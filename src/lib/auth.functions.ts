@@ -379,6 +379,9 @@ export const createTrialAccount = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const username = data.username.trim().toLowerCase();
 
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
+    if (!plansCfg.trial?.enabled) throw new Error("نسخه تست در حال حاضر غیرفعال است.");
+
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles").select("id").eq("username", username).maybeSingle();
     if (existingProfile) throw new Error("این یوزرنیم قبلاً ثبت شده است.");
@@ -390,7 +393,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
 
     const email = toEmail(username);
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + PLAN_DURATION_MS.trial);
+    const endDate = new Date(startDate.getTime() + planDurationMs(plansCfg, "trial"));
 
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email,

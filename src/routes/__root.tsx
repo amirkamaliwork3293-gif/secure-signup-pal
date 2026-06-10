@@ -11,6 +11,7 @@ import {
 import appCss from "../styles.css?url";
 import { KamaliSplash } from "@/components/KamaliSplash";
 import { AuthProvider } from "@/lib/AuthContext";
+import { InstallAppPrompt } from "@/components/InstallAppPrompt";
 import { registerServiceWorker } from "@/registerSW";
 
 function NotFoundComponent() {
@@ -133,6 +134,7 @@ function RootComponent() {
         <KamaliSplash />
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        <InstallAppPrompt />
       </AuthProvider>
     </QueryClientProvider>
   );

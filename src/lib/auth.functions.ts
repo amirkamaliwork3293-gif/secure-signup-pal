@@ -449,3 +449,30 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
   });
+
+// ─── Admin: update full per-plan configuration (enabled/price/duration/discount) ──
+export const updatePlanConfigs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { plans: PlansConfig }) => {
+    if (!d?.plans || typeof d.plans !== "object") throw new Error("داده‌های پلن نامعتبر است.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const normalized = normalizePlans(data.plans);
+    // Mirror paid-plan prices into legacy price_* columns so older readers stay in sync.
+    const { error } = await supabaseAdmin
+      .from("app_settings")
+      .update({
+        plans: normalized as any,
+        price_1month: normalized["1month"].price,
+        price_3month: normalized["3month"].price,
+        price_6month: normalized["6month"].price,
+        price_12month: normalized["12month"].price,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });

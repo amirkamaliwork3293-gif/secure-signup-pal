@@ -31,7 +31,7 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Install Capacitor + Vite plugins
-        run: npm install @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
+        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
 
       - name: Create index.html for SPA build
         run: |

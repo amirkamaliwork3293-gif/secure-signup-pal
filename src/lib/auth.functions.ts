@@ -63,6 +63,10 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+    // Enforce plan enabled flag (admins can disable plans for new signups)
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
+    if (!plansCfg[data.plan]?.enabled) throw new Error("این پلن در حال حاضر غیرفعال است.");
+
     // Check username not already taken (profile or pending request)
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
@@ -147,8 +151,9 @@ export const setPasswordAfterApproval = createServerFn({ method: "POST" })
 
     const email = toEmail(username);
     const plan = req.plan as Plan;
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + PLAN_DURATION_MS[plan]);
+    const endDate = new Date(startDate.getTime() + planDurationMs(plansCfg, plan));
 
     // Create auth user
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({

@@ -4,6 +4,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { DEFAULT_PLANS, normalizePlans, type PlansConfig } from "@/lib/plans";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -22,6 +23,16 @@ const ADMIN_EMAIL = "amirkamali@kamali.local";
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
+}
+
+async function loadPlansConfig(admin: any): Promise<PlansConfig> {
+  const { data } = await admin.from("app_settings").select("plans").eq("id", 1).maybeSingle();
+  return normalizePlans((data as any)?.plans);
+}
+
+function planDurationMs(cfg: PlansConfig, plan: Plan): number {
+  const minutes = cfg[plan]?.duration_minutes ?? DEFAULT_PLANS[plan].duration_minutes;
+  return Math.max(1, Math.floor(minutes)) * 60 * 1000;
 }
 
 // ─── Public: submit signup request ───────────────────────────────────────────

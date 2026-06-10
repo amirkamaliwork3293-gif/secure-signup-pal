@@ -28,10 +28,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm install
 
       - name: Install Capacitor + Vite plugins
-        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
+        run: npm install @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react
 
       - name: Create index.html for SPA build
         run: |
@@ -41,7 +41,7 @@ jobs:
             <head>
               <meta charset="UTF-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>اپ</title>
+              <title>کمالی - مدیریت انبار</title>
             </head>
             <body>
               <div id="root"></div>
@@ -81,6 +81,10 @@ jobs:
             build: {
               outDir: "dist",
             },
+            define: {
+              'process.env.VITE_SUPABASE_URL': JSON.stringify('https://wchghogprftrurbcarvp.supabase.co'),
+              'process.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM'),
+            },
           });
           EOF
 
@@ -89,13 +93,18 @@ jobs:
           cat > capacitor.config.ts << 'EOF'
           import type { CapacitorConfig } from '@capacitor/cli';
           const config: CapacitorConfig = {
-            appId: 'com.secure.signup.pal',
-            appName: 'اپ',
+            appId: 'com.kamali.inventory',
+            appName: 'کمالی انبار',
             webDir: 'dist',
             server: { androidScheme: 'https' }
           };
           export default config;
           EOF
+
+      - name: Create .env file
+        run: |
+          echo "VITE_SUPABASE_URL=https://wchghogprftrurbcarvp.supabase.co" > .env
+          echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
 
       - name: Build web app
         run: npm run build
@@ -143,6 +152,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: secure-signup-pal-apk
+          name: kamali-inventory-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7

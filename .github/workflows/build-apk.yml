@@ -50,6 +50,48 @@ jobs:
           </html>
           EOF
 
+      - name: Override __root.tsx for SPA mode
+        run: |
+          cat > src/routes/__root.tsx << 'EOF'
+          import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+          import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
+          import { AuthProvider } from "@/lib/AuthContext";
+
+          export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+            component: RootComponent,
+          });
+
+          function RootComponent() {
+            const { queryClient } = Route.useRouteContext();
+            return (
+              <QueryClientProvider client={queryClient}>
+                <AuthProvider>
+                  <Outlet />
+                </AuthProvider>
+              </QueryClientProvider>
+            );
+          }
+          EOF
+
+      - name: Override router.tsx for SPA mode
+        run: |
+          cat > src/router.tsx << 'EOF'
+          import { createRouter, createMemoryHistory, createHashHistory } from '@tanstack/react-router'
+          import { QueryClient } from '@tanstack/react-query'
+          import { routeTree } from './routeTree.gen'
+
+          export function getRouter() {
+            const queryClient = new QueryClient()
+            const router = createRouter({
+              routeTree,
+              history: createHashHistory(),
+              context: { queryClient },
+              defaultPreload: 'intent',
+            })
+            return router
+          }
+          EOF
+
       - name: Create main.tsx for SPA mode
         run: |
           cat > src/main.tsx << 'EOF'
@@ -81,6 +123,14 @@ jobs:
             build: {
               outDir: "dist",
             },
+            resolve: {
+              alias: {
+                '@tanstack/start': '@tanstack/react-router',
+              },
+            },
+            optimizeDeps: {
+              exclude: ['@tanstack/start-server-core', '@tanstack/start-storage-context'],
+            },
           });
           EOF
 
@@ -101,6 +151,12 @@ jobs:
         run: |
           echo "VITE_SUPABASE_URL=https://wchghogprftrurbcarvp.supabase.co" > .env
           echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
+
+      - name: Remove TanStack Start server packages from node_modules
+        run: |
+          rm -rf node_modules/@tanstack/start-server-core
+          rm -rf node_modules/@tanstack/start-storage-context
+          rm -rf node_modules/@tanstack/start-client-core
 
       - name: Build web app
         run: npm run build

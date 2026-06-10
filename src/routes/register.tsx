@@ -222,14 +222,19 @@ function RegisterPage() {
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">پلن اشتراک</label>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {ALL_PLANS.map((p) => {
+            {visiblePlans.map((p) => {
               const isTrialBtn = p === "trial";
+              const cfg = plansCfg[p];
+              const original = cfg.price;
+              const final = effectivePrice(cfg, now);
+              const discounted = isDiscountActive(cfg, now);
+              const remainingMs = cfg.discount_until ? new Date(cfg.discount_until).getTime() - now : Infinity;
               return (
                 <button
                   key={p}
                   type="button"
                   onClick={() => setPlan(p)}
-                  className={`flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs transition ${
+                  className={`relative flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs transition ${
                     plan === p
                       ? isTrialBtn
                         ? "border-amber-500 bg-amber-500/10 text-foreground"
@@ -237,15 +242,35 @@ function RegisterPage() {
                       : "border-border bg-background text-muted-foreground hover:bg-accent"
                   }`}
                 >
+                  {discounted && !isTrialBtn && (
+                    <span className="absolute -top-2 -right-2 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                      {cfg.discount_percent}%
+                    </span>
+                  )}
                   <span className="font-semibold">{isTrialBtn ? "تست رایگان" : PLAN_LABEL[p]}</span>
                   <span className="text-[10px] opacity-80">{PLAN_DURATION_LABEL[p]}</span>
-                  <span className={`text-[10px] font-medium ${isTrialBtn ? "text-amber-600" : "text-primary"}`}>
-                    {isTrialBtn ? "رایگان" : formatToman(planPrice(p))}
-                  </span>
+                  {isTrialBtn ? (
+                    <span className="text-[10px] font-medium text-amber-600">رایگان</span>
+                  ) : discounted ? (
+                    <span className="flex flex-col items-center leading-tight">
+                      <span className="text-[10px] text-muted-foreground line-through">{formatToman(original)}</span>
+                      <span className="text-[10px] font-bold text-rose-600">{formatToman(final)}</span>
+                      {isFinite(remainingMs) && remainingMs > 0 && (
+                        <span dir="ltr" className="mt-0.5 text-[9px] text-rose-600/80">⏳ {formatRemaining(remainingMs)}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium text-primary">{formatToman(original)}</span>
+                  )}
                 </button>
               );
             })}
           </div>
+          {visiblePlans.length === 0 && (
+            <div className="mt-2 rounded-xl border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
+              در حال حاضر هیچ پلنی برای ثبت‌نام فعال نیست.
+            </div>
+          )}
         </div>
 
         {isTrial ? (

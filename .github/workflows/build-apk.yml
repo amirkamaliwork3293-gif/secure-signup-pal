@@ -31,7 +31,7 @@ jobs:
         run: npm install
 
       - name: Install Capacitor + Vite plugins
-        run: npm install @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react
+        run: npm install @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
 
       - name: Create index.html for SPA build
         run: |
@@ -80,10 +80,6 @@ jobs:
             plugins: [react(), tsconfigPaths(), tailwindcss()],
             build: {
               outDir: "dist",
-            },
-            define: {
-              'process.env.VITE_SUPABASE_URL': JSON.stringify('https://wchghogprftrurbcarvp.supabase.co'),
-              'process.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM'),
             },
           });
           EOF

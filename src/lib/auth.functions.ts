@@ -4,6 +4,7 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { DEFAULT_PLANS, normalizePlans, type PlansConfig } from "@/lib/plans";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -22,6 +23,16 @@ const ADMIN_EMAIL = "amirkamali@kamali.local";
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
+}
+
+async function loadPlansConfig(admin: any): Promise<PlansConfig> {
+  const { data } = await admin.from("app_settings").select("plans").eq("id", 1).maybeSingle();
+  return normalizePlans((data as any)?.plans);
+}
+
+function planDurationMs(cfg: PlansConfig, plan: Plan): number {
+  const minutes = cfg[plan]?.duration_minutes ?? DEFAULT_PLANS[plan].duration_minutes;
+  return Math.max(1, Math.floor(minutes)) * 60 * 1000;
 }
 
 // ─── Public: submit signup request ───────────────────────────────────────────
@@ -51,6 +62,10 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    // Enforce plan enabled flag (admins can disable plans for new signups)
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
+    if (!plansCfg[data.plan]?.enabled) throw new Error("این پلن در حال حاضر غیرفعال است.");
 
     // Check username not already taken (profile or pending request)
     const { data: existingProfile } = await supabaseAdmin
@@ -136,8 +151,9 @@ export const setPasswordAfterApproval = createServerFn({ method: "POST" })
 
     const email = toEmail(username);
     const plan = req.plan as Plan;
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + PLAN_DURATION_MS[plan]);
+    const endDate = new Date(startDate.getTime() + planDurationMs(plansCfg, plan));
 
     // Create auth user
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
@@ -292,8 +308,9 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
     const start = new Date();
-    const end = new Date(start.getTime() + PLAN_DURATION_MS[data.plan]);
+    const end = new Date(start.getTime() + planDurationMs(plansCfg, data.plan));
     const { error } = await supabaseAdmin
       .from("profiles")
       .update({
@@ -362,6 +379,9 @@ export const createTrialAccount = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const username = data.username.trim().toLowerCase();
 
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
+    if (!plansCfg.trial?.enabled) throw new Error("نسخه تست در حال حاضر غیرفعال است.");
+
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles").select("id").eq("username", username).maybeSingle();
     if (existingProfile) throw new Error("این یوزرنیم قبلاً ثبت شده است.");
@@ -373,7 +393,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
 
     const email = toEmail(username);
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + PLAN_DURATION_MS.trial);
+    const endDate = new Date(startDate.getTime() + planDurationMs(plansCfg, "trial"));
 
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email,
@@ -428,4 +448,31 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
       .createSignedUrl(data.path, 3600);
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
+  });
+
+// ─── Admin: update full per-plan configuration (enabled/price/duration/discount) ──
+export const updatePlanConfigs = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { plans: PlansConfig }) => {
+    if (!d?.plans || typeof d.plans !== "object") throw new Error("داده‌های پلن نامعتبر است.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const normalized = normalizePlans(data.plans);
+    // Mirror paid-plan prices into legacy price_* columns so older readers stay in sync.
+    const { error } = await supabaseAdmin
+      .from("app_settings")
+      .update({
+        plans: normalized as any,
+        price_1month: normalized["1month"].price,
+        price_3month: normalized["3month"].price,
+        price_6month: normalized["6month"].price,
+        price_12month: normalized["12month"].price,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { success: true };
   });

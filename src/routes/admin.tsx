@@ -7,10 +7,15 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
+  updatePlanConfigs,
 } from "@/lib/auth.functions";
+import {
+  DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
+} from "@/lib/plans";
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
+  Package, Power, Percent, Timer,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -22,7 +27,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "settings";
+type Tab = "requests" | "users" | "plans" | "settings";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -138,16 +143,17 @@ function AdminPage() {
         </div>
 
         {/* Tabs */}
-        <div className="mb-4 flex gap-1 rounded-xl bg-muted p-1">
+        <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "users" as Tab, label: "کاربران", icon: Users },
+            { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
           ]).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${
+              className={`flex flex-1 min-w-fit items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
                 tab === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -179,6 +185,7 @@ function AdminPage() {
                 onDelete={handleDelete}
               />
             )}
+            {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
           </>
         )}
@@ -553,6 +560,182 @@ function SettingsTab() {
           {savedPrices ? "قیمت‌ها ذخیره شدند" : "ذخیره قیمت‌ها"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Plans management tab ──────────────────────────────────────────────────
+
+const PLAN_KEYS: SubscriptionPlan[] = ["trial", "1month", "3month", "6month", "12month"];
+const PLAN_TITLE: Record<SubscriptionPlan, string> = {
+  trial: "نسخه تست",
+  "1month": "یک ماهه",
+  "3month": "سه ماهه",
+  "6month": "شش ماهه",
+  "12month": "یک ساله",
+};
+
+function toLocalDatetimeInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function PlansTab() {
+  const [cfg, setCfg] = useState<PlansConfig>(DEFAULT_PLANS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const save = useServerFn(updatePlanConfigs);
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("app_settings").select("plans").eq("id", 1).maybeSingle();
+    setCfg(normalizePlans((data as any)?.plans));
+    setLoading(false);
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const update = (plan: SubscriptionPlan, patch: Partial<PlanConfig>) => {
+    setCfg((prev) => ({ ...prev, [plan]: { ...prev[plan], ...patch } }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true); setSaved(false);
+    try {
+      await save({ data: { plans: cfg } });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) { alert(e?.message || "خطا در ذخیره."); }
+    setSaving(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-10">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-3 text-xs text-muted-foreground">
+        💡 پلن‌های غیرفعال در صفحه ثبت‌نام به کاربران جدید نمایش داده نمی‌شوند.
+        غیرفعال‌سازی یک پلن هیچ تاثیری روی اشتراک کاربران فعلی ندارد.
+      </div>
+
+      {PLAN_KEYS.map((p) => (
+        <PlanCard key={p} plan={p} cfg={cfg[p]} onChange={(patch) => update(p, patch)} />
+      ))}
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="sticky bottom-2 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-lg disabled:opacity-60"
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+        {saved ? "ذخیره شد ✓" : "ذخیره همه پلن‌ها"}
+      </button>
+    </div>
+  );
+}
+
+function PlanCard({
+  plan, cfg, onChange,
+}: { plan: SubscriptionPlan; cfg: PlanConfig; onChange: (patch: Partial<PlanConfig>) => void }) {
+  const isTrial = plan === "trial";
+  return (
+    <div className={`rounded-2xl border bg-card p-4 transition ${cfg.enabled ? "border-border" : "border-dashed border-muted-foreground/30 opacity-70"}`}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Package className={`h-4 w-4 ${isTrial ? "text-amber-600" : "text-primary"}`} />
+          <h3 className="text-sm font-bold">{PLAN_TITLE[plan]}</h3>
+          {!cfg.enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">غیرفعال</span>}
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange({ enabled: !cfg.enabled })}
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            cfg.enabled ? "bg-green-500/10 text-green-700 dark:text-green-400" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          <Power className="h-3 w-3" />
+          {cfg.enabled ? "فعال" : "غیرفعال"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="mb-1 block text-[11px] text-muted-foreground">قیمت (تومان)</label>
+          <input
+            type="number"
+            min={0}
+            value={cfg.price}
+            disabled={isTrial}
+            onChange={(e) => onChange({ price: Math.max(0, Number(e.target.value) || 0) })}
+            dir="ltr"
+            className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
+          />
+          {isTrial && <p className="mt-1 text-[10px] text-muted-foreground">نسخه تست همیشه رایگان است.</p>}
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] text-muted-foreground flex items-center gap-1">
+            <Timer className="h-3 w-3" /> مدت ({isTrial ? "دقیقه" : "روز"})
+          </label>
+          <input
+            type="number"
+            min={1}
+            value={isTrial ? cfg.duration_minutes : Math.round(cfg.duration_minutes / (60 * 24))}
+            onChange={(e) => {
+              const v = Math.max(1, Number(e.target.value) || 1);
+              onChange({ duration_minutes: isTrial ? v : v * 60 * 24 });
+            }}
+            dir="ltr"
+            className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary"
+          />
+        </div>
+      </div>
+
+      {!isTrial && (
+        <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/5 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+            <Percent className="h-3 w-3" /> تخفیف زمان‌دار
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-[11px] text-muted-foreground">درصد تخفیف (٪)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={cfg.discount_percent}
+                onChange={(e) => onChange({ discount_percent: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                dir="ltr"
+                className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-muted-foreground">پایان تخفیف</label>
+              <input
+                type="datetime-local"
+                value={toLocalDatetimeInput(cfg.discount_until)}
+                onChange={(e) => onChange({ discount_until: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+          </div>
+          {cfg.discount_percent > 0 && (
+            <p className="mt-2 text-[10px] text-rose-600">
+              قیمت نهایی: {new Intl.NumberFormat("fa-IR").format(Math.floor(cfg.price * (100 - cfg.discount_percent) / 100))} تومان
+              {cfg.discount_until && ` — تا ${new Date(cfg.discount_until).toLocaleString("fa-IR")}`}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

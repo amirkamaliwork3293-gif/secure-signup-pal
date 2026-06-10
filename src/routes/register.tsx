@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitSignupRequest, createTrialAccount } from "@/lib/auth.functions";
+import { normalizePlans, effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/register")({
@@ -15,6 +16,18 @@ const TRIAL_DEVICE_KEY = "kamali.trial.used.v1";
 
 function formatToman(n: number) {
   return new Intl.NumberFormat("fa-IR").format(n) + " تومان";
+}
+
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return "";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d} روز و ${h} ساعت`;
+  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
 function RegisterPage() {
@@ -44,11 +57,15 @@ function RegisterPage() {
     card_number: "",
     card_holder: "",
     bank_name: "",
-    price_1month: 100000,
-    price_3month: 280000,
-    price_6month: 500000,
-    price_12month: 1500000,
   });
+  const [plansCfg, setPlansCfg] = useState<PlansConfig>(DEFAULT_PLANS);
+  const [now, setNow] = useState(Date.now());
+
+  // Live ticker for discount countdowns
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     supabase.from("app_settings").select("*").eq("id", 1).maybeSingle().then(({ data }) => {
@@ -56,21 +73,19 @@ function RegisterPage() {
         card_number: (data as any).card_number || "",
         card_holder: (data as any).card_holder || "",
         bank_name: (data as any).bank_name || "",
-        price_1month: Number((data as any).price_1month ?? 100000),
-        price_3month: Number((data as any).price_3month ?? 280000),
-        price_6month: Number((data as any).price_6month ?? 500000),
-        price_12month: Number((data as any).price_12month ?? 1500000),
       });
+      if (data) setPlansCfg(normalizePlans((data as any).plans));
     });
   }, []);
 
-  const planPrice = (p: SubscriptionPlan): number => {
-    if (p === "trial") return 0;
-    if (p === "1month") return card.price_1month;
-    if (p === "3month") return card.price_3month;
-    if (p === "6month") return card.price_6month;
-    return card.price_12month;
-  };
+  // Only show enabled plans; auto-pick a sensible default if current pick was disabled
+  const visiblePlans = ALL_PLANS.filter((p) => plansCfg[p]?.enabled);
+  useEffect(() => {
+    if (visiblePlans.length > 0 && !visiblePlans.includes(plan)) {
+      setPlan(visiblePlans.find((p) => p !== "trial") ?? visiblePlans[0]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plansCfg]);
 
   const copyCard = async () => {
     await navigator.clipboard.writeText(card.card_number.replace(/[^0-9]/g, ""));
@@ -207,14 +222,19 @@ function RegisterPage() {
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">پلن اشتراک</label>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {ALL_PLANS.map((p) => {
+            {visiblePlans.map((p) => {
               const isTrialBtn = p === "trial";
+              const cfg = plansCfg[p];
+              const original = cfg.price;
+              const final = effectivePrice(cfg, now);
+              const discounted = isDiscountActive(cfg, now);
+              const remainingMs = cfg.discount_until ? new Date(cfg.discount_until).getTime() - now : Infinity;
               return (
                 <button
                   key={p}
                   type="button"
                   onClick={() => setPlan(p)}
-                  className={`flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs transition ${
+                  className={`relative flex flex-col items-center gap-1 rounded-xl border p-2.5 text-xs transition ${
                     plan === p
                       ? isTrialBtn
                         ? "border-amber-500 bg-amber-500/10 text-foreground"
@@ -222,15 +242,35 @@ function RegisterPage() {
                       : "border-border bg-background text-muted-foreground hover:bg-accent"
                   }`}
                 >
+                  {discounted && !isTrialBtn && (
+                    <span className="absolute -top-2 -right-2 rounded-full bg-rose-500 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                      {cfg.discount_percent}%
+                    </span>
+                  )}
                   <span className="font-semibold">{isTrialBtn ? "تست رایگان" : PLAN_LABEL[p]}</span>
                   <span className="text-[10px] opacity-80">{PLAN_DURATION_LABEL[p]}</span>
-                  <span className={`text-[10px] font-medium ${isTrialBtn ? "text-amber-600" : "text-primary"}`}>
-                    {isTrialBtn ? "رایگان" : formatToman(planPrice(p))}
-                  </span>
+                  {isTrialBtn ? (
+                    <span className="text-[10px] font-medium text-amber-600">رایگان</span>
+                  ) : discounted ? (
+                    <span className="flex flex-col items-center leading-tight">
+                      <span className="text-[10px] text-muted-foreground line-through">{formatToman(original)}</span>
+                      <span className="text-[10px] font-bold text-rose-600">{formatToman(final)}</span>
+                      {isFinite(remainingMs) && remainingMs > 0 && (
+                        <span dir="ltr" className="mt-0.5 text-[9px] text-rose-600/80">⏳ {formatRemaining(remainingMs)}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium text-primary">{formatToman(original)}</span>
+                  )}
                 </button>
               );
             })}
           </div>
+          {visiblePlans.length === 0 && (
+            <div className="mt-2 rounded-xl border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
+              در حال حاضر هیچ پلنی برای ثبت‌نام فعال نیست.
+            </div>
+          )}
         </div>
 
         {isTrial ? (

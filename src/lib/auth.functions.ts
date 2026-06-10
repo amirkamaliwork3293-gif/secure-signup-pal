@@ -308,8 +308,9 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
     const start = new Date();
-    const end = new Date(start.getTime() + PLAN_DURATION_MS[data.plan]);
+    const end = new Date(start.getTime() + planDurationMs(plansCfg, data.plan));
     const { error } = await supabaseAdmin
       .from("profiles")
       .update({

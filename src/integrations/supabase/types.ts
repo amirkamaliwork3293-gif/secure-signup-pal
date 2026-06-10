@@ -14,16 +14,183 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_settings: {
+        Row: {
+          bank_name: string
+          card_holder: string
+          card_number: string
+          id: number
+          price_1month: number
+          price_3month: number
+          price_6month: number
+          updated_at: string
+        }
+        Insert: {
+          bank_name?: string
+          card_holder?: string
+          card_number?: string
+          id?: number
+          price_1month?: number
+          price_3month?: number
+          price_6month?: number
+          updated_at?: string
+        }
+        Update: {
+          bank_name?: string
+          card_holder?: string
+          card_number?: string
+          id?: number
+          price_1month?: number
+          price_3month?: number
+          price_6month?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          end_date: string | null
+          first_name: string | null
+          id: string
+          last_name: string | null
+          plan: Database["public"]["Enums"]["subscription_plan"] | null
+          start_date: string | null
+          status: Database["public"]["Enums"]["profile_status"]
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          end_date?: string | null
+          first_name?: string | null
+          id: string
+          last_name?: string | null
+          plan?: Database["public"]["Enums"]["subscription_plan"] | null
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["profile_status"]
+          username: string
+        }
+        Update: {
+          created_at?: string
+          end_date?: string | null
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          plan?: Database["public"]["Enums"]["subscription_plan"] | null
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["profile_status"]
+          username?: string
+        }
+        Relationships: []
+      }
+      signup_requests: {
+        Row: {
+          created_at: string
+          first_name: string
+          id: string
+          last_name: string
+          password_set: boolean
+          payment_confirmed: boolean
+          plan: Database["public"]["Enums"]["subscription_plan"]
+          receipt_url: string | null
+          reviewed_at: string | null
+          status: Database["public"]["Enums"]["request_status"]
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          first_name: string
+          id?: string
+          last_name: string
+          password_set?: boolean
+          payment_confirmed?: boolean
+          plan: Database["public"]["Enums"]["subscription_plan"]
+          receipt_url?: string | null
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["request_status"]
+          username: string
+        }
+        Update: {
+          created_at?: string
+          first_name?: string
+          id?: string
+          last_name?: string
+          password_set?: boolean
+          payment_confirmed?: boolean
+          plan?: Database["public"]["Enums"]["subscription_plan"]
+          receipt_url?: string | null
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["request_status"]
+          username?: string
+        }
+        Relationships: []
+      }
+      user_data: {
+        Row: {
+          categories: Json
+          current_invoice: Json | null
+          invoices: Json
+          products: Json
+          settings: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          categories?: Json
+          current_invoice?: Json | null
+          invoices?: Json
+          products?: Json
+          settings?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          categories?: Json
+          current_invoice?: Json | null
+          invoices?: Json
+          products?: Json
+          settings?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
+      profile_status: "pending" | "active" | "expired" | "rejected"
+      request_status: "pending" | "approved" | "rejected"
+      subscription_plan: "1month" | "3month" | "6month"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +317,11 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+      profile_status: ["pending", "active", "expired", "rejected"],
+      request_status: ["pending", "approved", "rejected"],
+      subscription_plan: ["1month", "3month", "6month"],
+    },
   },
 } as const

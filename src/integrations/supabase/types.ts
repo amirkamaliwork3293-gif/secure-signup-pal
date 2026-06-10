@@ -20,6 +20,7 @@ export type Database = {
           card_holder: string
           card_number: string
           id: number
+          plans: Json
           price_12month: number
           price_1month: number
           price_3month: number
@@ -31,6 +32,7 @@ export type Database = {
           card_holder?: string
           card_number?: string
           id?: number
+          plans?: Json
           price_12month?: number
           price_1month?: number
           price_3month?: number
@@ -42,6 +44,7 @@ export type Database = {
           card_holder?: string
           card_number?: string
           id?: number
+          plans?: Json
           price_12month?: number
           price_1month?: number
           price_3month?: number

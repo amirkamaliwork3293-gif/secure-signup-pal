@@ -3,7 +3,6 @@ import { useAuth } from "@/lib/AuthContext";
 import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3 } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings } from "@/lib/store";
-import { InstallAppButton } from "@/components/InstallAppButton";
 
 const nav = [
   { to: "/",         label: "فاکتور",   icon: Receipt  },
@@ -36,7 +35,6 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           </div>
           <div className="flex items-center gap-2">
-            <InstallAppButton />
             {state.status === "authenticated" && state.isAdmin && (
               <Link
                 to="/admin"

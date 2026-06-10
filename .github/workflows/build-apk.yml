@@ -1,0 +1,148 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Capacitor + Vite plugins
+        run: npm install @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
+
+      - name: Create index.html for SPA build
+        run: |
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="fa" dir="rtl">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>اپ</title>
+            </head>
+            <body>
+              <div id="root"></div>
+              <script type="module" src="/src/main.tsx"></script>
+            </body>
+          </html>
+          EOF
+
+      - name: Create main.tsx for SPA mode
+        run: |
+          cat > src/main.tsx << 'EOF'
+          import React from 'react'
+          import ReactDOM from 'react-dom/client'
+          import { RouterProvider } from '@tanstack/react-router'
+          import { getRouter } from './router'
+          import './styles.css'
+
+          const router = getRouter()
+
+          ReactDOM.createRoot(document.getElementById('root')!).render(
+            <React.StrictMode>
+              <RouterProvider router={router} />
+            </React.StrictMode>
+          )
+          EOF
+
+      - name: Override vite.config.ts for static SPA build
+        run: |
+          cat > vite.config.ts << 'EOF'
+          import { defineConfig } from "vite";
+          import react from "@vitejs/plugin-react";
+          import tsconfigPaths from "vite-tsconfig-paths";
+          import tailwindcss from "@tailwindcss/vite";
+
+          export default defineConfig({
+            plugins: [react(), tsconfigPaths(), tailwindcss()],
+            build: {
+              outDir: "dist",
+            },
+          });
+          EOF
+
+      - name: Create capacitor.config.ts
+        run: |
+          cat > capacitor.config.ts << 'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.secure.signup.pal',
+            appName: 'اپ',
+            webDir: 'dist',
+            server: { androidScheme: 'https' }
+          };
+          export default config;
+          EOF
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Fix Kotlin duplicate and lower minSdk
+        run: |
+          python3 - << 'PYEOF'
+          import re
+
+          with open('android/app/build.gradle', 'r') as f:
+              content = f.read()
+
+          content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 22', content)
+          content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 22', content)
+
+          fix = """
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+              }
+          }
+          """
+          content = content + fix
+
+          with open('android/app/build.gradle', 'w') as f:
+              f.write(content)
+
+          print("Done!")
+          PYEOF
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-signup-pal-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

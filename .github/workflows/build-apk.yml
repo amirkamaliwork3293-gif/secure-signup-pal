@@ -50,6 +50,52 @@ jobs:
           </html>
           EOF
 
+      - name: Stub @tanstack/react-start completely
+        run: |
+          mkdir -p node_modules/@tanstack/react-start/dist
+          cat > node_modules/@tanstack/react-start/package.json << 'EOF'
+          {
+            "name": "@tanstack/react-start",
+            "version": "0.0.0-stub",
+            "main": "./dist/index.js",
+            "module": "./dist/index.js",
+            "exports": {
+              ".": "./dist/index.js",
+              "./server-entry": "./dist/index.js"
+            }
+          }
+          EOF
+          cat > node_modules/@tanstack/react-start/dist/index.js << 'EOF'
+          // Stub for SPA/Capacitor build — server functions run directly on client
+          export function createServerFn(options) {
+            return function(fn) {
+              const serverFn = fn || options;
+              const callable = async (input) => {
+                if (typeof serverFn === 'function') return serverFn(input);
+                return null;
+              };
+              callable.validator = (fn) => callable;
+              callable.handler = (fn) => { Object.assign(callable, { _handler: fn }); return callable; };
+              callable.inputValidator = (fn) => callable;
+              callable.middleware = (fns) => callable;
+              return callable;
+            };
+          }
+          export function useServerFn(fn) {
+            return fn;
+          }
+          export function createMiddleware() {
+            return {
+              server: (fn) => ({ _server: fn }),
+              client: (fn) => ({ _client: fn }),
+            };
+          }
+          export function createStart(fn) {
+            return fn ? fn() : {};
+          }
+          export default {};
+          EOF
+
       - name: Override __root.tsx for SPA mode
         run: |
           cat > src/routes/__root.tsx << 'EOF'
@@ -66,11 +112,9 @@ jobs:
 
           function RootComponent() {
             const { queryClient } = Route.useRouteContext();
-
             if (typeof window !== "undefined") {
               registerServiceWorker();
             }
-
             return (
               <QueryClientProvider client={queryClient}>
                 <AuthProvider>
@@ -138,38 +182,22 @@ jobs:
             },
             build: {
               outDir: "dist",
-              rollupOptions: {
-                external: [],
-              },
-            },
-            optimizeDeps: {
-              exclude: [
-                "@tanstack/react-start",
-                "@tanstack/start-client-core",
-                "@tanstack/start-server-core",
-                "@tanstack/start-storage-context",
-                "@lovable.dev/vite-tanstack-config",
-              ],
             },
           });
           EOF
-
-      - name: Remove SSR-only packages
-        run: |
-          rm -rf node_modules/@tanstack/react-start
-          rm -rf node_modules/@tanstack/start-client-core
-          rm -rf node_modules/@tanstack/start-server-core
-          rm -rf node_modules/@tanstack/start-storage-context
-          rm -rf node_modules/@lovable.dev/vite-tanstack-config
-          rm -rf node_modules/nitro
 
       - name: Stub out server-only source files
         run: |
           echo "export {};" > src/start.ts
           echo "export {};" > src/server.ts
-          echo "export const attachSupabaseAuth = () => {};" > src/integrations/supabase/auth-attacher.ts
-          echo "export const authMiddleware = {};" > src/integrations/supabase/auth-middleware.ts
-          echo "export {};" > src/lib/config.server.ts
+          cat > src/integrations/supabase/auth-attacher.ts << 'EOF'
+          export const attachSupabaseAuth = async ({ next }: any) => next();
+          EOF
+          cat > src/integrations/supabase/auth-middleware.ts << 'EOF'
+          export const requireSupabaseAuth = async ({ next }: any) => next();
+          EOF
+          echo "export const config = {};" > src/lib/config.server.ts
+          echo "export {};" > src/lib/api/example.functions.ts
 
       - name: Create .env file
         run: |

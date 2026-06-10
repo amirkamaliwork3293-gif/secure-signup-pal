@@ -20,6 +20,7 @@ export type Database = {
           card_holder: string
           card_number: string
           id: number
+          price_12month: number
           price_1month: number
           price_3month: number
           price_6month: number
@@ -30,6 +31,7 @@ export type Database = {
           card_holder?: string
           card_number?: string
           id?: number
+          price_12month?: number
           price_1month?: number
           price_3month?: number
           price_6month?: number
@@ -40,6 +42,7 @@ export type Database = {
           card_holder?: string
           card_number?: string
           id?: number
+          price_12month?: number
           price_1month?: number
           price_3month?: number
           price_6month?: number
@@ -190,7 +193,7 @@ export type Database = {
       app_role: "admin" | "user"
       profile_status: "pending" | "active" | "expired" | "rejected"
       request_status: "pending" | "approved" | "rejected"
-      subscription_plan: "1month" | "3month" | "6month"
+      subscription_plan: "1month" | "3month" | "6month" | "trial" | "12month"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -321,7 +324,7 @@ export const Constants = {
       app_role: ["admin", "user"],
       profile_status: ["pending", "active", "expired", "rejected"],
       request_status: ["pending", "approved", "rejected"],
-      subscription_plan: ["1month", "3month", "6month"],
+      subscription_plan: ["1month", "3month", "6month", "trial", "12month"],
     },
   },
 } as const

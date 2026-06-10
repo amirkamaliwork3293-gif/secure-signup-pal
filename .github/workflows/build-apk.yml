@@ -33,13 +33,6 @@ jobs:
       - name: Install Capacitor + Vite plugins
         run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
 
-      - name: Remove TanStack Start server packages from node_modules
-        run: |
-          rm -rf node_modules/@tanstack/start-server-core
-          rm -rf node_modules/@tanstack/start-storage-context
-          rm -rf node_modules/@tanstack/start-client-core
-          rm -rf node_modules/@tanstack/react-start
-
       - name: Create index.html for SPA build
         run: |
           cat > index.html << 'EOF'
@@ -63,6 +56,9 @@ jobs:
           import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
           import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
           import { AuthProvider } from "@/lib/AuthContext";
+          import { KamaliSplash } from "@/components/KamaliSplash";
+          import { InstallAppPrompt } from "@/components/InstallAppPrompt";
+          import { registerServiceWorker } from "@/registerSW";
 
           export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
             component: RootComponent,
@@ -70,10 +66,17 @@ jobs:
 
           function RootComponent() {
             const { queryClient } = Route.useRouteContext();
+
+            if (typeof window !== "undefined") {
+              registerServiceWorker();
+            }
+
             return (
               <QueryClientProvider client={queryClient}>
                 <AuthProvider>
+                  <KamaliSplash />
                   <Outlet />
+                  <InstallAppPrompt />
                 </AuthProvider>
               </QueryClientProvider>
             );
@@ -83,38 +86,38 @@ jobs:
       - name: Override router.tsx for SPA mode
         run: |
           cat > src/router.tsx << 'EOF'
-          import { createRouter, createHashHistory } from '@tanstack/react-router'
-          import { QueryClient } from '@tanstack/react-query'
-          import { routeTree } from './routeTree.gen'
+          import { QueryClient } from "@tanstack/react-query";
+          import { createRouter, createHashHistory } from "@tanstack/react-router";
+          import { routeTree } from "./routeTree.gen";
 
-          export function getRouter() {
-            const queryClient = new QueryClient()
+          export const getRouter = () => {
+            const queryClient = new QueryClient();
             const router = createRouter({
               routeTree,
               history: createHashHistory(),
               context: { queryClient },
-              defaultPreload: 'intent',
-            })
-            return router
-          }
+              defaultPreloadStaleTime: 0,
+            });
+            return router;
+          };
           EOF
 
       - name: Create main.tsx for SPA mode
         run: |
           cat > src/main.tsx << 'EOF'
-          import React from 'react'
-          import ReactDOM from 'react-dom/client'
-          import { RouterProvider } from '@tanstack/react-router'
-          import { getRouter } from './router'
-          import './styles.css'
+          import React from "react";
+          import ReactDOM from "react-dom/client";
+          import { RouterProvider } from "@tanstack/react-router";
+          import { getRouter } from "./router";
+          import "./styles.css";
 
-          const router = getRouter()
+          const router = getRouter();
 
-          ReactDOM.createRoot(document.getElementById('root')!).render(
+          ReactDOM.createRoot(document.getElementById("root")!).render(
             <React.StrictMode>
               <RouterProvider router={router} />
             </React.StrictMode>
-          )
+          );
           EOF
 
       - name: Override vite.config.ts for static SPA build
@@ -124,35 +127,57 @@ jobs:
           import react from "@vitejs/plugin-react";
           import tsconfigPaths from "vite-tsconfig-paths";
           import tailwindcss from "@tailwindcss/vite";
+          import path from "path";
 
           export default defineConfig({
             plugins: [react(), tsconfigPaths(), tailwindcss()],
+            resolve: {
+              alias: {
+                "@": path.resolve(__dirname, "./src"),
+              },
+            },
             build: {
               outDir: "dist",
               rollupOptions: {
-                external: [
-                  '@tanstack/start-client-core',
-                  '@tanstack/start-server-core',
-                  '@tanstack/start-storage-context',
-                  '@tanstack/react-start',
-                ],
-              },
-            },
-            resolve: {
-              alias: {
-                '@tanstack/start': '@tanstack/react-router',
+                external: [],
               },
             },
             optimizeDeps: {
               exclude: [
-                '@tanstack/start-server-core',
-                '@tanstack/start-storage-context',
-                '@tanstack/start-client-core',
-                '@tanstack/react-start',
+                "@tanstack/react-start",
+                "@tanstack/start-client-core",
+                "@tanstack/start-server-core",
+                "@tanstack/start-storage-context",
+                "@lovable.dev/vite-tanstack-config",
               ],
             },
           });
           EOF
+
+      - name: Remove SSR-only packages
+        run: |
+          rm -rf node_modules/@tanstack/react-start
+          rm -rf node_modules/@tanstack/start-client-core
+          rm -rf node_modules/@tanstack/start-server-core
+          rm -rf node_modules/@tanstack/start-storage-context
+          rm -rf node_modules/@lovable.dev/vite-tanstack-config
+          rm -rf node_modules/nitro
+
+      - name: Stub out server-only source files
+        run: |
+          echo "export {};" > src/start.ts
+          echo "export {};" > src/server.ts
+          echo "export const attachSupabaseAuth = () => {};" > src/integrations/supabase/auth-attacher.ts
+          echo "export const authMiddleware = {};" > src/integrations/supabase/auth-middleware.ts
+          echo "export {};" > src/lib/config.server.ts
+
+      - name: Create .env file
+        run: |
+          echo "VITE_SUPABASE_URL=https://wchghogprftrurbcarvp.supabase.co" > .env
+          echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
+
+      - name: Build web app
+        run: npm run build
 
       - name: Create capacitor.config.ts
         run: |
@@ -166,14 +191,6 @@ jobs:
           };
           export default config;
           EOF
-
-      - name: Create .env file
-        run: |
-          echo "VITE_SUPABASE_URL=https://wchghogprftrurbcarvp.supabase.co" > .env
-          echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
-
-      - name: Build web app
-        run: npm run build
 
       - name: Add Android platform
         run: npx cap add android

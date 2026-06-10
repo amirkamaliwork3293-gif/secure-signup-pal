@@ -103,8 +103,6 @@ jobs:
           import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
           import { AuthProvider } from "@/lib/AuthContext";
           import { KamaliSplash } from "@/components/KamaliSplash";
-          import { InstallAppPrompt } from "@/components/InstallAppPrompt";
-          import { registerServiceWorker } from "@/registerSW";
 
           export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
             component: RootComponent,
@@ -112,15 +110,11 @@ jobs:
 
           function RootComponent() {
             const { queryClient } = Route.useRouteContext();
-            if (typeof window !== "undefined") {
-              registerServiceWorker();
-            }
             return (
               <QueryClientProvider client={queryClient}>
                 <AuthProvider>
                   <KamaliSplash />
                   <Outlet />
-                  <InstallAppPrompt />
                 </AuthProvider>
               </QueryClientProvider>
             );
@@ -155,6 +149,17 @@ jobs:
           import { getRouter } from "./router";
           import "./styles.css";
 
+          // Unregister any leftover service workers (avoid white-screen from stale cache)
+          if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistrations().then((rs) =>
+              rs.forEach((r) => r.unregister())
+            ).catch(() => {});
+          }
+
+          // Global error logger so chrome://inspect shows the real cause if white screen
+          window.addEventListener("error", (e) => console.error("[GlobalError]", e.error || e.message));
+          window.addEventListener("unhandledrejection", (e) => console.error("[UnhandledRejection]", e.reason));
+
           const router = getRouter();
 
           ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -180,8 +185,10 @@ jobs:
                 "@": path.resolve(__dirname, "./src"),
               },
             },
+            base: "./",
             build: {
               outDir: "dist",
+              target: "es2020",
             },
           });
           EOF
@@ -198,6 +205,14 @@ jobs:
           EOF
           echo "export const config = {};" > src/lib/config.server.ts
           echo "export {};" > src/lib/api/example.functions.ts
+          # Neutralize PWA service-worker registration inside the APK
+          cat > src/registerSW.ts << 'EOF'
+          export function registerServiceWorker() { /* disabled in Capacitor build */ }
+          EOF
+          # Remove the install-prompt component usage from any leftover imports
+          cat > src/components/InstallAppPrompt.tsx << 'EOF'
+          export function InstallAppPrompt() { return null; }
+          EOF
 
       - name: Create .env file
         run: |
@@ -215,7 +230,13 @@ jobs:
             appId: 'com.kamali.inventory',
             appName: 'کمالی انبار',
             webDir: 'dist',
-            server: { androidScheme: 'https' }
+            server: {
+              androidScheme: 'https',
+              cleartext: true
+            },
+            android: {
+              webContentsDebuggingEnabled: true
+            }
           };
           export default config;
           EOF

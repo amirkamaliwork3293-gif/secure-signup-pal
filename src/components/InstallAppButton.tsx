@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, X, Share2 } from "lucide-react";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -10,7 +10,7 @@ export function InstallAppButton() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
-  const [showIOSHint, setShowIOSHint] = useState(false);
+  const [showHint, setShowHint] = useState<null | "ios" | "desktop" | "android">(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -28,7 +28,6 @@ export function InstallAppButton() {
     const ios = /iphone|ipad|ipod/.test(ua);
     if (ios) {
       setIsIOS(true);
-      return;
     }
 
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -51,45 +50,32 @@ export function InstallAppButton() {
   }, []);
 
   const handleInstallClick = async () => {
-    if (isIOS) {
-      setShowIOSHint(true);
+    if (deferredPrompt) {
+      try {
+        await deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") setIsInstalled(true);
+      } catch (err) {
+        console.warn("PWA install failed:", err);
+      } finally {
+        setDeferredPrompt(null);
+      }
       return;
     }
-
-    if (!deferredPrompt) return;
-
-    try {
-      await deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === "accepted") setIsInstalled(true);
-    } catch (err) {
-      console.warn("PWA install failed:", err);
-    } finally {
-      setDeferredPrompt(null);
+    // Fallback: browser hasn't fired beforeinstallprompt (iOS Safari, Firefox, unsupported)
+    if (isIOS) {
+      setShowHint("ios");
+    } else {
+      const ua = window.navigator.userAgent.toLowerCase();
+      const isAndroid = /android/.test(ua);
+      setShowHint(isAndroid ? "android" : "desktop");
     }
   };
 
   if (isInstalled) return null;
 
-  if (isIOS && showIOSHint) {
-    return (
-      <div className="fixed inset-x-0 bottom-24 z-50 mx-auto max-w-sm rounded-2xl border border-border bg-card p-4 shadow-elegant">
-        <div className="text-sm font-bold text-foreground">نصب اپلیکیشن روی iOS</div>
-        <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-          در سافاری روی دکمه اشتراک‌گذاری (آیکون جعبه با فلش) بزنید، سپس «Add to Home Screen» را انتخاب کنید.
-        </p>
-        <button
-          onClick={() => setShowIOSHint(false)}
-          className="mt-3 text-xs text-primary font-medium"
-        >
-          متوجه شدم
-        </button>
-      </div>
-    );
-  }
-
-  if (deferredPrompt || isIOS) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={handleInstallClick}
@@ -99,8 +85,56 @@ export function InstallAppButton() {
         <Download className="h-3.5 w-3.5" />
         نصب اپ
       </button>
-    );
-  }
-
-  return null;
+      {showHint && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-elegant">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-primary text-primary-foreground">
+                  {showHint === "ios" ? <Share2 className="h-5 w-5" /> : <Download className="h-5 w-5" />}
+                </div>
+                <div className="text-sm font-bold">نصب اپلیکیشن</div>
+              </div>
+              <button
+                onClick={() => setShowHint(null)}
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+                aria-label="بستن"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
+              {showHint === "ios" && (
+                <ol className="list-decimal pr-5 space-y-1">
+                  <li>در سافاری روی آیکون اشتراک‌گذاری (مربع با فلش رو به بالا) بزنید.</li>
+                  <li>گزینه «Add to Home Screen» را انتخاب کنید.</li>
+                  <li>روی «Add» بزنید — اپ مثل یک برنامه واقعی نصب می‌شود.</li>
+                </ol>
+              )}
+              {showHint === "android" && (
+                <ol className="list-decimal pr-5 space-y-1">
+                  <li>روی منوی سه‌نقطه مرورگر بزنید.</li>
+                  <li>گزینه «Install app» یا «Add to Home screen» را انتخاب کنید.</li>
+                  <li>تأیید کنید — اپ نصب می‌شود.</li>
+                </ol>
+              )}
+              {showHint === "desktop" && (
+                <ol className="list-decimal pr-5 space-y-1">
+                  <li>در نوار آدرس مرورگر روی آیکون نصب (Install) بزنید.</li>
+                  <li>اگر دیده نمی‌شود، از منوی مرورگر گزینه «Install» یا «Apps → Install this site» را انتخاب کنید.</li>
+                  <li>برای Firefox: نصب مستقیم پشتیبانی نمی‌شود — از Chrome/Edge استفاده کنید.</li>
+                </ol>
+              )}
+            </div>
+            <button
+              onClick={() => setShowHint(null)}
+              className="mt-4 w-full rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"
+            >
+              متوجه شدم
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

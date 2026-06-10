@@ -7,10 +7,15 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
+  updatePlanConfigs,
 } from "@/lib/auth.functions";
+import {
+  DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
+} from "@/lib/plans";
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
+  Package, Power, Percent, Timer,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -22,7 +27,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "settings";
+type Tab = "requests" | "users" | "plans" | "settings";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -138,16 +143,17 @@ function AdminPage() {
         </div>
 
         {/* Tabs */}
-        <div className="mb-4 flex gap-1 rounded-xl bg-muted p-1">
+        <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "users" as Tab, label: "کاربران", icon: Users },
+            { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
           ]).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${
+              className={`flex flex-1 min-w-fit items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
                 tab === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -179,6 +185,7 @@ function AdminPage() {
                 onDelete={handleDelete}
               />
             )}
+            {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
           </>
         )}

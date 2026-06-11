@@ -129,6 +129,27 @@ jobs:
           }
           EOF
 
+      - name: Add camera permissions to AndroidManifest
+        run: |
+          python3 - << 'PYEOF'
+          manifest_path = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest_path, 'r') as f:
+              content = f.read()
+
+          permissions = [
+              '<uses-permission android:name="android.permission.CAMERA" />',
+              '<uses-feature android:name="android.hardware.camera" android:required="false" />',
+              '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
+          ]
+          for perm in permissions:
+              if perm not in content:
+                  content = content.replace('<application', perm + '\n    <application', 1)
+
+          with open(manifest_path, 'w') as f:
+              f.write(content)
+          print("Camera permissions added!")
+          PYEOF
+
       - name: Build Debug APK
         run: |
           cd android

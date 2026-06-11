@@ -129,15 +129,20 @@ jobs:
           }
           EOF
 
-      - name: Add camera permissions to AndroidManifest
+      - name: Add permissions and fix WebView for download/print/share
         run: |
           python3 - << 'PYEOF'
+          import re, os
+
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest_path, 'r') as f:
               content = f.read()
 
+          # همه permission های لازم
           permissions = [
               '<uses-permission android:name="android.permission.CAMERA" />',
+              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />',
+              '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',
               '<uses-feature android:name="android.hardware.camera" android:required="false" />',
               '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
           ]
@@ -145,9 +150,124 @@ jobs:
               if perm not in content:
                   content = content.replace('<application', perm + '\n    <application', 1)
 
+          # فعال کردن قابلیت دانلود در WebView
+          if 'android:requestLegacyExternalStorage' not in content:
+              content = content.replace(
+                  '<application',
+                  '<application\n        android:requestLegacyExternalStorage="true"',
+                  1
+              )
+
           with open(manifest_path, 'w') as f:
               f.write(content)
-          print("Camera permissions added!")
+
+          print("Permissions added!")
+          PYEOF
+
+      - name: Enable file download and print in WebView (MainActivity)
+        run: |
+          python3 - << 'PYEOF'
+          import os, glob
+
+          # پیدا کردن MainActivity
+          files = glob.glob('android/app/src/main/java/**/*.java', recursive=True) + \
+                  glob.glob('android/app/src/main/java/**/*.kt', recursive=True)
+
+          main_file = next((f for f in files if 'MainActivity' in f), None)
+          if not main_file:
+              print("MainActivity not found!")
+              exit(0)
+
+          print(f"Found: {main_file}")
+
+          # جایگزینی با نسخه کامل که WebView download را فعال می‌کند
+          if main_file.endswith('.kt'):
+              new_content = '''package com.kamali.inventory
+
+import android.os.Bundle
+import android.webkit.URLUtil
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.DownloadListener
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
+import com.getcapacitor.BridgeActivity
+
+class MainActivity : BridgeActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // فعال کردن دانلود فایل از WebView
+        bridge?.webView?.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
+            try {
+                if (url.startsWith("data:") || url.startsWith("blob:")) {
+                    // data URI: مستقیم از طریق JavaScript ذخیره می‌شود
+                    return@setDownloadListener
+                }
+                val request = DownloadManager.Request(Uri.parse(url))
+                val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                request.setTitle(filename)
+                request.setDescription("در حال دانلود...")
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+                request.addRequestHeader("User-Agent", userAgent)
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                dm.enqueue(request)
+                Toast.makeText(this, "دانلود شروع شد: $filename", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "خطا در دانلود", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+'''
+          else:
+              new_content = '''package com.kamali.inventory;
+
+import android.os.Bundle;
+import android.webkit.URLUtil;
+import android.webkit.DownloadListener;
+import android.app.DownloadManager;
+import android.content.Context;
+import android.net.Uri;
+import android.os.Environment;
+import android.widget.Toast;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+                try {
+                    if (url.startsWith("data:") || url.startsWith("blob:")) return;
+                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                    String filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                    request.setTitle(filename);
+                    request.setDescription("در حال دانلود...");
+                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+                    request.addRequestHeader("User-Agent", userAgent);
+                    DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                    dm.enqueue(request);
+                    Toast.makeText(this, "دانلود شروع شد: " + filename, Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, "خطا در دانلود", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+    }
+}
+'''
+
+          with open(main_file, 'w') as f:
+              f.write(new_content)
+          print(f"MainActivity updated: {main_file}")
           PYEOF
 
       - name: Build Debug APK

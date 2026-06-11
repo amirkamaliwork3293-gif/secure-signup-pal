@@ -1,14 +1,14 @@
 /**
  * دکمه دانلود مستقیم APK اندروید — برای همه قابل دسترس است (با یا بدون ورود).
- * فایل از GitHub Releases ریپوی پروژه سرو می‌شود؛ workflow ساخت APK پس از هر
- * push آن را در تگ ثابت «apk-latest» منتشر می‌کند.
+ * فایل مستقیماً از خود سایت سرو می‌شود (بدون انتقال به گیت‌هاب یا صفحه خارجی):
+ * workflow ساخت APK آخرین نسخه را در public/kamali-accounting.apk کامیت می‌کند
+ * و سایت آن را در آدرس ‎/kamali-accounting.apk ارائه می‌دهد.
  */
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { isNativeApp } from "@/lib/print";
 
-export const APK_DOWNLOAD_URL =
-  "https://github.com/amirkamaliwork3293-gif/secure-signup-pal/releases/download/apk-latest/kamali-accounting.apk";
+export const APK_DOWNLOAD_URL = "/kamali-accounting.apk";
 
 export function ApkDownloadButton({ className = "" }: { className?: string }) {
   // داخل خود اپ اندروید نمایش داده نمی‌شود (پس از hydration بررسی می‌شود)

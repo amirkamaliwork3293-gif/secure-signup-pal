@@ -2,7 +2,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Layout } from "@/components/Layout";
-import { products, cryptoId, type Product } from "@/lib/store";
+import { products, cryptoId, formatNumber, parseNumberInput, type Product } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode";
 import { BarcodePrintModal } from "@/components/BarcodePrintModal";
 import { Plus, Trash2, Zap, Printer, ArrowRight } from "lucide-react";
@@ -57,7 +57,13 @@ function QuickAdd() {
             <span className="grid h-9 w-7 place-items-center text-xs text-muted-foreground">{(i + 1).toLocaleString("fa-IR")}</span>
             <input value={d.name} onChange={(e) => update(d.id, "name", e.target.value)} placeholder="نام محصول"
               className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
-            <input value={d.price} onChange={(e) => update(d.id, "price", e.target.value.replace(/[^\d]/g, ""))} inputMode="numeric" placeholder="قیمت"
+            <input
+              value={d.price ? formatNumber(parseNumberInput(d.price)) : ""}
+              onChange={(e) => {
+                const n = parseNumberInput(e.target.value);
+                update(d.id, "price", n ? String(n) : "");
+              }}
+              inputMode="numeric" placeholder="قیمت"
               className="w-28 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
             <button onClick={() => remove(d.id)} className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
               <Trash2 className="h-4 w-4" />

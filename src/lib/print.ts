@@ -10,10 +10,24 @@
  *      (دانلود فایل و…) را ارائه کند.
  */
 
+type PrinterPlugin = {
+  print?: (opts: { content: string; name?: string; orientation?: string }) => Promise<void>;
+};
+type FilesystemPlugin = {
+  writeFile?: (opts: { path: string; data: string; directory: string; recursive?: boolean }) => Promise<{ uri: string }>;
+};
+type SharePlugin = {
+  share?: (opts: { title?: string; text?: string; url?: string; files?: string[]; dialogTitle?: string }) => Promise<unknown>;
+};
+
 type CapacitorGlobal = {
   isNativePlatform?: () => boolean;
   getPlatform?: () => string;
-  Plugins?: Record<string, { print?: (opts: { content: string; name?: string; orientation?: string }) => Promise<void> }>;
+  Plugins?: {
+    Printer?: PrinterPlugin;
+    Filesystem?: FilesystemPlugin;
+    Share?: SharePlugin;
+  } & Record<string, unknown>;
 };
 
 declare global {
@@ -140,3 +154,62 @@ export function downloadBlob(blob: Blob, filename: string) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+// ─── ذخیره فایل (وب + اپ اندروید) ───────────────────────────────────────────
+// در WebView اندروید، کلیک روی لینک blob دانلود را آغاز نمی‌کند. به‌جای آن
+// فایل با پلاگین Filesystem در حافظه نوشته و با Share سیستمی باز می‌شود تا
+// کاربر آن را ذخیره کند یا بفرستد (واتساپ، فایل‌ها و…).
+
+/**
+ * ذخیره فایل از روی data-URL یا رشته base64.
+ * وب: دانلود مستقیم — اپ اندروید: نوشتن فایل + پنجره اشتراک/ذخیره.
+ */
+export async function saveBase64File(
+  base64: string,
+  filename: string,
+  mime: string,
+): Promise<boolean> {
+  const data = base64.includes(",") ? base64.split(",")[1] : base64;
+
+  if (isNativeApp()) {
+    const plugins = window.Capacitor?.Plugins;
+    const fs = plugins?.Filesystem;
+    const share = plugins?.Share;
+    if (fs?.writeFile) {
+      try {
+        const res = await fs.writeFile({ path: filename, data, directory: "CACHE" });
+        if (share?.share) {
+          await share.share({
+            title: filename,
+            files: [res.uri],
+            dialogTitle: "ذخیره یا ارسال فایل",
+          }).catch(() => { /* کاربر پنجره را بست — فایل نوشته شده است */ });
+        }
+        return true;
+      } catch (e) {
+        console.warn("[print] native save failed", e);
+      }
+    }
+    return false;
+  }
+
+  // وب: تبدیل base64 به Blob و دانلود معمولی
+  try {
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    downloadBlob(new Blob([bytes], { type: mime }), filename);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** ذخیره PDF ساخته‌شده با jsPDF — وب: دانلود، اپ: ذخیره + اشتراک */
+export async function savePdf(pdf: { output: (type: "datauristring") => string }, filename: string): Promise<boolean> {
+  return saveBase64File(pdf.output("datauristring"), filename, "application/pdf");
+}
+
+/** پیام استاندارد وقتی ذخیره/چاپ در نسخه قدیمی اپ ممکن نیست */
+export const OLD_APP_MESSAGE =
+  "این قابلیت در نسخه قدیمی اپلیکیشن در دسترس نیست — لطفاً نسخه جدید APK را از سایت دانلود و نصب کنید.";

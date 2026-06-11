@@ -277,7 +277,7 @@ export function Scanner({ onDetected, paused }: Props) {
             workerBusy.current = true;
             workerRef.current.postMessage(
               { id: nativeGenRef.current, width: DW, height: DH, lum, thorough: thoroughToggle.current },
-              [lum.buffer],
+              [lum.buffer as ArrayBuffer],
             );
           }
         } else {

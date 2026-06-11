@@ -149,20 +149,6 @@ export async function labelDataUrl(item: LabelItem, opts: LabelOptions): Promise
   return c.toDataURL("image/png");
 }
 
-export async function downloadBarcodePNG(text: string, filename = `${text}.png`) {
-  const url = await barcodeDataUrl(text, { scale: 4, height: 14 });
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-}
-
-export async function downloadLabelPNG(item: LabelItem, opts: LabelOptions, filename?: string) {
-  const url = await labelDataUrl(item, opts);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename ?? `${item.code}.png`;
-  a.click();
-}
-
 // ─── چیدمان چاپ ─────────────────────────────────────────────────────────────
 
 export type PrintLayout = {

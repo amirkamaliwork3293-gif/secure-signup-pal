@@ -4,10 +4,12 @@
  * سه‌گانه عملیات فاکتور: پرینت، دانلود PDF، اشتراک‌گذاری
  */
 
-import { Printer, Download, Share2 } from "lucide-react";
+import { useState } from "react";
+import { Printer, Download, Share2, Loader2 } from "lucide-react";
 import type { Invoice } from "@/lib/store";
 import { settings } from "@/lib/store";
-import { printHtml, downloadBlob, isNativeApp } from "@/lib/print";
+import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
+import { buildInvoicePdf } from "@/lib/invoice-pdf";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
@@ -122,21 +124,29 @@ type Props = {
 export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) {
   const [appSettings] = settings.useAll();
   const fontSize = appSettings.invoiceFontSize ?? 13;
-  const native = isNativeApp();
+  const [busy, setBusy] = useState(false);
 
   // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
   const handlePrint = async () => {
     const html = buildInvoiceHTML(inv, fontSize);
     const ok = await printHtml(html, `فاکتور ${inv.id.toUpperCase()}`);
-    if (!ok) {
-      alert("چاپ در این نسخه از اپلیکیشن در دسترس نیست — لطفاً نسخه جدید اپ را از سایت دانلود و نصب کنید.");
-    }
+    if (!ok) alert(OLD_APP_MESSAGE);
   };
 
-  // ── دانلود HTML ───────────────────────────────────────────────────────────
-  const handleDownload = () => {
-    const html = buildInvoiceHTML(inv, fontSize);
-    downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `فاکتور-${inv.id.toUpperCase()}.html`);
+  // ── دانلود PDF — وب: دانلود مستقیم، اپ اندروید: ذخیره + اشتراک ────────────
+  const handleDownload = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const pdf = await buildInvoicePdf(inv);
+      const ok = await savePdf(pdf, `invoice-${inv.id.toUpperCase()}.pdf`);
+      if (!ok) alert(OLD_APP_MESSAGE);
+    } catch (e) {
+      console.warn("[invoice] pdf failed", e);
+      alert("خطا در ساخت PDF فاکتور.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   // ── اشتراک‌گذاری ──────────────────────────────────────────────────────────
@@ -192,18 +202,16 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         {showLabels && <span>پرینت</span>}
       </button>
 
-      {/* دانلود فایل فقط در مرورگر وب معنا دارد؛ در اپ، چاپ گزینه «ذخیره PDF» دارد */}
-      {!native && (
-        <button
-          type="button"
-          onClick={handleDownload}
-          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-          title="دانلود فاکتور"
-        >
-          <Download className={iconSize} />
-          {showLabels && <span>دانلود</span>}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={handleDownload}
+        disabled={busy}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-50`}
+        title="دانلود PDF فاکتور"
+      >
+        {busy ? <Loader2 className={`${iconSize} animate-spin`} /> : <Download className={iconSize} />}
+        {showLabels && <span>دانلود</span>}
+      </button>
 
       <button
         type="button"

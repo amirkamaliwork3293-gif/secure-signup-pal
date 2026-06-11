@@ -4,14 +4,13 @@ import {
   buildBarcodesPDF, printBarcodeLabels, renderLabelToCanvas,
   DEFAULT_LAYOUT, type PrintLayout, type LabelItem,
 } from "@/lib/barcode";
-import { isNativeApp } from "@/lib/print";
+import { savePdf, OLD_APP_MESSAGE } from "@/lib/print";
 import { formatNumber, type Product } from "@/lib/store";
 
 export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClose: () => void }) {
   const [layout, setLayout] = useState<PrintLayout>(DEFAULT_LAYOUT);
   const [busy, setBusy] = useState(false);
   const previewRef = useRef<HTMLCanvasElement>(null);
-  const native = isNativeApp();
 
   const validItems: LabelItem[] = items
     .filter((p) => p.code)
@@ -42,7 +41,8 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
     setBusy(true);
     try {
       const pdf = await buildBarcodesPDF(validItems, layout);
-      pdf.save("بارکدها.pdf");
+      const ok = await savePdf(pdf, "barcodes.pdf");
+      if (!ok) alert(OLD_APP_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -53,7 +53,7 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
     setBusy(true);
     try {
       const ok = await printBarcodeLabels(validItems, layout);
-      if (!ok) alert("چاپ در این نسخه از اپلیکیشن در دسترس نیست — لطفاً نسخه جدید اپ را از سایت دانلود و نصب کنید.");
+      if (!ok) alert(OLD_APP_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -110,11 +110,9 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
           </div>
 
           <div className="flex gap-2 pt-2">
-            {!native && (
-              <button onClick={download} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm disabled:opacity-50">
-                <Download className="h-4 w-4" /> PDF
-              </button>
-            )}
+            <button onClick={download} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm disabled:opacity-50">
+              <Download className="h-4 w-4" /> PDF
+            </button>
             <button onClick={print} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
               <Printer className="h-4 w-4" /> چاپ
             </button>

@@ -30,7 +30,7 @@ export function KamaliSplash() {
         <Receipt className="h-9 w-9 text-primary-foreground" />
       </div>
       <div className="kamali-splash-title">کمالی</div>
-      <div className="kamali-splash-subtitle">سیستم حسابداری کمالی</div>
+      <div className="kamali-splash-subtitle">سیستم حسابداری افشاری</div>
     </div>
   );
 }

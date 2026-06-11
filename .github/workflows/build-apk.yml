@@ -73,6 +73,7 @@ jobs:
         run: |
           cat > capacitor.config.ts << 'EOF'
           import type { CapacitorConfig } from '@capacitor/cli';
+
           const config: CapacitorConfig = {
             appId: process.env.APP_ID || 'com.kamali.inventory',
             appName: process.env.APP_NAME || 'کمالی انبار',
@@ -86,6 +87,7 @@ jobs:
               allowMixedContent: false,
             },
           };
+
           export default config;
           EOF
 
@@ -99,17 +101,21 @@ jobs:
         run: |
           python3 - << 'PYEOF'
           import re
+
           path = 'android/app/build.gradle'
           with open(path, 'r', encoding='utf-8') as f:
               content = f.read()
+
           content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 22', content)
           content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 22', content)
+
           with open(path, 'w', encoding='utf-8') as f:
               f.write(content)
+
           print('minSdk set to 22')
           PYEOF
 
-      - name: Force single Kotlin stdlib version
+      - name: Force single Kotlin stdlib version (fix duplicate classes)
         run: |
           cat >> android/app/build.gradle << 'EOF'
 
@@ -123,77 +129,24 @@ jobs:
           }
           EOF
 
-      - name: Add permissions to AndroidManifest
+      - name: Add camera permissions to AndroidManifest
         run: |
           python3 - << 'PYEOF'
-          import re, os
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest_path, 'r') as f:
               content = f.read()
           permissions = [
               '<uses-permission android:name="android.permission.CAMERA" />',
-              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />',
-              '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',
               '<uses-feature android:name="android.hardware.camera" android:required="false" />',
               '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
           ]
           for perm in permissions:
               if perm not in content:
                   content = content.replace('<application', perm + '\n    <application', 1)
-          if 'android:requestLegacyExternalStorage' not in content:
-              content = content.replace(
-                  '<application',
-                  '<application\n        android:requestLegacyExternalStorage="true"',
-                  1
-              )
           with open(manifest_path, 'w') as f:
               f.write(content)
-          print("Permissions added!")
+          print("Camera permissions added!")
           PYEOF
-
-      - name: Write MainActivity with download support
-        run: |
-          # پیدا کردن مسیر MainActivity
-          MAIN_FILE=$(find android/app/src/main/java -name "MainActivity.kt" -o -name "MainActivity.java" | head -1)
-          echo "Found: $MAIN_FILE"
-
-          # نوشتن MainActivity.kt با پشتیبانی از دانلود
-          cat > "$MAIN_FILE" << 'KOTLIN'
-package com.kamali.inventory
-
-import android.app.DownloadManager
-import android.content.Context
-import android.net.Uri
-import android.os.Bundle
-import android.os.Environment
-import android.webkit.URLUtil
-import android.widget.Toast
-import com.getcapacitor.BridgeActivity
-
-class MainActivity : BridgeActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        bridge?.webView?.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            try {
-                if (url.startsWith("data:") || url.startsWith("blob:")) return@setDownloadListener
-                val request = DownloadManager.Request(Uri.parse(url))
-                val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
-                request.setTitle(filename)
-                request.setDescription("در حال دانلود...")
-                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
-                request.addRequestHeader("User-Agent", userAgent)
-                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                dm.enqueue(request)
-                Toast.makeText(this, "دانلود شروع شد: $filename", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "خطا در دانلود", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-}
-KOTLIN
-          echo "MainActivity updated!"
 
       - name: Build Debug APK
         run: |

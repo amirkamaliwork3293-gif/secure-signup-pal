@@ -2,8 +2,16 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_URL: https://secure-signup-pal.lovable.app
+  APP_ID: com.kamali.inventory
+  APP_NAME: کمالی انبار
 
 jobs:
   build:
@@ -16,13 +24,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          distribution: temurin
+          java-version: "21"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -30,212 +38,56 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Install Capacitor + Vite plugins
-        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @vitejs/plugin-react vite-tsconfig-paths
+      - name: Install Capacitor
+        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
 
-      - name: Create index.html for SPA build
+      - name: Create fallback web folder
         run: |
-          cat > index.html << 'EOF'
-          <!DOCTYPE html>
+          rm -rf android dist
+          mkdir -p dist
+          cat > dist/index.html << EOF
+          <!doctype html>
           <html lang="fa" dir="rtl">
             <head>
-              <meta charset="UTF-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>کمالی - مدیریت انبار</title>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+              <meta http-equiv="refresh" content="0;url=${APP_URL}" />
+              <title>کمالی انبار</title>
+              <style>
+                body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: sans-serif; background: #f8fafc; color: #0f172a; }
+                main { text-align: center; padding: 24px; }
+                a { color: #2563eb; font-weight: 700; }
+              </style>
             </head>
             <body>
-              <div id="root"></div>
-              <script type="module" src="/src/main.tsx"></script>
+              <main>
+                <h1>در حال باز کردن برنامه کمالی...</h1>
+                <p><a href="${APP_URL}">اگر برنامه باز نشد اینجا بزنید</a></p>
+              </main>
+              <script>window.location.replace("${APP_URL}");</script>
             </body>
           </html>
           EOF
-
-      - name: Stub @tanstack/react-start completely
-        run: |
-          mkdir -p node_modules/@tanstack/react-start/dist
-          cat > node_modules/@tanstack/react-start/package.json << 'EOF'
-          {
-            "name": "@tanstack/react-start",
-            "version": "0.0.0-stub",
-            "main": "./dist/index.js",
-            "module": "./dist/index.js",
-            "exports": {
-              ".": "./dist/index.js",
-              "./server-entry": "./dist/index.js"
-            }
-          }
-          EOF
-          cat > node_modules/@tanstack/react-start/dist/index.js << 'EOF'
-          export function createServerFn(options) {
-            return function(fn) {
-              const serverFn = fn || options;
-              const callable = async (input) => {
-                if (typeof serverFn === 'function') return serverFn(input);
-                return null;
-              };
-              callable.validator = (fn) => callable;
-              callable.handler = (fn) => { Object.assign(callable, { _handler: fn }); return callable; };
-              callable.inputValidator = (fn) => callable;
-              callable.middleware = (fns) => callable;
-              return callable;
-            };
-          }
-          export function useServerFn(fn) { return fn; }
-          export function createMiddleware() {
-            return { server: (fn) => ({ _server: fn }), client: (fn) => ({ _client: fn }) };
-          }
-          export function createStart(fn) { return fn ? fn() : {}; }
-          export default {};
-          EOF
-
-      - name: Override vite.config.ts for static SPA build
-        run: |
-          cat > vite.config.ts << 'EOF'
-          import { defineConfig } from "vite";
-          import react from "@vitejs/plugin-react";
-          import tsconfigPaths from "vite-tsconfig-paths";
-          import tailwindcss from "@tailwindcss/vite";
-          import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
-          import path from "path";
-
-          export default defineConfig({
-            plugins: [
-              // ⬇️ این باید اول باشه تا routeTree.gen.tsx رو بسازه
-              TanStackRouterVite({ routesDirectory: "./src/routes", generatedRouteTree: "./src/routeTree.gen.tsx" }),
-              react(),
-              tsconfigPaths(),
-              tailwindcss(),
-            ],
-            resolve: {
-              alias: {
-                "@": path.resolve(__dirname, "./src"),
-              },
-            },
-            base: "./",
-            build: {
-              outDir: "dist",
-              target: "es2020",
-            },
-          });
-          EOF
-
-      - name: Override __root.tsx for SPA mode
-        run: |
-          cat > src/routes/__root.tsx << 'EOF'
-          import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-          import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
-          import { AuthProvider } from "@/lib/AuthContext";
-          import { KamaliSplash } from "@/components/KamaliSplash";
-          import "@/styles.css";
-
-          export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-            component: RootComponent,
-          });
-
-          function RootComponent() {
-            const { queryClient } = Route.useRouteContext();
-            return (
-              <QueryClientProvider client={queryClient}>
-                <AuthProvider>
-                  <KamaliSplash />
-                  <Outlet />
-                </AuthProvider>
-              </QueryClientProvider>
-            );
-          }
-          EOF
-
-      - name: Override router.tsx for SPA mode (HashHistory for Capacitor)
-        run: |
-          cat > src/router.tsx << 'EOF'
-          import { QueryClient } from "@tanstack/react-query";
-          import { createRouter, createHashHistory } from "@tanstack/react-router";
-          import { routeTree } from "./routeTree.gen";
-
-          export const getRouter = () => {
-            const queryClient = new QueryClient();
-            const router = createRouter({
-              routeTree,
-              history: createHashHistory(),
-              context: { queryClient },
-              defaultPreloadStaleTime: 0,
-            });
-            return router;
-          };
-          EOF
-
-      - name: Create main.tsx for SPA mode
-        run: |
-          cat > src/main.tsx << 'EOF'
-          import React from "react";
-          import ReactDOM from "react-dom/client";
-          import { RouterProvider } from "@tanstack/react-router";
-          import { getRouter } from "./router";
-          import "./styles.css";
-
-          // Unregister any leftover service workers (avoid white-screen from stale cache)
-          if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-            navigator.serviceWorker.getRegistrations().then((rs) =>
-              rs.forEach((r) => r.unregister())
-            ).catch(() => {});
-          }
-
-          window.addEventListener("error", (e) => console.error("[GlobalError]", e.error || e.message));
-          window.addEventListener("unhandledrejection", (e) => console.error("[UnhandledRejection]", e.reason));
-
-          const router = getRouter();
-
-          ReactDOM.createRoot(document.getElementById("root")!).render(
-            <React.StrictMode>
-              <RouterProvider router={router} />
-            </React.StrictMode>
-          );
-          EOF
-
-      - name: Stub out server-only source files
-        run: |
-          echo "export {};" > src/start.ts
-          echo "export {};" > src/server.ts
-          cat > src/integrations/supabase/auth-attacher.ts << 'EOF'
-          export const attachSupabaseAuth = async ({ next }: any) => next();
-          EOF
-          cat > src/integrations/supabase/auth-middleware.ts << 'EOF'
-          export const requireSupabaseAuth = async ({ next }: any) => next();
-          EOF
-          echo "export const config = {};" > src/lib/config.server.ts
-          echo "export {};" > src/lib/api/example.functions.ts
-          cat > src/registerSW.ts << 'EOF'
-          export function registerServiceWorker() { /* disabled in Capacitor build */ }
-          EOF
-          cat > src/components/InstallAppPrompt.tsx << 'EOF'
-          export function InstallAppPrompt() { return null; }
-          EOF
-
-      - name: Create .env file
-        run: |
-          echo "VITE_SUPABASE_URL=https://wchghogprftrurbcarvp.supabase.co" > .env
-          echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
-
-      - name: Build web app
-        # routeTree.gen.tsx در این مرحله توسط TanStackRouterVite ساخته می‌شه
-        run: npm run build
 
       - name: Create capacitor.config.ts
         run: |
           cat > capacitor.config.ts << 'EOF'
           import type { CapacitorConfig } from '@capacitor/cli';
+
           const config: CapacitorConfig = {
-            appId: 'com.kamali.inventory',
-            appName: 'کمالی انبار',
+            appId: process.env.APP_ID || 'com.kamali.inventory',
+            appName: process.env.APP_NAME || 'کمالی انبار',
             webDir: 'dist',
             server: {
-              androidScheme: 'https',
-              cleartext: true
+              url: process.env.APP_URL || 'https://secure-signup-pal.lovable.app',
+              cleartext: false,
             },
             android: {
-              webContentsDebuggingEnabled: true
-            }
+              webContentsDebuggingEnabled: true,
+              allowMixedContent: false,
+            },
           };
+
           export default config;
           EOF
 
@@ -245,32 +97,22 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Fix Kotlin duplicate and lower minSdk
+      - name: Lower minSdk for older Android devices
         run: |
           python3 - << 'PYEOF'
           import re
 
-          with open('android/app/build.gradle', 'r') as f:
+          path = 'android/app/build.gradle'
+          with open(path, 'r', encoding='utf-8') as f:
               content = f.read()
 
           content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 22', content)
           content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 22', content)
 
-          fix = """
-          configurations.all {
-              resolutionStrategy {
-                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
-                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
-                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
-              }
-          }
-          """
-          content = content + fix
-
-          with open('android/app/build.gradle', 'w') as f:
+          with open(path, 'w', encoding='utf-8') as f:
               f.write(content)
 
-          print("Done!")
+          print('minSdk set to 22')
           PYEOF
 
       - name: Build Debug APK

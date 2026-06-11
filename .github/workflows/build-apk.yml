@@ -73,7 +73,6 @@ jobs:
         run: |
           cat > capacitor.config.ts << 'EOF'
           import type { CapacitorConfig } from '@capacitor/cli';
-
           const config: CapacitorConfig = {
             appId: process.env.APP_ID || 'com.kamali.inventory',
             appName: process.env.APP_NAME || 'کمالی انبار',
@@ -87,7 +86,6 @@ jobs:
               allowMixedContent: false,
             },
           };
-
           export default config;
           EOF
 
@@ -101,21 +99,17 @@ jobs:
         run: |
           python3 - << 'PYEOF'
           import re
-
           path = 'android/app/build.gradle'
           with open(path, 'r', encoding='utf-8') as f:
               content = f.read()
-
           content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 22', content)
           content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 22', content)
-
           with open(path, 'w', encoding='utf-8') as f:
               f.write(content)
-
           print('minSdk set to 22')
           PYEOF
 
-      - name: Force single Kotlin stdlib version (fix duplicate classes)
+      - name: Force single Kotlin stdlib version
         run: |
           cat >> android/app/build.gradle << 'EOF'
 
@@ -129,16 +123,13 @@ jobs:
           }
           EOF
 
-      - name: Add permissions and fix WebView for download/print/share
+      - name: Add permissions to AndroidManifest
         run: |
           python3 - << 'PYEOF'
           import re, os
-
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest_path, 'r') as f:
               content = f.read()
-
-          # همه permission های لازم
           permissions = [
               '<uses-permission android:name="android.permission.CAMERA" />',
               '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />',
@@ -149,64 +140,42 @@ jobs:
           for perm in permissions:
               if perm not in content:
                   content = content.replace('<application', perm + '\n    <application', 1)
-
-          # فعال کردن قابلیت دانلود در WebView
           if 'android:requestLegacyExternalStorage' not in content:
               content = content.replace(
                   '<application',
                   '<application\n        android:requestLegacyExternalStorage="true"',
                   1
               )
-
           with open(manifest_path, 'w') as f:
               f.write(content)
-
           print("Permissions added!")
           PYEOF
 
-      - name: Enable file download and print in WebView (MainActivity)
+      - name: Write MainActivity with download support
         run: |
-          python3 - << 'PYEOF'
-          import os, glob
+          # پیدا کردن مسیر MainActivity
+          MAIN_FILE=$(find android/app/src/main/java -name "MainActivity.kt" -o -name "MainActivity.java" | head -1)
+          echo "Found: $MAIN_FILE"
 
-          # پیدا کردن MainActivity
-          files = glob.glob('android/app/src/main/java/**/*.java', recursive=True) + \
-                  glob.glob('android/app/src/main/java/**/*.kt', recursive=True)
+          # نوشتن MainActivity.kt با پشتیبانی از دانلود
+          cat > "$MAIN_FILE" << 'KOTLIN'
+package com.kamali.inventory
 
-          main_file = next((f for f in files if 'MainActivity' in f), None)
-          if not main_file:
-              print("MainActivity not found!")
-              exit(0)
-
-          print(f"Found: {main_file}")
-
-          # جایگزینی با نسخه کامل که WebView download را فعال می‌کند
-          if main_file.endswith('.kt'):
-              new_content = '''package com.kamali.inventory
-
-import android.os.Bundle
-import android.webkit.URLUtil
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.DownloadListener
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.os.Environment
+import android.webkit.URLUtil
 import android.widget.Toast
 import com.getcapacitor.BridgeActivity
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // فعال کردن دانلود فایل از WebView
-        bridge?.webView?.setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
+        bridge?.webView?.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             try {
-                if (url.startsWith("data:") || url.startsWith("blob:")) {
-                    // data URI: مستقیم از طریق JavaScript ذخیره می‌شود
-                    return@setDownloadListener
-                }
+                if (url.startsWith("data:") || url.startsWith("blob:")) return@setDownloadListener
                 val request = DownloadManager.Request(Uri.parse(url))
                 val filename = URLUtil.guessFileName(url, contentDisposition, mimeType)
                 request.setTitle(filename)
@@ -223,52 +192,8 @@ class MainActivity : BridgeActivity() {
         }
     }
 }
-'''
-          else:
-              new_content = '''package com.kamali.inventory;
-
-import android.os.Bundle;
-import android.webkit.URLUtil;
-import android.webkit.DownloadListener;
-import android.app.DownloadManager;
-import android.content.Context;
-import android.net.Uri;
-import android.os.Environment;
-import android.widget.Toast;
-import com.getcapacitor.BridgeActivity;
-
-public class MainActivity extends BridgeActivity {
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            getBridge().getWebView().setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
-                try {
-                    if (url.startsWith("data:") || url.startsWith("blob:")) return;
-                    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                    String filename = URLUtil.guessFileName(url, contentDisposition, mimeType);
-                    request.setTitle(filename);
-                    request.setDescription("در حال دانلود...");
-                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
-                    request.addRequestHeader("User-Agent", userAgent);
-                    DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-                    dm.enqueue(request);
-                    Toast.makeText(this, "دانلود شروع شد: " + filename, Toast.LENGTH_SHORT).show();
-                } catch (Exception e) {
-                    Toast.makeText(this, "خطا در دانلود", Toast.LENGTH_SHORT).show();
-                }
-            });
-        }
-    }
-}
-'''
-
-          with open(main_file, 'w') as f:
-              f.write(new_content)
-          print(f"MainActivity updated: {main_file}")
-          PYEOF
+KOTLIN
+          echo "MainActivity updated!"
 
       - name: Build Debug APK
         run: |

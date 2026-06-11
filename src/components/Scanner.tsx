@@ -131,6 +131,10 @@ export function Scanner({ onDetected, paused }: Props) {
   const nativeGenRef   = useRef(0);
   const nativeRunRef   = useRef(0); // last dispatched generation
   const nativeInflight = useRef(false); // guard: skip if previous detect still running
+  // ZXing Web Worker — decode off the main thread (kills UI lag)
+  const workerRef      = useRef<Worker | null>(null);
+  const workerBusy     = useRef(false);
+  const lastZxingAt    = useRef(0);
 
   const [error,          setError]          = useState<string | null>(null);
   const [torchOn,        setTorchOn]        = useState(false);
@@ -188,6 +192,25 @@ export function Scanner({ onDetected, paused }: Props) {
     const tr = new MultiFormatReader(); tr.setHints(THOROUGH_HINTS);
     thoroughReader.current = tr;
 
+    // ZXing in a dedicated Web Worker — decoding never blocks the UI thread.
+    // Falls back to synchronous decode below if Worker construction fails.
+    if (!workerRef.current) {
+      try {
+        const w = new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
+        w.onmessage = (e: MessageEvent<{ id: number; text: string | null }>) => {
+          workerBusy.current = false;
+          if (e.data.text) emit(e.data.text, "ZXing-W");
+        };
+        w.onerror = () => {
+          workerBusy.current = false;
+          workerRef.current = null; // fall back to sync path
+        };
+        workerRef.current = w;
+      } catch {
+        workerRef.current = null;
+      }
+    }
+
     // Native BarcodeDetector
     const hasNative = !!window.BarcodeDetector;
     if (hasNative) {
@@ -195,10 +218,10 @@ export function Scanner({ onDetected, paused }: Props) {
         nativeRef.current = new window.BarcodeDetector!({ formats: NATIVE_FORMATS });
         setEngine("🚀 Native GPU");
       } catch {
-        setEngine("⚙️ ZXing");
+        setEngine(workerRef.current ? "⚡ ZXing Worker" : "⚙️ ZXing");
       }
     } else {
-      setEngine("⚙️ ZXing");
+      setEngine(workerRef.current ? "⚡ ZXing Worker" : "⚙️ ZXing");
     }
 
     const loop = () => {
@@ -238,21 +261,34 @@ export function Scanner({ onDetected, paused }: Props) {
         // On non-native: run every frame for maximum coverage
       }
 
-      // ── Path B: ZXing synchronous fallback ────────────────────────────
-      // Native devices: run ZXing every 4th frame (keeps CPU free for native GPU path)
-      // Non-native devices: alternate fast/thorough every frame
-      const runZXing = !nativeRef.current
-        ? true  // always on non-native
-        : (nativeGenRef.current % 4 === 0); // every 4th frame on native
-
-      if (runZXing) {
-        const imageData = ctx.getImageData(0, 0, DW, DH);
-        thoroughToggle.current = !thoroughToggle.current;
-        const reader = thoroughToggle.current ? tr : fr;
-        const result = zxingDecode(imageData, reader);
-        if (result) emit(result, thoroughToggle.current ? "ZXing-T" : "ZXing-F");
-      } else {
-        thoroughToggle.current = !thoroughToggle.current;
+      // ── Path B: ZXing (Worker preferred, sync fallback) ────────────────
+      // With native detector present, ZXing is only a safety net — run it less
+      // often. Without native, ZXing is the primary engine.
+      const now = performance.now();
+      const minInterval = nativeRef.current ? 350 : (workerRef.current ? 90 : 200);
+      if (now - lastZxingAt.current >= minInterval) {
+        if (workerRef.current) {
+          // Worker path: zero main-thread decode cost. Skip if still busy.
+          if (!workerBusy.current) {
+            lastZxingAt.current = now;
+            const imageData = ctx.getImageData(0, 0, DW, DH);
+            const lum = extractLuminance(imageData.data, DW * DH);
+            thoroughToggle.current = !thoroughToggle.current;
+            workerBusy.current = true;
+            workerRef.current.postMessage(
+              { id: nativeGenRef.current, width: DW, height: DH, lum, thorough: thoroughToggle.current },
+              [lum.buffer],
+            );
+          }
+        } else {
+          // Sync fallback: time-throttled so the UI keeps breathing.
+          lastZxingAt.current = now;
+          const imageData = ctx.getImageData(0, 0, DW, DH);
+          thoroughToggle.current = !thoroughToggle.current;
+          const reader = thoroughToggle.current ? tr : fr;
+          const result = zxingDecode(imageData, reader);
+          if (result) emit(result, thoroughToggle.current ? "ZXing-T" : "ZXing-F");
+        }
       }
     };
 
@@ -361,6 +397,9 @@ export function Scanner({ onDetected, paused }: Props) {
       streamRef.current?.getTracks().forEach(t => t.stop());
       fastReader.current?.reset();
       thoroughReader.current?.reset();
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      workerBusy.current = false;
       if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     };
   }, [startLoop]);

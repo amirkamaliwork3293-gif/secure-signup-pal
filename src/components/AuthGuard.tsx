@@ -10,7 +10,7 @@ type Props = {
 };
 
 export function AuthGuard({ children, adminOnly = false }: Props) {
-  const { state, signOut } = useAuth();
+  const { state, signOut, refreshProfile } = useAuth();
 
   if (state.status === "loading") {
     return (
@@ -30,9 +30,24 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
       <CenterMessage
         icon={<Clock className="h-8 w-8 text-amber-500" />}
         iconBg="bg-amber-500/10"
-        title="حساب شما در انتظار تایید است"
-        desc={<>کاربر <strong>{state.username}</strong> هنوز توسط مدیر تایید نشده.</>}
-        action={<SignOutBtn onClick={signOut} />}
+        title="حساب شما در انتظار تایید مدیر است"
+        desc={
+          <>
+            کاربر <strong>{state.username}</strong> ثبت شده است.
+            <br />به‌محض تایید مدیر، با زدن «بررسی مجدد» وارد می‌شوید.
+          </>
+        }
+        action={
+          <div className="flex gap-2">
+            <button
+              onClick={() => void refreshProfile()}
+              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              بررسی مجدد
+            </button>
+            <SignOutBtn onClick={signOut} />
+          </div>
+        }
       />
     );
   }

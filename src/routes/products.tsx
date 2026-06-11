@@ -3,7 +3,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import {
-  products, categories, cryptoId, formatToman, stockStatus,
+  products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
+  parseNumberInput, COUNT_UNIT, WEIGHT_UNITS,
   type Product, type Category,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode";
@@ -16,13 +17,13 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 
-const searchSchema = z.object({ code: z.string().optional() });
+const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
 
 export const Route = createFileRoute("/products")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "محصولات | حساب‌بان" },
+      { title: "محصولات | کمالی حسابداری" },
       { name: "description", content: "مدیریت محصولات و کدهای بارکد/QR." },
     ],
   }),
@@ -30,13 +31,13 @@ export const Route = createFileRoute("/products")({
 });
 
 function ProductsPageInner() {
-  const { code: incomingCode } = Route.useSearch();
+  const { code: incomingCode, q: incomingQuery } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [list, setList] = products.useAll();
   const [catList, setCatList] = categories.useAll();
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Product | null>(null);
-  const [searchQ, setSearchQ] = useState("");
+  const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
   const [filterCat, setFilterCat] = useState<string>("all");
   const [showCatManager, setShowCatManager] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -48,6 +49,10 @@ function ProductsPageInner() {
   useEffect(() => {
     if (incomingCode) setOpen(true);
   }, [incomingCode]);
+
+  useEffect(() => {
+    if (incomingQuery != null) setSearchQ(incomingQuery);
+  }, [incomingQuery]);
 
   const remove = (id: string) => {
     if (!confirm("حذف این محصول؟")) return;
@@ -106,9 +111,10 @@ function ProductsPageInner() {
 
   const stockBadge = (p: Product) => {
     const s = stockStatus(p);
+    const unitLabel = p.unit || "عدد";
     if (s === "out") return <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded-md">اتمام موجودی</span>;
-    if (s === "low") return <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md flex items-center gap-0.5"><AlertTriangle className="h-2.5 w-2.5" />{p.stock.toLocaleString("fa-IR")}</span>;
-    return <span className="text-[10px] text-muted-foreground">{p.stock.toLocaleString("fa-IR")} عدد</span>;
+    if (s === "low") return <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md flex items-center gap-0.5"><AlertTriangle className="h-2.5 w-2.5" />{formatNumber(p.stock)}</span>;
+    return <span className="text-[10px] text-muted-foreground">{formatNumber(p.stock)} {unitLabel}</span>;
   };
 
   return (
@@ -217,7 +223,12 @@ function ProductsPageInner() {
                     )}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-xs flex-wrap">
-                    <span className="font-medium text-primary">{formatToman(p.price)}</span>
+                    <span className="font-medium text-primary">
+                      {formatToman(p.price)}{p.unit && p.unit !== "عدد" ? ` / ${p.unit}` : ""}
+                    </span>
+                    {!!p.discountPercent && (
+                      <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">٪{formatNumber(p.discountPercent)} تخفیف</span>
+                    )}
                     {stockBadge(p)}
                     {p.code && <span className="text-muted-foreground" dir="ltr">{p.code.slice(0, 16)}</span>}
                   </div>
@@ -297,6 +308,27 @@ function ProductsPageInner() {
 
 // ─── Product Modal ────────────────────────────────────────────────────────────
 
+const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
+
+/** ورودی قیمت با جداکننده هزارگان زنده */
+function PriceInput({
+  value, onChange, placeholder,
+}: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const display = value ? formatNumber(parseNumberInput(value)) : "";
+  return (
+    <input
+      value={display}
+      onChange={(e) => {
+        const n = parseNumberInput(e.target.value);
+        onChange(n ? String(n) : "");
+      }}
+      inputMode="numeric"
+      placeholder={placeholder}
+      className={inputCls}
+    />
+  );
+}
+
 function ProductModal({
   initialCode = "",
   initial,
@@ -312,6 +344,9 @@ function ProductModal({
   onSave: (p: Omit<Product, "id"> | Product) => void;
   isEdit?: boolean;
 }) {
+  const [appSettings] = settings.useAll();
+  const weightEnabled = !!appSettings.weightUnits;
+
   const [name, setName]       = useState(initial?.name ?? "");
   const [price, setPrice]     = useState(initial ? String(initial.price) : "");
   const [category, setCat]    = useState(initial?.category ?? "");
@@ -319,19 +354,34 @@ function ProductModal({
   const [stock, setStock]     = useState(initial ? String(initial.stock) : "0");
   const [desc, setDesc]       = useState(initial?.description ?? "");
   const [lowThreshold, setLow]= useState(initial?.lowStockThreshold ? String(initial.lowStockThreshold) : "5");
+  const [unit, setUnit]       = useState(initial?.unit ?? COUNT_UNIT);
+  // فیلدهای اختیاری — صرفاً پیشنهادی، هیچ‌کدام الزامی نیستند
+  const [showOptional, setShowOptional] = useState(
+    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent),
+  );
+  const [buyPrice, setBuyPrice]           = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
+  const [consumerPrice, setConsumerPrice] = useState(initial?.consumerPrice ? String(initial.consumerPrice) : "");
+  const [sellerPrice, setSellerPrice]     = useState(initial?.sellerPrice ? String(initial.sellerPrice) : "");
+  const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const priceNum = Number(price.replace(/[^\d]/g, ""));
+    const priceNum = parseNumberInput(price);
     if (!name.trim() || !priceNum) { alert("نام و قیمت الزامی است."); return; }
+    const discountNum = Math.max(0, Math.min(100, parseNumberInput(discount)));
     const data: Omit<Product, "id"> = {
       name: name.trim(),
       price: priceNum,
       category: category.trim(),
       code: code.trim(),
-      stock: Number(stock) || 0,
+      stock: parseNumberInput(stock) || 0,
       description: desc.trim() || undefined,
-      lowStockThreshold: Number(lowThreshold) || 5,
+      lowStockThreshold: parseNumberInput(lowThreshold) || 5,
+      unit: weightEnabled && unit !== COUNT_UNIT ? unit : undefined,
+      buyPrice: parseNumberInput(buyPrice) || undefined,
+      consumerPrice: parseNumberInput(consumerPrice) || undefined,
+      sellerPrice: parseNumberInput(sellerPrice) || undefined,
+      discountPercent: discountNum || undefined,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);
@@ -353,43 +403,100 @@ function ProductModal({
         <form onSubmit={submit} className="space-y-3">
           <Field label="نام محصول *">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً: شیر پرچرب کاله"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+              className={inputCls} />
           </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="قیمت (تومان) *">
-              <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="numeric" placeholder="۲۵۰۰۰"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+            <Field label={weightEnabled && unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
+              <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
             </Field>
-            <Field label="موجودی انبار">
-              <input value={stock} onChange={(e) => setStock(e.target.value)} inputMode="numeric" placeholder="۰"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+            <Field label={weightEnabled && unit !== COUNT_UNIT ? `موجودی (${unit})` : "موجودی انبار"}>
+              <input value={stock} onChange={(e) => setStock(e.target.value)} inputMode="decimal" placeholder="۰"
+                className={inputCls} />
             </Field>
           </div>
+          {weightEnabled && (
+            <Field label="واحد فروش">
+              <div className="grid grid-cols-3 gap-2">
+                {[COUNT_UNIT, ...WEIGHT_UNITS].map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUnit(u)}
+                    className={`rounded-xl border px-2 py-2 text-xs font-medium transition ${
+                      unit === u ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"
+                    }`}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <Field label="دسته‌بندی">
               <select value={category} onChange={(e) => setCat(e.target.value)}
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary">
+                className={inputCls}>
                 <option value="">— بدون دسته —</option>
                 {catList.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
             </Field>
             <Field label="هشدار موجودی کم">
               <input value={lowThreshold} onChange={(e) => setLow(e.target.value)} inputMode="numeric" placeholder="۵"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+                className={inputCls} />
             </Field>
           </div>
           <Field label="کد بارکد / QR">
             <div className="flex gap-2">
               <input value={code} onChange={(e) => setCode(e.target.value)} dir="ltr" placeholder="اختیاری"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
+                className={inputCls} />
               <button type="button" onClick={genCode} className="shrink-0 rounded-xl border border-border px-3 text-xs">
                 تولید
               </button>
             </div>
           </Field>
+
+          {/* بخش اختیاری: قیمت خرید، قیمت مصرف‌کننده، قیمت همکار، تخفیف */}
+          <button
+            type="button"
+            onClick={() => setShowOptional((v) => !v)}
+            className="flex w-full items-center justify-between rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            <span>قیمت‌های تکمیلی و تخفیف (اختیاری)</span>
+            <span>{showOptional ? "▲" : "▼"}</span>
+          </button>
+          {showOptional && (
+            <div className="space-y-3 rounded-xl border border-border bg-background/50 p-3">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="قیمت خرید (برای سود)">
+                  <PriceInput value={buyPrice} onChange={setBuyPrice} placeholder="—" />
+                </Field>
+                <Field label="درصد تخفیف">
+                  <input value={discount} onChange={(e) => setDiscount(e.target.value)} inputMode="numeric" placeholder="۰"
+                    className={inputCls} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="قیمت مصرف‌کننده">
+                  <PriceInput value={consumerPrice} onChange={setConsumerPrice} placeholder="—" />
+                </Field>
+                <Field label="قیمت همکار / فروشنده">
+                  <PriceInput value={sellerPrice} onChange={setSellerPrice} placeholder="—" />
+                </Field>
+              </div>
+              {parseNumberInput(buyPrice) > 0 && parseNumberInput(price) > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  سود هر واحد:{" "}
+                  <span className={parseNumberInput(price) >= parseNumberInput(buyPrice) ? "font-semibold text-green-600" : "font-semibold text-destructive"}>
+                    {formatToman(parseNumberInput(price) - parseNumberInput(buyPrice))}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+
           <Field label="توضیحات">
             <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} placeholder="توضیحات اضافی (اختیاری)"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary resize-none" />
+              className={`${inputCls} resize-none`} />
           </Field>
           <button type="submit"
             className="mt-2 w-full rounded-xl bg-gradient-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-elegant">

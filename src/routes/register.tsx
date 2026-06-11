@@ -7,7 +7,7 @@ import { normalizePlans, effectivePrice, isDiscountActive, DEFAULT_PLANS, type P
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/register")({
-  head: () => ({ meta: [{ title: "ثبت‌نام | سیستم حسابداری کمالی" }] }),
+  head: () => ({ meta: [{ title: "ثبت‌نام | کمالی حسابداری" }] }),
   component: RegisterPage,
 });
 
@@ -135,6 +135,8 @@ function RegisterPage() {
     setError("");
     if (!firstName.trim() || !lastName.trim()) { setError("نام و نام خانوادگی الزامی است."); return; }
     if (!usernameField.trim()) { setError("یوزرنیم الزامی است."); return; }
+    if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
+    if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
     if (!receiptFile) { setError("لطفاً عکس رسید پرداخت را آپلود کنید."); return; }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
     setLoading(true);
@@ -155,6 +157,7 @@ function RegisterPage() {
           first_name: firstName,
           last_name: lastName,
           username: usernameField,
+          password,
           plan,
           payment_confirmed: paid,
           receipt_url: path,
@@ -174,18 +177,19 @@ function RegisterPage() {
           <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-green-500/10">
             <Check className="h-7 w-7 text-green-600" />
           </div>
-          <h1 className="text-lg font-bold">درخواست شما ثبت شد</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            پس از تایید مدیر، می‌توانید با یوزرنیم{" "}
+          <h1 className="text-lg font-bold">ثبت‌نام شما انجام شد</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            حساب شما با یوزرنیم{" "}
             <strong dir="ltr" className="inline-block">{usernameField.toLowerCase()}</strong>{" "}
-            رمز عبور خود را تنظیم کنید.
+            ساخته شد و در انتظار تایید مدیر است.
+            <br />
+            به‌محض تایید، با همین یوزرنیم و رمز عبوری که انتخاب کردید وارد شوید — بدون هیچ مرحله اضافه.
           </p>
           <Link
-            to="/set-password"
-            search={{ u: usernameField.toLowerCase() }}
+            to="/login"
             className="mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
           >
-            بررسی وضعیت / تنظیم رمز
+            رفتن به صفحه ورود
             <ArrowRight className="h-4 w-4 rotate-180" />
           </Link>
         </div>
@@ -218,6 +222,32 @@ function RegisterPage() {
           placeholder="ali123"
           dir="ltr"
         />
+
+        {/* انتخاب رمز عبور همان ابتدا — پس از تایید مدیر، ورود فوری */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              dir="ltr"
+              autoComplete="new-password"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تکرار رمز</label>
+            <input
+              type="password"
+              value={password2}
+              onChange={(e) => setPassword2(e.target.value)}
+              dir="ltr"
+              autoComplete="new-password"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">پلن اشتراک</label>
@@ -292,29 +322,6 @@ function RegisterPage() {
                   نسخه تست قبلاً روی این دستگاه استفاده شده است.
                 </div>
               )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  dir="ltr"
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تکرار رمز</label>
-                <input
-                  type="password"
-                  value={password2}
-                  onChange={(e) => setPassword2(e.target.value)}
-                  dir="ltr"
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-                />
-              </div>
             </div>
           </>
         ) : (

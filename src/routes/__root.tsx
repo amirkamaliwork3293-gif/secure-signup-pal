@@ -11,8 +11,7 @@ import {
 import appCss from "../styles.css?url";
 import { KamaliSplash } from "@/components/KamaliSplash";
 import { AuthProvider } from "@/lib/AuthContext";
-import { InstallAppPrompt } from "@/components/InstallAppPrompt";
-import { registerServiceWorker } from "@/registerSW";
+import { disableServiceWorker } from "@/registerSW";
 
 function NotFoundComponent() {
   return (
@@ -79,23 +78,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "theme-color", content: "#3b82f6" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { name: "apple-mobile-web-app-title", content: "حساب‌بان" },
-      { title: "سیستم حسابداری کمالی" },
-      { name: "description", content: "سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
+      { name: "apple-mobile-web-app-title", content: "کمالی حسابداری" },
+      { title: "کمالی حسابداری" },
+      { name: "description", content: "کمالی حسابداری — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
       { name: "author", content: "Kamali" },
-      { property: "og:title", content: "سیستم حسابداری کمالی" },
-      { property: "og:description", content: "سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
+      { property: "og:title", content: "کمالی حسابداری" },
+      { property: "og:description", content: "کمالی حسابداری — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "سیستم حسابداری کمالی" },
-      { name: "twitter:description", content: "سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
+      { name: "twitter:title", content: "کمالی حسابداری" },
+      { name: "twitter:description", content: "کمالی حسابداری — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
       { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png" },
       { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "manifest", href: "/manifest.webmanifest" },
+      // نسخه PWA حذف شده — نصب از طریق APK اندروید انجام می‌شود
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
       { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
       { rel: "apple-touch-icon", href: "/icon-192.png" },
@@ -125,7 +124,8 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   if (typeof window !== "undefined") {
-    registerServiceWorker();
+    // PWA حذف شده: سرویس‌ورکرهای قبلی پاک می‌شوند تا کش قدیمی مزاحم نشود
+    disableServiceWorker();
   }
 
   return (
@@ -134,7 +134,6 @@ function RootComponent() {
         <KamaliSplash />
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
-        <InstallAppPrompt />
       </AuthProvider>
     </QueryClientProvider>
   );

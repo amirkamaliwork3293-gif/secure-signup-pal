@@ -2,7 +2,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
-import { invoice, recalc, formatToman, settings, products, addProductToInvoice, PAYMENT_LABEL, type CustomerInfo, type PaymentMethod } from "@/lib/store";
+import { invoice, recalc, formatToman, formatNumber, parseNumberInput, settings, products, customers, addProductToInvoice, isWeightUnit, PAYMENT_LABEL, type CustomerInfo, type PaymentMethod } from "@/lib/store";
 import {
   Minus, Plus, Trash2, ScanLine, CheckCircle2, Receipt,
   User, Search, X, FileText, Plus as PlusIcon,
@@ -13,7 +13,7 @@ export const Route = createFileRoute("/")(
   {
     head: () => ({
       meta: [
-        { title: "حساب‌بان | فاکتور جاری" },
+        { title: "کمالی حسابداری | فاکتور جاری" },
         { name: "description", content: "فاکتور حسابداری با اسکن بارکد و QR کد توسط دوربین موبایل." },
       ],
     }),
@@ -54,10 +54,30 @@ function InvoicePageInner() {
     setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
   };
 
+  // تنظیم مستقیم مقدار (برای محصولات وزنی — کیلوگرم/گرم)
+  const setQuantity = (productId: string, quantity: number) => {
+    setInv((prev) => {
+      const items = prev.items
+        .map((i) => (i.productId === productId ? { ...i, quantity } : i))
+        .filter((i) => i.quantity > 0);
+      return recalc({ ...prev, items });
+    });
+  };
+
   const checkout = () => {
     if (inv.items.length === 0) return;
+    const hasCustomer = !!(customer.firstName?.trim() || customer.lastName?.trim() || customer.phone?.trim());
+    if (paymentMethod === "credit" && !hasCustomer) {
+      setShowCustomer(true);
+      alert("برای فاکتور نسیه، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.");
+      return;
+    }
     const finalInv = { ...inv, customer, paymentMethod, shopName: appSettings.shopName };
     invoice.archive(finalInv);
+    // فاکتور نسیه → ثبت خودکار بدهی در بخش مشتریان/بدهکاران
+    if (paymentMethod === "credit") {
+      customers.recordInvoiceDebt(customer, finalInv);
+    }
     setCustomer({});
     setPaymentMethod("cash");
     setShowCustomer(false);
@@ -326,29 +346,53 @@ function InvoicePageInner() {
         </div>
       ) : (
         <ul className="space-y-2">
-          {inv.items.map((item) => (
-            <li key={item.productId} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{item.name}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  {formatToman(item.price)} × {item.quantity.toLocaleString("fa-IR")}
-                  <span className="mr-2 font-semibold text-primary">= {formatToman(item.price * item.quantity)}</span>
+          {inv.items.map((item) => {
+            const weight = isWeightUnit(item.unit);
+            return (
+              <li key={item.productId} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{item.name}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {formatToman(item.price)} × {formatNumber(item.quantity)}{weight ? ` ${item.unit}` : ""}
+                    <span className="mr-2 font-semibold text-primary">= {formatToman(Math.round(item.price * item.quantity))}</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border border-border bg-background">
-                <button onClick={() => update(item.productId, -1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="کاهش">
-                  <Minus className="h-4 w-4" />
+                {weight ? (
+                  /* محصول وزنی: مقدار اعشاری قابل تایپ (مثلاً ۲.۵ کیلوگرم) */
+                  <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2">
+                    <input
+                      defaultValue={item.quantity}
+                      key={`${item.productId}-${item.quantity}`}
+                      onBlur={(e) => {
+                        const q = parseNumberInput(e.target.value);
+                        if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
+                        else e.target.value = String(item.quantity);
+                      }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      inputMode="decimal"
+                      dir="ltr"
+                      className="h-9 w-16 bg-transparent text-center text-sm font-semibold outline-none"
+                      aria-label="مقدار"
+                    />
+                    <span className="text-[10px] text-muted-foreground">{item.unit}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 rounded-lg border border-border bg-background">
+                    <button onClick={() => update(item.productId, -1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="کاهش">
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="min-w-7 text-center text-sm font-semibold">{formatNumber(item.quantity)}</span>
+                    <button onClick={() => update(item.productId, 1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="افزایش">
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+                <button onClick={() => remove(item.productId)} className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10" aria-label="حذف">
+                  <Trash2 className="h-4 w-4" />
                 </button>
-                <span className="min-w-7 text-center text-sm font-semibold">{item.quantity.toLocaleString("fa-IR")}</span>
-                <button onClick={() => update(item.productId, 1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="افزایش">
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-              <button onClick={() => remove(item.productId)} className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10" aria-label="حذف">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </Layout>

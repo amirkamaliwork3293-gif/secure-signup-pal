@@ -3,10 +3,11 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { ensureAdminAccount } from "@/lib/auth.functions";
+import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [{ title: "ورود | سیستم حسابداری کمالی" }] }),
+  head: () => ({ meta: [{ title: "ورود | کمالی حسابداری" }] }),
   component: LoginPage,
 });
 
@@ -80,8 +81,8 @@ export function LoginPage() {
           <Receipt className="h-7 w-7 text-primary-foreground" />
         </div>
         <div className="text-center">
-          <div className="text-xl font-bold kamali-brand">کمالی</div>
-          <div className="text-xs text-muted-foreground">سیستم حسابداری کمالی</div>
+          <div className="text-xl font-bold kamali-brand">کمالی حسابداری</div>
+          <div className="text-xs text-muted-foreground">مدیریت فروش، انبار و حساب‌ها</div>
         </div>
       </div>
 
@@ -166,15 +167,11 @@ export function LoginPage() {
                 ثبت‌نام کنید
               </Link>
             </div>
-            <div className="text-muted-foreground">
-              ادمین تایید کرده؟{" "}
-              <Link to="/set-password" search={{ u: "" }} className="font-semibold text-primary hover:underline">
-                رمز عبور خود را تنظیم کنید
-              </Link>
-            </div>
           </div>
         )}
       </div>
+
+      <ApkDownloadButton className="mt-6" />
     </div>
   );
 }

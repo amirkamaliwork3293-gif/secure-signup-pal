@@ -111,7 +111,7 @@ function AdminPage() {
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-bold kamali-brand">پنل ادمین افشاری</div>
+              <div className="text-sm font-bold kamali-brand">پنل ادمین کمالی</div>
               <div className="text-[10px] text-muted-foreground">مدیریت کاربران و درخواست‌ها</div>
             </div>
           </div>
@@ -272,12 +272,12 @@ function RequestsTab({
             )}
             {r.status === "approved" && !r.password_set && (
               <div className="mt-2 text-xs text-amber-600">
-                ⏳ منتظر تنظیم رمز توسط کاربر
+                ⏳ منتظر تنظیم رمز توسط کاربر (ثبت‌نام قدیمی)
               </div>
             )}
             {r.status === "approved" && r.password_set && (
               <div className="mt-2 text-xs text-green-600">
-                ✅ حساب کاربر فعال شده
+                ✅ حساب فعال است — کاربر می‌تواند وارد شود
               </div>
             )}
           </li>

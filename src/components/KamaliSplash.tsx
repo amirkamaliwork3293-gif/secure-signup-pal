@@ -29,8 +29,8 @@ export function KamaliSplash() {
       <div className="kamali-splash-logo">
         <Receipt className="h-9 w-9 text-primary-foreground" />
       </div>
-      <div className="kamali-splash-title">کمالی</div>
-      <div className="kamali-splash-subtitle">سیستم حسابداری افشاری</div>
+      <div className="kamali-splash-title">کمالی حسابداری</div>
+      <div className="kamali-splash-subtitle">مدیریت فروش، انبار و حساب‌ها</div>
     </div>
   );
 }

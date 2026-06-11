@@ -12,9 +12,24 @@ export type Product = {
   stock: number;
   description?: string;
   lowStockThreshold?: number;
+  /** قیمت خرید — برای محاسبه سود و زیان (اختیاری) */
   buyPrice?: number;
+  /** قیمت مصرف‌کننده (اختیاری) */
+  consumerPrice?: number;
+  /** قیمت فروشنده/همکار (اختیاری) */
+  sellerPrice?: number;
+  /** درصد تخفیف پیشنهادی (اختیاری) */
+  discountPercent?: number;
+  /** واحد فروش: «عدد» یا واحدهای وزنی وقتی فروش وزنی فعال باشد */
   unit?: string;
 };
+
+export const COUNT_UNIT = "عدد";
+export const WEIGHT_UNITS = ["کیلوگرم", "گرم"] as const;
+
+export function isWeightUnit(unit?: string): boolean {
+  return !!unit && (WEIGHT_UNITS as readonly string[]).includes(unit);
+}
 
 export type Category = {
   id: string;
@@ -27,6 +42,10 @@ export type InvoiceItem = {
   name: string;
   price: number;
   quantity: number;
+  /** قیمت خرید در لحظه فروش — برای گزارش سود */
+  buyPrice?: number;
+  /** واحد فروش (عدد / کیلوگرم / گرم) */
+  unit?: string;
 };
 
 export type CustomerInfo = {
@@ -53,6 +72,38 @@ export type Invoice = {
   paymentMethod?: PaymentMethod;
 };
 
+// ─── Customers / Debtors ─────────────────────────────────────────────────────
+
+export type CustomerTx = {
+  id: string;
+  /** debt = بدهی جدید، payment = پرداخت/تسویه */
+  type: "debt" | "payment";
+  amount: number;
+  note?: string;
+  at: number;
+  /** اگر بدهی از ثبت فاکتور نسیه ایجاد شده باشد */
+  invoiceId?: string;
+};
+
+export type Customer = {
+  id: string;
+  firstName: string;
+  lastName?: string;
+  phone?: string;
+  note?: string;
+  createdAt: number;
+  txs: CustomerTx[];
+};
+
+/** مانده حساب مشتری: مثبت یعنی بدهکار است */
+export function customerBalance(c: Customer): number {
+  return c.txs.reduce((s, t) => s + (t.type === "debt" ? t.amount : -t.amount), 0);
+}
+
+export function customerFullName(c: Customer): string {
+  return [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 const PRODUCTS_KEY   = "acc.products.v2";
@@ -60,23 +111,27 @@ const CATEGORIES_KEY = "acc.categories.v1";
 const INVOICE_KEY    = "acc.currentInvoice.v2";
 const HISTORY_KEY    = "acc.invoices.v2";
 const SETTINGS_KEY   = "acc.settings.v1";
+const CUSTOMERS_KEY  = "acc.customers.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
-const CLOUD_FIELDS: Record<string, "products" | "categories" | "invoices" | "current_invoice" | "settings"> = {
+const CLOUD_FIELDS: Record<string, "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers"> = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
   [HISTORY_KEY]: "invoices",
   [INVOICE_KEY]: "current_invoice",
   [SETTINGS_KEY]: "settings",
+  [CUSTOMERS_KEY]: "customers",
 };
 
 export type AppSettings = {
   invoiceFontSize: number;
   shopName: string;
+  /** فعال‌سازی فروش وزنی (کیلوگرم/گرم) — پیش‌فرض غیرفعال */
+  weightUnits?: boolean;
 };
 
-const DEFAULT_SETTINGS: AppSettings = { shopName: "فروشگاه من", invoiceFontSize: 13 };
+const DEFAULT_SETTINGS: AppSettings = { shopName: "فروشگاه من", invoiceFontSize: 13, weightUnits: false };
 
 function getStorageScope() {
   if (typeof window === "undefined") return "anon";
@@ -147,10 +202,16 @@ async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
   const userId = cloudUserId;
-  const payload = { ...pendingPush, user_id: userId, updated_at: new Date().toISOString() };
+  const payload: Record<string, unknown> = { ...pendingPush, user_id: userId, updated_at: new Date().toISOString() };
   for (const k of Object.keys(pendingPush)) delete pendingPush[k];
   try {
-    await supabase.from("user_data").upsert(payload, { onConflict: "user_id" });
+    const { error } = await supabase.from("user_data").upsert(payload as never, { onConflict: "user_id" });
+    // If the customers column doesn't exist yet in this deployment, retry without
+    // it so syncing of products/invoices/settings is never blocked.
+    if (error && /customers/.test(error.message) && "customers" in payload) {
+      delete payload.customers;
+      await supabase.from("user_data").upsert(payload as never, { onConflict: "user_id" });
+    }
   } catch (e) {
     console.warn("[store] cloud push failed", e);
   }
@@ -184,6 +245,8 @@ export async function hydrateFromCloud(userId: string) {
     if (data.invoices != null) writeLocalOnly(HISTORY_KEY, data.invoices);
     if (data.current_invoice != null) writeLocalOnly(INVOICE_KEY, data.current_invoice);
     if (data.settings != null) writeLocalOnly(SETTINGS_KEY, data.settings);
+    const cloudCustomers = (data as Record<string, unknown>).customers;
+    if (cloudCustomers != null) writeLocalOnly(CUSTOMERS_KEY, cloudCustomers);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   }
@@ -368,6 +431,7 @@ export const invoice = {
   },
 
   useHistory: () => useStore<Invoice[]>(HISTORY_KEY, []),
+  getHistory: () => read<Invoice[]>(HISTORY_KEY, []),
   archive: (inv: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     inv.items.forEach((item) => products.decreaseStock(item.productId, item.quantity));
@@ -400,6 +464,72 @@ export const settings = {
   save:   (s: AppSettings) => write(SETTINGS_KEY, s),
 };
 
+// ─── Customers (debtors/creditors) ───────────────────────────────────────────
+
+export const customers = {
+  useAll: () => useStore<Customer[]>(CUSTOMERS_KEY, []),
+  getAll: () => read<Customer[]>(CUSTOMERS_KEY, []),
+  save:   (list: Customer[]) => write(CUSTOMERS_KEY, list),
+
+  add: (c: Omit<Customer, "id" | "createdAt" | "txs">): Customer => {
+    const created: Customer = { ...c, id: cryptoId(), createdAt: Date.now(), txs: [] };
+    write(CUSTOMERS_KEY, [created, ...read<Customer[]>(CUSTOMERS_KEY, [])]);
+    return created;
+  },
+
+  update: (updated: Customer) => {
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    write(CUSTOMERS_KEY, list.map((c) => (c.id === updated.id ? updated : c)));
+  },
+
+  remove: (id: string) => {
+    write(CUSTOMERS_KEY, read<Customer[]>(CUSTOMERS_KEY, []).filter((c) => c.id !== id));
+  },
+
+  addTx: (customerId: string, tx: Omit<CustomerTx, "id" | "at"> & { at?: number }) => {
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    write(CUSTOMERS_KEY, list.map((c) =>
+      c.id === customerId
+        ? { ...c, txs: [{ ...tx, id: cryptoId(), at: tx.at ?? Date.now() }, ...c.txs] }
+        : c,
+    ));
+  },
+
+  /**
+   * ثبت خودکار بدهی برای فاکتور نسیه. مشتری موجود (بر اساس تلفن یا نام) پیدا
+   * می‌شود و در غیر این صورت ساخته می‌شود.
+   */
+  recordInvoiceDebt: (info: CustomerInfo, inv: Invoice) => {
+    const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
+    if (!name && !info.phone?.trim()) return;
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    let target = list.find((c) =>
+      (info.phone?.trim() && c.phone === info.phone.trim()) ||
+      (name && customerFullName(c) === name),
+    );
+    if (!target) {
+      target = {
+        id: cryptoId(),
+        firstName: info.firstName?.trim() || name || "مشتری",
+        lastName: info.lastName?.trim() || undefined,
+        phone: info.phone?.trim() || undefined,
+        createdAt: Date.now(),
+        txs: [],
+      };
+      list.unshift(target);
+    }
+    const tx: CustomerTx = {
+      id: cryptoId(),
+      type: "debt",
+      amount: inv.total,
+      note: "فاکتور نسیه",
+      at: inv.createdAt || Date.now(),
+      invoiceId: inv.id,
+    };
+    write(CUSTOMERS_KEY, list.map((c) => (c.id === target!.id ? { ...c, txs: [tx, ...c.txs] } : c)));
+  },
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export function emptyInvoice(): Invoice {
@@ -407,7 +537,8 @@ export function emptyInvoice(): Invoice {
 }
 
 export function recalc(inv: Invoice): Invoice {
-  const total = inv.items.reduce((s, i) => s + i.price * i.quantity, 0);
+  // گرد کردن برای جلوگیری از خطای اعشار در فروش وزنی (۲٫۵ × قیمت)
+  const total = Math.round(inv.items.reduce((s, i) => s + i.price * i.quantity, 0));
   return { ...inv, total };
 }
 
@@ -423,13 +554,53 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
       i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i,
     );
   } else {
-    items = [...inv.items, { productId: p.id, name: p.name, price: p.price, quantity: 1 }];
+    items = [...inv.items, {
+      productId: p.id,
+      name: p.name,
+      price: p.price,
+      quantity: 1,
+      buyPrice: p.buyPrice,
+      unit: p.unit,
+    }];
   }
   return recalc({ ...inv, items });
 }
 
+/** فرمت عدد با جداکننده هزارگان (ارقام فارسی) */
+export function formatNumber(n: number): string {
+  return new Intl.NumberFormat("fa-IR").format(n);
+}
+
 export function formatToman(n: number): string {
-  return new Intl.NumberFormat("fa-IR").format(n) + " تومان";
+  return formatNumber(n) + " تومان";
+}
+
+/**
+ * تبدیل ورودی کاربر به عدد: ارقام فارسی/عربی را به انگلیسی تبدیل و
+ * جداکننده‌ها را حذف می‌کند. اعشار (برای واحدهای وزنی) پشتیبانی می‌شود.
+ */
+export function parseNumberInput(s: string): number {
+  if (!s) return 0;
+  const fa = "۰۱۲۳۴۵۶۷۸۹";
+  const ar = "٠١٢٣٤٥٦٧٨٩";
+  let out = "";
+  for (const ch of String(s)) {
+    const fi = fa.indexOf(ch);
+    const ai = ar.indexOf(ch);
+    if (fi >= 0) out += String(fi);
+    else if (ai >= 0) out += String(ai);
+    else if ((ch >= "0" && ch <= "9") || ch === "." || ch === "/") out += ch === "/" ? "." : ch;
+    // ، ٬ , و فاصله به‌عنوان جداکننده نادیده گرفته می‌شوند
+  }
+  const n = parseFloat(out);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** نمایش زنده‌ی عدد با جداکننده هزارگان داخل input (ارقام فارسی) */
+export function formatNumberInput(s: string): string {
+  const n = parseNumberInput(s);
+  if (!n) return s.trim() === "" ? "" : s;
+  return formatNumber(n);
 }
 
 export function stockStatus(p: Product): "ok" | "low" | "out" {

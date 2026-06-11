@@ -1,20 +1,24 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
-import { invoice, formatToman, settings, type Invoice, type InvoiceItem } from "@/lib/store";
+import { invoice, formatToman, formatNumber, settings, type Invoice, type InvoiceItem } from "@/lib/store";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
   User, Pencil, Trash2, Check, X,
-  Minus, Plus,
+  Minus, Plus, Search,
 } from "lucide-react";
+import { z } from "zod";
+
+const searchSchema = z.object({ q: z.string().optional() });
 
 export const Route = createFileRoute("/history")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "تاریخچه فاکتورها | حساب‌بان" },
+      { title: "تاریخچه فاکتورها | کمالی حسابداری" },
       { name: "description", content: "تاریخچه فاکتورهای ثبت‌شده." },
     ],
   }),
@@ -285,22 +289,67 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 // ─── صفحه اصلی ────────────────────────────────────────────────────────────────
 
 function HistoryPageInner() {
+  const { q: incomingQuery } = Route.useSearch();
   const [list] = invoice.useHistory();
+  const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+
+  useEffect(() => {
+    if (incomingQuery != null) setSearchQ(incomingQuery);
+  }, [incomingQuery]);
+
+  const filtered = useMemo(() => {
+    const q = searchQ.trim();
+    if (!q) return list;
+    return list.filter((inv) =>
+      inv.id.toUpperCase().includes(q.toUpperCase()) ||
+      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ").includes(q) ||
+      (inv.customer?.phone ?? "").includes(q) ||
+      inv.items.some((i) => i.name.includes(q)),
+    );
+  }, [list, searchQ]);
 
   return (
     <Layout>
-      <h1 className="mb-4 text-lg font-bold">تاریخچه فاکتورها</h1>
+      <h1 className="mb-3 text-lg font-bold">تاریخچه فاکتورها</h1>
+
+      {list.length > 0 && (
+        <div className="relative mb-3">
+          <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <input
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="جستجو: نام مشتری، محصول، شماره فاکتور..."
+            className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+          />
+          {searchQ && (
+            <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
+
       {list.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <HistoryIcon className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">هنوز فاکتوری ثبت نشده است.</p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
+          <Search className="mx-auto h-10 w-10 text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">فاکتوری با این مشخصات یافت نشد.</p>
+        </div>
       ) : (
-        <ul className="space-y-2">
-          {list.map((inv) => (
-            <InvoiceCard key={inv.id} inv={inv} />
-          ))}
-        </ul>
+        <>
+          {searchQ.trim() && (
+            <p className="mb-2 text-xs text-muted-foreground">{formatNumber(filtered.length)} فاکتور یافت شد</p>
+          )}
+          <ul className="space-y-2">
+            {filtered.map((inv) => (
+              <InvoiceCard key={inv.id} inv={inv} />
+            ))}
+          </ul>
+        </>
       )}
     </Layout>
   );

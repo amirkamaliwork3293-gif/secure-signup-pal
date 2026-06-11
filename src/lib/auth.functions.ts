@@ -36,12 +36,16 @@ function planDurationMs(cfg: PlansConfig, plan: Plan): number {
 }
 
 // ─── Public: submit signup request ───────────────────────────────────────────
+// جریان جدید: کاربر همان ابتدا یوزرنیم و رمز عبور انتخاب می‌کند. حساب با وضعیت
+// «در انتظار تایید» ساخته می‌شود و بلافاصله پس از تایید مدیر، ورود ممکن است —
+// بدون هیچ مرحله «تنظیم رمز» اضافه.
 export const submitSignupRequest = createServerFn({ method: "POST" })
   .inputValidator(
     (d: {
       first_name: string;
       last_name: string;
       username: string;
+      password: string;
       plan: Plan;
       payment_confirmed: boolean;
       receipt_url?: string | null;
@@ -50,6 +54,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       if (!d.username?.trim() || !/^[a-zA-Z0-9_-]{3,32}$/.test(d.username)) {
         throw new Error("یوزرنیم باید ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، عدد، _ و - باشد.");
       }
+      if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
       if (!VALID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
       if (d.plan === "trial") throw new Error("برای نسخه تست از فرم اختصاصی استفاده کنید.");
       if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
@@ -62,6 +67,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const username = data.username.trim().toLowerCase();
 
     // Enforce plan enabled flag (admins can disable plans for new signups)
     const plansCfg = await loadPlansConfig(supabaseAdmin);
@@ -71,33 +77,59 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
       .select("id")
-      .eq("username", data.username.toLowerCase())
+      .eq("username", username)
       .maybeSingle();
     if (existingProfile) throw new Error("این یوزرنیم قبلاً ثبت شده است.");
 
     const { data: existingReq } = await supabaseAdmin
       .from("signup_requests")
       .select("id, status")
-      .eq("username", data.username.toLowerCase())
+      .eq("username", username)
       .in("status", ["pending", "approved"])
       .maybeSingle();
     if (existingReq) {
       throw new Error(
         existingReq.status === "pending"
           ? "درخواست شما قبلاً ثبت شده و در انتظار تایید است."
-          : "این یوزرنیم تایید شده — لطفاً وارد شوید یا رمز عبور را تنظیم کنید.",
+          : "این یوزرنیم قبلاً تایید شده — لطفاً وارد شوید.",
       );
     }
+
+    // Create the auth user up front with the chosen password (profile stays pending)
+    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email: toEmail(username),
+      password: data.password,
+      email_confirm: true,
+      user_metadata: { username, first_name: data.first_name.trim(), last_name: data.last_name.trim() },
+    });
+    if (createErr || !created.user) throw new Error(createErr?.message || "خطا در ایجاد حساب.");
+
+    const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
+      id: created.user.id,
+      username,
+      first_name: data.first_name.trim(),
+      last_name: data.last_name.trim(),
+      plan: data.plan,
+      status: "pending",
+    });
+    if (profileErr) {
+      // cleanup so the username isn't burned by a half-created account
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      throw new Error(profileErr.message);
+    }
+
+    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
 
     const { data: inserted, error } = await supabaseAdmin
       .from("signup_requests")
       .insert({
         first_name: data.first_name.trim(),
         last_name: data.last_name.trim(),
-        username: data.username.trim().toLowerCase(),
+        username,
         plan: data.plan,
         payment_confirmed: data.payment_confirmed,
         receipt_url: data.receipt_url ?? null,
+        password_set: true, // رمز هنگام ثبت‌نام انتخاب شده است
       })
       .select("id")
       .single();
@@ -251,11 +283,46 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: req, error: reqErr } = await supabaseAdmin
+      .from("signup_requests")
+      .select("id, username, plan, password_set")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (reqErr || !req) throw new Error(reqErr?.message || "درخواست یافت نشد.");
+
     const { error } = await supabaseAdmin
       .from("signup_requests")
       .update({ status: "approved", reviewed_at: new Date().toISOString() })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+
+    // جریان جدید: حساب از قبل (با رمز انتخابی کاربر) ساخته شده — همینجا فعال
+    // می‌شود تا کاربر بلافاصله بتواند وارد شود. (درخواست‌های قدیمی بدون حساب،
+    // مثل سابق از مسیر «تنظیم رمز» فعال می‌شوند.)
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("id, status")
+      .eq("username", req.username)
+      .maybeSingle();
+
+    if (profile && profile.status === "pending") {
+      const plansCfg = await loadPlansConfig(supabaseAdmin);
+      const plan = req.plan as Plan;
+      const start = new Date();
+      const end = new Date(start.getTime() + planDurationMs(plansCfg, plan));
+      const { error: actErr } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          plan,
+          status: "active",
+          start_date: start.toISOString(),
+          end_date: end.toISOString(),
+        })
+        .eq("id", profile.id);
+      if (actErr) throw new Error(actErr.message);
+    }
+
     return { success: true };
   });
 
@@ -268,11 +335,28 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: req } = await supabaseAdmin
+      .from("signup_requests")
+      .select("id, username")
+      .eq("id", data.id)
+      .maybeSingle();
+
     const { error } = await supabaseAdmin
       .from("signup_requests")
       .update({ status: "rejected", reviewed_at: new Date().toISOString() })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+
+    // اگر حساب در انتظار از قبل ساخته شده، رد هم بشود
+    if (req?.username) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ status: "rejected" })
+        .eq("username", req.username)
+        .eq("status", "pending");
+    }
+
     return { success: true };
   });
 

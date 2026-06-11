@@ -1,16 +1,18 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3 } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings } from "@/lib/store";
+import { GlobalSearch } from "@/components/GlobalSearch";
 
 const nav = [
-  { to: "/",         label: "فاکتور",   icon: Receipt  },
-  { to: "/scan",     label: "اسکن",     icon: ScanLine },
-  { to: "/products", label: "محصولات",  icon: Package  },
-  { to: "/history",  label: "تاریخچه",  icon: History  },
-  { to: "/reports",  label: "گزارش",    icon: BarChart3 },
-  { to: "/settings", label: "تنظیمات",  icon: Settings },
+  { to: "/",          label: "فاکتور",   icon: Receipt  },
+  { to: "/scan",      label: "اسکن",     icon: ScanLine },
+  { to: "/products",  label: "محصولات",  icon: Package  },
+  { to: "/customers", label: "مشتریان",  icon: Users    },
+  { to: "/history",   label: "تاریخچه",  icon: History  },
+  { to: "/reports",   label: "گزارش",    icon: BarChart3 },
+  { to: "/settings",  label: "تنظیمات",  icon: Settings },
 ] as const;
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -30,11 +32,12 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
             <div className="leading-tight">
               <div className="text-base font-bold kamali-brand">{shopName}</div>
-              <div className="text-[11px] text-muted-foreground">سیستم حسابداری کمالی</div>
+              <div className="text-[11px] text-muted-foreground">کمالی حسابداری</div>
             </div>
           </Link>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <GlobalSearch />
             {state.status === "authenticated" && state.isAdmin && (
               <Link
                 to="/admin"
@@ -58,20 +61,24 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur">
-        <div className="mx-auto grid max-w-3xl grid-cols-6">
+      {/* pb-safe: فاصله امن برای نوار ژست اندروید/آیفون در نسخه APK */}
+      <nav
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <div className="mx-auto grid max-w-3xl grid-cols-7">
           {nav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to;
             return (
               <Link
                 key={to}
                 to={to}
-                className={`flex flex-col items-center gap-1 py-2 text-[11px] transition-colors ${
+                className={`flex flex-col items-center gap-1 py-2 text-[10px] transition-colors ${
                   active ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className={`h-5 w-5 ${active ? "scale-110" : ""} transition-transform`} />
-                <span className={active ? "font-semibold" : ""}>{label}</span>
+                <span className={`whitespace-nowrap ${active ? "font-semibold" : ""}`}>{label}</span>
               </Link>
             );
           })}

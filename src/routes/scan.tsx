@@ -9,7 +9,7 @@ import { CheckCircle2, AlertCircle, Plus, Search, X, Package } from "lucide-reac
 export const Route = createFileRoute("/scan")({
   head: () => ({
     meta: [
-      { title: "اسکن بارکد | حساب‌بان" },
+      { title: "اسکن بارکد | کمالی حسابداری" },
       { name: "description", content: "اسکن سریع QR و بارکد محصولات با دوربین موبایل." },
     ],
   }),

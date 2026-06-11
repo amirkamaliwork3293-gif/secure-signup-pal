@@ -4,10 +4,10 @@
  * سه‌گانه عملیات فاکتور: پرینت، دانلود PDF، اشتراک‌گذاری
  */
 
-import { useRef } from "react";
 import { Printer, Download, Share2 } from "lucide-react";
 import type { Invoice } from "@/lib/store";
 import { settings } from "@/lib/store";
+import { printHtml, downloadBlob, isNativeApp } from "@/lib/print";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
@@ -120,45 +120,23 @@ type Props = {
 // ─── کامپوننت ────────────────────────────────────────────────────────────────
 
 export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [appSettings] = settings.useAll();
   const fontSize = appSettings.invoiceFontSize ?? 13;
+  const native = isNativeApp();
 
-  // ── پرینت با iframe (نه window.open) ──────────────────────────────────────
-  const handlePrint = () => {
+  // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
+  const handlePrint = async () => {
     const html = buildInvoiceHTML(inv, fontSize);
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    iframe.srcdoc = html;
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch {
-        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-      }
-    };
+    const ok = await printHtml(html, `فاکتور ${inv.id.toUpperCase()}`);
+    if (!ok) {
+      alert("چاپ در این نسخه از اپلیکیشن در دسترس نیست — لطفاً نسخه جدید اپ را از سایت دانلود و نصب کنید.");
+    }
   };
 
   // ── دانلود HTML ───────────────────────────────────────────────────────────
   const handleDownload = () => {
     const html = buildInvoiceHTML(inv, fontSize);
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `فاکتور-${inv.id.toUpperCase()}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `فاکتور-${inv.id.toUpperCase()}.html`);
   };
 
   // ── اشتراک‌گذاری ──────────────────────────────────────────────────────────
@@ -204,22 +182,6 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
 
   return (
     <>
-      {/* iframe مخفی برای پرینت */}
-      <iframe
-        ref={iframeRef}
-        title="invoice-print"
-        style={{
-          position: "fixed",
-          top: "-9999px",
-          left: "-9999px",
-          width: "1px",
-          height: "1px",
-          border: "none",
-          opacity: 0,
-          pointerEvents: "none",
-        }}
-      />
-
       <button
         type="button"
         onClick={handlePrint}
@@ -230,15 +192,18 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         {showLabels && <span>پرینت</span>}
       </button>
 
-      <button
-        type="button"
-        onClick={handleDownload}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="دانلود فاکتور"
-      >
-        <Download className={iconSize} />
-        {showLabels && <span>دانلود</span>}
-      </button>
+      {/* دانلود فایل فقط در مرورگر وب معنا دارد؛ در اپ، چاپ گزینه «ذخیره PDF» دارد */}
+      {!native && (
+        <button
+          type="button"
+          onClick={handleDownload}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
+          title="دانلود فاکتور"
+        >
+          <Download className={iconSize} />
+          {showLabels && <span>دانلود</span>}
+        </button>
+      )}
 
       <button
         type="button"

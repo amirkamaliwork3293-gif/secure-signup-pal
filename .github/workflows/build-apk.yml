@@ -66,7 +66,6 @@ jobs:
           }
           EOF
           cat > node_modules/@tanstack/react-start/dist/index.js << 'EOF'
-          // Stub for SPA/Capacitor build — server functions run directly on client
           export function createServerFn(options) {
             return function(fn) {
               const serverFn = fn || options;
@@ -81,19 +80,43 @@ jobs:
               return callable;
             };
           }
-          export function useServerFn(fn) {
-            return fn;
-          }
+          export function useServerFn(fn) { return fn; }
           export function createMiddleware() {
-            return {
-              server: (fn) => ({ _server: fn }),
-              client: (fn) => ({ _client: fn }),
-            };
+            return { server: (fn) => ({ _server: fn }), client: (fn) => ({ _client: fn }) };
           }
-          export function createStart(fn) {
-            return fn ? fn() : {};
-          }
+          export function createStart(fn) { return fn ? fn() : {}; }
           export default {};
+          EOF
+
+      - name: Override vite.config.ts for static SPA build
+        run: |
+          cat > vite.config.ts << 'EOF'
+          import { defineConfig } from "vite";
+          import react from "@vitejs/plugin-react";
+          import tsconfigPaths from "vite-tsconfig-paths";
+          import tailwindcss from "@tailwindcss/vite";
+          import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
+          import path from "path";
+
+          export default defineConfig({
+            plugins: [
+              // ⬇️ این باید اول باشه تا routeTree.gen.tsx رو بسازه
+              TanStackRouterVite({ routesDirectory: "./src/routes", generatedRouteTree: "./src/routeTree.gen.tsx" }),
+              react(),
+              tsconfigPaths(),
+              tailwindcss(),
+            ],
+            resolve: {
+              alias: {
+                "@": path.resolve(__dirname, "./src"),
+              },
+            },
+            base: "./",
+            build: {
+              outDir: "dist",
+              target: "es2020",
+            },
+          });
           EOF
 
       - name: Override __root.tsx for SPA mode
@@ -103,6 +126,7 @@ jobs:
           import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
           import { AuthProvider } from "@/lib/AuthContext";
           import { KamaliSplash } from "@/components/KamaliSplash";
+          import "@/styles.css";
 
           export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
             component: RootComponent,
@@ -121,7 +145,7 @@ jobs:
           }
           EOF
 
-      - name: Override router.tsx for SPA mode
+      - name: Override router.tsx for SPA mode (HashHistory for Capacitor)
         run: |
           cat > src/router.tsx << 'EOF'
           import { QueryClient } from "@tanstack/react-query";
@@ -156,7 +180,6 @@ jobs:
             ).catch(() => {});
           }
 
-          // Global error logger so chrome://inspect shows the real cause if white screen
           window.addEventListener("error", (e) => console.error("[GlobalError]", e.error || e.message));
           window.addEventListener("unhandledrejection", (e) => console.error("[UnhandledRejection]", e.reason));
 
@@ -167,30 +190,6 @@ jobs:
               <RouterProvider router={router} />
             </React.StrictMode>
           );
-          EOF
-
-      - name: Override vite.config.ts for static SPA build
-        run: |
-          cat > vite.config.ts << 'EOF'
-          import { defineConfig } from "vite";
-          import react from "@vitejs/plugin-react";
-          import tsconfigPaths from "vite-tsconfig-paths";
-          import tailwindcss from "@tailwindcss/vite";
-          import path from "path";
-
-          export default defineConfig({
-            plugins: [react(), tsconfigPaths(), tailwindcss()],
-            resolve: {
-              alias: {
-                "@": path.resolve(__dirname, "./src"),
-              },
-            },
-            base: "./",
-            build: {
-              outDir: "dist",
-              target: "es2020",
-            },
-          });
           EOF
 
       - name: Stub out server-only source files
@@ -205,11 +204,9 @@ jobs:
           EOF
           echo "export const config = {};" > src/lib/config.server.ts
           echo "export {};" > src/lib/api/example.functions.ts
-          # Neutralize PWA service-worker registration inside the APK
           cat > src/registerSW.ts << 'EOF'
           export function registerServiceWorker() { /* disabled in Capacitor build */ }
           EOF
-          # Remove the install-prompt component usage from any leftover imports
           cat > src/components/InstallAppPrompt.tsx << 'EOF'
           export function InstallAppPrompt() { return null; }
           EOF
@@ -220,6 +217,7 @@ jobs:
           echo "VITE_SUPABASE_PUBLISHABLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjaGdob2dwcmZ0cnVyYmNhcnZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwOTMzMjQsImV4cCI6MjA5NjY2OTMyNH0.y2LIlgnIhlDXM6fRxYhPoYFDSISvB4FLK5YJxqmASyM" >> .env
 
       - name: Build web app
+        # routeTree.gen.tsx در این مرحله توسط TanStackRouterVite ساخته می‌شه
         run: npm run build
 
       - name: Create capacitor.config.ts

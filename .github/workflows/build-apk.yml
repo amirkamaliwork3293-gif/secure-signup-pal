@@ -115,6 +115,20 @@ jobs:
           print('minSdk set to 22')
           PYEOF
 
+      - name: Force single Kotlin stdlib version (fix duplicate classes)
+        run: |
+          cat >> android/app/build.gradle << 'EOF'
+
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22'
+              }
+          }
+          EOF
+
       - name: Build Debug APK
         run: |
           cd android

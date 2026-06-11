@@ -111,7 +111,7 @@ function AdminPage() {
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-bold kamali-brand">پنل ادمین کمالی</div>
+              <div className="text-sm font-bold kamali-brand">پنل ادمین افشاری</div>
               <div className="text-[10px] text-muted-foreground">مدیریت کاربران و درخواست‌ها</div>
             </div>
           </div>

@@ -35,6 +35,7 @@ function RegisterPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [usernameField, setUsernameField] = useState("");
+  const [phone, setPhone] = useState("");
   const [plan, setPlan] = useState<SubscriptionPlan>("1month");
   const [paid, setPaid] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -161,6 +162,7 @@ function RegisterPage() {
           plan,
           payment_confirmed: paid,
           receipt_url: path,
+          phone: phone.trim() || undefined,
         },
       });
       setSuccess(true);
@@ -220,6 +222,14 @@ function RegisterPage() {
           value={usernameField}
           onChange={setUsernameField}
           placeholder="ali123"
+          dir="ltr"
+        />
+
+        <Field
+          label="شماره موبایل (اختیاری)"
+          value={phone}
+          onChange={setPhone}
+          placeholder="09xxxxxxxxx"
           dir="ltr"
         />
 

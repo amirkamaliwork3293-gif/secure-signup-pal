@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
-  updatePlanConfigs,
+  updatePlanConfigs, adminResetUserPassword,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
@@ -15,7 +15,7 @@ import {
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
-  Package, Power, Percent, Timer,
+  Package, Power, Percent, Timer, Search, KeyRound,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -41,6 +41,7 @@ function AdminPage() {
   const reject = useServerFn(rejectSignupRequest);
   const extend = useServerFn(extendUserSubscription);
   const delUser = useServerFn(deleteUserAccount);
+  const resetPwd = useServerFn(adminResetUserPassword);
 
   const fetchAll = async () => {
     if (state.status !== "authenticated" || !state.isAdmin) {
@@ -94,6 +95,13 @@ function AdminPage() {
     if (!confirm(`کاربر «${user.username}» حذف شود؟`)) return;
     setActing(user.id);
     try { await delUser({ data: { user_id: user.id } }); await fetchAll(); }
+    catch (e: any) { alert(e?.message); }
+    setActing(null);
+  };
+
+  const handleResetPassword = async (user: UserProfile, newPassword: string) => {
+    setActing(user.id);
+    try { await resetPwd({ data: { user_id: user.id, new_password: newPassword } }); }
     catch (e: any) { alert(e?.message); }
     setActing(null);
   };
@@ -183,6 +191,7 @@ function AdminPage() {
                 acting={acting}
                 onExtend={handleExtend}
                 onDelete={handleDelete}
+                onResetPassword={handleResetPassword}
               />
             )}
             {tab === "plans" && <PlansTab />}
@@ -239,6 +248,9 @@ function RequestsTab({
                     <span className="rounded bg-green-500/10 px-2 py-0.5 font-medium text-green-700 dark:text-green-400">
                       پرداخت ✅
                     </span>
+                  )}
+                  {(r as any).phone && (
+                    <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{(r as any).phone}</span>
                   )}
                   <span>{new Date(r.created_at).toLocaleString("fa-IR")}</span>
                 </div>
@@ -341,82 +353,162 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function UsersTab({
-  users, acting, onExtend, onDelete,
+  users, acting, onExtend, onDelete, onResetPassword,
 }: {
   users: UserProfile[];
   acting: string | null;
   onExtend: (u: UserProfile, plan: SubscriptionPlan) => void;
   onDelete: (u: UserProfile) => void;
+  onResetPassword: (u: UserProfile, newPassword: string) => void;
 }) {
-  if (users.length === 0) {
-    return (
-      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-        <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
-        کاربری ثبت نشده
-      </div>
-    );
-  }
-  return (
-    <ul className="space-y-2">
-      {users.map((u) => {
-        const isActing = acting === u.id;
-        const daysLeft = u.end_date
-          ? Math.max(0, Math.ceil((new Date(u.end_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-          : null;
-        return (
-          <li key={u.id} className="rounded-2xl border border-border bg-card p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1">
-                <div className="font-medium">
-                  {u.first_name || "—"} {u.last_name || ""}
-                  <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{u.username}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {u.plan && (
-                    <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">{PLAN_LABEL[u.plan]}</span>
-                  )}
-                  {u.end_date && (
-                    <span className="flex items-center gap-1">
-                      <CalendarClock className="h-3 w-3" />
-                      تا {new Date(u.end_date).toLocaleDateString("fa-IR")}
-                      {daysLeft !== null && (
-                        <span className={daysLeft < 7 ? "text-destructive" : ""}>
-                          {" "}({daysLeft} روز)
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <StatusBadge status={u.status} />
-            </div>
+  const [searchQ, setSearchQ] = useState("");
+  const [resetTarget, setResetTarget] = useState<UserProfile | null>(null);
+  const [newPwd, setNewPwd] = useState("");
+  const [pwdSaving, setPwdSaving] = useState(false);
 
-            {u.username !== "amirkamali" && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="text-[11px] text-muted-foreground">تمدید:</span>
-                {(["1month", "3month", "6month", "12month"] as SubscriptionPlan[]).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => onExtend(u, p)}
-                    disabled={isActing}
-                    className="rounded-lg border border-border px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-60"
-                  >
-                    {PLAN_LABEL[p]}
-                  </button>
-                ))}
-                <button
-                  onClick={() => onDelete(u)}
-                  disabled={isActing}
-                  className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                >
-                  {isActing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                </button>
+  const filtered = searchQ.trim()
+    ? users.filter((u) =>
+        u.username?.includes(searchQ) ||
+        u.first_name?.includes(searchQ) ||
+        u.last_name?.includes(searchQ),
+      )
+    : users;
+
+  const handlePwdReset = async () => {
+    if (!resetTarget || newPwd.length < 6) return;
+    setPwdSaving(true);
+    await onResetPassword(resetTarget, newPwd);
+    setPwdSaving(false);
+    setResetTarget(null);
+    setNewPwd("");
+    alert("رمز عبور با موفقیت تغییر کرد.");
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <input
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          placeholder="جستجوی نام یا یوزرنیم..."
+          className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+        />
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
+          {users.length === 0 ? "کاربری ثبت نشده" : "کاربری یافت نشد"}
+        </div>
+      )}
+
+      <ul className="space-y-2">
+        {filtered.map((u) => {
+          const isActing = acting === u.id;
+          const daysLeft = u.end_date
+            ? Math.max(0, Math.ceil((new Date(u.end_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+            : null;
+          return (
+            <li key={u.id} className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="font-medium">
+                    {u.first_name || "—"} {u.last_name || ""}
+                    <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{u.username}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {u.plan && (
+                      <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">{PLAN_LABEL[u.plan]}</span>
+                    )}
+                    {u.end_date && (
+                      <span className="flex items-center gap-1">
+                        <CalendarClock className="h-3 w-3" />
+                        تا {new Date(u.end_date).toLocaleDateString("fa-IR")}
+                        {daysLeft !== null && (
+                          <span className={daysLeft < 7 ? "text-destructive" : ""}>
+                            {" "}({daysLeft} روز)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <StatusBadge status={u.status} />
               </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+
+              {u.username !== "amirkamali" && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <span className="text-[11px] text-muted-foreground">تمدید:</span>
+                    {(["1month", "3month", "6month", "12month"] as SubscriptionPlan[]).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => onExtend(u, p)}
+                        disabled={isActing}
+                        className="rounded-lg border border-border px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-60"
+                      >
+                        {PLAN_LABEL[p]}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => onDelete(u)}
+                      disabled={isActing}
+                      className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      {isActing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => { setResetTarget(u); setNewPwd(""); }}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                  >
+                    <KeyRound className="h-3 w-3" />
+                    تغییر رمز عبور
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {/* Password reset modal */}
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setResetTarget(null); setNewPwd(""); } }}>
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-elegant">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-primary" />
+                تغییر رمز — {resetTarget.username}
+              </h3>
+              <button onClick={() => { setResetTarget(null); setNewPwd(""); }} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-secondary">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور جدید (حداقل ۶ کاراکتر)</label>
+            <input
+              type="password"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              dir="ltr"
+              autoFocus
+              placeholder="••••••••"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <button
+              onClick={handlePwdReset}
+              disabled={pwdSaving || newPwd.length < 6}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {pwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              ذخیره رمز جدید
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

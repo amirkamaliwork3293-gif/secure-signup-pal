@@ -49,6 +49,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       plan: Plan;
       payment_confirmed: boolean;
       receipt_url?: string | null;
+      phone?: string;
     }) => {
       if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
       if (!d.username?.trim() || !/^[a-zA-Z0-9_-]{3,32}$/.test(d.username)) {
@@ -130,6 +131,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         payment_confirmed: data.payment_confirmed,
         receipt_url: data.receipt_url ?? null,
         password_set: true, // رمز هنگام ثبت‌نام انتخاب شده است
+        phone: data.phone?.trim() || null,
       })
       .select("id")
       .single();
@@ -532,6 +534,25 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
       .createSignedUrl(data.path, 3600);
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
+  });
+
+// ─── Admin: reset a user's password ─────────────────────────────────────────
+export const adminResetUserPassword = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { user_id: string; new_password: string }) => {
+    if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
+    if (!d.new_password || d.new_password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    if (data.user_id === context.userId) throw new Error("نمی‌توانید رمز خود را از اینجا تغییر دهید.");
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
+      password: data.new_password,
+    });
+    if (error) throw new Error(error.message);
+    return { success: true };
   });
 
 // ─── Admin: update full per-plan configuration (enabled/price/duration/discount) ──

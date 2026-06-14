@@ -1,9 +1,10 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { useState, useEffect } from "react";
 
 const nav = [
   { to: "/",          label: "فاکتور",   icon: Receipt  },
@@ -20,6 +21,16 @@ export function Layout({ children }: { children: ReactNode }) {
   const [appSettings] = settings.useAll();
   const shopName = appSettings.shopName || "کمالی";
   const { state, signOut } = useAuth();
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+  useEffect(() => {
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -58,6 +69,14 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="sticky top-[57px] z-20 flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-xs font-semibold text-white">
+          <WifiOff className="h-3.5 w-3.5" />
+          آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد
+        </div>
+      )}
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 

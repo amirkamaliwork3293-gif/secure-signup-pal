@@ -258,6 +258,15 @@ export function stopCloudSync() {
   for (const k of Object.keys(pendingPush)) delete pendingPush[k];
 }
 
+// Re-flush pending changes when the browser regains connectivity
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    if (cloudUserId && Object.keys(pendingPush).length > 0) {
+      flushCloudPush();
+    }
+  });
+}
+
 // ─── React hook ──────────────────────────────────────────────────────────────
 
 export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)) => void] {

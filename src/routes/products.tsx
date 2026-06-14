@@ -13,9 +13,10 @@ import { BarcodePrintModal } from "@/components/BarcodePrintModal";
 import { BarcodeViewModal } from "@/components/BarcodeViewModal";
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
-  Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square,
+  Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet,
 } from "lucide-react";
 import { z } from "zod";
+import * as XLSX from "xlsx";
 
 const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
 
@@ -109,6 +110,38 @@ function ProductsPageInner() {
     setPrintTargets(list.filter((p) => selected.has(p.id)));
   };
 
+  const totalInventoryValue = list.reduce((sum, p) => sum + p.price * p.stock, 0);
+  const totalBuyValue = list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0);
+
+  const exportToExcel = () => {
+    if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
+    const rows = list.map((p) => ({
+      "نام محصول": p.name,
+      "قیمت فروش (تومان)": p.price,
+      "موجودی": p.stock,
+      "واحد": p.unit || "عدد",
+      "ارزش موجودی (تومان)": p.price * p.stock,
+      "دسته‌بندی": p.category,
+      "کد بارکد": p.code,
+      "قیمت خرید (تومان)": p.buyPrice ?? "",
+      "قیمت مصرف‌کننده (تومان)": p.consumerPrice ?? "",
+      "قیمت همکار (تومان)": p.sellerPrice ?? "",
+      "درصد تخفیف": p.discountPercent ?? "",
+      "هشدار موجودی کم": p.lowStockThreshold ?? 5,
+      "توضیحات": p.description ?? "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // Set column widths
+    ws["!cols"] = [
+      { wch: 25 }, { wch: 18 }, { wch: 10 }, { wch: 8 }, { wch: 20 },
+      { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
+      { wch: 12 }, { wch: 16 }, { wch: 25 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "محصولات");
+    XLSX.writeFile(wb, `products-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const stockBadge = (p: Product) => {
     const s = stockStatus(p);
     const unitLabel = p.unit || "عدد";
@@ -126,6 +159,14 @@ function ProductsPageInner() {
         </div>
         <div className="flex gap-1.5 flex-wrap justify-end">
           <button
+            onClick={exportToExcel}
+            className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-3 py-2 text-xs font-medium text-foreground"
+            title="خروجی Excel"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 text-green-600" />
+            Excel
+          </button>
+          <button
             onClick={() => { setEditTarget(null); setOpen(true); }}
             className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"
           >
@@ -134,6 +175,22 @@ function ProductsPageInner() {
           </button>
         </div>
       </div>
+
+      {/* Inventory value summary */}
+      {list.length > 0 && (
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-border bg-card p-3">
+            <div className="text-[10px] text-muted-foreground mb-1">ارزش کل موجودی (قیمت فروش)</div>
+            <div className="text-sm font-bold text-primary">{formatToman(totalInventoryValue)}</div>
+          </div>
+          {totalBuyValue > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-3">
+              <div className="text-[10px] text-muted-foreground mb-1">ارزش کل موجودی (قیمت خرید)</div>
+              <div className="text-sm font-bold text-green-600">{formatToman(totalBuyValue)}</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Action toolbar */}
       <div className="mb-3 grid grid-cols-3 gap-1.5">
@@ -230,6 +287,11 @@ function ProductsPageInner() {
                       <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">٪{formatNumber(p.discountPercent)} تخفیف</span>
                     )}
                     {stockBadge(p)}
+                    {p.stock > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        ارزش: {formatToman(p.price * p.stock)}
+                      </span>
+                    )}
                     {p.code && <span className="text-muted-foreground" dir="ltr">{p.code.slice(0, 16)}</span>}
                   </div>
                 </div>

@@ -5,7 +5,7 @@ import { Layout } from "@/components/Layout";
 import { invoice, recalc, formatToman, formatNumber, parseNumberInput, settings, products, customers, addProductToInvoice, isWeightUnit, PAYMENT_LABEL, type CustomerInfo, type PaymentMethod } from "@/lib/store";
 import {
   Minus, Plus, Trash2, ScanLine, CheckCircle2, Receipt,
-  User, Search, X, FileText, Plus as PlusIcon,
+  User, Search, X, FileText, Plus as PlusIcon, Pencil,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
@@ -32,6 +32,7 @@ function InvoicePageInner() {
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
   const searchRef = useRef<HTMLInputElement>(null);
+  const [editingPrice, setEditingPrice] = useState<string | null>(null);
 
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
@@ -52,6 +53,16 @@ function InvoicePageInner() {
 
   const remove = (productId: string) => {
     setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+  };
+
+  const setItemPrice = (productId: string, price: number) => {
+    if (price <= 0) return;
+    setInv((prev) => {
+      const items = prev.items.map((i) =>
+        i.productId === productId ? { ...i, price } : i,
+      );
+      return recalc({ ...prev, items });
+    });
   };
 
   // تنظیم مستقیم مقدار (برای محصولات وزنی — کیلوگرم/گرم)
@@ -352,9 +363,37 @@ function InvoicePageInner() {
               <li key={item.productId} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{item.name}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {formatToman(item.price)} × {formatNumber(item.quantity)}{weight ? ` ${item.unit}` : ""}
-                    <span className="mr-2 font-semibold text-primary">= {formatToman(Math.round(item.price * item.quantity))}</span>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    {editingPrice === item.productId ? (
+                      <input
+                        autoFocus
+                        defaultValue={item.price}
+                        onBlur={(e) => {
+                          const p = parseNumberInput(e.target.value);
+                          if (p > 0) setItemPrice(item.productId, p);
+                          setEditingPrice(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingPrice(null);
+                        }}
+                        inputMode="numeric"
+                        dir="ltr"
+                        className="w-28 rounded border border-primary bg-background px-2 py-0.5 text-xs text-foreground outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingPrice(item.productId)}
+                        className="flex items-center gap-0.5 hover:text-primary"
+                        title="ویرایش قیمت"
+                      >
+                        {formatToman(item.price)}
+                        <Pencil className="h-2.5 w-2.5 opacity-50" />
+                      </button>
+                    )}
+                    <span>× {formatNumber(item.quantity)}{weight ? ` ${item.unit}` : ""}</span>
+                    <span className="font-semibold text-primary">= {formatToman(Math.round(item.price * item.quantity))}</span>
                   </div>
                 </div>
                 {weight ? (

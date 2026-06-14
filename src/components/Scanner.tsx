@@ -107,15 +107,41 @@ function zxingDecode(imageData: ImageData, reader: MultiFormatReader): string | 
   }
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Device tier detection ───────────────────────────────────────────────────
+// Estimates device performance to adapt decode parameters for low-end hardware.
 
-// Decode canvas size — sweet spot between resolution and decode speed
-const DW = 512, DH = 384;
+function detectDeviceTier(): "low" | "mid" | "high" {
+  const cores = navigator.hardwareConcurrency ?? 2;
+  // Quick benchmark: measure how fast we can do simple math
+  const start = performance.now();
+  let sum = 0;
+  for (let i = 0; i < 200_000; i++) sum += Math.sqrt(i);
+  void sum;
+  const benchMs = performance.now() - start;
+  if (cores <= 2 || benchMs > 40) return "low";
+  if (cores <= 4 || benchMs > 20) return "mid";
+  return "high";
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 // Scan zone crop — tighter zone = fewer pixels = faster
 const CROP_X = 0.12, CROP_Y = 0.22, CROP_W = 0.76, CROP_H = 0.56;
 
 export function Scanner({ onDetected, paused }: Props) {
+  // Detect device tier once on mount to adapt performance parameters
+  const tier = useRef<"low" | "mid" | "high">("mid");
+  const DW = useRef(512);
+  const DH = useRef(384);
+
+  useEffect(() => {
+    tier.current = detectDeviceTier();
+    if (tier.current === "low") { DW.current = 320; DH.current = 240; }
+    else if (tier.current === "mid") { DW.current = 448; DH.current = 336; }
+    else { DW.current = 512; DH.current = 384; }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const videoRef       = useRef<HTMLVideoElement>(null);
   const streamRef      = useRef<MediaStream | null>(null);
   const pausedRef      = useRef(false);
@@ -173,15 +199,19 @@ export function Scanner({ onDetected, paused }: Props) {
 
   // ── scan loop ─────────────────────────────────────────────────────────────
   const startLoop = useCallback((video: HTMLVideoElement) => {
+    const dw = DW.current;
+    const dh = DH.current;
+    const deviceTier = tier.current;
+
     // Build offscreen canvas
     let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
     try {
-      const oc = new OffscreenCanvas(DW, DH);
+      const oc = new OffscreenCanvas(dw, dh);
       offscreen.current = oc;
       ctx = oc.getContext("2d", { willReadFrequently: true, alpha: false }) as OffscreenCanvasRenderingContext2D;
     } catch {
       const c = document.createElement("canvas");
-      c.width = DW; c.height = DH;
+      c.width = dw; c.height = dh;
       offscreen.current = c;
       ctx = c.getContext("2d", { willReadFrequently: true, alpha: false })!;
     }
@@ -234,7 +264,7 @@ export function Scanner({ onDetected, paused }: Props) {
       // Crop to scan zone
       const sx = vw * CROP_X, sy = vh * CROP_Y;
       const sw = vw * CROP_W, sh = vh * CROP_H;
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, DW, DH);
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
       fpsCountRef.current++; // counts drawn frames
 
       // ── Path A: Native BarcodeDetector ─────────────────────────────────
@@ -265,26 +295,32 @@ export function Scanner({ onDetected, paused }: Props) {
       // With native detector present, ZXing is only a safety net — run it less
       // often. Without native, ZXing is the primary engine.
       const now = performance.now();
-      const minInterval = nativeRef.current ? 350 : (workerRef.current ? 90 : 200);
+      // Low-end devices get longer intervals to keep UI smooth
+      const minInterval = nativeRef.current
+        ? (deviceTier === "low" ? 600 : 350)
+        : workerRef.current
+          ? (deviceTier === "low" ? 180 : 90)
+          : (deviceTier === "low" ? 350 : 200);
       if (now - lastZxingAt.current >= minInterval) {
         if (workerRef.current) {
           // Worker path: zero main-thread decode cost. Skip if still busy.
           if (!workerBusy.current) {
             lastZxingAt.current = now;
-            const imageData = ctx.getImageData(0, 0, DW, DH);
-            const lum = extractLuminance(imageData.data, DW * DH);
-            thoroughToggle.current = !thoroughToggle.current;
+            const imageData = ctx.getImageData(0, 0, dw, dh);
+            const lum = extractLuminance(imageData.data, dw * dh);
+            // Low-end: always fast mode (skip thorough alternation)
+            thoroughToggle.current = deviceTier === "low" ? false : !thoroughToggle.current;
             workerBusy.current = true;
             workerRef.current.postMessage(
-              { id: nativeGenRef.current, width: DW, height: DH, lum, thorough: thoroughToggle.current },
+              { id: nativeGenRef.current, width: dw, height: dh, lum, thorough: thoroughToggle.current },
               [lum.buffer as ArrayBuffer],
             );
           }
         } else {
           // Sync fallback: time-throttled so the UI keeps breathing.
           lastZxingAt.current = now;
-          const imageData = ctx.getImageData(0, 0, DW, DH);
-          thoroughToggle.current = !thoroughToggle.current;
+          const imageData = ctx.getImageData(0, 0, dw, dh);
+          thoroughToggle.current = deviceTier === "low" ? false : !thoroughToggle.current;
           const reader = thoroughToggle.current ? tr : fr;
           const result = zxingDecode(imageData, reader);
           if (result) emit(result, thoroughToggle.current ? "ZXing-T" : "ZXing-F");
@@ -312,28 +348,35 @@ export function Scanner({ onDetected, paused }: Props) {
         let stream: MediaStream | null = null;
 
         // Try high-fps first — more frames = more decode chances per second
-        const tries = [
-          {
-            video: {
-              facingMode: { ideal: "environment" },
-              width:  { ideal: 1280, min: 640 },
-              height: { ideal: 720,  min: 480 },
-              frameRate: { ideal: 60, min: 30 },  // ← try 60fps first
-            },
-            audio: false,
-          },
-          {
-            video: {
-              facingMode: { ideal: "environment" },
-              width:  { ideal: 1280, min: 640 },
-              height: { ideal: 720,  min: 480 },
-              frameRate: { ideal: 30, min: 20 },
-            },
-            audio: false,
-          },
-          { video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false },
-          { video: { facingMode: "environment" }, audio: false },
-        ];
+        // Low-end devices get lower resolution to reduce GPU/CPU pressure
+        const isLow = tier.current === "low";
+        const tries = isLow
+          ? [
+              { video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, min: 15 } }, audio: false },
+              { video: { facingMode: "environment" }, audio: false },
+            ]
+          : [
+              {
+                video: {
+                  facingMode: { ideal: "environment" },
+                  width:  { ideal: 1280, min: 640 },
+                  height: { ideal: 720,  min: 480 },
+                  frameRate: { ideal: 60, min: 30 },
+                },
+                audio: false,
+              },
+              {
+                video: {
+                  facingMode: { ideal: "environment" },
+                  width:  { ideal: 1280, min: 640 },
+                  height: { ideal: 720,  min: 480 },
+                  frameRate: { ideal: 30, min: 20 },
+                },
+                audio: false,
+              },
+              { video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false },
+              { video: { facingMode: "environment" }, audio: false },
+            ];
 
         for (const c of tries) {
           try { stream = await navigator.mediaDevices.getUserMedia(c); break; }

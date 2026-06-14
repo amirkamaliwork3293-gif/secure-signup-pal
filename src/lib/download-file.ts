@@ -29,12 +29,16 @@ export async function downloadFile(
   filename: string,
   mime?: string,
 ): Promise<void> {
-  const blob =
-    data instanceof Blob
-      ? data
-      : new Blob([data instanceof Uint8Array ? data : new Uint8Array(data)], {
-          type: mime || "application/octet-stream",
-        });
+  let blob: Blob;
+  if (data instanceof Blob) {
+    blob = data;
+  } else {
+    const buf: ArrayBuffer =
+      data instanceof Uint8Array
+        ? (data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer)
+        : (data as ArrayBuffer);
+    blob = new Blob([buf], { type: mime || "application/octet-stream" });
+  }
 
   // 1) Web Share API با فایل — بهترین گزینه روی WebView اندروید
   try {

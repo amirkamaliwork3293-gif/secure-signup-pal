@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import * as XLSX from "xlsx";
+import { downloadFile } from "@/lib/download-file";
 
 const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
 
@@ -113,7 +114,7 @@ function ProductsPageInner() {
   const totalInventoryValue = list.reduce((sum, p) => sum + p.price * p.stock, 0);
   const totalBuyValue = list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0);
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
     const rows = list.map((p) => ({
       "نام محصول": p.name,
@@ -139,7 +140,12 @@ function ProductsPageInner() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
-    XLSX.writeFile(wb, `products-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const out = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    await downloadFile(
+      out,
+      `products-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
   };
 
   const stockBadge = (p: Product) => {

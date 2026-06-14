@@ -11,7 +11,7 @@ import {
 import appCss from "../styles.css?url";
 import { KamaliSplash } from "@/components/KamaliSplash";
 import { AuthProvider } from "@/lib/AuthContext";
-import { registerServiceWorker } from "@/registerSW";
+import { disableServiceWorker } from "@/registerSW";
 
 function NotFoundComponent() {
   return (
@@ -94,8 +94,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      // PWA با حالت آفلاین فعال است
-      { rel: "manifest", href: "/manifest.webmanifest" },
+      // نسخه PWA حذف شده — نصب از طریق APK اندروید انجام می‌شود
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
       { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
       { rel: "apple-touch-icon", href: "/icon-192.png" },
@@ -125,8 +124,8 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   if (typeof window !== "undefined") {
-    // ثبت سرویس‌ورکر برای حالت آفلاین (با گارد preview/dev/iframe)
-    registerServiceWorker();
+    // PWA حذف شده: سرویس‌ورکرهای قبلی پاک می‌شوند تا کش قدیمی مزاحم نشود
+    disableServiceWorker();
   }
 
   return (

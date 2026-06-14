@@ -138,7 +138,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     let result = await supabaseAdmin
       .from("signup_requests")
-      .insert((phone ? { ...requestBase, phone } : requestBase) as any)
+      .insert(phone ? { ...requestBase, phone } : requestBase)
       .select("id")
       .single();
 

@@ -1,7 +1,6 @@
 // Parse Excel/CSV product files into normalized rows.
 import * as XLSX from "xlsx";
 import type { Product } from "@/lib/store";
-import { downloadFile } from "@/lib/download-file";
 
 export type ImportRow = {
   rowIndex: number;
@@ -92,11 +91,10 @@ export function sampleWorkbook(): Blob {
 }
 
 export function downloadSample() {
-  void downloadFile(
-    sampleWorkbook(),
-    "نمونه-محصولات.xlsx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  );
+  const url = URL.createObjectURL(sampleWorkbook());
+  const a = document.createElement("a");
+  a.href = url; a.download = "نمونه-محصولات.xlsx"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type MergeResult = { added: number; updated: number };

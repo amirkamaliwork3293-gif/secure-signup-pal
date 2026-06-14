@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
-  updatePlanConfigs, adminResetUserPassword,
+  updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
@@ -42,6 +42,7 @@ function AdminPage() {
   const extend = useServerFn(extendUserSubscription);
   const delUser = useServerFn(deleteUserAccount);
   const resetPwd = useServerFn(adminResetUserPassword);
+  const getRequests = useServerFn(adminGetRequestsWithPhone);
 
   const fetchAll = async () => {
     if (state.status !== "authenticated" || !state.isAdmin) {
@@ -52,15 +53,14 @@ function AdminPage() {
     }
 
     setLoading(true);
-    const [r, u] = await Promise.all([
-      supabase.from("signup_requests").select("*").order("created_at", { ascending: false }),
+    const [requestsData, u] = await Promise.all([
+      getRequests(),
       supabase.from("profiles").select("*").order("created_at", { ascending: false }),
     ]);
 
-    if (r.error) throw new Error(r.error.message);
     if (u.error) throw new Error(u.error.message);
 
-    setRequests((r.data as SignupRequest[]) || []);
+    setRequests((requestsData as SignupRequest[]) || []);
     setUsers((u.data as UserProfile[]) || []);
     setLoading(false);
   };

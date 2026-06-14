@@ -97,11 +97,14 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     }
 
     // Create the auth user up front with the chosen password (profile stays pending)
+    const phone = data.phone?.trim() || null;
+
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email: toEmail(username),
       password: data.password,
       email_confirm: true,
-      user_metadata: { username, first_name: data.first_name.trim(), last_name: data.last_name.trim() },
+      // Store phone in user_metadata so it's always accessible without a schema change
+      user_metadata: { username, first_name: data.first_name.trim(), last_name: data.last_name.trim(), phone },
     });
     if (createErr || !created.user) throw new Error(createErr?.message || "خطا در ایجاد حساب.");
 
@@ -121,23 +124,35 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
 
-    const { data: inserted, error } = await supabaseAdmin
+    // Try inserting with phone; if the column doesn't exist yet (migration pending),
+    // fall back to inserting without it so registration never fails.
+    const requestBase = {
+      first_name: data.first_name.trim(),
+      last_name: data.last_name.trim(),
+      username,
+      plan: data.plan,
+      payment_confirmed: data.payment_confirmed,
+      receipt_url: data.receipt_url ?? null,
+      password_set: true,
+    };
+
+    let result = await supabaseAdmin
       .from("signup_requests")
-      .insert({
-        first_name: data.first_name.trim(),
-        last_name: data.last_name.trim(),
-        username,
-        plan: data.plan,
-        payment_confirmed: data.payment_confirmed,
-        receipt_url: data.receipt_url ?? null,
-        password_set: true, // رمز هنگام ثبت‌نام انتخاب شده است
-        phone: data.phone?.trim() || null,
-      })
+      .insert(phone ? { ...requestBase, phone } : requestBase)
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
 
-    return { id: inserted.id };
+    if (result.error?.message?.toLowerCase().includes("phone")) {
+      // Column not yet migrated — retry without phone
+      result = await supabaseAdmin
+        .from("signup_requests")
+        .insert(requestBase)
+        .select("id")
+        .single();
+    }
+    if (result.error) throw new Error(result.error.message);
+
+    return { id: result.data.id };
   });
 
 // ─── Public: check request status (for set-password page) ────────────────────
@@ -534,6 +549,35 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
       .createSignedUrl(data.path, 3600);
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
+  });
+
+// ─── Admin: fetch signup requests enriched with phone from user_metadata ──────
+// Works even before the phone column migration is applied — phone is always
+// stored in auth user_metadata when a user registers.
+export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const [{ data: requests, error: reqErr }, { data: { users } }] = await Promise.all([
+      supabaseAdmin.from("signup_requests").select("*").order("created_at", { ascending: false }),
+      supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    ]);
+    if (reqErr) throw new Error(reqErr.message);
+
+    // Build username → phone map from auth user_metadata (always present)
+    const phoneMap: Record<string, string | null> = {};
+    for (const u of users ?? []) {
+      const uname = (u.user_metadata?.username as string | undefined)?.toLowerCase();
+      if (uname && u.user_metadata?.phone) phoneMap[uname] = u.user_metadata.phone as string;
+    }
+
+    return (requests ?? []).map((r: Record<string, unknown>) => ({
+      ...r,
+      // Prefer DB phone column (after migration) over metadata
+      phone: (r.phone as string | null) || phoneMap[(r.username as string)?.toLowerCase()] || null,
+    }));
   });
 
 // ─── Admin: reset a user's password ─────────────────────────────────────────

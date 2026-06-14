@@ -28,45 +28,79 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+// ── Offline profile cache ────────────────────────────────────────────────────
+// Supabase stores the session token in localStorage, so getSession() works
+// offline. The problem is the subsequent DB queries for profile and user_roles.
+// We cache those after every successful load and fall back to cache when offline.
+
+const profileCacheKey = (uid: string) => `auth_profile:${uid}`;
+
+function saveProfileCache(uid: string, profile: UserProfile, isAdmin: boolean) {
+  try {
+    localStorage.setItem(profileCacheKey(uid), JSON.stringify({ profile, isAdmin }));
+  } catch {}
+}
+
+function readProfileCache(uid: string): { profile: UserProfile; isAdmin: boolean } | null {
+  try {
+    const raw = localStorage.getItem(profileCacheKey(uid));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 async function loadState(session: Session): Promise<AuthState> {
   setStorageScope(session.user.id);
-  await hydrateFromCloud(session.user.id);
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", session.user.id)
-    .maybeSingle();
+  // hydrateFromCloud fails when offline — that's fine, local data is source of truth
+  try { await hydrateFromCloud(session.user.id); } catch {}
 
-  if (!profile) return { status: "unauthenticated" };
+  let profile: UserProfile | null = null;
+  let isAdmin = false;
 
-  const { data: roleRow } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", session.user.id)
-    .eq("role", "admin")
-    .maybeSingle();
-  const isAdmin = !!roleRow;
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", session.user.id)
+      .maybeSingle();
 
-  // Admins always authenticated regardless of subscription
+    if (!data) return { status: "unauthenticated" };
+
+    const { data: roleRow } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", session.user.id)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    isAdmin = !!roleRow;
+    profile = data as UserProfile;
+    saveProfileCache(session.user.id, profile, isAdmin);
+  } catch {
+    // Offline path: fall back to cached profile
+    const cached = readProfileCache(session.user.id);
+    if (!cached) return { status: "unauthenticated" };
+    profile = cached.profile;
+    isAdmin = cached.isAdmin;
+  }
+
   if (isAdmin) {
-    return { status: "authenticated", session, profile: profile as UserProfile, isAdmin: true };
+    return { status: "authenticated", session, profile, isAdmin: true };
   }
 
   if (profile.status === "rejected") return { status: "rejected", username: profile.username };
   if (profile.status === "pending") return { status: "pending", username: profile.username };
 
-  // Check expiry
   if (profile.end_date && new Date(profile.end_date) < new Date()) {
-    // Mark expired in DB (best-effort)
-    await supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id);
-    return { status: "expired", username: profile.username, profile: profile as UserProfile };
+    // Best-effort DB update — ignore failure when offline
+    try { await supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id); } catch {}
+    return { status: "expired", username: profile.username, profile };
   }
   if (profile.status === "expired") {
-    return { status: "expired", username: profile.username, profile: profile as UserProfile };
+    return { status: "expired", username: profile.username, profile };
   }
 
-  return { status: "authenticated", session, profile: profile as UserProfile, isAdmin: false };
+  return { status: "authenticated", session, profile, isAdmin: false };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

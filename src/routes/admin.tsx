@@ -60,7 +60,7 @@ function AdminPage() {
 
     if (u.error) throw new Error(u.error.message);
 
-    setRequests((requestsData as SignupRequest[]) || []);
+    setRequests((requestsData as unknown as SignupRequest[]) || []);
     setUsers((u.data as UserProfile[]) || []);
     setLoading(false);
   };

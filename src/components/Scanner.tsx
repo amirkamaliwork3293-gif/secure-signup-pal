@@ -16,7 +16,7 @@
  *  10. requestAnimationFrame kept — no polling timers
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   BarcodeFormat,
   DecodeHintType,
@@ -118,14 +118,15 @@ const DEVICE_TIER: "low" | "mid" | "high" = (() => {
   return "low";
 })();
 
-// Decode canvas size — adapts to device tier
-const DW = DEVICE_TIER === "low" ? 320 : DEVICE_TIER === "mid" ? 448 : 512;
-const DH = DEVICE_TIER === "low" ? 240 : DEVICE_TIER === "mid" ? 336 : 384;
+// Decode canvas size — adapts to device tier.
+// Higher resolution = small/dense barcodes are decoded reliably (user-priority).
+const DW = DEVICE_TIER === "low" ? 384 : DEVICE_TIER === "mid" ? 560 : 720;
+const DH = DEVICE_TIER === "low" ? 288 : DEVICE_TIER === "mid" ? 420 : 540;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-// Scan zone crop — tighter zone = fewer pixels = faster
-const CROP_X = 0.12, CROP_Y = 0.22, CROP_W = 0.76, CROP_H = 0.56;
+// Default scan-zone crop (W × H, centred). User can resize via slider.
+const BASE_W = 0.78, BASE_H = 0.46;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef       = useRef<HTMLVideoElement>(null);
@@ -164,6 +165,39 @@ export function Scanner({ onDetected, paused }: Props) {
   // Track whether ZXing should use thorough pass (alternates every frame)
   const thoroughToggle = useRef(false);
 
+  // ── adjustable scan box ───────────────────────────────────────────────────
+  // 0.4 (tiny — best for very small barcodes) … 1.4 (wide — large labels)
+  const [boxScale, setBoxScale] = useState(1);
+  const crop = useMemo(() => {
+    const w = Math.min(0.96, Math.max(0.22, BASE_W * boxScale));
+    const h = Math.min(0.86, Math.max(0.16, BASE_H * boxScale));
+    return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+  }, [boxScale]);
+  const cropRef = useRef(crop);
+  useEffect(() => { cropRef.current = crop; }, [crop]);
+
+  // ── short beep on detection ───────────────────────────────────────────────
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const beep = useCallback(() => {
+    try {
+      const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+      if (!audioCtxRef.current) audioCtxRef.current = new AC();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") ctx.resume().catch(() => {});
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = 1180;
+      const t0 = ctx.currentTime;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0);
+      o.stop(t0 + 0.14);
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => { pausedRef.current = !!paused; }, [paused]);
 
   // ── emit ──────────────────────────────────────────────────────────────────
@@ -180,8 +214,9 @@ export function Scanner({ onDetected, paused }: Props) {
     setFlash(true);
     setTimeout(() => setFlash(false), 220);
     navigator.vibrate?.(35);
+    beep();
     onDetected(t, fmt);
-  }, [onDetected]);
+  }, [onDetected, beep]);
 
   // ── scan loop ─────────────────────────────────────────────────────────────
   const startLoop = useCallback((video: HTMLVideoElement) => {
@@ -242,9 +277,10 @@ export function Scanner({ onDetected, paused }: Props) {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw || !vh) return;
 
-      // Crop to scan zone
-      const sx = vw * CROP_X, sy = vh * CROP_Y;
-      const sw = vw * CROP_W, sh = vh * CROP_H;
+      // Crop to (live, user-adjustable) scan zone
+      const c = cropRef.current;
+      const sx = vw * c.x, sy = vh * c.y;
+      const sw = vw * c.w, sh = vh * c.h;
       ctx.drawImage(video, sx, sy, sw, sh, 0, 0, DW, DH);
       fpsCountRef.current++; // counts drawn frames
 
@@ -383,6 +419,15 @@ export function Scanner({ onDetected, paused }: Props) {
           // Continuous AF — most critical for fast focus on barcodes
           if (Array.isArray(caps.focusMode) && (caps.focusMode as string[]).includes("continuous"))
             adv.push({ focusMode: "continuous" });
+          // Macro / minimum focus distance — lets the camera lock on tiny
+          // barcodes held very close without going blurry.
+          const fd = caps.focusDistance as { min?: number } | undefined;
+          if (fd && typeof fd.min === "number")
+            adv.push({ focusDistance: fd.min });
+          // Modern Chrome on Android exposes a dedicated macro focusRange.
+          if (Array.isArray((caps as Record<string, unknown>).focusRange) &&
+              ((caps as Record<string, unknown>).focusRange as string[]).includes("macro"))
+            adv.push({ focusRange: "macro" });
           // Continuous AE — prevents dark frames during scan
           if (Array.isArray(caps.exposureMode) && (caps.exposureMode as string[]).includes("continuous"))
             adv.push({ exposureMode: "continuous" });
@@ -471,10 +516,38 @@ export function Scanner({ onDetected, paused }: Props) {
     } catch { /* ignore */ }
   };
 
+  // Tap-to-focus on the video — drives PTZ pointsOfInterest where supported,
+  // then re-enables continuous AF.
+  const tapFocus = async (e: React.PointerEvent<HTMLDivElement>) => {
+    const t = track(); if (!t) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const py = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    try {
+      await t.applyConstraints({
+        advanced: [{
+          pointsOfInterest: [{ x: px, y: py }],
+          focusMode: "single-shot",
+          exposureMode: "single-shot",
+        }] as any,
+      });
+      setTimeout(() => {
+        t.applyConstraints({ advanced: [{ focusMode: "continuous", exposureMode: "continuous" } as any] })
+          .catch(() => {});
+      }, 260);
+    } catch { /* ignore */ }
+  };
+
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-black shadow-card">
-      <div className="relative aspect-[4/3] w-full">
+      <div
+        className="relative aspect-[4/3] w-full"
+        onPointerDown={tapFocus}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         <video
           ref={videoRef}
           className="h-full w-full object-cover"
@@ -486,14 +559,14 @@ export function Scanner({ onDetected, paused }: Props) {
           {/* Dark vignette */}
           <div className="absolute inset-0 bg-black/30" />
 
-          {/* Guide box — matches CROP_X/Y/W/H values above */}
+          {/* Guide box — driven by live crop state (user resizable) */}
           <div
             className="absolute"
             style={{
-              left:   `${CROP_X * 100}%`,
-              right:  `${CROP_X * 100}%`,
-              top:    `${CROP_Y * 100}%`,
-              bottom: `${CROP_Y * 100}%`,
+              left:   `${crop.x * 100}%`,
+              right:  `${crop.x * 100}%`,
+              top:    `${crop.y * 100}%`,
+              bottom: `${crop.y * 100}%`,
             }}
           >
             {/* Clear inside scan zone */}
@@ -527,6 +600,24 @@ export function Scanner({ onDetected, paused }: Props) {
 
         {/* Success flash */}
         {flash && <div className="pointer-events-none absolute inset-0 bg-green-400/40" />}
+
+        {/* Scan-box size slider — اندازه کادر اسکن */}
+        <div className="pointer-events-auto absolute top-2 left-2 right-2 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+          <span className="text-[10px] text-white/70 shrink-0">اندازه کادر</span>
+          <input
+            type="range"
+            min={0.4}
+            max={1.4}
+            step={0.05}
+            value={boxScale}
+            onChange={(e) => setBoxScale(parseFloat(e.target.value))}
+            className="zoom-slider flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.9) ${((boxScale - 0.4) / 1.0) * 100}%, rgba(255,255,255,0.25) ${((boxScale - 0.4) / 1.0) * 100}%, rgba(255,255,255,0.25) 100%)`,
+            }}
+          />
+          <span className="text-[10px] text-white/70 w-8 text-center">{Math.round(boxScale * 100)}%</span>
+        </div>
 
         {/* Zoom slider — only shown if hardware zoom is available */}
         {zoomSupported && (

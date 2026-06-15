@@ -519,6 +519,7 @@ export function Scanner({ onDetected, paused }: Props) {
   // Tap-to-focus on the video — drives PTZ pointsOfInterest where supported,
   // then re-enables continuous AF.
   const tapFocus = async (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary) return; // ignore secondary fingers (pinch)
     const t = track(); if (!t) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));

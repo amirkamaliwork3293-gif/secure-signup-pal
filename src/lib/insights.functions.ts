@@ -35,10 +35,10 @@ export const askReportAssistant = createServerFn({ method: "POST" })
     return d;
   })
   .handler(async ({ data }) => {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.LOVABLE_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "دستیار هوشمند هنوز فعال نشده — کلید ANTHROPIC_API_KEY روی سرور تنظیم نشده است.",
+        "دستیار هوشمند هنوز فعال نشده — کلید LOVABLE_API_KEY روی سرور تنظیم نشده است.",
       );
     }
 
@@ -58,18 +58,19 @@ ${JSON.stringify(data.summary, null, 0)}
 
     let response: Response;
     try {
-      response = await fetch("https://api.anthropic.com/v1/messages", {
+      response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "google/gemini-3-flash-preview",
           max_tokens: 500,
-          system,
-          messages: [{ role: "user", content: userMessage }],
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userMessage },
+          ],
         }),
       });
     } catch {
@@ -78,19 +79,21 @@ ${JSON.stringify(data.summary, null, 0)}
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
-      console.error("[insights] Anthropic API error", response.status, errText);
+      console.error("[insights] AI Gateway error", response.status, errText);
+      if (response.status === 429) {
+        throw new Error("درخواست‌ها زیاد شده — کمی صبر کنید و دوباره تلاش کنید.");
+      }
+      if (response.status === 402) {
+        throw new Error("اعتبار دستیار هوشمند تمام شده — لطفاً پلن خود را ارتقا دهید.");
+      }
       throw new Error("دستیار هوشمند موقتاً پاسخگو نیست. کمی بعد دوباره تلاش کنید.");
     }
 
     const payload = (await response.json()) as {
-      content?: { type: string; text?: string }[];
+      choices?: { message?: { content?: string } }[];
     };
 
-    const answer = (payload.content ?? [])
-      .filter((block) => block.type === "text" && block.text)
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const answer = (payload.choices?.[0]?.message?.content ?? "").trim();
 
     if (!answer) throw new Error("دستیار هوشمند پاسخی برنگرداند. دوباره تلاش کنید.");
 

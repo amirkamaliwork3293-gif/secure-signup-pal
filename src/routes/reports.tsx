@@ -2,7 +2,6 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
-import { ReportAssistant } from "@/components/ReportAssistant";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
   type Invoice, type PaymentMethod,
@@ -172,8 +171,6 @@ function ReportsPageInner() {
         <RangeButton value="year" icon={CalendarRange} />
         <RangeButton value="all" icon={Clock} />
       </div>
-
-      <ReportAssistant history={history} range={range} />
 
       {/* درآمد + سود */}
       <div className="mb-4 grid grid-cols-2 gap-2">

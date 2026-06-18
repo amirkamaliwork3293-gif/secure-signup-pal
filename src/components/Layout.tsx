@@ -4,6 +4,7 @@ import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users
 import type { ReactNode } from "react";
 import { settings } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { FloatingAssistant } from "@/components/FloatingAssistant";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -79,6 +80,8 @@ export function Layout({ children }: { children: ReactNode }) {
       )}
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
+
+      <FloatingAssistant />
 
       {/* pb-safe: فاصله امن برای نوار ژست اندروید/آیفون در نسخه APK */}
       <nav

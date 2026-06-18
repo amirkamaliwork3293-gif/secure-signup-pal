@@ -173,6 +173,8 @@ function ReportsPageInner() {
         <RangeButton value="all" icon={Clock} />
       </div>
 
+      <ReportAssistant history={history} range={range} />
+
       {/* درآمد + سود */}
       <div className="mb-4 grid grid-cols-2 gap-2">
         <section className="rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">

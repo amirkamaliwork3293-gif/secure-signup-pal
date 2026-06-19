@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   customers, customerBalance, customerFullName, formatToman, formatNumber, parseNumberInput, cryptoId,
+  settings,
   type Customer, type CustomerTx,
 } from "@/lib/store";
 import {
   Users, Plus, X, Search, Phone, Trash2, Pencil,
   ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp, Wallet,
+  Bell, MessageCircle, Send,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -37,6 +39,7 @@ function CustomersPageInner() {
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | null>(null);
   const [txTarget, setTxTarget] = useState<{ customer: Customer; type: "debt" | "payment" } | null>(null);
+  const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -142,6 +145,7 @@ function CustomersPageInner() {
               onPayment={() => setTxTarget({ customer: c, type: "payment" })}
               onEdit={() => setEditTarget(c)}
               onDelete={() => removeCustomer(c)}
+              onRemind={() => setReminderTarget(c)}
             />
           ))}
         </ul>
@@ -175,6 +179,13 @@ function CustomersPageInner() {
           onClose={() => setTxTarget(null)}
         />
       )}
+
+      {reminderTarget && (
+        <ReminderModal
+          customer={reminderTarget}
+          onClose={() => setReminderTarget(null)}
+        />
+      )}
     </Layout>
   );
 }
@@ -182,16 +193,18 @@ function CustomersPageInner() {
 // ─── کارت مشتری ──────────────────────────────────────────────────────────────
 
 function CustomerCard({
-  customer, onDebt, onPayment, onEdit, onDelete,
+  customer, onDebt, onPayment, onEdit, onDelete, onRemind,
 }: {
   customer: Customer;
   onDebt: () => void;
   onPayment: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRemind: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const balance = customerBalance(customer);
+  const canRemind = balance > 0 && !!customer.phone;
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
@@ -229,6 +242,16 @@ function CustomerCard({
               ثبت پرداخت
             </button>
           </div>
+
+          {canRemind && (
+            <button
+              onClick={onRemind}
+              className="mb-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+            >
+              <Bell className="h-3.5 w-3.5" />
+              ارسال یادآور بدهی
+            </button>
+          )}
 
           {customer.txs.length === 0 ? (
             <p className="py-2 text-center text-xs text-muted-foreground">تراکنشی ثبت نشده است.</p>
@@ -409,4 +432,82 @@ function TxModal({
 
 function CustomersPage() {
   return <AuthGuard><CustomersPageInner /></AuthGuard>;
+}
+
+// ─── مودال یادآور (واتساپ / پیامک) ─────────────────────────────────────────
+
+function toIntlPhone(raw: string): string {
+  // فقط اعداد و تبدیل ارقام فارسی/عربی
+  const en = raw.replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+                .replace(/[\u0660-\u0669]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  const digits = en.replace(/\D/g, "");
+  if (digits.startsWith("0098")) return digits.slice(2);
+  if (digits.startsWith("98")) return digits;
+  if (digits.startsWith("0")) return "98" + digits.slice(1);
+  if (digits.startsWith("9") && digits.length === 10) return "98" + digits;
+  return digits;
+}
+
+function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const balance = customerBalance(customer);
+  const shopName = settings.get().shopName || "فروشگاه ما";
+  const defaultMsg =
+    `سلام ${customerFullName(customer)} عزیز،\n` +
+    `یادآور بدهی شما به ${shopName}:\n` +
+    `مبلغ: ${formatToman(balance)}\n` +
+    `لطفاً در اولین فرصت نسبت به تسویه اقدام بفرمایید. با تشکر.`;
+  const [text, setText] = useState(defaultMsg);
+  const phoneRaw = customer.phone ?? "";
+  const intl = toIntlPhone(phoneRaw);
+  const waUrl = `https://wa.me/${intl}?text=${encodeURIComponent(text)}`;
+  const smsUrl = `sms:${phoneRaw}?body=${encodeURIComponent(text)}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-base font-bold">
+            <Bell className="h-4 w-4 text-primary" />
+            ارسال یادآور بدهی
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          به <strong className="text-foreground">{customerFullName(customer)}</strong>
+          {" "}— <span dir="ltr">{phoneRaw}</span>
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={7}
+          className={`${inputCls} resize-none leading-6`}
+        />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <a
+            href={waUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onClose}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-green-700"
+          >
+            <MessageCircle className="h-4 w-4" />
+            واتساپ
+          </a>
+          <a
+            href={smsUrl}
+            onClick={onClose}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+          >
+            <Send className="h-4 w-4" />
+            پیامک
+          </a>
+        </div>
+        {!intl && (
+          <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
+        )}
+      </div>
+    </div>
+  );
 }

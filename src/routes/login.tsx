@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { ensureAdminAccount } from "@/lib/auth.functions";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
+import { LoginPromoVideo } from "@/components/LoginPromoVideo";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
@@ -174,6 +175,7 @@ export function LoginPage() {
 
       <ApkDownloadButton className="mt-6" />
       <LoginHelpDialog />
+      <LoginPromoVideo className="mt-6 mb-4" />
     </div>
   );
 }

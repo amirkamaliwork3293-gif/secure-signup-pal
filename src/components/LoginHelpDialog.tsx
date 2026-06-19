@@ -1,11 +1,10 @@
 /**
  * راهنمای سریع (FAQ) برای صفحه‌ی ورود.
  * - لیست ثابت ۸ سؤال/جواب
- * - پخش صوتی پاسخ با Web Speech API (fa-IR)
  * - بدون هیچ تماس شبکه/سرور/AI
  */
 import { useEffect, useRef, useState } from "react";
-import { HelpCircle, Volume2, Square, Phone, X } from "lucide-react";
+import { HelpCircle, Phone, X } from "lucide-react";
 
 const SUPPORT_PHONE = "09138413293";
 
@@ -44,47 +43,12 @@ const FAQ: { q: string; a: string }[] = [
   },
 ];
 
-function hasSpeech(): boolean {
-  return typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined";
-}
-
 export function LoginHelpDialog() {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [speakingIdx, setSpeakingIdx] = useState<number | null>(null);
-  const [speechSupported, setSpeechSupported] = useState(false);
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setSpeechSupported(hasSpeech()); }, []);
-
-  const stopSpeech = () => {
-    if (hasSpeech()) {
-      try { window.speechSynthesis.cancel(); } catch {}
-    }
-    setSpeakingIdx(null);
-  };
-
-  const speak = (idx: number, text: string) => {
-    if (!hasSpeech()) return;
-    if (speakingIdx === idx) { stopSpeech(); return; }
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "fa-IR";
-      u.rate = 1;
-      u.onend = () => setSpeakingIdx((cur) => (cur === idx ? null : cur));
-      u.onerror = () => setSpeakingIdx((cur) => (cur === idx ? null : cur));
-      window.speechSynthesis.speak(u);
-      setSpeakingIdx(idx);
-    } catch {
-      setSpeakingIdx(null);
-    }
-  };
-
-  const close = () => {
-    stopSpeech();
-    setOpen(false);
-  };
+  const close = () => setOpen(false);
 
   useEffect(() => {
     if (!open) return;
@@ -93,9 +57,6 @@ export function LoginHelpDialog() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  // Stop speech when component unmounts.
-  useEffect(() => () => { if (hasSpeech()) { try { window.speechSynthesis.cancel(); } catch {} } }, []);
 
   return (
     <>
@@ -134,7 +95,6 @@ export function LoginHelpDialog() {
               <ul className="space-y-2">
                 {FAQ.map((item, idx) => {
                   const isOpen = expanded === idx;
-                  const isSpeaking = speakingIdx === idx;
                   return (
                     <li key={idx} className="rounded-xl border border-border bg-background">
                       <button
@@ -148,16 +108,6 @@ export function LoginHelpDialog() {
                       {isOpen && (
                         <div className="border-t border-border px-3 py-2.5">
                           <p className="text-xs leading-7 text-muted-foreground">{item.a}</p>
-                          {speechSupported && (
-                            <button
-                              type="button"
-                              onClick={() => speak(idx, item.a)}
-                              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1.5 text-[11px] font-semibold text-primary transition hover:bg-primary/10"
-                            >
-                              {isSpeaking ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-                              {isSpeaking ? "توقف پخش" : "شنیدن پاسخ"}
-                            </button>
-                          )}
                         </div>
                       )}
                     </li>

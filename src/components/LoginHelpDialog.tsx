@@ -95,7 +95,6 @@ export function LoginHelpDialog() {
               <ul className="space-y-2">
                 {FAQ.map((item, idx) => {
                   const isOpen = expanded === idx;
-                  const isSpeaking = speakingIdx === idx;
                   return (
                     <li key={idx} className="rounded-xl border border-border bg-background">
                       <button
@@ -109,16 +108,6 @@ export function LoginHelpDialog() {
                       {isOpen && (
                         <div className="border-t border-border px-3 py-2.5">
                           <p className="text-xs leading-7 text-muted-foreground">{item.a}</p>
-                          {speechSupported && (
-                            <button
-                              type="button"
-                              onClick={() => speak(idx, item.a)}
-                              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/5 px-2.5 py-1.5 text-[11px] font-semibold text-primary transition hover:bg-primary/10"
-                            >
-                              {isSpeaking ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-                              {isSpeaking ? "توقف پخش" : "شنیدن پاسخ"}
-                            </button>
-                          )}
                         </div>
                       )}
                     </li>

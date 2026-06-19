@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { ensureAdminAccount } from "@/lib/auth.functions";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
+import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
@@ -172,6 +173,7 @@ export function LoginPage() {
       </div>
 
       <ApkDownloadButton className="mt-6" />
+      <LoginHelpDialog />
     </div>
   );
 }

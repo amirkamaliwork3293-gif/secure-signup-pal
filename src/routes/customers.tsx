@@ -433,3 +433,81 @@ function TxModal({
 function CustomersPage() {
   return <AuthGuard><CustomersPageInner /></AuthGuard>;
 }
+
+// ─── مودال یادآور (واتساپ / پیامک) ─────────────────────────────────────────
+
+function toIntlPhone(raw: string): string {
+  // فقط اعداد و تبدیل ارقام فارسی/عربی
+  const en = raw.replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+                .replace(/[\u0660-\u0669]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  const digits = en.replace(/\D/g, "");
+  if (digits.startsWith("0098")) return digits.slice(2);
+  if (digits.startsWith("98")) return digits;
+  if (digits.startsWith("0")) return "98" + digits.slice(1);
+  if (digits.startsWith("9") && digits.length === 10) return "98" + digits;
+  return digits;
+}
+
+function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const balance = customerBalance(customer);
+  const shopName = settings.get().shopName || "فروشگاه ما";
+  const defaultMsg =
+    `سلام ${customerFullName(customer)} عزیز،\n` +
+    `یادآور بدهی شما به ${shopName}:\n` +
+    `مبلغ: ${formatToman(balance)}\n` +
+    `لطفاً در اولین فرصت نسبت به تسویه اقدام بفرمایید. با تشکر.`;
+  const [text, setText] = useState(defaultMsg);
+  const phoneRaw = customer.phone ?? "";
+  const intl = toIntlPhone(phoneRaw);
+  const waUrl = `https://wa.me/${intl}?text=${encodeURIComponent(text)}`;
+  const smsUrl = `sms:${phoneRaw}?body=${encodeURIComponent(text)}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-base font-bold">
+            <Bell className="h-4 w-4 text-primary" />
+            ارسال یادآور بدهی
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          به <strong className="text-foreground">{customerFullName(customer)}</strong>
+          {" "}— <span dir="ltr">{phoneRaw}</span>
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={7}
+          className={`${inputCls} resize-none leading-6`}
+        />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <a
+            href={waUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onClose}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-green-700"
+          >
+            <MessageCircle className="h-4 w-4" />
+            واتساپ
+          </a>
+          <a
+            href={smsUrl}
+            onClick={onClose}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+          >
+            <Send className="h-4 w-4" />
+            پیامک
+          </a>
+        </div>
+        {!intl && (
+          <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
+        )}
+      </div>
+    </div>
+  );
+}

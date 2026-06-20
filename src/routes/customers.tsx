@@ -41,6 +41,7 @@ function CustomersPageInner() {
   const [editTarget, setEditTarget] = useState<Customer | null>(null);
   const [txTarget, setTxTarget] = useState<{ customer: Customer; type: "debt" | "payment" } | null>(null);
   const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
+  const [showCampaign, setShowCampaign] = useState(false);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -92,6 +93,15 @@ function CustomersPageInner() {
           مشتری جدید
         </button>
       </div>
+
+      {/* پنل پیامکی — ارسال گروهی */}
+      <button
+        onClick={() => setShowCampaign(true)}
+        className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10"
+      >
+        <Megaphone className="h-4 w-4" />
+        پنل پیامکی — ارسال جشنواره / تخفیف / تبلیغ
+      </button>
 
       {/* جمع کل طلب */}
       <section className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
@@ -186,6 +196,10 @@ function CustomersPageInner() {
           customer={reminderTarget}
           onClose={() => setReminderTarget(null)}
         />
+      )}
+
+      {showCampaign && (
+        <SmsCampaignModal customers={list} onClose={() => setShowCampaign(false)} />
       )}
     </Layout>
   );

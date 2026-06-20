@@ -526,3 +526,215 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
     </div>
   );
 }
+
+// ─── پنل پیامکی (ارسال گروهی) ──────────────────────────────────────────────
+
+type Audience = "all" | "debtors" | "settled";
+
+const TEMPLATES: { id: string; label: string; body: (shop: string) => string }[] = [
+  {
+    id: "festival",
+    label: "🎉 جشنواره",
+    body: (shop) =>
+      `مشتری گرامی،\n${shop} با افتخار جشنواره ویژه‌ای برگزار می‌کند.\nبا تخفیف‌های شگفت‌انگیز در انتظار شما هستیم.\nمنتظر دیدارتان هستیم 🌹`,
+  },
+  {
+    id: "discount",
+    label: "🏷️ تخفیف",
+    body: (shop) =>
+      `سلام،\nتخفیف ویژه ${shop} فعال شد!\nفرصت را از دست ندهید و همین حالا از محصولات منتخب با قیمت استثنایی بهره‌مند شوید.`,
+  },
+  {
+    id: "promo",
+    label: "📣 تبلیغ",
+    body: (shop) =>
+      `با سلام،\nمحصولات جدید ${shop} رسید!\nبرای مشاهده تازه‌ترین کالاها به فروشگاه ما سر بزنید.\nبا تشکر از همراهی شما.`,
+  },
+  {
+    id: "thanks",
+    label: "🙏 تشکر",
+    body: (shop) =>
+      `مشتری گرامی،\nاز اینکه ${shop} را انتخاب کرده‌اید سپاسگزاریم.\nهمیشه در خدمت شما هستیم.`,
+  },
+];
+
+function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[]; onClose: () => void }) {
+  const shopName = settings.get().shopName || "فروشگاه ما";
+  const [audience, setAudience] = useState<Audience>("all");
+  const [text, setText] = useState(TEMPLATES[0].body(shopName));
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [customMode, setCustomMode] = useState(false);
+
+  const audienceList = useMemo(() => {
+    return list.filter((c) => {
+      if (!c.phone) return false;
+      const b = customerBalance(c);
+      if (audience === "debtors") return b > 0;
+      if (audience === "settled") return b <= 0;
+      return true;
+    });
+  }, [list, audience]);
+
+  const finalList = useMemo(
+    () => (customMode ? audienceList.filter((c) => selectedIds.has(c.id)) : audienceList),
+    [customMode, audienceList, selectedIds],
+  );
+
+  const toggle = (id: string) => {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+
+  const sendSms = () => {
+    if (finalList.length === 0) { alert("هیچ گیرنده‌ای انتخاب نشده."); return; }
+    const numbers = finalList.map((c) => c.phone!).join(",");
+    const url = `sms:${numbers}?body=${encodeURIComponent(text)}`;
+    window.location.href = url;
+    onClose();
+  };
+
+  const sendWhatsAppOne = (c: Customer) => {
+    const intl = toIntlPhone(c.phone ?? "");
+    if (!intl) return;
+    const personal = text.replace(/\{name\}/g, customerFullName(c));
+    const url = `https://wa.me/${intl}?text=${encodeURIComponent(personal)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
+        <div className="flex items-center justify-between border-b border-border p-4">
+          <h3 className="flex items-center gap-2 text-base font-bold">
+            <Megaphone className="h-4 w-4 text-primary" />
+            پنل پیامکی
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 overflow-y-auto p-4">
+          {/* قالب آماده */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">قالب آماده</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setText(t.body(shopName))}
+                  className="rounded-xl border border-border bg-background px-2 py-2 text-xs font-medium hover:bg-accent"
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* متن پیام */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              متن پیام <span className="text-[10px] opacity-70">(در واتساپ، {"{name}"} با نام مشتری جایگزین می‌شود)</span>
+            </label>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={5}
+              className={`${inputCls} resize-none leading-6`}
+              placeholder="متن پیام جشنواره/تخفیف..."
+            />
+            <div className="mt-1 text-[10px] text-muted-foreground text-left">{text.length} کاراکتر</div>
+          </div>
+
+          {/* گیرندگان */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">گیرندگان</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { v: "all", l: "همه" },
+                { v: "debtors", l: "بدهکاران" },
+                { v: "settled", l: "تسویه‌شده" },
+              ] as { v: Audience; l: string }[]).map((o) => (
+                <button
+                  key={o.v}
+                  onClick={() => { setAudience(o.v); setSelectedIds(new Set()); }}
+                  className={`rounded-xl border px-2 py-2 text-xs font-medium ${audience === o.v ? "border-primary bg-primary/10 text-primary" : "border-border bg-background"}`}
+                >
+                  {o.l}
+                </button>
+              ))}
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <input type="checkbox" checked={customMode} onChange={(e) => setCustomMode(e.target.checked)} className="h-4 w-4" />
+              انتخاب دستی مشتریان
+            </label>
+          </div>
+
+          {/* لیست گیرندگان */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">
+                {customMode ? "انتخاب کنید" : "پیش‌نمایش گیرندگان"}
+              </span>
+              <span className="text-[11px] font-semibold text-primary">
+                {formatNumber(finalList.length)} نفر
+              </span>
+            </div>
+            <div className="max-h-40 overflow-y-auto rounded-xl border border-border bg-background">
+              {audienceList.length === 0 ? (
+                <p className="p-3 text-center text-xs text-muted-foreground">مشتری دارای شماره تلفن در این گروه نیست.</p>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {audienceList.map((c) => {
+                    const checked = customMode ? selectedIds.has(c.id) : true;
+                    return (
+                      <li key={c.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                        {customMode ? (
+                          <button
+                            onClick={() => toggle(c.id)}
+                            className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
+                          >
+                            {checked && <Check className="h-3 w-3" />}
+                          </button>
+                        ) : (
+                          <Check className="h-4 w-4 shrink-0 text-green-600" />
+                        )}
+                        <span className="flex-1 truncate">{customerFullName(c)}</span>
+                        <span className="text-muted-foreground" dir="ltr">{c.phone}</span>
+                        <button
+                          onClick={() => sendWhatsAppOne(c)}
+                          title="ارسال واتساپ به این مشتری"
+                          className="grid h-7 w-7 place-items-center rounded-lg text-green-600 hover:bg-green-500/10"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
+            💡 با زدن دکمه «ارسال پیامک»، اپ پیامک گوشی با همه شماره‌ها و متن آماده باز می‌شود. برای واتساپ، روی آیکن سبز کنار هر مشتری بزنید (واتساپ ارسال گروهی از طریق لینک ندارد).
+          </div>
+        </div>
+
+        <div className="border-t border-border p-4">
+          <button
+            onClick={sendSms}
+            disabled={finalList.length === 0}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Send className="h-4 w-4" />
+            ارسال پیامک به {formatNumber(finalList.length)} نفر
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

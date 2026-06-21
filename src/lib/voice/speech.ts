@@ -25,8 +25,14 @@ export type StartHandlers = {
   onPartial?: (text: string) => void;
   /** نتیجه‌ی نهایی پس از پایان صحبت */
   onResult: (text: string) => void;
-  /** خطا با پیام فارسی قابل‌نمایش */
+  /** خطای موقت تشخیص گفتار (مثلاً صدایی شنیده نشد) — کاربر می‌تواند دوباره تلاش کند */
   onError: (message: string) => void;
+  /**
+   * میکروفون در دسترس نیست (اجازه داده نشد یا دستگاه پشتیبانی نمی‌کند).
+   * در این حالت رابط کاربری باید بی‌سروصدا به «ورود دستی متن» برگردد — نه اینکه
+   * کاربر را مجبور به فعال‌کردن میکروفون کند. اگر تعریف نشده باشد، به onError می‌افتد.
+   */
+  onUnavailable?: (message: string) => void;
   /** پایان شنیدن (به هر دلیل) */
   onEnd?: () => void;
 };
@@ -108,10 +114,15 @@ export function detectEngine(): SpeechEngine {
   return "none";
 }
 
-const PERMISSION_DENIED_MSG =
-  "دسترسی به میکروفون داده نشد. لطفاً از تنظیمات گوشی، اجازه‌ی میکروفون را برای اپ فعال کنید.";
+const PERMISSION_DENIED_MSG = "میکروفون فعال نشد — می‌توانید در عوض متن را دستی وارد کنید.";
 const UNSUPPORTED_MSG =
-  "تشخیص گفتار روی این دستگاه پشتیبانی نمی‌شود. می‌توانید متن را دستی وارد کنید.";
+  "تشخیص گفتار روی این دستگاه در دسترس نیست — می‌توانید متن را دستی وارد کنید.";
+
+/** میکروفون در دسترس نیست → ترجیحاً به ورود دستی برگرد؛ اگر هندلر نبود، خطا بده. */
+function notifyUnavailable(h: StartHandlers, message: string) {
+  if (h.onUnavailable) h.onUnavailable(message);
+  else h.onError(message);
+}
 
 // ─── ساخت Recognizer ──────────────────────────────────────────────────────────
 
@@ -127,7 +138,7 @@ export function createRecognizer(): Recognizer {
   return {
     engine: "none",
     isSupported: false,
-    start: async (h) => h.onError(UNSUPPORTED_MSG),
+    start: async (h) => notifyUnavailable(h, UNSUPPORTED_MSG),
     stop: async () => {},
   };
 }
@@ -164,12 +175,15 @@ function createNativeRecognizer(): Recognizer {
       lastPartial = "";
       try {
         const avail = await p.available();
-        if (!avail?.available) return h.onError(UNSUPPORTED_MSG);
+        if (!avail?.available) return notifyUnavailable(h, UNSUPPORTED_MSG);
 
+        // اجازه‌ی میکروفون فقط همین‌جا — یعنی وقتی کاربر خودش دکمه‌ی ضبط را زده —
+        // درخواست می‌شود؛ نه هنگام باز شدن صفحه. اگر داده نشد، به‌جای اجبار کاربر
+        // به تنظیمات، بی‌سروصدا به ورود دستی برمی‌گردیم.
         const perm = (await p.checkPermissions?.())?.speechRecognition;
         if (perm !== "granted") {
           const req = (await p.requestPermissions?.())?.speechRecognition;
-          if (req && req !== "granted") return h.onError(PERMISSION_DENIED_MSG);
+          if (req && req !== "granted") return notifyUnavailable(h, PERMISSION_DENIED_MSG);
         }
 
         const partial = await p.addListener("partialResults", (data) => {
@@ -208,7 +222,8 @@ function createNativeRecognizer(): Recognizer {
       } catch (e) {
         await cleanup();
         const msg = String((e as { message?: string })?.message ?? e);
-        if (/permission|denied|اجازه/i.test(msg)) h.onError(PERMISSION_DENIED_MSG);
+        if (/permission|denied|اجازه|not.?allowed/i.test(msg))
+          notifyUnavailable(h, PERMISSION_DENIED_MSG);
         else h.onError("خطا در تشخیص گفتار. دوباره تلاش کنید یا متن را دستی وارد کنید.");
       }
     },
@@ -231,7 +246,7 @@ function createWebRecognizer(): Recognizer {
     engine: "web",
     isSupported: !!Ctor,
     start: async (h) => {
-      if (!Ctor) return h.onError(UNSUPPORTED_MSG);
+      if (!Ctor) return notifyUnavailable(h, UNSUPPORTED_MSG);
       try {
         rec = new Ctor();
         rec.lang = "fa-IR";
@@ -253,7 +268,7 @@ function createWebRecognizer(): Recognizer {
         };
         rec.onerror = (e) => {
           if (e.error === "not-allowed" || e.error === "service-not-allowed")
-            h.onError(PERMISSION_DENIED_MSG);
+            notifyUnavailable(h, PERMISSION_DENIED_MSG);
           else if (e.error === "no-speech") h.onError("صدایی شنیده نشد. دوباره تلاش کنید.");
           else h.onError("خطا در تشخیص گفتار. دوباره تلاش کنید.");
         };

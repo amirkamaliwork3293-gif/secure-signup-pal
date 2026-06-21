@@ -63,6 +63,7 @@ function VoicePageInner() {
   const [results, setResults] = useState<ResolvedItem[]>([]);
   const [manualMode, setManualMode] = useState(false);
   const [manualText, setManualText] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
 
   useEffect(() => {
@@ -170,6 +171,7 @@ function VoicePageInner() {
     const rec = recognizerRef.current;
     if (!rec) return;
     setError(null);
+    setNotice(null);
     setResults([]);
     setTranscript("");
     setListening(true);
@@ -182,6 +184,13 @@ function VoicePageInner() {
       onError: (msg) => {
         setListening(false);
         setError(msg);
+      },
+      // میکروفون در دسترس نیست/اجازه داده نشد → بدون اجبار، به ورود دستی برمی‌گردیم
+      onUnavailable: (msg) => {
+        setListening(false);
+        setError(null);
+        setNotice(msg);
+        setManualMode(true);
       },
       onEnd: () => setListening(false),
     });
@@ -254,10 +263,14 @@ function VoicePageInner() {
       {/* حالت دستی (یا وقتی تشخیص گفتار پشتیبانی نمی‌شود) */}
       {manualMode && (
         <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
-          {engine === "none" && (
-            <p className="mb-2 text-xs text-amber-600">
-              تشخیص گفتار روی این دستگاه در دسترس نیست؛ متن را دستی وارد کنید.
-            </p>
+          {notice ? (
+            <p className="mb-2 text-xs text-amber-600">{notice}</p>
+          ) : (
+            engine === "none" && (
+              <p className="mb-2 text-xs text-amber-600">
+                تشخیص گفتار روی این دستگاه در دسترس نیست؛ متن را دستی وارد کنید.
+              </p>
+            )
           )}
           <textarea
             value={manualText}

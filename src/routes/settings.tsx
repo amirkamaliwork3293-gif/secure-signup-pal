@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
-import { publishStoreProfile, uploadStoreLogo } from "@/lib/storeProfile";
+import { publishStoreProfile, uploadStoreLogo, storeErrorMessage } from "@/lib/storeProfile";
 import { openExternal } from "@/lib/openExternal";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import {
@@ -173,8 +173,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
     try {
       const url = await uploadStoreLogo(userId, file);
       setLogoUrl(url);
-    } catch {
-      alert("آپلود لوگو ناموفق بود. اتصال اینترنت را بررسی کنید.");
+    } catch (e) {
+      console.error("[settings] logo upload failed:", e);
+      alert(storeErrorMessage(e));
     } finally {
       setUploading(false);
     }
@@ -213,8 +214,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
       await publishStoreProfile(userId, profile);
       setDone(true);
       setTimeout(() => setDone(false), 2500);
-    } catch {
-      alert("انتشار صفحه‌ی فروشگاه ناموفق بود. اتصال اینترنت را بررسی کنید.");
+    } catch (e) {
+      console.error("[settings] publish store profile failed:", e);
+      alert(storeErrorMessage(e));
     } finally {
       setBusy(false);
     }

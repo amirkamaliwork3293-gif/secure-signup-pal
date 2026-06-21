@@ -3,15 +3,38 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
-  customers, customerBalance, customerFullName, formatToman, formatNumber, parseNumberInput, cryptoId,
+  customers,
+  customerBalance,
+  customerFullName,
+  formatToman,
+  formatNumber,
+  parseNumberInput,
+  cryptoId,
   settings,
-  type Customer, type CustomerTx,
+  storePublicUrl,
+  type Customer,
+  type CustomerTx,
 } from "@/lib/store";
+import { useAuth } from "@/lib/AuthContext";
 import {
-  Users, Plus, X, Search, Phone, Trash2, Pencil,
-  ArrowDownCircle, ArrowUpCircle, ChevronDown, ChevronUp, Wallet,
-  Bell, MessageCircle, Send,
-  Megaphone, Check,
+  Users,
+  Plus,
+  X,
+  Search,
+  Phone,
+  Trash2,
+  Pencil,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  ChevronDown,
+  ChevronUp,
+  Wallet,
+  Bell,
+  MessageCircle,
+  Send,
+  Megaphone,
+  Check,
+  Link2,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -30,7 +53,8 @@ export const Route = createFileRoute("/customers")({
 
 type Filter = "all" | "debtor" | "settled";
 
-const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
+const inputCls =
+  "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
 
 function CustomersPageInner() {
   const { q: incomingQuery } = Route.useSearch();
@@ -39,7 +63,9 @@ function CustomersPageInner() {
   const [filter, setFilter] = useState<Filter>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | null>(null);
-  const [txTarget, setTxTarget] = useState<{ customer: Customer; type: "debt" | "payment" } | null>(null);
+  const [txTarget, setTxTarget] = useState<{ customer: Customer; type: "debt" | "payment" } | null>(
+    null,
+  );
   const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
   const [showCampaign, setShowCampaign] = useState(false);
 
@@ -52,7 +78,10 @@ function CustomersPageInner() {
     let debtors = 0;
     for (const c of list) {
       const b = customerBalance(c);
-      if (b > 0) { receivable += b; debtors++; }
+      if (b > 0) {
+        receivable += b;
+        debtors++;
+      }
     }
     return { receivable, debtors };
   }, [list]);
@@ -71,7 +100,8 @@ function CustomersPageInner() {
   }, [list, searchQ, filter]);
 
   const removeCustomer = (c: Customer) => {
-    if (!confirm(`حساب «${customerFullName(c)}» حذف شود؟ تمام سوابق بدهی و پرداخت پاک می‌شود.`)) return;
+    if (!confirm(`حساب «${customerFullName(c)}» حذف شود؟ تمام سوابق بدهی و پرداخت پاک می‌شود.`))
+      return;
     customers.remove(c.id);
   };
 
@@ -192,15 +222,10 @@ function CustomersPageInner() {
       )}
 
       {reminderTarget && (
-        <ReminderModal
-          customer={reminderTarget}
-          onClose={() => setReminderTarget(null)}
-        />
+        <ReminderModal customer={reminderTarget} onClose={() => setReminderTarget(null)} />
       )}
 
-      {showCampaign && (
-        <SmsCampaignModal customers={list} onClose={() => setShowCampaign(false)} />
-      )}
+      {showCampaign && <SmsCampaignModal customers={list} onClose={() => setShowCampaign(false)} />}
     </Layout>
   );
 }
@@ -208,7 +233,12 @@ function CustomersPageInner() {
 // ─── کارت مشتری ──────────────────────────────────────────────────────────────
 
 function CustomerCard({
-  customer, onDebt, onPayment, onEdit, onDelete, onRemind,
+  customer,
+  onDebt,
+  onPayment,
+  onEdit,
+  onDelete,
+  onRemind,
 }: {
   customer: Customer;
   onDebt: () => void;
@@ -223,36 +253,58 @@ function CustomerCard({
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right"
+      >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="truncate font-medium">{customerFullName(customer)}</span>
             {balance > 0 ? (
-              <span className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold text-destructive">بدهکار</span>
+              <span className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
+                بدهکار
+              </span>
             ) : (
-              <span className="rounded-md bg-green-500/10 px-1.5 py-0.5 text-[10px] font-bold text-green-600">تسویه</span>
+              <span className="rounded-md bg-green-500/10 px-1.5 py-0.5 text-[10px] font-bold text-green-600">
+                تسویه
+              </span>
             )}
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
-            <span className={`font-semibold ${balance > 0 ? "text-destructive" : "text-green-600"}`}>
+            <span
+              className={`font-semibold ${balance > 0 ? "text-destructive" : "text-green-600"}`}
+            >
               {balance > 0 ? `بدهی: ${formatToman(balance)}` : "بدون بدهی"}
             </span>
             {customer.phone && (
-              <span className="flex items-center gap-1" dir="ltr"><Phone className="h-3 w-3" />{customer.phone}</span>
+              <span className="flex items-center gap-1" dir="ltr">
+                <Phone className="h-3 w-3" />
+                {customer.phone}
+              </span>
             )}
           </div>
         </div>
-        {open ? <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        {open ? (
+          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
       </button>
 
       {open && (
         <div className="border-t border-border px-4 pb-4 pt-3">
           <div className="mb-3 grid grid-cols-2 gap-2">
-            <button onClick={onDebt} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
+            <button
+              onClick={onDebt}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive"
+            >
               <ArrowUpCircle className="h-3.5 w-3.5" />
               ثبت بدهی
             </button>
-            <button onClick={onPayment} className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-400">
+            <button
+              onClick={onPayment}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-400"
+            >
               <ArrowDownCircle className="h-3.5 w-3.5" />
               ثبت پرداخت
             </button>
@@ -272,19 +324,31 @@ function CustomerCard({
             <p className="py-2 text-center text-xs text-muted-foreground">تراکنشی ثبت نشده است.</p>
           ) : (
             <ul className="space-y-1.5 max-h-56 overflow-y-auto">
-              {customer.txs.map((t) => <TxRow key={t.id} tx={t} customer={customer} />)}
+              {customer.txs.map((t) => (
+                <TxRow key={t.id} tx={t} customer={customer} />
+              ))}
             </ul>
           )}
 
           {customer.note && (
-            <div className="mt-2 rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">{customer.note}</div>
+            <div className="mt-2 rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
+              {customer.note}
+            </div>
           )}
 
           <div className="mt-3 flex justify-end gap-1">
-            <button onClick={onEdit} className="grid h-8 w-8 place-items-center rounded-lg text-primary hover:bg-primary/10" title="ویرایش">
+            <button
+              onClick={onEdit}
+              className="grid h-8 w-8 place-items-center rounded-lg text-primary hover:bg-primary/10"
+              title="ویرایش"
+            >
               <Pencil className="h-4 w-4" />
             </button>
-            <button onClick={onDelete} className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10" title="حذف">
+            <button
+              onClick={onDelete}
+              className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+              title="حذف"
+            >
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
@@ -302,9 +366,11 @@ function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
   };
   return (
     <li className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs">
-      {isDebt
-        ? <ArrowUpCircle className="h-4 w-4 shrink-0 text-destructive" />
-        : <ArrowDownCircle className="h-4 w-4 shrink-0 text-green-600" />}
+      {isDebt ? (
+        <ArrowUpCircle className="h-4 w-4 shrink-0 text-destructive" />
+      ) : (
+        <ArrowDownCircle className="h-4 w-4 shrink-0 text-green-600" />
+      )}
       <div className="min-w-0 flex-1">
         <div className={`font-semibold ${isDebt ? "text-destructive" : "text-green-600"}`}>
           {isDebt ? "بدهی" : "پرداخت"} — {formatToman(tx.amount)}
@@ -314,7 +380,10 @@ function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
           {tx.note && ` · ${tx.note}`}
         </div>
       </div>
-      <button onClick={removeTx} className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+      <button
+        onClick={removeTx}
+        className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      >
         <Trash2 className="h-3.5 w-3.5" />
       </button>
     </li>
@@ -324,7 +393,9 @@ function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
 // ─── مودال مشتری ─────────────────────────────────────────────────────────────
 
 function CustomerModal({
-  initial, onClose, onSave,
+  initial,
+  onClose,
+  onSave,
 }: {
   initial?: Customer;
   onClose: () => void;
@@ -337,7 +408,10 @@ function CustomerModal({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName.trim()) { alert("نام مشتری الزامی است."); return; }
+    if (!firstName.trim()) {
+      alert("نام مشتری الزامی است.");
+      return;
+    }
     onSave({
       firstName: firstName.trim(),
       lastName: lastName.trim() || undefined,
@@ -347,22 +421,56 @@ function CustomerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold">{initial ? "ویرایش مشتری" : "مشتری جدید"}</h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="نام *" className={inputCls} />
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="نام خانوادگی" className={inputCls} />
+            <input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="نام *"
+              className={inputCls}
+            />
+            <input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="نام خانوادگی"
+              className={inputCls}
+            />
           </div>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="شماره تلفن" inputMode="tel" dir="ltr" className={inputCls} />
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="یادداشت (اختیاری)" className={`${inputCls} resize-none`} />
-          <button type="submit" className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="شماره تلفن"
+            inputMode="tel"
+            dir="ltr"
+            className={inputCls}
+          />
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="یادداشت (اختیاری)"
+            className={`${inputCls} resize-none`}
+          />
+          <button
+            type="submit"
+            className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+          >
             ذخیره
           </button>
         </form>
@@ -374,7 +482,9 @@ function CustomerModal({
 // ─── مودال ثبت بدهی / پرداخت ────────────────────────────────────────────────
 
 function TxModal({
-  customer, type, onClose,
+  customer,
+  type,
+  onClose,
 }: {
   customer: Customer;
   type: "debt" | "payment";
@@ -388,29 +498,47 @@ function TxModal({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const n = parseNumberInput(amount);
-    if (!n || n <= 0) { alert("مبلغ معتبر وارد کنید."); return; }
+    if (!n || n <= 0) {
+      alert("مبلغ معتبر وارد کنید.");
+      return;
+    }
     customers.addTx(customer.id, { type, amount: n, note: note.trim() || undefined });
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
         <div className="mb-1 flex items-center justify-between">
           <h3 className={`text-base font-bold ${isDebt ? "text-destructive" : "text-green-600"}`}>
             {isDebt ? "ثبت بدهی جدید" : "ثبت پرداخت / تسویه"}
           </h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">
           {customerFullName(customer)}
-          {balance > 0 && <> — بدهی فعلی: <strong className="text-destructive">{formatToman(balance)}</strong></>}
+          {balance > 0 && (
+            <>
+              {" "}
+              — بدهی فعلی: <strong className="text-destructive">{formatToman(balance)}</strong>
+            </>
+          )}
         </p>
         <form onSubmit={submit} className="space-y-3">
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">مبلغ (تومان)</label>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              مبلغ (تومان)
+            </label>
             <input
               value={amount ? formatNumber(parseNumberInput(amount)) : ""}
               onChange={(e) => {
@@ -432,7 +560,12 @@ function TxModal({
               تسویه کامل — {formatToman(balance)}
             </button>
           )}
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="بابت... (اختیاری)" className={inputCls} />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="بابت... (اختیاری)"
+            className={inputCls}
+          />
           <button
             type="submit"
             className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white ${isDebt ? "bg-destructive" : "bg-green-600"}`}
@@ -446,15 +579,20 @@ function TxModal({
 }
 
 function CustomersPage() {
-  return <AuthGuard><CustomersPageInner /></AuthGuard>;
+  return (
+    <AuthGuard>
+      <CustomersPageInner />
+    </AuthGuard>
+  );
 }
 
 // ─── مودال یادآور (واتساپ / پیامک) ─────────────────────────────────────────
 
 function toIntlPhone(raw: string): string {
   // فقط اعداد و تبدیل ارقام فارسی/عربی
-  const en = raw.replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-                .replace(/[\u0660-\u0669]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+  const en = raw
+    .replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[\u0660-\u0669]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
   const digits = en.replace(/\D/g, "");
   if (digits.startsWith("0098")) return digits.slice(2);
   if (digits.startsWith("98")) return digits;
@@ -478,20 +616,28 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
   const smsUrl = `sms:${phoneRaw}?body=${encodeURIComponent(text)}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-base font-bold">
             <Bell className="h-4 w-4 text-primary" />
             ارسال یادآور بدهی
           </h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          به <strong className="text-foreground">{customerFullName(customer)}</strong>
-          {" "}— <span dir="ltr">{phoneRaw}</span>
+          به <strong className="text-foreground">{customerFullName(customer)}</strong> —{" "}
+          <span dir="ltr">{phoneRaw}</span>
         </p>
         <textarea
           value={text}
@@ -558,12 +704,45 @@ const TEMPLATES: { id: string; label: string; body: (shop: string) => string }[]
   },
 ];
 
-function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[]; onClose: () => void }) {
+// هنگام ارسال انبوه، گیرندگان به گروه‌های ۱۰ نفره تقسیم می‌شوند تا اپ پیامک
+// گوشی با تعداد زیاد گیرنده دچار مشکل نشود. شماره‌های ارسال‌شده در همین نشست
+// نگه‌داری می‌شوند تا با بستن/بازکردن دوباره‌ی پنل هم مشخص بماند.
+const SMS_GROUP_SIZE = 10;
+const SMS_SENT_KEY = "acc.sms.sentPhones.v1";
+
+function readSentPhones(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = sessionStorage.getItem(SMS_SENT_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeSentPhones(set: Set<string>) {
+  try {
+    sessionStorage.setItem(SMS_SENT_KEY, JSON.stringify([...set]));
+  } catch {
+    /* ignore */
+  }
+}
+
+function SmsCampaignModal({
+  customers: list,
+  onClose,
+}: {
+  customers: Customer[];
+  onClose: () => void;
+}) {
   const shopName = settings.get().shopName || "فروشگاه ما";
+  const { state: authState } = useAuth();
+  const userId = authState.status === "authenticated" ? authState.session.user.id : null;
   const [audience, setAudience] = useState<Audience>("all");
   const [text, setText] = useState(TEMPLATES[0].body(shopName));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [customMode, setCustomMode] = useState(false);
+  const [includeLink, setIncludeLink] = useState(true);
+  const [sentPhones, setSentPhones] = useState<Set<string>>(() => readSentPhones());
 
   const audienceList = useMemo(() => {
     return list.filter((c) => {
@@ -583,36 +762,73 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
   const toggle = (id: string) => {
     setSelectedIds((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id); else n.add(id);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
   };
 
-  const sendSms = () => {
-    if (finalList.length === 0) { alert("هیچ گیرنده‌ای انتخاب نشده."); return; }
-    const numbers = finalList.map((c) => c.phone!).join(",");
-    const url = `sms:${numbers}?body=${encodeURIComponent(text)}`;
-    window.location.href = url;
-    onClose();
+  // لینک عمومی صفحه فروشگاه که در انتهای پیام افزوده می‌شود (در صورت فعال‌بودن)
+  const storeLink = userId && includeLink ? storePublicUrl(userId) : "";
+  const finalText = storeLink ? `${text}\n${storeLink}` : text;
+
+  const markSent = (phones: string[]) =>
+    setSentPhones((prev) => {
+      const next = new Set(prev);
+      phones.forEach((p) => next.add(p));
+      writeSentPhones(next);
+      return next;
+    });
+
+  // تقسیم گیرندگان به گروه‌های ۱۰ نفره
+  const groups = useMemo(() => {
+    const out: Customer[][] = [];
+    for (let i = 0; i < finalList.length; i += SMS_GROUP_SIZE)
+      out.push(finalList.slice(i, i + SMS_GROUP_SIZE));
+    return out;
+  }, [finalList]);
+
+  const groupSent = (group: Customer[]) =>
+    group.length > 0 && group.every((c) => sentPhones.has((c.phone ?? "").trim()));
+
+  // ارسال پیامک به یک گروه (چند گیرنده در یک لینک sms:)
+  const sendSmsGroup = (group: Customer[]) => {
+    const numbers = group.map((c) => (c.phone ?? "").trim()).filter(Boolean);
+    if (numbers.length === 0) {
+      alert("هیچ گیرنده‌ای انتخاب نشده.");
+      return;
+    }
+    window.location.href = `sms:${numbers.join(",")}?body=${encodeURIComponent(finalText)}`;
+    markSent(numbers);
   };
 
   const sendWhatsAppOne = (c: Customer) => {
     const intl = toIntlPhone(c.phone ?? "");
     if (!intl) return;
-    const personal = text.replace(/\{name\}/g, customerFullName(c));
+    let personal = text.replace(/\{name\}/g, customerFullName(c));
+    if (storeLink) personal = `${personal}\n${storeLink}`;
     const url = `https://wa.me/${intl}?text=${encodeURIComponent(personal)}`;
     window.open(url, "_blank", "noopener,noreferrer");
+    markSent([(c.phone ?? "").trim()]);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
         <div className="flex items-center justify-between border-b border-border p-4">
           <h3 className="flex items-center gap-2 text-base font-bold">
             <Megaphone className="h-4 w-4 text-primary" />
             پنل پیامکی
           </h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -620,7 +836,9 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
         <div className="space-y-4 overflow-y-auto p-4">
           {/* قالب آماده */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">قالب آماده</label>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              قالب آماده
+            </label>
             <div className="grid grid-cols-2 gap-1.5">
               {TEMPLATES.map((t) => (
                 <button
@@ -637,7 +855,10 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
           {/* متن پیام */}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              متن پیام <span className="text-[10px] opacity-70">(در واتساپ، {"{name}"} با نام مشتری جایگزین می‌شود)</span>
+              متن پیام{" "}
+              <span className="text-[10px] opacity-70">
+                (در واتساپ، {"{name}"} با نام مشتری جایگزین می‌شود)
+              </span>
             </label>
             <textarea
               value={text}
@@ -646,21 +867,30 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
               className={`${inputCls} resize-none leading-6`}
               placeholder="متن پیام جشنواره/تخفیف..."
             />
-            <div className="mt-1 text-[10px] text-muted-foreground text-left">{text.length} کاراکتر</div>
+            <div className="mt-1 text-[10px] text-muted-foreground text-left">
+              {text.length} کاراکتر
+            </div>
           </div>
 
           {/* گیرندگان */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">گیرندگان</label>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              گیرندگان
+            </label>
             <div className="grid grid-cols-3 gap-1.5">
-              {([
-                { v: "all", l: "همه" },
-                { v: "debtors", l: "بدهکاران" },
-                { v: "settled", l: "تسویه‌شده" },
-              ] as { v: Audience; l: string }[]).map((o) => (
+              {(
+                [
+                  { v: "all", l: "همه" },
+                  { v: "debtors", l: "بدهکاران" },
+                  { v: "settled", l: "تسویه‌شده" },
+                ] as { v: Audience; l: string }[]
+              ).map((o) => (
                 <button
                   key={o.v}
-                  onClick={() => { setAudience(o.v); setSelectedIds(new Set()); }}
+                  onClick={() => {
+                    setAudience(o.v);
+                    setSelectedIds(new Set());
+                  }}
                   className={`rounded-xl border px-2 py-2 text-xs font-medium ${audience === o.v ? "border-primary bg-primary/10 text-primary" : "border-border bg-background"}`}
                 >
                   {o.l}
@@ -668,7 +898,12 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
               ))}
             </div>
             <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <input type="checkbox" checked={customMode} onChange={(e) => setCustomMode(e.target.checked)} className="h-4 w-4" />
+              <input
+                type="checkbox"
+                checked={customMode}
+                onChange={(e) => setCustomMode(e.target.checked)}
+                className="h-4 w-4"
+              />
               انتخاب دستی مشتریان
             </label>
           </div>
@@ -685,7 +920,9 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
             </div>
             <div className="max-h-40 overflow-y-auto rounded-xl border border-border bg-background">
               {audienceList.length === 0 ? (
-                <p className="p-3 text-center text-xs text-muted-foreground">مشتری دارای شماره تلفن در این گروه نیست.</p>
+                <p className="p-3 text-center text-xs text-muted-foreground">
+                  مشتری دارای شماره تلفن در این گروه نیست.
+                </p>
               ) : (
                 <ul className="divide-y divide-border">
                   {audienceList.map((c) => {
@@ -703,7 +940,9 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
                           <Check className="h-4 w-4 shrink-0 text-green-600" />
                         )}
                         <span className="flex-1 truncate">{customerFullName(c)}</span>
-                        <span className="text-muted-foreground" dir="ltr">{c.phone}</span>
+                        <span className="text-muted-foreground" dir="ltr">
+                          {c.phone}
+                        </span>
                         <button
                           onClick={() => sendWhatsAppOne(c)}
                           title="ارسال واتساپ به این مشتری"
@@ -720,19 +959,87 @@ function SmsCampaignModal({ customers: list, onClose }: { customers: Customer[];
           </div>
 
           <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
-            💡 با زدن دکمه «ارسال پیامک»، اپ پیامک گوشی با همه شماره‌ها و متن آماده باز می‌شود. برای واتساپ، روی آیکن سبز کنار هر مشتری بزنید (واتساپ ارسال گروهی از طریق لینک ندارد).
+            💡 با زدن دکمه «ارسال پیامک»، اپ پیامک گوشی با همه شماره‌ها و متن آماده باز می‌شود. برای
+            واتساپ، روی آیکن سبز کنار هر مشتری بزنید (واتساپ ارسال گروهی از طریق لینک ندارد).
           </div>
         </div>
 
-        <div className="border-t border-border p-4">
-          <button
-            onClick={sendSms}
-            disabled={finalList.length === 0}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-            ارسال پیامک به {formatNumber(finalList.length)} نفر
-          </button>
+        <div className="space-y-3 border-t border-border p-4">
+          {/* افزودن لینک صفحه فروشگاه به متن پیام */}
+          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2">
+            <span className="flex items-center gap-2 text-xs">
+              <Link2 className="h-4 w-4 text-primary" />
+              افزودن لینک صفحه فروشگاه به پیام
+            </span>
+            <input
+              type="checkbox"
+              checked={includeLink}
+              onChange={(e) => setIncludeLink(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          {includeLink && !userId && (
+            <p className="text-[10px] text-amber-600">برای افزودن لینک باید وارد حساب باشید.</p>
+          )}
+
+          {finalList.length === 0 ? (
+            <button
+              disabled
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-sm font-semibold text-primary-foreground opacity-50"
+            >
+              <Send className="h-4 w-4" />
+              ارسال پیامک
+            </button>
+          ) : finalList.length <= SMS_GROUP_SIZE ? (
+            <button
+              onClick={() => sendSmsGroup(finalList)}
+              className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-sm font-semibold ${
+                groupSent(finalList)
+                  ? "bg-green-600 text-white"
+                  : "bg-primary text-primary-foreground hover:opacity-90"
+              }`}
+            >
+              {groupSent(finalList) ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              {groupSent(finalList)
+                ? "ارسال شد"
+                : `ارسال پیامک به ${formatNumber(finalList.length)} نفر`}
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                به‌دلیل تعداد زیاد، گیرندگان به گروه‌های ۱۰ نفره تقسیم شدند. هر گروه را جداگانه و با
+                کمی فاصله بفرستید.
+              </p>
+              <div className="max-h-44 space-y-1.5 overflow-y-auto">
+                {groups.map((group, i) => {
+                  const isSent = groupSent(group);
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2"
+                    >
+                      <span className="text-sm font-medium">
+                        گروه {formatNumber(i + 1)} ({formatNumber(group.length)} نفر)
+                      </span>
+                      <button
+                        onClick={() => sendSmsGroup(group)}
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                          isSent ? "bg-green-600 text-white" : "bg-primary text-primary-foreground"
+                        }`}
+                      >
+                        {isSent ? (
+                          <Check className="h-3.5 w-3.5" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                        {isSent ? "ارسال شد" : "ارسال"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

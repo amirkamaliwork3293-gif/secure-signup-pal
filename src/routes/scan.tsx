@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { Scanner } from "@/components/Scanner";
 import { products, invoice, addProductToInvoice, formatToman, stockStatus } from "@/lib/store";
-import { CheckCircle2, AlertCircle, Plus, Search, X, Package } from "lucide-react";
+import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
 export const Route = createFileRoute("/scan")({
   head: () => ({
@@ -40,7 +40,13 @@ function ScanPageInner() {
       const current = invoice.getCurrent();
       const next = addProductToInvoice(current, product);
       invoice.save(next);
-      setLast({ kind: "found", name: product.name, price: product.price, code, stock: product.stock });
+      setLast({
+        kind: "found",
+        name: product.name,
+        price: product.price,
+        code,
+        stock: product.stock,
+      });
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(40);
     } else {
       setLast({ kind: "unknown", code });
@@ -52,7 +58,10 @@ function ScanPageInner() {
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     const status = stockStatus(p);
-    if (status === "out") { alert(`محصول "${p.name}" موجودی ندارد.`); return; }
+    if (status === "out") {
+      alert(`محصول "${p.name}" موجودی ندارد.`);
+      return;
+    }
     const current = invoice.getCurrent();
     const next = addProductToInvoice(current, p);
     invoice.save(next);
@@ -66,7 +75,16 @@ function ScanPageInner() {
 
   return (
     <Layout>
-      <h1 className="mb-3 text-lg font-bold">اسکن محصول</h1>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h1 className="text-lg font-bold">اسکن محصول</h1>
+        <Link
+          to="/voice"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+        >
+          <Mic className="h-3.5 w-3.5" />
+          ثبت صوتی
+        </Link>
+      </div>
       <p className="mb-4 text-sm text-muted-foreground">
         کد QR یا بارکد محصول را داخل کادر دوربین قرار دهید.
       </p>
@@ -86,7 +104,10 @@ function ScanPageInner() {
             className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-8 text-sm outline-none focus:border-primary"
           />
           {searchQ && (
-            <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+            <button
+              onClick={() => setSearchQ("")}
+              className="absolute left-2 top-2.5 text-muted-foreground"
+            >
               <X className="h-4 w-4" />
             </button>
           )}
@@ -108,7 +129,9 @@ function ScanPageInner() {
                       <div className="text-xs text-muted-foreground">
                         {formatToman(p.price)}
                         {s === "out" && <span className="mr-2 text-destructive">اتمام موجودی</span>}
-                        {s === "low" && <span className="mr-2 text-amber-600">موجودی کم: {p.stock}</span>}
+                        {s === "low" && (
+                          <span className="mr-2 text-amber-600">موجودی کم: {p.stock}</span>
+                        )}
                       </div>
                     </div>
                     <Plus className="h-4 w-4 shrink-0 text-primary" />
@@ -130,11 +153,17 @@ function ScanPageInner() {
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
             <div className="flex-1">
               <div className="font-semibold text-foreground">به فاکتور اضافه شد ✓</div>
-              <div className="text-sm text-foreground/80">{last.name} — {formatToman(last.price)}</div>
+              <div className="text-sm text-foreground/80">
+                {last.name} — {formatToman(last.price)}
+              </div>
               {last.stock <= 5 && last.stock > 0 && (
-                <div className="mt-0.5 text-xs text-amber-600">⚠ موجودی کم: {last.stock.toLocaleString("fa-IR")} عدد</div>
+                <div className="mt-0.5 text-xs text-amber-600">
+                  ⚠ موجودی کم: {last.stock.toLocaleString("fa-IR")} عدد
+                </div>
               )}
-              <div className="mt-0.5 text-xs text-muted-foreground" dir="ltr">{last.code}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
+                {last.code}
+              </div>
             </div>
           </div>
         )}
@@ -143,7 +172,9 @@ function ScanPageInner() {
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div className="flex-1">
               <div className="font-semibold">محصولی با این کد ثبت نشده</div>
-              <div className="mt-0.5 text-xs text-muted-foreground" dir="ltr">{last.code}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
+                {last.code}
+              </div>
               <div className="mt-3 flex gap-2">
                 <Link
                   to="/products"
@@ -154,7 +185,10 @@ function ScanPageInner() {
                   افزودن محصول
                 </Link>
                 <button
-                  onClick={() => { setLast(null); setPaused(false); }}
+                  onClick={() => {
+                    setLast(null);
+                    setPaused(false);
+                  }}
                   className="rounded-lg border border-border px-3 py-1.5 text-xs"
                 >
                   ادامه اسکن
@@ -169,5 +203,9 @@ function ScanPageInner() {
 }
 
 function ScanPage() {
-  return <AuthGuard><ScanPageInner /></AuthGuard>;
+  return (
+    <AuthGuard>
+      <ScanPageInner />
+    </AuthGuard>
+  );
 }

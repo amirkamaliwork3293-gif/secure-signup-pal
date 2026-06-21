@@ -2,24 +2,47 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
-import { invoice, recalc, formatToman, formatNumber, parseNumberInput, settings, products, customers, addProductToInvoice, isWeightUnit, PAYMENT_LABEL, type CustomerInfo, type PaymentMethod } from "@/lib/store";
 import {
-  Minus, Plus, Trash2, ScanLine, CheckCircle2, Receipt,
-  User, Search, X, FileText, Plus as PlusIcon, Pencil,
+  invoice,
+  recalc,
+  formatToman,
+  formatNumber,
+  parseNumberInput,
+  settings,
+  products,
+  customers,
+  addProductToInvoice,
+  isWeightUnit,
+  PAYMENT_LABEL,
+  type CustomerInfo,
+  type PaymentMethod,
+} from "@/lib/store";
+import {
+  Minus,
+  Plus,
+  Trash2,
+  ScanLine,
+  CheckCircle2,
+  Receipt,
+  User,
+  Search,
+  X,
+  FileText,
+  Plus as PlusIcon,
+  Pencil,
+  Mic,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
-export const Route = createFileRoute("/")(
-  {
-    head: () => ({
-      meta: [
-        { title: "کمالی حسابداری | فاکتور جاری" },
-        { name: "description", content: "فاکتور حسابداری با اسکن بارکد و QR کد توسط دوربین موبایل." },
-      ],
-    }),
-    component: InvoicePage,
-  }
-);
+export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "کمالی حسابداری | فاکتور جاری" },
+      { name: "description", content: "فاکتور حسابداری با اسکن بارکد و QR کد توسط دوربین موبایل." },
+    ],
+  }),
+  component: InvoicePage,
+});
 
 function InvoicePageInner() {
   const [inv, setInv] = invoice.useCurrent();
@@ -52,15 +75,15 @@ function InvoicePageInner() {
   };
 
   const remove = (productId: string) => {
-    setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+    setInv((prev) =>
+      recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }),
+    );
   };
 
   const setItemPrice = (productId: string, price: number) => {
     if (price <= 0) return;
     setInv((prev) => {
-      const items = prev.items.map((i) =>
-        i.productId === productId ? { ...i, price } : i,
-      );
+      const items = prev.items.map((i) => (i.productId === productId ? { ...i, price } : i));
       return recalc({ ...prev, items });
     });
   };
@@ -77,10 +100,16 @@ function InvoicePageInner() {
 
   const checkout = () => {
     if (inv.items.length === 0) return;
-    const hasCustomer = !!(customer.firstName?.trim() || customer.lastName?.trim() || customer.phone?.trim());
+    const hasCustomer = !!(
+      customer.firstName?.trim() ||
+      customer.lastName?.trim() ||
+      customer.phone?.trim()
+    );
     if (paymentMethod === "credit" && !hasCustomer) {
       setShowCustomer(true);
-      alert("برای فاکتور نسیه، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.");
+      alert(
+        "برای فاکتور نسیه، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.",
+      );
       return;
     }
     const finalInv = { ...inv, customer, paymentMethod, shopName: appSettings.shopName };
@@ -109,7 +138,6 @@ function InvoicePageInner() {
     ? allProducts.filter((p) => p.name.includes(searchQ) || p.code.includes(searchQ))
     : [];
 
-
   return (
     <Layout>
       {/* Invoice tabs */}
@@ -117,9 +145,10 @@ function InvoicePageInner() {
         {board.open.map((it, idx) => {
           const isActive = it.id === board.activeId;
           const cust = it.customer;
-          const label = cust?.firstName || cust?.lastName
-            ? `${cust?.firstName ?? ""} ${cust?.lastName ?? ""}`.trim()
-            : `فاکتور ${(idx + 1).toLocaleString("fa-IR")}`;
+          const label =
+            cust?.firstName || cust?.lastName
+              ? `${cust?.firstName ?? ""} ${cust?.lastName ?? ""}`.trim()
+              : `فاکتور ${(idx + 1).toLocaleString("fa-IR")}`;
           return (
             <div
               key={it.id}
@@ -138,7 +167,9 @@ function InvoicePageInner() {
                 <FileText className="h-3.5 w-3.5" />
                 <span className="max-w-[120px] truncate font-medium">{label}</span>
                 {it.items.length > 0 && (
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${isActive ? "bg-primary/20" : "bg-muted"}`}>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] ${isActive ? "bg-primary/20" : "bg-muted"}`}
+                  >
                     {it.items.length.toLocaleString("fa-IR")}
                   </span>
                 )}
@@ -147,7 +178,11 @@ function InvoicePageInner() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (it.items.length > 0 && !confirm("این فاکتور باز خالی نیست — بستنش مطمئنید؟")) return;
+                    if (
+                      it.items.length > 0 &&
+                      !confirm("این فاکتور باز خالی نیست — بستنش مطمئنید؟")
+                    )
+                      return;
                     tabs.close(it.id);
                   }}
                   className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -182,20 +217,30 @@ function InvoicePageInner() {
         </div>
 
         {/* Action buttons */}
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-3 gap-2">
           <Link
             to="/scan"
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <ScanLine className="h-4 w-4" />
-            اسکن بارکد
+            اسکن
+          </Link>
+          <Link
+            to="/voice"
+            className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
+          >
+            <Mic className="h-4 w-4" />
+            ثبت صوتی
           </Link>
           <button
-            onClick={() => { setShowSearch((v) => !v); setTimeout(() => searchRef.current?.focus(), 100); }}
+            onClick={() => {
+              setShowSearch((v) => !v);
+              setTimeout(() => searchRef.current?.focus(), 100);
+            }}
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <Search className="h-4 w-4" />
-            جستجوی محصول
+            جستجو
           </button>
         </div>
 
@@ -210,7 +255,10 @@ function InvoicePageInner() {
               className="w-full rounded-xl bg-background/90 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
             {searchQ && (
-              <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+              <button
+                onClick={() => setSearchQ("")}
+                className="absolute left-2 top-2.5 text-muted-foreground"
+              >
                 <X className="h-4 w-4" />
               </button>
             )}
@@ -223,7 +271,9 @@ function InvoicePageInner() {
                     className="flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent border-b border-border last:border-0"
                   >
                     <span className="font-medium text-foreground">{p.name}</span>
-                    <span className="text-xs text-primary font-semibold">{formatToman(p.price)}</span>
+                    <span className="text-xs text-primary font-semibold">
+                      {formatToman(p.price)}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -333,7 +383,6 @@ function InvoicePageInner() {
         </div>
       </div>
 
-
       {/* Items list */}
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
         اقلام فاکتور ({inv.items.length})
@@ -360,7 +409,10 @@ function InvoicePageInner() {
           {inv.items.map((item) => {
             const weight = isWeightUnit(item.unit);
             return (
-              <li key={item.productId} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
+              <li
+                key={item.productId}
+                className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{item.name}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
@@ -392,8 +444,13 @@ function InvoicePageInner() {
                         <Pencil className="h-2.5 w-2.5 opacity-50" />
                       </button>
                     )}
-                    <span>× {formatNumber(item.quantity)}{weight ? ` ${item.unit}` : ""}</span>
-                    <span className="font-semibold text-primary">= {formatToman(Math.round(item.price * item.quantity))}</span>
+                    <span>
+                      × {formatNumber(item.quantity)}
+                      {weight ? ` ${item.unit}` : ""}
+                    </span>
+                    <span className="font-semibold text-primary">
+                      = {formatToman(Math.round(item.price * item.quantity))}
+                    </span>
                   </div>
                 </div>
                 {weight ? (
@@ -407,7 +464,9 @@ function InvoicePageInner() {
                         if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
                         else e.target.value = String(item.quantity);
                       }}
-                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
                       inputMode="decimal"
                       dir="ltr"
                       className="h-9 w-16 bg-transparent text-center text-sm font-semibold outline-none"
@@ -417,16 +476,30 @@ function InvoicePageInner() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-1 rounded-lg border border-border bg-background">
-                    <button onClick={() => update(item.productId, -1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="کاهش">
+                    <button
+                      onClick={() => update(item.productId, -1)}
+                      className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground"
+                      aria-label="کاهش"
+                    >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="min-w-7 text-center text-sm font-semibold">{formatNumber(item.quantity)}</span>
-                    <button onClick={() => update(item.productId, 1)} className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground" aria-label="افزایش">
+                    <span className="min-w-7 text-center text-sm font-semibold">
+                      {formatNumber(item.quantity)}
+                    </span>
+                    <button
+                      onClick={() => update(item.productId, 1)}
+                      className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground"
+                      aria-label="افزایش"
+                    >
                       <Plus className="h-4 w-4" />
                     </button>
                   </div>
                 )}
-                <button onClick={() => remove(item.productId)} className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10" aria-label="حذف">
+                <button
+                  onClick={() => remove(item.productId)}
+                  className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                  aria-label="حذف"
+                >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </li>
@@ -439,5 +512,9 @@ function InvoicePageInner() {
 }
 
 function InvoicePage() {
-  return <AuthGuard><InvoicePageInner /></AuthGuard>;
+  return (
+    <AuthGuard>
+      <InvoicePageInner />
+    </AuthGuard>
+  );
 }

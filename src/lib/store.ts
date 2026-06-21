@@ -106,16 +106,19 @@ export function customerFullName(c: Customer): string {
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
-const PRODUCTS_KEY   = "acc.products.v2";
+const PRODUCTS_KEY = "acc.products.v2";
 const CATEGORIES_KEY = "acc.categories.v1";
-const INVOICE_KEY    = "acc.currentInvoice.v2";
-const HISTORY_KEY    = "acc.invoices.v2";
-const SETTINGS_KEY   = "acc.settings.v1";
-const CUSTOMERS_KEY  = "acc.customers.v1";
+const INVOICE_KEY = "acc.currentInvoice.v2";
+const HISTORY_KEY = "acc.invoices.v2";
+const SETTINGS_KEY = "acc.settings.v1";
+const CUSTOMERS_KEY = "acc.customers.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
-const CLOUD_FIELDS: Record<string, "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers"> = {
+const CLOUD_FIELDS: Record<
+  string,
+  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers"
+> = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
   [HISTORY_KEY]: "invoices",
@@ -129,9 +132,30 @@ export type AppSettings = {
   shopName: string;
   /** فعال‌سازی فروش وزنی (کیلوگرم/گرم) — پیش‌فرض غیرفعال */
   weightUnits?: boolean;
+  // ─── پروفایل عمومی فروشگاه (اختیاری) — برای صفحه عمومی /store/[id] ───
+  /** آدرس فروشگاه */
+  storeAddress?: string;
+  /** شماره تماس‌ها (یک یا چند شماره) */
+  storePhones?: string[];
+  /** ساعات کاری */
+  businessHours?: string;
+  /** آیدی/لینک اینستاگرام */
+  instagram?: string;
+  /** آیدی/لینک تلگرام */
+  telegram?: string;
+  /** شماره/لینک واتساپ بیزینس */
+  whatsapp?: string;
+  /** توضیح کوتاه فروشگاه */
+  storeDescription?: string;
+  /** آدرس لوگو یا تصویر فروشگاه */
+  logoUrl?: string;
 };
 
-const DEFAULT_SETTINGS: AppSettings = { shopName: "فروشگاه من", invoiceFontSize: 13, weightUnits: false };
+const DEFAULT_SETTINGS: AppSettings = {
+  shopName: "فروشگاه من",
+  invoiceFontSize: 13,
+  weightUnits: false,
+};
 
 function getStorageScope() {
   if (typeof window === "undefined") return "anon";
@@ -146,7 +170,9 @@ export function setStorageScope(scope: string | null) {
   if (typeof window === "undefined") return;
   const nextScope = scope || "anon";
   localStorage.setItem(STORAGE_SCOPE_KEY, nextScope);
-  window.dispatchEvent(new CustomEvent("store-change", { detail: { scopeChanged: true, scope: nextScope } }));
+  window.dispatchEvent(
+    new CustomEvent("store-change", { detail: { scopeChanged: true, scope: nextScope } }),
+  );
 }
 
 // ─── Default categories ──────────────────────────────────────────────────────
@@ -176,7 +202,9 @@ function writeLocalOnly<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   const keyWithScope = scopedKey(key);
   localStorage.setItem(keyWithScope, JSON.stringify(value));
-  window.dispatchEvent(new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key } }));
+  window.dispatchEvent(
+    new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key } }),
+  );
 }
 
 function write<T>(key: string, value: T) {
@@ -202,10 +230,16 @@ async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
   const userId = cloudUserId;
-  const payload: Record<string, unknown> = { ...pendingPush, user_id: userId, updated_at: new Date().toISOString() };
+  const payload: Record<string, unknown> = {
+    ...pendingPush,
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  };
   for (const k of Object.keys(pendingPush)) delete pendingPush[k];
   try {
-    const { error } = await supabase.from("user_data").upsert(payload as never, { onConflict: "user_id" });
+    const { error } = await supabase
+      .from("user_data")
+      .upsert(payload as never, { onConflict: "user_id" });
     // If the customers column doesn't exist yet in this deployment, retry without
     // it so syncing of products/invoices/settings is never blocked.
     if (error && /customers/.test(error.message) && "customers" in payload) {
@@ -254,7 +288,10 @@ export async function hydrateFromCloud(userId: string) {
 
 export function stopCloudSync() {
   cloudUserId = null;
-  if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
   for (const k of Object.keys(pendingPush)) delete pendingPush[k];
 }
 
@@ -280,7 +317,8 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
         }
         return;
       }
-      const detail = (e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean }>).detail;
+      const detail = (e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean }>)
+        .detail;
       if (detail?.scopeChanged || detail?.key === currentKey || detail?.baseKey === key) {
         setState(read(key, fallback));
       }
@@ -306,20 +344,24 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
 // ─── Products ────────────────────────────────────────────────────────────────
 
 export const products = {
-  useAll:      ()         => useStore<Product[]>(PRODUCTS_KEY, []),
-  getAll:      ()         => read<Product[]>(PRODUCTS_KEY, []),
-  save:        (list: Product[]) => write(PRODUCTS_KEY, list),
-  findByCode:  (code: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.code === code),
-  findById:    (id: string)   => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.id === id),
-  update:      (updated: Product) => {
+  useAll: () => useStore<Product[]>(PRODUCTS_KEY, []),
+  getAll: () => read<Product[]>(PRODUCTS_KEY, []),
+  save: (list: Product[]) => write(PRODUCTS_KEY, list),
+  findByCode: (code: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.code === code),
+  findById: (id: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.id === id),
+  update: (updated: Product) => {
     const list = read<Product[]>(PRODUCTS_KEY, []);
-    write(PRODUCTS_KEY, list.map((p) => (p.id === updated.id ? updated : p)));
+    write(
+      PRODUCTS_KEY,
+      list.map((p) => (p.id === updated.id ? updated : p)),
+    );
   },
   decreaseStock: (productId: string, qty: number) => {
     const list = read<Product[]>(PRODUCTS_KEY, []);
-    write(PRODUCTS_KEY, list.map((p) =>
-      p.id === productId ? { ...p, stock: Math.max(0, p.stock - qty) } : p
-    ));
+    write(
+      PRODUCTS_KEY,
+      list.map((p) => (p.id === productId ? { ...p, stock: Math.max(0, p.stock - qty) } : p)),
+    );
   },
 };
 
@@ -368,7 +410,10 @@ function writeBoard(b: InvoiceBoard) {
   write(INVOICE_KEY, b);
 }
 
-function useBoard(): [InvoiceBoard, (v: InvoiceBoard | ((p: InvoiceBoard) => InvoiceBoard)) => void] {
+function useBoard(): [
+  InvoiceBoard,
+  (v: InvoiceBoard | ((p: InvoiceBoard) => InvoiceBoard)) => void,
+] {
   const [raw, setRaw] = useStore<unknown>(INVOICE_KEY, null);
   const board = normalizeBoard(raw);
   const set = (v: InvoiceBoard | ((p: InvoiceBoard) => InvoiceBoard)) => {
@@ -387,9 +432,12 @@ export const invoice = {
     const active = board.open.find((i) => i.id === board.activeId) ?? board.open[0];
     const set = (v: Invoice | ((p: Invoice) => Invoice)) => {
       setBoard((prev) => {
-        const next = typeof v === "function" ? (v as (p: Invoice) => Invoice)(
-          prev.open.find((i) => i.id === prev.activeId) ?? prev.open[0],
-        ) : v;
+        const next =
+          typeof v === "function"
+            ? (v as (p: Invoice) => Invoice)(
+                prev.open.find((i) => i.id === prev.activeId) ?? prev.open[0],
+              )
+            : v;
         return {
           activeId: next.id,
           open: prev.open.some((i) => i.id === next.id)
@@ -413,30 +461,39 @@ export const invoice = {
   },
 
   // Tabs API
-  useTabs: (): [InvoiceBoard, {
-    openNew: () => void;
-    switchTo: (id: string) => void;
-    close: (id: string) => void;
-  }] => {
+  useTabs: (): [
+    InvoiceBoard,
+    {
+      openNew: () => void;
+      switchTo: (id: string) => void;
+      close: (id: string) => void;
+    },
+  ] => {
     const [board, setBoard] = useBoard();
-    return [board, {
-      openNew: () => setBoard((prev) => {
-        const fresh = emptyInvoice();
-        return { open: [...prev.open, fresh], activeId: fresh.id };
-      }),
-      switchTo: (id: string) => setBoard((prev) =>
-        prev.open.some((i) => i.id === id) ? { ...prev, activeId: id } : prev,
-      ),
-      close: (id: string) => setBoard((prev) => {
-        const filtered = prev.open.filter((i) => i.id !== id);
-        if (filtered.length === 0) {
-          const fresh = emptyInvoice();
-          return { open: [fresh], activeId: fresh.id };
-        }
-        const activeId = prev.activeId === id ? filtered[0].id : prev.activeId;
-        return { open: filtered, activeId };
-      }),
-    }];
+    return [
+      board,
+      {
+        openNew: () =>
+          setBoard((prev) => {
+            const fresh = emptyInvoice();
+            return { open: [...prev.open, fresh], activeId: fresh.id };
+          }),
+        switchTo: (id: string) =>
+          setBoard((prev) =>
+            prev.open.some((i) => i.id === id) ? { ...prev, activeId: id } : prev,
+          ),
+        close: (id: string) =>
+          setBoard((prev) => {
+            const filtered = prev.open.filter((i) => i.id !== id);
+            if (filtered.length === 0) {
+              const fresh = emptyInvoice();
+              return { open: [fresh], activeId: fresh.id };
+            }
+            const activeId = prev.activeId === id ? filtered[0].id : prev.activeId;
+            return { open: filtered, activeId };
+          }),
+      },
+    ];
   },
 
   useHistory: () => useStore<Invoice[]>(HISTORY_KEY, []),
@@ -457,11 +514,17 @@ export const invoice = {
   },
   updateHistory: (updated: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
-    write(HISTORY_KEY, hist.map((inv) => (inv.id === updated.id ? updated : inv)));
+    write(
+      HISTORY_KEY,
+      hist.map((inv) => (inv.id === updated.id ? updated : inv)),
+    );
   },
   deleteFromHistory: (id: string) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
-    write(HISTORY_KEY, hist.filter((inv) => inv.id !== id));
+    write(
+      HISTORY_KEY,
+      hist.filter((inv) => inv.id !== id),
+    );
   },
 };
 
@@ -469,8 +532,8 @@ export const invoice = {
 
 export const settings = {
   useAll: () => useStore<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS),
-  get:    () => read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS),
-  save:   (s: AppSettings) => write(SETTINGS_KEY, s),
+  get: () => read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS),
+  save: (s: AppSettings) => write(SETTINGS_KEY, s),
 };
 
 // ─── Customers (debtors/creditors) ───────────────────────────────────────────
@@ -478,7 +541,7 @@ export const settings = {
 export const customers = {
   useAll: () => useStore<Customer[]>(CUSTOMERS_KEY, []),
   getAll: () => read<Customer[]>(CUSTOMERS_KEY, []),
-  save:   (list: Customer[]) => write(CUSTOMERS_KEY, list),
+  save: (list: Customer[]) => write(CUSTOMERS_KEY, list),
 
   add: (c: Omit<Customer, "id" | "createdAt" | "txs">): Customer => {
     const created: Customer = { ...c, id: cryptoId(), createdAt: Date.now(), txs: [] };
@@ -488,20 +551,29 @@ export const customers = {
 
   update: (updated: Customer) => {
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
-    write(CUSTOMERS_KEY, list.map((c) => (c.id === updated.id ? updated : c)));
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) => (c.id === updated.id ? updated : c)),
+    );
   },
 
   remove: (id: string) => {
-    write(CUSTOMERS_KEY, read<Customer[]>(CUSTOMERS_KEY, []).filter((c) => c.id !== id));
+    write(
+      CUSTOMERS_KEY,
+      read<Customer[]>(CUSTOMERS_KEY, []).filter((c) => c.id !== id),
+    );
   },
 
   addTx: (customerId: string, tx: Omit<CustomerTx, "id" | "at"> & { at?: number }) => {
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
-    write(CUSTOMERS_KEY, list.map((c) =>
-      c.id === customerId
-        ? { ...c, txs: [{ ...tx, id: cryptoId(), at: tx.at ?? Date.now() }, ...c.txs] }
-        : c,
-    ));
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) =>
+        c.id === customerId
+          ? { ...c, txs: [{ ...tx, id: cryptoId(), at: tx.at ?? Date.now() }, ...c.txs] }
+          : c,
+      ),
+    );
   },
 
   /**
@@ -512,9 +584,10 @@ export const customers = {
     const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
     if (!name && !info.phone?.trim()) return;
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
-    let target = list.find((c) =>
-      (info.phone?.trim() && c.phone === info.phone.trim()) ||
-      (name && customerFullName(c) === name),
+    let target = list.find(
+      (c) =>
+        (info.phone?.trim() && c.phone === info.phone.trim()) ||
+        (name && customerFullName(c) === name),
     );
     if (!target) {
       target = {
@@ -535,7 +608,10 @@ export const customers = {
       at: inv.createdAt || Date.now(),
       invoiceId: inv.id,
     };
-    write(CUSTOMERS_KEY, list.map((c) => (c.id === target!.id ? { ...c, txs: [tx, ...c.txs] } : c)));
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) => (c.id === target!.id ? { ...c, txs: [tx, ...c.txs] } : c)),
+    );
   },
 };
 
@@ -559,20 +635,60 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
   const existing = inv.items.find((i) => i.productId === p.id);
   let items;
   if (existing) {
-    items = inv.items.map((i) =>
-      i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i,
-    );
+    items = inv.items.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i));
   } else {
-    items = [...inv.items, {
-      productId: p.id,
-      name: p.name,
-      price: p.price,
-      quantity: 1,
-      buyPrice: p.buyPrice,
-      unit: p.unit,
-    }];
+    items = [
+      ...inv.items,
+      {
+        productId: p.id,
+        name: p.name,
+        price: p.price,
+        quantity: 1,
+        buyPrice: p.buyPrice,
+        unit: p.unit,
+      },
+    ];
   }
   return recalc({ ...inv, items });
+}
+
+/**
+ * افزودن محصول به فاکتور با مقدار و واحد مشخص (برای ثبت صوتی استفاده می‌شود).
+ * تابع موجود `addProductToInvoice` دست‌نخورده می‌ماند؛ این نسخه مقدار دلخواه را
+ * می‌گیرد: برای محصول وزنی مقدار را جمع می‌کند و برای محصول عددی هم همین‌طور.
+ */
+export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: number): Invoice {
+  const qty = quantity > 0 ? quantity : 1;
+  const existing = inv.items.find((i) => i.productId === p.id);
+  let items;
+  if (existing) {
+    items = inv.items.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + qty } : i));
+  } else {
+    items = [
+      ...inv.items,
+      {
+        productId: p.id,
+        name: p.name,
+        price: p.price,
+        quantity: qty,
+        buyPrice: p.buyPrice,
+        unit: p.unit,
+      },
+    ];
+  }
+  return recalc({ ...inv, items });
+}
+
+/**
+ * ساخت لینک عمومی صفحه فروشگاه برای یک کاربر مشخص.
+ * شناسه فروشگاه همان شناسه کاربر (user id) است.
+ */
+export function storePublicUrl(userId: string): string {
+  const origin =
+    typeof window !== "undefined" && window.location?.origin
+      ? window.location.origin
+      : "https://secure-signup-pal.lovable.app";
+  return `${origin}/store/${userId}`;
 }
 
 /** فرمت عدد با جداکننده هزارگان (ارقام فارسی) */

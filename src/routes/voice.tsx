@@ -65,12 +65,36 @@ function VoicePageInner() {
   const [manualText, setManualText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
+  // تشخیص فنی — فقط داخل اپ نیتیو (APK) برای فهمیدن علت کار نکردن میکروفون
+  const [capInfo, setCapInfo] = useState<{ native: boolean; plugins: string[] } | null>(null);
 
   useEffect(() => {
     const rec = createRecognizer();
     recognizerRef.current = rec;
     setEngine(rec.engine);
     if (rec.engine === "none") setManualMode(true);
+
+    // آیا پلاگین نیتیو SpeechRecognition واقعاً داخل APK کامپایل شده؟ (مثل Printer)
+    // PluginHeaders فهرست قطعی پلاگین‌های نیتیوِ ثبت‌شده روی پل Capacitor است.
+    try {
+      const cap = (
+        window as unknown as {
+          Capacitor?: {
+            isNativePlatform?: () => boolean;
+            Plugins?: Record<string, unknown>;
+            PluginHeaders?: Array<{ name: string }>;
+          };
+        }
+      ).Capacitor;
+      const native = !!cap?.isNativePlatform?.();
+      const headers = cap?.PluginHeaders?.map((h) => h.name) ?? [];
+      const keys = cap?.Plugins ? Object.keys(cap.Plugins) : [];
+      const plugins = (headers.length ? headers : keys).sort();
+      if (native) setCapInfo({ native, plugins });
+    } catch {
+      /* ignore */
+    }
+
     return () => {
       void rec.stop();
     };
@@ -380,6 +404,29 @@ function VoicePageInner() {
         >
           مشاهده فاکتور
         </Link>
+      )}
+
+      {/* تشخیص فنی — فقط داخل اپ نیتیو نمایش داده می‌شود (برای رفع اشکال میکروفون) */}
+      {capInfo && (
+        <details className="mt-6 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-medium">تشخیص فنی میکروفون</summary>
+          <div className="mt-2 space-y-1 leading-6">
+            <div>
+              موتور تشخیص گفتار: <b dir="ltr">{engine}</b>
+            </div>
+            <div>
+              داخل اپ نیتیو: <b>{capInfo.native ? "بله" : "خیر"}</b>
+            </div>
+            <div>
+              پلاگین SpeechRecognition:{" "}
+              <b>{capInfo.plugins.includes("SpeechRecognition") ? "موجود ✓" : "نصب نشده ✗"}</b>
+            </div>
+            <div className="break-all">
+              پلاگین‌های نصب‌شده:{" "}
+              <b dir="ltr">{capInfo.plugins.length ? capInfo.plugins.join(", ") : "—"}</b>
+            </div>
+          </div>
+        </details>
       )}
     </Layout>
   );

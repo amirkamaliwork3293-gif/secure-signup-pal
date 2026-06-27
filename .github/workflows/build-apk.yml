@@ -184,11 +184,11 @@ jobs:
           import android.util.Base64;
           import android.webkit.JavascriptInterface;
           import android.webkit.PermissionRequest;
-          import android.webkit.WebChromeClient;
           import android.webkit.WebView;
           import androidx.core.app.ActivityCompat;
           import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.BridgeWebChromeClient;
           import org.json.JSONObject;
           import java.io.ByteArrayOutputStream;
           import java.io.File;
@@ -207,7 +207,7 @@ jobs:
                   WebView webView = this.bridge.getWebView();
                   webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
                   webView.addJavascriptInterface(new KamaliVoiceBridge(), "KamaliVoice");
-                  webView.setWebChromeClient(new WebChromeClient() {
+                  webView.setWebChromeClient(new BridgeWebChromeClient(this.bridge) {
                       @Override
                       public void onPermissionRequest(final PermissionRequest request) {
                           runOnUiThread(() -> {

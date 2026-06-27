@@ -76,7 +76,7 @@ function MenuPage() {
           <h1 className="text-lg font-bold">منوی دیجیتال</h1>
         </div>
         <div className="flex gap-2">
-          <Link to="/menu/qr" className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs">
+          <Link to="/menu-qr" className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs">
             <QrCode className="h-3.5 w-3.5" /> QR منو
           </Link>
           <Link to="/m/$userId" params={{ userId }} className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs">

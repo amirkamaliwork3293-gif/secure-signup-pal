@@ -14,6 +14,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as RenewRouteImport } from './routes/renew'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as QuickAddRouteImport } from './routes/quick-add'
 import { Route as ProductsRouteImport } from './routes/products'
@@ -47,6 +48,11 @@ const ScanRoute = ScanRouteImport.update({
 const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RenewRoute = RenewRouteImport.update({
+  id: '/renew',
+  path: '/renew',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterRoute = RegisterRouteImport.update({
@@ -104,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -137,6 +145,7 @@ export interface FileRoutesById {
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -155,6 +164,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/quick-add'
     | '/register'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -171,6 +181,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/quick-add'
     | '/register'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -187,6 +198,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/quick-add'
     | '/register'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -204,6 +216,7 @@ export interface RootRouteChildren {
   ProductsRoute: typeof ProductsRoute
   QuickAddRoute: typeof QuickAddRoute
   RegisterRoute: typeof RegisterRoute
+  RenewRoute: typeof RenewRoute
   ReportsRoute: typeof ReportsRoute
   ScanRoute: typeof ScanRoute
   SetPasswordRoute: typeof SetPasswordRoute
@@ -247,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/reports'
       preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/renew': {
+      id: '/renew'
+      path: '/renew'
+      fullPath: '/renew'
+      preLoaderRoute: typeof RenewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register': {
@@ -324,6 +344,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsRoute: ProductsRoute,
   QuickAddRoute: QuickAddRoute,
   RegisterRoute: RegisterRoute,
+  RenewRoute: RenewRoute,
   ReportsRoute: ReportsRoute,
   ScanRoute: ScanRoute,
   SetPasswordRoute: SetPasswordRoute,

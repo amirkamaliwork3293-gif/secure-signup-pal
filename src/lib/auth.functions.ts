@@ -303,7 +303,7 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
 
     const { data: req, error: reqErr } = await supabaseAdmin
       .from("signup_requests")
-      .select("id, username, plan, password_set")
+      .select("id, username, plan, password_set, request_type, target_user_id")
       .eq("id", data.id)
       .maybeSingle();
     if (reqErr || !req) throw new Error(reqErr?.message || "درخواست یافت نشد.");
@@ -313,6 +313,22 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       .update({ status: "approved", reviewed_at: new Date().toISOString() })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
+
+    // ── جریان «تمدید طرح»: حساب از قبل وجود دارد؛ فقط پروفایل را تمدید کن
+    if ((req as any).request_type === "renewal") {
+      const targetId = (req as any).target_user_id as string | null;
+      if (!targetId) throw new Error("شناسه کاربر مقصد در درخواست تمدید یافت نشد.");
+      const plansCfg = await loadPlansConfig(supabaseAdmin);
+      const plan = req.plan as Plan;
+      const start = new Date();
+      const end = new Date(start.getTime() + planDurationMs(plansCfg, plan));
+      const { error: renErr } = await supabaseAdmin
+        .from("profiles")
+        .update({ plan, status: "active", start_date: start.toISOString(), end_date: end.toISOString() })
+        .eq("id", targetId);
+      if (renErr) throw new Error(renErr.message);
+      return { success: true };
+    }
 
     // جریان جدید: حساب از قبل (با رمز انتخابی کاربر) ساخته شده — همینجا فعال
     // می‌شود تا کاربر بلافاصله بتواند وارد شود. (درخواست‌های قدیمی بدون حساب،

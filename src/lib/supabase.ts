@@ -33,6 +33,10 @@ export type SignupRequest = {
   password_set: boolean;
   created_at: string;
   reviewed_at: string | null;
+  phone?: string | null;
+  receipt_url?: string | null;
+  request_type?: "signup" | "renewal";
+  target_user_id?: string | null;
 };
 
 // Duration in milliseconds — trial is 1 hour, others map to days

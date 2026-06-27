@@ -68,6 +68,11 @@ type NativeSpeechPlugin = {
   removeAllListeners: () => Promise<void>;
 };
 
+type NativeAudioBridge = {
+  start?: () => void;
+  stop?: () => void;
+};
+
 function nativeSpeech(): NativeSpeechPlugin | null {
   if (typeof window === "undefined") return null;
   const p = (
@@ -76,6 +81,14 @@ function nativeSpeech(): NativeSpeechPlugin | null {
     }
   ).Capacitor?.Plugins?.SpeechRecognition;
   return p && typeof p.start === "function" ? p : null;
+}
+
+function nativeAudioBridge(): NativeAudioBridge | null {
+  if (typeof window === "undefined") return null;
+  const bridge = (window as unknown as { KamaliVoice?: NativeAudioBridge }).KamaliVoice;
+  return bridge && typeof bridge.start === "function" && typeof bridge.stop === "function"
+    ? bridge
+    : null;
 }
 
 // ─── Web Speech API ───────────────────────────────────────────────────────────
@@ -110,6 +123,9 @@ function webSpeechCtor(): (new () => WebSpeechRecognition) | null {
 // ─── تشخیص موتور ──────────────────────────────────────────────────────────────
 
 export function detectEngine(): SpeechEngine {
+  // نسخه جدید APK یک پل نیتیو اختصاصی دارد که مستقیم با میکروفون اندروید ضبط می‌کند؛
+  // این مسیر به Web Speech، getUserMedia و پلاگین Capacitor وابسته نیست.
+  if (nativeAudioBridge()) return "native";
   // در اپ نیتیو (APK) ترجیحاً MediaRecorder + سرویس رونویسی Lovable AI استفاده می‌شود
   // تا چند ثانیه‌ی اول صحبت یا تک‌کلمه‌ها (مثل «ماست» / «رب گوجه») گم نشود.
   if (isNativeApp() && typeof window !== "undefined" && hasMediaRecorder()) return "native";
@@ -138,6 +154,7 @@ export function createRecognizer(): Recognizer {
   const engine = detectEngine();
 
   if (engine === "native") {
+    if (nativeAudioBridge()) return createNativeAudioBridgeRecognizer();
     if (hasMediaRecorder()) return createMediaRecorderRecognizer();
     return createNativeRecognizer();
   }
@@ -149,6 +166,85 @@ export function createRecognizer(): Recognizer {
     isSupported: false,
     start: async (h) => notifyUnavailable(h, UNSUPPORTED_MSG),
     stop: async () => {},
+  };
+}
+
+// ─── پل صوتی اختصاصی APK: Android MediaRecorder → Base64 → Lovable AI STT ───
+
+type NativeAudioEvent = CustomEvent<{ audioBase64?: string; format?: string; error?: string }>;
+
+function createNativeAudioBridgeRecognizer(): Recognizer {
+  let activeHandlers: StartHandlers | null = null;
+  let resultListener: ((ev: Event) => void) | null = null;
+  let errorListener: ((ev: Event) => void) | null = null;
+  let processing = false;
+
+  const removeListeners = () => {
+    if (typeof window === "undefined") return;
+    if (resultListener) window.removeEventListener("kamali-native-audio", resultListener);
+    if (errorListener) window.removeEventListener("kamali-native-audio-error", errorListener);
+    resultListener = null;
+    errorListener = null;
+  };
+
+  return {
+    engine: "native",
+    isSupported: true,
+    start: async (h) => {
+      const bridge = nativeAudioBridge();
+      if (!bridge?.start) return notifyUnavailable(h, UNSUPPORTED_MSG);
+      activeHandlers = h;
+      processing = false;
+      removeListeners();
+
+      resultListener = (ev: Event) => {
+        const detail = (ev as NativeAudioEvent).detail ?? {};
+        const audioBase64 = detail.audioBase64 ?? "";
+        const format = detail.format || "m4a";
+        if (!audioBase64 || processing) return;
+        processing = true;
+        h.onPartial?.("در حال تبدیل صدا به متن…");
+        void transcribeAudio({ data: { audioBase64, format, language: "fa" } })
+          .then((result) => {
+            if (result.ok) h.onResult(result.text);
+            else h.onError(result.error);
+          })
+          .catch((e) => h.onError("ارسال صدا ناموفق بود: " + String((e as Error)?.message ?? e)))
+          .finally(() => {
+            processing = false;
+            removeListeners();
+            h.onEnd?.();
+          });
+      };
+
+      errorListener = (ev: Event) => {
+        const detail = (ev as NativeAudioEvent).detail ?? {};
+        removeListeners();
+        const msg = detail.error || PERMISSION_DENIED_MSG;
+        if (/permission|اجازه|denied|record/i.test(msg)) notifyUnavailable(h, PERMISSION_DENIED_MSG);
+        else h.onError(msg);
+        h.onEnd?.();
+      };
+
+      window.addEventListener("kamali-native-audio", resultListener);
+      window.addEventListener("kamali-native-audio-error", errorListener);
+
+      // مهم: این فراخوانی مستقیماً در همان کلیک کاربر انجام می‌شود؛ هیچ await قبل از آن نیست.
+      try {
+        bridge.start();
+      } catch (e) {
+        removeListeners();
+        notifyUnavailable(h, "میکروفون اپلیکیشن فعال نشد — نسخه جدید APK را نصب کنید.");
+      }
+    },
+    stop: async () => {
+      const bridge = nativeAudioBridge();
+      try {
+        bridge?.stop?.();
+      } catch {
+        activeHandlers?.onEnd?.();
+      }
+    },
   };
 }
 
@@ -211,27 +307,10 @@ function createMediaRecorderRecognizer(): Recognizer {
     start: async (h) => {
       activeHandlers = h;
       stopped = false;
-      // در اپ اندروید، فراخوانی getUserMedia فقط دیالوگ WebView را می‌سازد و
-      // دیالوگ سیستمی Android RECORD_AUDIO را خودبه‌خود نمی‌آورد. اگر پلاگین
-      // SpeechRecognition نصب باشد (که در workflow ساخت APK نصب می‌شود)،
-      // از همان برای گرفتن پرمیشن سیستمی استفاده می‌کنیم؛ بعد getUserMedia
-      // بدون reject شدن کار می‌کند.
       try {
-        const plugin = nativeSpeech();
-        if (isNativeApp() && plugin) {
-          const cur = (await plugin.checkPermissions?.())?.speechRecognition;
-          if (cur && cur !== "granted") {
-            const req = (await plugin.requestPermissions?.())?.speechRecognition;
-            if (req && req !== "granted") {
-              notifyUnavailable(h, PERMISSION_DENIED_MSG);
-              return;
-            }
-          }
-        }
-      } catch {
-        /* اگر پلاگین در دسترس نبود، روی getUserMedia تکیه می‌کنیم */
-      }
-      try {
+        // مهم: getUserMedia باید اولین فراخوانی async بعد از کلیک کاربر باشد.
+        // اگر قبلش permission/plugin await شود، WebView اندروید گاهی gesture را از دست
+        // می‌دهد و بی‌دلیل «در دسترس نیست» برمی‌گرداند.
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,

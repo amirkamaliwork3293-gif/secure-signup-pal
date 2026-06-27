@@ -1,5 +1,3 @@
-import { shortenUrlServer } from "@/lib/shorten.functions";
-
 /**
  * باز کردن لینک‌های بیرونی به‌شکلی که هم در مرورگر و هم داخل WebView اپ (Capacitor)
  * درست کار کند. لینک‌هایی مثل `sms:`، `https://wa.me/...` و صفحه عمومی فروشگاه
@@ -106,34 +104,12 @@ export function toIntlPhone(phone: string): string {
 }
 
 /**
- * کوتاه‌سازی URL بلند (مثل لینک عمومی فروشگاه با UUID) برای جلوگیری از
- * شکستن پیامک به چند بخش و خرابی ارسال در اپراتورهای ایرانی. از سرویس عمومی
- * is.gd استفاده می‌شود (HTTPS، با CORS). اگر سرویس در دسترس نبود، همان لینک
- * اصلی برمی‌گردد تا چیزی خراب نشود.
+ * قبلاً لینک فروشگاه برای پیامک کوتاه می‌شد، اما طبق نیاز فعلی کاربر باید
+ * همیشه همان لینک اصلی استفاده شود. این تابع برای سازگاری باقی مانده و دیگر
+ * هیچ لینک جدید/کوتاه‌شده‌ای نمی‌سازد.
  */
 export async function shortenUrl(url: string): Promise<string> {
-  if (!url || url.length < 50) return url;
-  // ابتدا سمت سرور تلاش می‌کنیم — داخل WebView اپ اندروید، fetch به دامنه‌های
-  // شخص ثالث (is.gd) ممکن است به‌خاطر CSP/شبکه شکست بخورد و لینک بلند باقی
-  // بماند → پیامک به چند بخش می‌شکند و در اپراتورهای ایرانی نمی‌رسد.
-  try {
-    const r = await shortenUrlServer({ data: { url } });
-    if (r?.short && /^https?:\/\//i.test(r.short) && r.short.length < url.length) return r.short;
-  } catch {
-    /* fall through to client-side */
-  }
-  try {
-    const res = await fetch(
-      `https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`,
-      { method: "GET" },
-    );
-    if (!res.ok) return url;
-    const text = (await res.text()).trim();
-    if (/^https?:\/\//i.test(text) && text.length < url.length) return text;
-    return url;
-  } catch {
-    return url;
-  }
+  return url;
 }
 
 /**

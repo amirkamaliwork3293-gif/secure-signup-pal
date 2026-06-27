@@ -167,6 +167,8 @@ export async function shareText(opts: {
       /* user canceled or bridge unavailable — fall through */
     }
   }
+  // اگر پنجره اشتراک باز نشد، حالا در همان کلیک متن را کپی می‌کنیم.
+  copied = await copyTextSafe(combined);
 
   const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }) : null;
   if (nav?.share) {
@@ -184,7 +186,6 @@ export async function shareText(opts: {
     if (typeof window !== "undefined") window.location.href = url;
     return "sms";
   }
-  copied = await copyTextSafe(combined);
   if (!copied) await copyTextSafe(combined);
   return "copied";
 }

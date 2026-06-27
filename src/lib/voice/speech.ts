@@ -100,7 +100,7 @@ function createFullAudioRecognizer(): Recognizer {
   let nativeHandlers: StartHandlers | null = null;
   let nativeResultListener: ((ev: Event) => void) | null = null;
   let nativeErrorListener: ((ev: Event) => void) | null = null;
-  let webRecorder: WebAudioRecorder | null = null;
+  let webRecorder: WebRecorder | null = null;
   let processing = false;
 
   const removeNativeListeners = () => {
@@ -176,7 +176,7 @@ function createFullAudioRecognizer(): Recognizer {
       }
 
       try {
-        webRecorder = new WebAudioRecorder(h);
+        webRecorder = pickWebRecorder(h);
         // اولین await واقعی همین getUserMedia است تا WebView زنجیره کلیک را از دست ندهد.
         await webRecorder.start();
       } catch (e) {

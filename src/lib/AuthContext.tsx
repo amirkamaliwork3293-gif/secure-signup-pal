@@ -1,7 +1,7 @@
 /**
  * AuthContext — session + profile + subscription expiry awareness.
  */
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
@@ -105,6 +105,8 @@ async function loadState(session: Session): Promise<AuthState> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const refreshProfile = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -132,7 +134,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (!disposed && currentRevision === revision) {
+      // Avoid the loading flicker when the same user's session is re-emitted
+      // (e.g. mobile WebView resumes after the native file picker closes —
+      // Supabase fires SIGNED_IN again, which would otherwise unmount the
+      // current page and discard the in-progress file selection / form state).
+      const cur = stateRef.current;
+      const sameUser =
+        (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
+        (cur.status === "expired" && cur.profile.id === session.user.id);
+      if (!disposed && currentRevision === revision && !sameUser) {
         setState({ status: "loading" });
       }
 
@@ -148,6 +158,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      // SIGNED_IN for the already-authenticated user is a no-op on mobile resume.
+      const cur = stateRef.current;
+      if (
+        event === "SIGNED_IN" &&
+        session &&
+        cur.status === "authenticated" &&
+        cur.session.user.id === session.user.id
+      ) {
+        return;
+      }
       void syncSession(session);
     });
 

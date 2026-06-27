@@ -18,12 +18,15 @@ import { Route as RenewRouteImport } from './routes/renew'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as QuickAddRouteImport } from './routes/quick-add'
 import { Route as ProductsRouteImport } from './routes/products'
+import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StoreStoreIdRouteImport } from './routes/store.$storeId'
+import { Route as MenuQrRouteImport } from './routes/menu.qr'
+import { Route as MUserIdRouteImport } from './routes/m.$userId'
 
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
@@ -70,6 +73,11 @@ const ProductsRoute = ProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MenuRoute = MenuRouteImport.update({
+  id: '/menu',
+  path: '/menu',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -100,6 +108,16 @@ const StoreStoreIdRoute = StoreStoreIdRouteImport.update({
   path: '/store/$storeId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MenuQrRoute = MenuQrRouteImport.update({
+  id: '/qr',
+  path: '/qr',
+  getParentRoute: () => MenuRoute,
+} as any)
+const MUserIdRoute = MUserIdRouteImport.update({
+  id: '/m/$userId',
+  path: '/m/$userId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -107,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
+  '/menu': typeof MenuRouteWithChildren
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
@@ -116,6 +135,8 @@ export interface FileRoutesByFullPath {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/voice': typeof VoiceRoute
+  '/m/$userId': typeof MUserIdRoute
+  '/menu/qr': typeof MenuQrRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
 export interface FileRoutesByTo {
@@ -124,6 +145,7 @@ export interface FileRoutesByTo {
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
+  '/menu': typeof MenuRouteWithChildren
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
@@ -133,6 +155,8 @@ export interface FileRoutesByTo {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/voice': typeof VoiceRoute
+  '/m/$userId': typeof MUserIdRoute
+  '/menu/qr': typeof MenuQrRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
 export interface FileRoutesById {
@@ -142,6 +166,7 @@ export interface FileRoutesById {
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
+  '/menu': typeof MenuRouteWithChildren
   '/products': typeof ProductsRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
@@ -151,6 +176,8 @@ export interface FileRoutesById {
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
   '/voice': typeof VoiceRoute
+  '/m/$userId': typeof MUserIdRoute
+  '/menu/qr': typeof MenuQrRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
 export interface FileRouteTypes {
@@ -161,6 +188,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/history'
     | '/login'
+    | '/menu'
     | '/products'
     | '/quick-add'
     | '/register'
@@ -170,6 +198,8 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/voice'
+    | '/m/$userId'
+    | '/menu/qr'
     | '/store/$storeId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -178,6 +208,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/history'
     | '/login'
+    | '/menu'
     | '/products'
     | '/quick-add'
     | '/register'
@@ -187,6 +218,8 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/voice'
+    | '/m/$userId'
+    | '/menu/qr'
     | '/store/$storeId'
   id:
     | '__root__'
@@ -195,6 +228,7 @@ export interface FileRouteTypes {
     | '/customers'
     | '/history'
     | '/login'
+    | '/menu'
     | '/products'
     | '/quick-add'
     | '/register'
@@ -204,6 +238,8 @@ export interface FileRouteTypes {
     | '/set-password'
     | '/settings'
     | '/voice'
+    | '/m/$userId'
+    | '/menu/qr'
     | '/store/$storeId'
   fileRoutesById: FileRoutesById
 }
@@ -213,6 +249,7 @@ export interface RootRouteChildren {
   CustomersRoute: typeof CustomersRoute
   HistoryRoute: typeof HistoryRoute
   LoginRoute: typeof LoginRoute
+  MenuRoute: typeof MenuRouteWithChildren
   ProductsRoute: typeof ProductsRoute
   QuickAddRoute: typeof QuickAddRoute
   RegisterRoute: typeof RegisterRoute
@@ -222,6 +259,7 @@ export interface RootRouteChildren {
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   VoiceRoute: typeof VoiceRoute
+  MUserIdRoute: typeof MUserIdRoute
   StoreStoreIdRoute: typeof StoreStoreIdRoute
 }
 
@@ -290,6 +328,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/menu': {
+      id: '/menu'
+      path: '/menu'
+      fullPath: '/menu'
+      preLoaderRoute: typeof MenuRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -332,8 +377,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StoreStoreIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/menu/qr': {
+      id: '/menu/qr'
+      path: '/qr'
+      fullPath: '/menu/qr'
+      preLoaderRoute: typeof MenuQrRouteImport
+      parentRoute: typeof MenuRoute
+    }
+    '/m/$userId': {
+      id: '/m/$userId'
+      path: '/m/$userId'
+      fullPath: '/m/$userId'
+      preLoaderRoute: typeof MUserIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
+
+interface MenuRouteChildren {
+  MenuQrRoute: typeof MenuQrRoute
+}
+
+const MenuRouteChildren: MenuRouteChildren = {
+  MenuQrRoute: MenuQrRoute,
+}
+
+const MenuRouteWithChildren = MenuRoute._addFileChildren(MenuRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -341,6 +410,7 @@ const rootRouteChildren: RootRouteChildren = {
   CustomersRoute: CustomersRoute,
   HistoryRoute: HistoryRoute,
   LoginRoute: LoginRoute,
+  MenuRoute: MenuRouteWithChildren,
   ProductsRoute: ProductsRoute,
   QuickAddRoute: QuickAddRoute,
   RegisterRoute: RegisterRoute,
@@ -350,6 +420,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
   VoiceRoute: VoiceRoute,
+  MUserIdRoute: MUserIdRoute,
   StoreStoreIdRoute: StoreStoreIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -755,6 +755,25 @@ function SmsCampaignModal({
   const [customMode, setCustomMode] = useState(false);
   const [includeLink, setIncludeLink] = useState(true);
   const [sentPhones, setSentPhones] = useState<Set<string>>(() => readSentPhones());
+  const [shortLink, setShortLink] = useState<string>("");
+
+  // لینک عمومی فروشگاه را به‌صورت کوتاه‌شده برای پیامک آماده می‌کنیم تا پیام به
+  // چند SMS تقسیم نشود و در اپراتورهای ایرانی به‌درستی برسد.
+  useEffect(() => {
+    if (!userId) {
+      setShortLink("");
+      return;
+    }
+    let alive = true;
+    const raw = storePublicUrl(userId);
+    setShortLink(raw);
+    void shortenUrl(raw).then((s) => {
+      if (alive) setShortLink(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   const audienceList = useMemo(() => {
     return list.filter((c) => {
@@ -780,8 +799,8 @@ function SmsCampaignModal({
     });
   };
 
-  // لینک عمومی صفحه فروشگاه که در انتهای پیام افزوده می‌شود (در صورت فعال‌بودن)
-  const storeLink = userId && includeLink ? storePublicUrl(userId) : "";
+  // لینک عمومی صفحه فروشگاه (کوتاه‌شده) که در انتهای پیام افزوده می‌شود
+  const storeLink = userId && includeLink ? shortLink : "";
   const finalText = storeLink ? `${text}\n${storeLink}` : text;
 
   const markSent = (phones: string[]) =>

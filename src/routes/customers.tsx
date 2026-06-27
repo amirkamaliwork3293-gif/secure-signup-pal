@@ -16,6 +16,7 @@ import {
   type CustomerTx,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
+import { shortenUrl, shareText } from "@/lib/openExternal";
 import {
   Users,
   Plus,
@@ -35,6 +36,7 @@ import {
   Megaphone,
   Check,
   Link2,
+  Share2,
 } from "lucide-react";
 import { z } from "zod";
 

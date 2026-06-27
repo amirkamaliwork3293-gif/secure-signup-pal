@@ -61,7 +61,14 @@ function StorePage() {
   }
 
   const socials = profile.socials ?? {};
-  const hasSocial = !!(socials.instagram || socials.telegram || socials.whatsapp);
+  const hasSocial = !!(
+    socials.instagram ||
+    socials.telegram ||
+    socials.whatsapp ||
+    socials.rubika ||
+    socials.eitaa ||
+    socials.bale
+  );
 
   return (
     <div className="min-h-screen bg-background pb-10" dir="rtl">
@@ -148,6 +155,27 @@ function StorePage() {
                   onClick={() => openExternal(`https://wa.me/${toIntlPhone(socials.whatsapp!)}`)}
                 />
               )}
+              {socials.rubika && (
+                <SocialButton
+                  icon={<MessageCircle className="h-4 w-4" />}
+                  label="روبیکا"
+                  onClick={() => openExternal(normalizeRubika(socials.rubika!))}
+                />
+              )}
+              {socials.eitaa && (
+                <SocialButton
+                  icon={<Send className="h-4 w-4" />}
+                  label="ایتا"
+                  onClick={() => openExternal(normalizeEitaa(socials.eitaa!))}
+                />
+              )}
+              {socials.bale && (
+                <SocialButton
+                  icon={<Send className="h-4 w-4" />}
+                  label="بله"
+                  onClick={() => openExternal(normalizeBale(socials.bale!))}
+                />
+              )}
             </div>
           </InfoCard>
         )}
@@ -168,6 +196,22 @@ function normalizeInstagram(v: string): string {
 function normalizeTelegram(v: string): string {
   if (/^https?:\/\//i.test(v)) return v;
   return `https://t.me/${v.replace(/^@/, "")}`;
+}
+
+function normalizeRubika(v: string): string {
+  if (/^https?:\/\//i.test(v)) return v;
+  // اگر شماره موبایل بود، به شناسه‌ی پروفایل تبدیل نمی‌کنیم — فقط نمایش/کپی
+  return `https://rubika.ir/${v.replace(/^@/, "")}`;
+}
+
+function normalizeEitaa(v: string): string {
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://eitaa.com/${v.replace(/^@/, "")}`;
+}
+
+function normalizeBale(v: string): string {
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://ble.ir/${v.replace(/^@/, "")}`;
 }
 
 function InfoCard({

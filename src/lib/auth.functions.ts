@@ -641,3 +641,54 @@ export const updatePlanConfigs = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { success: true };
   });
+
+// ─── User: submit a renewal request (extends current account, no new signup) ──
+export const submitRenewalRequest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { plan: Plan; receipt_url: string; payment_confirmed: boolean }) => {
+    if (!PAID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
+    if (!d.receipt_url) throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید.");
+    if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const plansCfg = await loadPlansConfig(supabaseAdmin);
+    if (!plansCfg[data.plan]?.enabled) throw new Error("این پلن در حال حاضر غیرفعال است.");
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("id, username, first_name, last_name")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (!profile) throw new Error("پروفایل یافت نشد.");
+
+    // اگر درخواست تمدید فعال (در انتظار) از قبل دارد، اجازه ارسال دوباره نده
+    const { data: existing } = await supabaseAdmin
+      .from("signup_requests")
+      .select("id")
+      .eq("target_user_id", context.userId)
+      .eq("request_type", "renewal")
+      .eq("status", "pending")
+      .maybeSingle();
+    if (existing) throw new Error("درخواست تمدید قبلی شما هنوز در انتظار بررسی است.");
+
+    const { data: created, error } = await supabaseAdmin
+      .from("signup_requests")
+      .insert({
+        first_name: profile.first_name || "",
+        last_name: profile.last_name || "",
+        username: profile.username,
+        plan: data.plan,
+        payment_confirmed: data.payment_confirmed,
+        receipt_url: data.receipt_url,
+        password_set: true,
+        request_type: "renewal",
+        target_user_id: context.userId,
+      } as any)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: created.id };
+  });

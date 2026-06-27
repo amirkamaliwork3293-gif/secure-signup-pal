@@ -801,7 +801,12 @@ function SmsCampaignModal({
 
   // لینک عمومی صفحه فروشگاه (کوتاه‌شده) که در انتهای پیام افزوده می‌شود
   const storeLink = userId && includeLink ? shortLink : "";
-  const finalText = storeLink ? `${text}\n${storeLink}` : text;
+  // حذف کاراکترهای نامرئی جهت متن (RLM/LRM/RLE/PDF/...) که گاهی توسط ادیتور یا
+  // مرورگر هنگام ترکیب متن فارسی + لینک انگلیسی به‌صورت خودکار تزریق می‌شوند و
+  // باعث می‌شوند برخی اپ‌های پیامک اندرویدی URL را خراب تفسیر کنند.
+  const stripBidi = (s: string) =>
+    s.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
+  const finalText = stripBidi(storeLink ? `${text}\n${storeLink}` : text);
 
   const markSent = (phones: string[]) =>
     setSentPhones((prev) => {

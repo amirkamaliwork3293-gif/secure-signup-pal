@@ -199,19 +199,24 @@ function normalizeTelegram(v: string): string {
 }
 
 function normalizeRubika(v: string): string {
-  if (/^https?:\/\//i.test(v)) return v;
-  // اگر شماره موبایل بود، به شناسه‌ی پروفایل تبدیل نمی‌کنیم — فقط نمایش/کپی
-  return `https://rubika.ir/${v.replace(/^@/, "")}`;
+  const t = v.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  const id = t.replace(/^@/, "").replace(/\s+/g, "");
+  return `https://rubika.ir/${id}`;
 }
 
 function normalizeEitaa(v: string): string {
-  if (/^https?:\/\//i.test(v)) return v;
-  return `https://eitaa.com/${v.replace(/^@/, "")}`;
+  const t = v.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  const id = t.replace(/^@/, "").replace(/\s+/g, "");
+  return `https://eitaa.com/${id}`;
 }
 
 function normalizeBale(v: string): string {
-  if (/^https?:\/\//i.test(v)) return v;
-  return `https://ble.ir/${v.replace(/^@/, "")}`;
+  const t = v.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  const id = t.replace(/^@/, "").replace(/\s+/g, "");
+  return `https://ble.ir/${id}`;
 }
 
 function InfoCard({

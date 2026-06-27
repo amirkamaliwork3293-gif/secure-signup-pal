@@ -33,6 +33,7 @@ type CapacitorGlobal = {
 declare global {
   interface Window {
     Capacitor?: CapacitorGlobal;
+    __KAMALI_NATIVE_APP?: boolean;
   }
 }
 
@@ -40,6 +41,7 @@ declare global {
 export function isNativeApp(): boolean {
   if (typeof window === "undefined") return false;
   try {
+    if (window.__KAMALI_NATIVE_APP) return true;
     return !!window.Capacitor?.isNativePlatform?.();
   } catch {
     return false;

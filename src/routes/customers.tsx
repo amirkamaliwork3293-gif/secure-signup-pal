@@ -612,6 +612,7 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
     `مبلغ: ${formatToman(balance)}\n` +
     `لطفاً در اولین فرصت نسبت به تسویه اقدام بفرمایید. با تشکر.`;
   const [text, setText] = useState(defaultMsg);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
   const phoneRaw = customer.phone ?? "";
   const intl = toIntlPhone(phoneRaw);
   const waUrl = `https://wa.me/${intl}?text=${encodeURIComponent(text)}`;
@@ -669,14 +670,22 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
         </div>
         <button
           onClick={async () => {
-            await shareText({ text, fallbackPhones: phoneRaw ? [phoneRaw] : [] });
-            onClose();
+            const result = await shareText({
+              title: "یادآور بدهی",
+              text,
+            });
+            setShareNotice(
+              result === "shared"
+                ? "پنجره اشتراک باز شد؛ اگر متن داخل اپ نیامد، متن آماده کپی شده و Paste کنید."
+                : "متن آماده کپی شد؛ وارد روبیکا، بله یا ایتا شوید و Paste کنید.",
+            );
           }}
           className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-semibold hover:bg-accent"
         >
           <Share2 className="h-4 w-4" />
           اشتراک‌گذاری در روبیکا / بله / ایتا / تلگرام ...
         </button>
+        {shareNotice && <p className="mt-2 text-center text-[11px] text-primary">{shareNotice}</p>}
         {!intl && (
           <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
         )}
@@ -756,6 +765,7 @@ function SmsCampaignModal({
   const [includeLink, setIncludeLink] = useState(true);
   const [sentPhones, setSentPhones] = useState<Set<string>>(() => readSentPhones());
   const [shortLink, setShortLink] = useState<string>("");
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
 
   // لینک عمومی فروشگاه را به‌صورت کوتاه‌شده برای پیامک آماده می‌کنیم تا پیام به
   // چند SMS تقسیم نشود و در اپراتورهای ایرانی به‌درستی برسد.
@@ -846,6 +856,16 @@ function SmsCampaignModal({
     const url = `https://wa.me/${intl}?text=${encodeURIComponent(personal)}`;
     window.open(url, "_blank", "noopener,noreferrer");
     markSent([(c.phone ?? "").trim()]);
+  };
+
+  const shareForApps = async (message: string, sentPhonesToMark: string[] = []) => {
+    const result = await shareText({ title: shopName, text: message });
+    if (sentPhonesToMark.length) markSent(sentPhonesToMark);
+    setShareNotice(
+      result === "shared"
+        ? "پنجره اشتراک باز شد؛ روبیکا، بله یا ایتا را انتخاب کنید. اگر متن نیامد، متن کپی شده و Paste کنید."
+        : "متن پیام کپی شد؛ وارد روبیکا، بله یا ایتا شوید و Paste کنید.",
+    );
   };
 
   return (
@@ -990,13 +1010,13 @@ function SmsCampaignModal({
                           onClick={async () => {
                             const personal = text.replace(/\{name\}/g, customerFullName(c));
                             const msg = storeLink ? `${personal}\n${storeLink}` : personal;
-                            await shareText({ text: msg, fallbackPhones: c.phone ? [c.phone] : [] });
-                            markSent([(c.phone ?? "").trim()]);
+                            await shareForApps(msg, [(c.phone ?? "").trim()].filter(Boolean));
                           }}
                           title="اشتراک‌گذاری (روبیکا/بله/ایتا/...)"
-                          className="grid h-7 w-7 place-items-center rounded-lg text-primary hover:bg-primary/10"
+                          className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-primary hover:bg-primary/10"
                         >
                           <Share2 className="h-3.5 w-3.5" />
+                          <span className="text-[10px] font-semibold">اشتراک</span>
                         </button>
                       </li>
                     );
@@ -1008,7 +1028,7 @@ function SmsCampaignModal({
 
           <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
             💡 با زدن دکمه «ارسال پیامک»، اپ پیامک گوشی با همه شماره‌ها و متن آماده باز می‌شود. برای
-            واتساپ، روی آیکن سبز کنار هر مشتری بزنید (واتساپ ارسال گروهی از طریق لینک ندارد).
+            روبیکا، بله و ایتا از دکمه «اشتراک در اپ‌های ایرانی» استفاده کنید؛ متن همزمان کپی می‌شود تا داخل اپ Paste کنید.
           </div>
         </div>
 
@@ -1029,6 +1049,17 @@ function SmsCampaignModal({
           {includeLink && !userId && (
             <p className="text-[10px] text-amber-600">برای افزودن لینک باید وارد حساب باشید.</p>
           )}
+
+          <button
+            type="button"
+            onClick={() => shareForApps(finalText)}
+            disabled={!finalText.trim()}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-semibold text-primary hover:bg-primary/15 disabled:opacity-50"
+          >
+            <Share2 className="h-4 w-4" />
+            اشتراک در روبیکا / بله / ایتا
+          </button>
+          {shareNotice && <p className="text-center text-[11px] leading-5 text-primary">{shareNotice}</p>}
 
           {finalList.length === 0 ? (
             <button

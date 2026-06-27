@@ -53,6 +53,83 @@ export type Database = {
         }
         Relationships: []
       }
+      menu_categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      menu_items: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string | null
+          is_available: boolean
+          name: string
+          price: number
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_available?: boolean
+          name: string
+          price?: number
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_available?: boolean
+          name?: string
+          price?: number
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "menu_items_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "menu_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -97,10 +174,13 @@ export type Database = {
           last_name: string
           password_set: boolean
           payment_confirmed: boolean
+          phone: string | null
           plan: Database["public"]["Enums"]["subscription_plan"]
           receipt_url: string | null
+          request_type: string
           reviewed_at: string | null
           status: Database["public"]["Enums"]["request_status"]
+          target_user_id: string | null
           username: string
         }
         Insert: {
@@ -110,10 +190,13 @@ export type Database = {
           last_name: string
           password_set?: boolean
           payment_confirmed?: boolean
+          phone?: string | null
           plan: Database["public"]["Enums"]["subscription_plan"]
           receipt_url?: string | null
+          request_type?: string
           reviewed_at?: string | null
           status?: Database["public"]["Enums"]["request_status"]
+          target_user_id?: string | null
           username: string
         }
         Update: {
@@ -123,10 +206,13 @@ export type Database = {
           last_name?: string
           password_set?: boolean
           payment_confirmed?: boolean
+          phone?: string | null
           plan?: Database["public"]["Enums"]["subscription_plan"]
           receipt_url?: string | null
+          request_type?: string
           reviewed_at?: string | null
           status?: Database["public"]["Enums"]["request_status"]
+          target_user_id?: string | null
           username?: string
         }
         Relationships: []

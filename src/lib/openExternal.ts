@@ -151,11 +151,12 @@ export async function shareText(opts: {
   const combined = opts.url ? `${opts.text}\n${opts.url}` : opts.text;
   // برای روبیکا/بله/ایتا بعضی نسخه‌ها متن را از Share Sheet دریافت نمی‌کنند؛
   // قبل از باز کردن پنجره اشتراک، متن را هم کپی می‌کنیم تا کاربر بتواند Paste کند.
-  const copied = await copyTextSafe(combined);
+  let copied = false;
 
   const nativeShare = nativeSharePlugin();
   if (nativeShare?.share) {
     try {
+      copied = await copyTextSafe(combined);
       await nativeShare.share({
         title: opts.title,
         text: combined,
@@ -183,6 +184,7 @@ export async function shareText(opts: {
     if (typeof window !== "undefined") window.location.href = url;
     return "sms";
   }
+  copied = await copyTextSafe(combined);
   if (!copied) await copyTextSafe(combined);
   return "copied";
 }

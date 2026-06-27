@@ -54,7 +54,14 @@ export const transcribeAudio = createServerFn({ method: "POST" })
     const fd = new FormData();
     fd.append("file", new Blob([bytes as BlobPart], { type: mime }), `recording.${ext}`);
     fd.append("model", "openai/gpt-4o-mini-transcribe");
-    if (data.language) fd.append("language", data.language);
+    // همیشه فارسی — کاربر فارسی صحبت می‌کند و نباید خروجی انگلیسی/فینگلیش شود.
+    fd.append("language", data.language || "fa");
+    fd.append(
+      "prompt",
+      "این یک گفتار فارسی برای ثبت فاکتور فروشگاهی است. خروجی باید کاملاً به الفبای فارسی نوشته شود؛ از حروف لاتین استفاده نکن. نمونه واژه‌ها: ماست، نان، پنیر، گوجه، کیلو، عدد، نیم، ربع.",
+    );
+    fd.append("response_format", "json");
+    fd.append("temperature", "0");
 
     try {
       const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {

@@ -522,7 +522,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
       throw new Error("یوزرنیم باید ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، عدد، _ و - باشد.");
     }
     if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
-    if (d.username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");
+    if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");
     return d;
   })
   .handler(async ({ data }) => {

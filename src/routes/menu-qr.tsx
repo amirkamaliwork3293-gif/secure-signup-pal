@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import bwipjs from "bwip-js/browser";
+import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Layout } from "@/components/Layout";
@@ -34,11 +34,17 @@ function QrPage() {
 
   useEffect(() => {
     if (!url || !canvasRef.current) return;
-    bwipjs.toCanvas(canvasRef.current, {
-      bcid: "qrcode", text: url, scale: 8, includetext: false,
-      paddingwidth: 4, paddingheight: 4,
-    });
-    setDataUrl(canvasRef.current.toDataURL("image/png"));
+    // استفاده از کتابخانه‌ی qrcode با حالت پیش‌فرض byte mode و پیشوند صریح
+    // https:// تا اسکنرهای موبایل (دوربین گوشی) آن را به‌عنوان لینک تشخیص
+    // داده و گزینه‌ی "Open website" نشان دهند، نه "Copy text".
+    QRCode.toCanvas(canvasRef.current, url, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      scale: 10,
+      color: { dark: "#000000", light: "#ffffff" },
+    }).then(() => {
+      setDataUrl(canvasRef.current!.toDataURL("image/png"));
+    }).catch(() => {});
   }, [url]);
 
   const buildHtml = () => {

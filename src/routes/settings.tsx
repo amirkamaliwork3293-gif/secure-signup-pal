@@ -152,6 +152,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
   const [instagram, setInstagram] = useState(appSettings.instagram ?? "");
   const [telegram, setTelegram] = useState(appSettings.telegram ?? "");
   const [whatsapp, setWhatsapp] = useState(appSettings.whatsapp ?? "");
+  const [rubika, setRubika] = useState(appSettings.rubika ?? "");
+  const [eitaa, setEitaa] = useState(appSettings.eitaa ?? "");
+  const [bale, setBale] = useState(appSettings.bale ?? "");
   const [description, setDescription] = useState(appSettings.storeDescription ?? "");
   const [logoUrl, setLogoUrl] = useState(appSettings.logoUrl ?? "");
   const [uploading, setUploading] = useState(false);
@@ -192,6 +195,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
         instagram: instagram.trim(),
         telegram: telegram.trim(),
         whatsapp: whatsapp.trim(),
+        rubika: rubika.trim(),
+        eitaa: eitaa.trim(),
+        bale: bale.trim(),
       },
       description,
       logoUrl,
@@ -205,6 +211,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
       instagram: instagram.trim() || undefined,
       telegram: telegram.trim() || undefined,
       whatsapp: whatsapp.trim() || undefined,
+      rubika: rubika.trim() || undefined,
+      eitaa: eitaa.trim() || undefined,
+      bale: bale.trim() || undefined,
       storeDescription: description.trim() || undefined,
       logoUrl: logoUrl.trim() || undefined,
     });

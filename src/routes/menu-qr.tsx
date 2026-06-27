@@ -9,7 +9,7 @@ import { settings } from "@/lib/store";
 import { printHtml, savePdf, saveBase64File } from "@/lib/print";
 import { QrCode, Printer, Download, ArrowLeft, Loader2 } from "lucide-react";
 
-export const Route = createFileRoute("/menu/qr")({
+export const Route = createFileRoute("/menu-qr")({
   head: () => ({ meta: [{ title: "QR منو | کمالی" }] }),
   component: () => (
     <AuthGuard>

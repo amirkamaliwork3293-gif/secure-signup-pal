@@ -48,9 +48,9 @@ jobs:
       #   Printer    → چاپ واقعی فاکتور/لیبل داخل اپ (دیالوگ چاپ اندروید + ذخیره PDF)
       #   Filesystem → ذخیره فایل PDF/PNG داخل اپ
       #   Share      → باز کردن پنجره ذخیره/ارسال فایل اندروید
-      #   SpeechRecognition → تشخیص گفتار نیتیو برای «ثبت صوتی» (fa-IR)
+      #   Voice bridge → ضبط مستقیم میکروفون اندروید برای «ثبت صوتی»
       - name: Install Capacitor + native plugins
-        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer @capacitor-community/speech-recognition
+        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer
 
       - name: Create fallback web folder
         run: |
@@ -151,6 +151,7 @@ jobs:
               '<uses-feature android:name="android.hardware.camera" android:required="false" />',
               '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
               '<uses-permission android:name="android.permission.RECORD_AUDIO" />',
+              '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />',
           ]
           for perm in permissions:
               if perm not in content:

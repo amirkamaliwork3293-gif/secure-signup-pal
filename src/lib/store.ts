@@ -145,6 +145,12 @@ export type AppSettings = {
   telegram?: string;
   /** شماره/لینک واتساپ بیزینس */
   whatsapp?: string;
+  /** آیدی یا شماره روبیکا */
+  rubika?: string;
+  /** آیدی یا شماره ایتا */
+  eitaa?: string;
+  /** آیدی یا شماره بله */
+  bale?: string;
   /** توضیح کوتاه فروشگاه */
   storeDescription?: string;
   /** آدرس لوگو یا تصویر فروشگاه */

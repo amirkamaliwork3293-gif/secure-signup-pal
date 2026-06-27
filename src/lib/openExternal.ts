@@ -1,3 +1,5 @@
+import { shortenUrlServer } from "@/lib/shorten.functions";
+
 /**
  * باز کردن لینک‌های بیرونی به‌شکلی که هم در مرورگر و هم داخل WebView اپ (Capacitor)
  * درست کار کند. لینک‌هایی مثل `sms:`، `https://wa.me/...` و صفحه عمومی فروشگاه
@@ -11,6 +13,43 @@ function isCapacitor(): boolean {
   if (typeof window === "undefined") return false;
   const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return !!cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : true);
+}
+
+type NativeSharePlugin = {
+  share?: (opts: { title?: string; text?: string; url?: string; dialogTitle?: string }) => Promise<unknown>;
+};
+
+function nativeSharePlugin(): NativeSharePlugin | null {
+  if (typeof window === "undefined") return null;
+  const plugin = (window as unknown as { Capacitor?: { Plugins?: { Share?: NativeSharePlugin } } })
+    .Capacitor?.Plugins?.Share;
+  return plugin && typeof plugin.share === "function" ? plugin : null;
+}
+
+async function copyTextSafe(text: string): Promise<boolean> {
+  if (typeof window === "undefined" || !text) return false;
+  try {
+    await navigator.clipboard?.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "true");
+      Object.assign(ta.style, {
+        position: "fixed",
+        top: "-1000px",
+        opacity: "0",
+      });
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function openExternal(url: string): void {
@@ -78,7 +117,6 @@ export async function shortenUrl(url: string): Promise<string> {
   // شخص ثالث (is.gd) ممکن است به‌خاطر CSP/شبکه شکست بخورد و لینک بلند باقی
   // بماند → پیامک به چند بخش می‌شکند و در اپراتورهای ایرانی نمی‌رسد.
   try {
-    const { shortenUrlServer } = await import("@/lib/shorten.functions");
     const r = await shortenUrlServer({ data: { url } });
     if (r?.short && /^https?:\/\//i.test(r.short) && r.short.length < url.length) return r.short;
   } catch {
@@ -111,6 +149,24 @@ export async function shareText(opts: {
   fallbackPhones?: string[];
 }): Promise<"shared" | "sms" | "copied"> {
   const combined = opts.url ? `${opts.text}\n${opts.url}` : opts.text;
+  // برای روبیکا/بله/ایتا بعضی نسخه‌ها متن را از Share Sheet دریافت نمی‌کنند؛
+  // قبل از باز کردن پنجره اشتراک، متن را هم کپی می‌کنیم تا کاربر بتواند Paste کند.
+  const copied = await copyTextSafe(combined);
+
+  const nativeShare = nativeSharePlugin();
+  if (nativeShare?.share) {
+    try {
+      await nativeShare.share({
+        title: opts.title,
+        text: combined,
+        dialogTitle: "ارسال در روبیکا، بله، ایتا و...",
+      });
+      return "shared";
+    } catch {
+      /* user canceled or bridge unavailable — fall through */
+    }
+  }
+
   const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }) : null;
   if (nav?.share) {
     try {
@@ -127,10 +183,6 @@ export async function shareText(opts: {
     if (typeof window !== "undefined") window.location.href = url;
     return "sms";
   }
-  try {
-    await navigator.clipboard?.writeText(combined);
-    return "copied";
-  } catch {
-    return "copied";
-  }
+  if (!copied) await copyTextSafe(combined);
+  return "copied";
 }

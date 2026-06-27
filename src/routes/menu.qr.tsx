@@ -35,7 +35,8 @@ function QrPage() {
   useEffect(() => {
     if (!url || !canvasRef.current) return;
     bwipjs.toCanvas(canvasRef.current, {
-      bcid: "qrcode", text: url, scale: 8, includetext: false, padding: 4,
+      bcid: "qrcode", text: url, scale: 8, includetext: false,
+      paddingwidth: 4, paddingheight: 4,
     });
     setDataUrl(canvasRef.current.toDataURL("image/png"));
   }, [url]);

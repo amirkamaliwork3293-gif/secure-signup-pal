@@ -113,8 +113,12 @@ export function detectEngine(): SpeechEngine {
   // در اپ نیتیو (APK) ترجیحاً MediaRecorder + سرویس رونویسی Lovable AI استفاده می‌شود
   // تا چند ثانیه‌ی اول صحبت یا تک‌کلمه‌ها (مثل «ماست» / «رب گوجه») گم نشود.
   if (isNativeApp() && typeof window !== "undefined" && hasMediaRecorder()) return "native";
-  if (isNativeApp() && nativeSpeech()) return "native";
   if (webSpeechCtor()) return "web";
+  // WebView اندروید گاهی Capacitor bridge را روی دامنه راه‌دور تزریق نمی‌کند؛
+  // در این حالت Web Speech هم وجود ندارد، اما MediaRecorder/getUserMedia هست.
+  // پس به‌جای نمایش «در دسترس نیست»، مسیر ضبط کامل صدا + رونویسی سرور را فعال می‌کنیم.
+  if (typeof window !== "undefined" && hasMediaRecorder()) return "native";
+  if (isNativeApp() && nativeSpeech()) return "native";
   return "none";
 }
 
@@ -134,7 +138,7 @@ export function createRecognizer(): Recognizer {
   const engine = detectEngine();
 
   if (engine === "native") {
-    if (isNativeApp() && hasMediaRecorder()) return createMediaRecorderRecognizer();
+    if (hasMediaRecorder()) return createMediaRecorderRecognizer();
     return createNativeRecognizer();
   }
   if (engine === "web") {

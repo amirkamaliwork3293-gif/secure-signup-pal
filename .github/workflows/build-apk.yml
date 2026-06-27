@@ -48,9 +48,9 @@ jobs:
       #   Printer    → چاپ واقعی فاکتور/لیبل داخل اپ (دیالوگ چاپ اندروید + ذخیره PDF)
       #   Filesystem → ذخیره فایل PDF/PNG داخل اپ
       #   Share      → باز کردن پنجره ذخیره/ارسال فایل اندروید
-      #   SpeechRecognition → تشخیص گفتار نیتیو برای «ثبت صوتی» (fa-IR)
+      #   Voice bridge → ضبط مستقیم میکروفون اندروید برای «ثبت صوتی»
       - name: Install Capacitor + native plugins
-        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer @capacitor-community/speech-recognition
+        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer
 
       - name: Create fallback web folder
         run: |
@@ -151,6 +151,7 @@ jobs:
               '<uses-feature android:name="android.hardware.camera" android:required="false" />',
               '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
               '<uses-permission android:name="android.permission.RECORD_AUDIO" />',
+              '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />',
           ]
           for perm in permissions:
               if perm not in content:
@@ -177,61 +178,108 @@ jobs:
 
           import android.Manifest;
           import android.content.pm.PackageManager;
-          import android.os.Build;
           import android.media.MediaRecorder;
+          import android.os.Build;
           import android.os.Bundle;
           import android.util.Base64;
           import android.webkit.JavascriptInterface;
           import android.webkit.PermissionRequest;
-          import android.webkit.WebChromeClient;
           import android.webkit.WebView;
           import androidx.core.app.ActivityCompat;
           import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.BridgeWebChromeClient;
           import org.json.JSONObject;
           import java.io.ByteArrayOutputStream;
           import java.io.File;
           import java.io.FileInputStream;
 
           public class MainActivity extends BridgeActivity {
+              private static final int REQ_MEDIA = 1207;
               private MediaRecorder voiceRecorder;
               private File voiceFile;
+              private boolean pendingVoiceStart = false;
+              private PermissionRequest pendingWebPermissionRequest;
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
-                  requestRuntimeMediaPermissions();
                   WebView webView = this.bridge.getWebView();
+                  webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
                   webView.addJavascriptInterface(new KamaliVoiceBridge(), "KamaliVoice");
-                  this.bridge.getWebView().setWebChromeClient(new WebChromeClient() {
+                  webView.setWebChromeClient(new BridgeWebChromeClient(this.bridge) {
                       @Override
                       public void onPermissionRequest(final PermissionRequest request) {
                           runOnUiThread(() -> {
-                              requestRuntimeMediaPermissions();
-                              request.grant(request.getResources());
+                              if (hasPermissionsForWebRequest(request)) {
+                                  safeGrant(request);
+                                  return;
+                              }
+                              pendingWebPermissionRequest = request;
+                              requestRuntimeMediaPermissions(true, true);
                           });
                       }
                   });
-                  webView.evaluateJavascript("window.__KAMALI_NATIVE_APP=true;", null);
+                  webView.post(() -> webView.evaluateJavascript("window.__KAMALI_NATIVE_APP=true;", null));
               }
 
-              private void requestRuntimeMediaPermissions() {
+              @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  if (requestCode != REQ_MEDIA) return;
+
+                  PermissionRequest webRequest = pendingWebPermissionRequest;
+                  pendingWebPermissionRequest = null;
+                  if (webRequest != null) {
+                      if (hasPermissionsForWebRequest(webRequest)) safeGrant(webRequest);
+                      else safeDeny(webRequest);
+                  }
+
+                  if (pendingVoiceStart) {
+                      pendingVoiceStart = false;
+                      if (hasRecordPermission()) startVoiceRecordingNow();
+                      else dispatchVoiceError("اجازه میکروفون داده نشد. از تنظیمات گوشی، دسترسی میکروفون برنامه را فعال کنید.");
+                  }
+              }
+
+              private void requestRuntimeMediaPermissions(boolean audio, boolean camera) {
                   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
                   java.util.ArrayList<String> permissions = new java.util.ArrayList<>();
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                  if (audio && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                       permissions.add(Manifest.permission.RECORD_AUDIO);
                   }
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                  if (camera && ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                       permissions.add(Manifest.permission.CAMERA);
                   }
-                  if (!permissions.isEmpty()) {
-                      ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), 1207);
-                  }
+                  if (!permissions.isEmpty()) ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), REQ_MEDIA);
               }
 
               private boolean hasRecordPermission() {
                   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
                   return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasCameraPermission() {
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+                  return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private boolean hasPermissionsForWebRequest(PermissionRequest request) {
+                  boolean needsAudio = false;
+                  boolean needsCamera = false;
+                  for (String resource : request.getResources()) {
+                      if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) needsAudio = true;
+                      if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) needsCamera = true;
+                  }
+                  return (!needsAudio || hasRecordPermission()) && (!needsCamera || hasCameraPermission());
+              }
+
+              private void safeGrant(PermissionRequest request) {
+                  try { request.grant(request.getResources()); } catch (Exception ignored) {}
+              }
+
+              private void safeDeny(PermissionRequest request) {
+                  try { request.deny(); } catch (Exception ignored) {}
               }
 
               private void dispatchVoiceError(String message) {
@@ -264,35 +312,40 @@ jobs:
                   }
               }
 
+              private void startVoiceRecordingNow() {
+                  try {
+                      stopRecorderOnly();
+                      voiceFile = File.createTempFile("kamali-voice-", ".m4a", getCacheDir());
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) voiceRecorder = new MediaRecorder(MainActivity.this);
+                      else voiceRecorder = new MediaRecorder();
+                      try {
+                          voiceRecorder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION);
+                      } catch (Exception ignored) {
+                          voiceRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                      }
+                      voiceRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                      voiceRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                      voiceRecorder.setAudioEncodingBitRate(128000);
+                      voiceRecorder.setAudioSamplingRate(44100);
+                      voiceRecorder.setOutputFile(voiceFile.getAbsolutePath());
+                      voiceRecorder.prepare();
+                      voiceRecorder.start();
+                  } catch (Exception e) {
+                      stopRecorderOnly();
+                      dispatchVoiceError("ضبط صدا در اپلیکیشن شروع نشد: " + e.getMessage());
+                  }
+              }
+
               public class KamaliVoiceBridge {
                   @JavascriptInterface
                   public void start() {
                       runOnUiThread(() -> {
-                          try {
-                              requestRuntimeMediaPermissions();
-                              if (!hasRecordPermission()) {
-                                  dispatchVoiceError("اجازه میکروفون داده نشده است.");
-                                  return;
-                              }
-                              stopRecorderOnly();
-                              voiceFile = File.createTempFile("kamali-voice-", ".m4a", getCacheDir());
-                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                  voiceRecorder = new MediaRecorder(MainActivity.this);
-                              } else {
-                                  voiceRecorder = new MediaRecorder();
-                              }
-                              voiceRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-                              voiceRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-                              voiceRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-                              voiceRecorder.setAudioEncodingBitRate(96000);
-                              voiceRecorder.setAudioSamplingRate(44100);
-                              voiceRecorder.setOutputFile(voiceFile.getAbsolutePath());
-                              voiceRecorder.prepare();
-                              voiceRecorder.start();
-                          } catch (Exception e) {
-                              stopRecorderOnly();
-                              dispatchVoiceError("ضبط صدا در اپلیکیشن شروع نشد: " + e.getMessage());
+                          if (!hasRecordPermission()) {
+                              pendingVoiceStart = true;
+                              requestRuntimeMediaPermissions(true, false);
+                              return;
                           }
+                          startVoiceRecordingNow();
                       });
                   }
 
@@ -306,8 +359,8 @@ jobs:
                               }
                               stopRecorderOnly();
                               byte[] data = readFile(voiceFile);
-                              if (data.length < 1024) {
-                                  dispatchVoiceError("صدایی ضبط نشد.");
+                              if (data.length < 2048) {
+                                  dispatchVoiceError("صدایی ضبط نشد. دوباره ضبط کنید.");
                                   return;
                               }
                               dispatchVoiceResult(Base64.encodeToString(data, Base64.NO_WRAP));

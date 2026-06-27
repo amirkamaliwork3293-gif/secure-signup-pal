@@ -132,7 +132,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (!disposed && currentRevision === revision) {
+      // Avoid the loading flicker when the same user's session is re-emitted
+      // (e.g. mobile WebView resumes after the native file picker closes —
+      // Supabase fires SIGNED_IN again, which would otherwise unmount the
+      // current page and discard the in-progress file selection / form state).
+      const sameUser =
+        (state.status === "authenticated" && state.session.user.id === session.user.id) ||
+        (state.status === "expired" && state.profile.id === session.user.id);
+      if (!disposed && currentRevision === revision && !sameUser) {
         setState({ status: "loading" });
       }
 
@@ -148,6 +155,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      // SIGNED_IN for the already-authenticated user is a no-op on mobile resume.
+      if (
+        event === "SIGNED_IN" &&
+        session &&
+        state.status === "authenticated" &&
+        state.session.user.id === session.user.id
+      ) {
+        return;
+      }
       void syncSession(session);
     });
 

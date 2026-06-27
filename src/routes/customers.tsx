@@ -667,6 +667,16 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
             پیامک
           </a>
         </div>
+        <button
+          onClick={async () => {
+            await shareText({ text, fallbackPhones: phoneRaw ? [phoneRaw] : [] });
+            onClose();
+          }}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-semibold hover:bg-accent"
+        >
+          <Share2 className="h-4 w-4" />
+          اشتراک‌گذاری در روبیکا / بله / ایتا / تلگرام ...
+        </button>
         {!intl && (
           <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
         )}

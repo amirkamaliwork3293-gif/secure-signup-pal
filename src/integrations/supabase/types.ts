@@ -131,6 +131,45 @@ export type Database = {
         }
         Relationships: []
       }
+      store_profiles: {
+        Row: {
+          address: string | null
+          created_at: string
+          description: string | null
+          hours: string | null
+          logo_url: string | null
+          phones: string[] | null
+          shop_name: string | null
+          socials: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address?: string | null
+          created_at?: string
+          description?: string | null
+          hours?: string | null
+          logo_url?: string | null
+          phones?: string[] | null
+          shop_name?: string | null
+          socials?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          address?: string | null
+          created_at?: string
+          description?: string | null
+          hours?: string | null
+          logo_url?: string | null
+          phones?: string[] | null
+          shop_name?: string | null
+          socials?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_data: {
         Row: {
           categories: Json

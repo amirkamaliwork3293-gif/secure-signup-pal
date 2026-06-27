@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
  * تبدیل گفتار به متن برای نسخه‌ی نیتیو (APK) — مشکل پلاگین
@@ -11,8 +12,8 @@ import { z } from "zod";
  */
 
 const InputSchema = z.object({
-  /** صدا به‌صورت base64 خام (بدون پیشوند data:) */
-  audioBase64: z.string().min(100),
+  /** صدا به‌صورت base64 خام (بدون پیشوند data:) — حداکثر ~۸ مگابایت base64 */
+  audioBase64: z.string().min(100).max(11_000_000),
   /** فرمت کانتینر صوت: webm/m4a/mp4/mp3/wav (پیش‌فرض webm) */
   format: z.string().default("webm"),
   /** زبان ISO-639-1؛ اگر خالی باشد، مدل خودش تشخیص می‌دهد */
@@ -41,6 +42,7 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 export const transcribeAudio = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((data) => InputSchema.parse(data))
   .handler(async ({ data }): Promise<TranscribeResult> => {
     const apiKey = process.env.LOVABLE_API_KEY;

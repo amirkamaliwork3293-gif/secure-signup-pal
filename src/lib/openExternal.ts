@@ -74,6 +74,16 @@ export function toIntlPhone(phone: string): string {
  */
 export async function shortenUrl(url: string): Promise<string> {
   if (!url || url.length < 50) return url;
+  // ابتدا سمت سرور تلاش می‌کنیم — داخل WebView اپ اندروید، fetch به دامنه‌های
+  // شخص ثالث (is.gd) ممکن است به‌خاطر CSP/شبکه شکست بخورد و لینک بلند باقی
+  // بماند → پیامک به چند بخش می‌شکند و در اپراتورهای ایرانی نمی‌رسد.
+  try {
+    const { shortenUrlServer } = await import("@/lib/shorten.functions");
+    const r = await shortenUrlServer({ data: { url } });
+    if (r?.short && /^https?:\/\//i.test(r.short) && r.short.length < url.length) return r.short;
+  } catch {
+    /* fall through to client-side */
+  }
   try {
     const res = await fetch(
       `https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`,

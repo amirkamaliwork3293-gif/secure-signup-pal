@@ -357,24 +357,39 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
             <input
               value={rubika}
               onChange={(e) => setRubika(e.target.value)}
-              placeholder="آیدی یا شماره روبیکا (Rubika)"
+              placeholder="آیدی روبیکا (مثلاً my_shop) — نه شماره تلفن"
               dir="ltr"
               className={profileInputCls}
             />
+            {rubika.trim() && /^[+\d۰-۹٠-٩]/.test(rubika.trim()) && (
+              <p className="-mt-2 text-[11px] text-amber-600">
+                این مقدار شبیه شماره تلفن است؛ روبیکا فقط با آیدی صفحه باز می‌شود، نه شماره.
+              </p>
+            )}
             <input
               value={eitaa}
               onChange={(e) => setEitaa(e.target.value)}
-              placeholder="آیدی یا شماره ایتا (Eitaa)"
+              placeholder="آیدی ایتا (مثلاً my_shop) — نه شماره تلفن"
               dir="ltr"
               className={profileInputCls}
             />
+            {eitaa.trim() && /^[+\d۰-۹٠-٩]/.test(eitaa.trim()) && (
+              <p className="-mt-2 text-[11px] text-amber-600">
+                این مقدار شبیه شماره تلفن است؛ ایتا فقط با آیدی صفحه باز می‌شود، نه شماره.
+              </p>
+            )}
             <input
               value={bale}
               onChange={(e) => setBale(e.target.value)}
-              placeholder="آیدی یا شماره بله (Bale)"
+              placeholder="آیدی بله (مثلاً my_shop) — نه شماره تلفن"
               dir="ltr"
               className={profileInputCls}
             />
+            {bale.trim() && /^[+\d۰-۹٠-٩]/.test(bale.trim()) && (
+              <p className="-mt-2 text-[11px] text-amber-600">
+                این مقدار شبیه شماره تلفن است؛ بله فقط با آیدی صفحه باز می‌شود، نه شماره.
+              </p>
+            )}
           </div>
 
           <div>

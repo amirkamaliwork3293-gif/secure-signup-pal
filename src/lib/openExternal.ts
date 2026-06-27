@@ -65,3 +65,62 @@ export function toIntlPhone(phone: string): string {
   else if (digits.length === 10 && digits.startsWith("9")) digits = "98" + digits;
   return digits;
 }
+
+/**
+ * کوتاه‌سازی URL بلند (مثل لینک عمومی فروشگاه با UUID) برای جلوگیری از
+ * شکستن پیامک به چند بخش و خرابی ارسال در اپراتورهای ایرانی. از سرویس عمومی
+ * is.gd استفاده می‌شود (HTTPS، با CORS). اگر سرویس در دسترس نبود، همان لینک
+ * اصلی برمی‌گردد تا چیزی خراب نشود.
+ */
+export async function shortenUrl(url: string): Promise<string> {
+  if (!url || url.length < 50) return url;
+  try {
+    const res = await fetch(
+      `https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`,
+      { method: "GET" },
+    );
+    if (!res.ok) return url;
+    const text = (await res.text()).trim();
+    if (/^https?:\/\//i.test(text) && text.length < url.length) return text;
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * اشتراک‌گذاری متن/لینک از طریق منوی اشتراک‌گذاری سیستم اندروید (Web Share API).
+ * در اپ نیتیو و مرورگرهای موبایل، پنجره‌ی انتخاب اپلیکیشن باز می‌شود و کاربر می‌تواند
+ * بین واتساپ، روبیکا، ایتا، بله، تلگرام و... یکی را انتخاب کند. اگر Web Share
+ * در دسترس نبود، به sms: برمی‌گردیم.
+ */
+export async function shareText(opts: {
+  text: string;
+  url?: string;
+  title?: string;
+  fallbackPhones?: string[];
+}): Promise<"shared" | "sms" | "copied"> {
+  const combined = opts.url ? `${opts.text}\n${opts.url}` : opts.text;
+  const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }) : null;
+  if (nav?.share) {
+    try {
+      await nav.share({ title: opts.title, text: combined });
+      return "shared";
+    } catch {
+      /* user canceled or unsupported — fall through */
+    }
+  }
+  // fallback: sms
+  if (opts.fallbackPhones?.length) {
+    const to = opts.fallbackPhones.join(",");
+    const url = `sms:${to}?body=${encodeURIComponent(combined)}`;
+    if (typeof window !== "undefined") window.location.href = url;
+    return "sms";
+  }
+  try {
+    await navigator.clipboard?.writeText(combined);
+    return "copied";
+  } catch {
+    return "copied";
+  }
+}

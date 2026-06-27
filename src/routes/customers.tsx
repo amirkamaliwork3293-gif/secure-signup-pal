@@ -16,6 +16,7 @@ import {
   type CustomerTx,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
+import { shortenUrl, shareText } from "@/lib/openExternal";
 import {
   Users,
   Plus,
@@ -35,6 +36,7 @@ import {
   Megaphone,
   Check,
   Link2,
+  Share2,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -665,6 +667,16 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
             پیامک
           </a>
         </div>
+        <button
+          onClick={async () => {
+            await shareText({ text, fallbackPhones: phoneRaw ? [phoneRaw] : [] });
+            onClose();
+          }}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-semibold hover:bg-accent"
+        >
+          <Share2 className="h-4 w-4" />
+          اشتراک‌گذاری در روبیکا / بله / ایتا / تلگرام ...
+        </button>
         {!intl && (
           <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
         )}
@@ -743,6 +755,25 @@ function SmsCampaignModal({
   const [customMode, setCustomMode] = useState(false);
   const [includeLink, setIncludeLink] = useState(true);
   const [sentPhones, setSentPhones] = useState<Set<string>>(() => readSentPhones());
+  const [shortLink, setShortLink] = useState<string>("");
+
+  // لینک عمومی فروشگاه را به‌صورت کوتاه‌شده برای پیامک آماده می‌کنیم تا پیام به
+  // چند SMS تقسیم نشود و در اپراتورهای ایرانی به‌درستی برسد.
+  useEffect(() => {
+    if (!userId) {
+      setShortLink("");
+      return;
+    }
+    let alive = true;
+    const raw = storePublicUrl(userId);
+    setShortLink(raw);
+    void shortenUrl(raw).then((s) => {
+      if (alive) setShortLink(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   const audienceList = useMemo(() => {
     return list.filter((c) => {
@@ -768,8 +799,8 @@ function SmsCampaignModal({
     });
   };
 
-  // لینک عمومی صفحه فروشگاه که در انتهای پیام افزوده می‌شود (در صورت فعال‌بودن)
-  const storeLink = userId && includeLink ? storePublicUrl(userId) : "";
+  // لینک عمومی صفحه فروشگاه (کوتاه‌شده) که در انتهای پیام افزوده می‌شود
+  const storeLink = userId && includeLink ? shortLink : "";
   const finalText = storeLink ? `${text}\n${storeLink}` : text;
 
   const markSent = (phones: string[]) =>
@@ -949,6 +980,18 @@ function SmsCampaignModal({
                           className="grid h-7 w-7 place-items-center rounded-lg text-green-600 hover:bg-green-500/10"
                         >
                           <MessageCircle className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={async () => {
+                            const personal = text.replace(/\{name\}/g, customerFullName(c));
+                            const msg = storeLink ? `${personal}\n${storeLink}` : personal;
+                            await shareText({ text: msg, fallbackPhones: c.phone ? [c.phone] : [] });
+                            markSent([(c.phone ?? "").trim()]);
+                          }}
+                          title="اشتراک‌گذاری (روبیکا/بله/ایتا/...)"
+                          className="grid h-7 w-7 place-items-center rounded-lg text-primary hover:bg-primary/10"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
                         </button>
                       </li>
                     );

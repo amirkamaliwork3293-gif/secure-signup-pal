@@ -9,7 +9,6 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
-import { KamaliSplash } from "@/components/KamaliSplash";
 import { AuthProvider } from "@/lib/AuthContext";
 import { disableServiceWorker } from "@/registerSW";
 
@@ -131,7 +130,6 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <KamaliSplash />
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
       </AuthProvider>

@@ -49,6 +49,12 @@ export type StoreSocials = {
   instagram?: string;
   telegram?: string;
   whatsapp?: string;
+  /** آیدی یا شماره روبیکا */
+  rubika?: string;
+  /** آیدی یا شماره ایتا */
+  eitaa?: string;
+  /** آیدی یا شماره بله */
+  bale?: string;
 };
 
 export type PublicStoreProfile = {

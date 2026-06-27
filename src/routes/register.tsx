@@ -30,6 +30,11 @@ function formatRemaining(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+function isValidIranPhone(p: string): boolean {
+  const v = p.replace(/\s+/g, "").replace(/^\+98/, "0").replace(/^98/, "0");
+  return /^09\d{9}$/.test(v);
+}
+
 function RegisterPage() {
   const navigate = useNavigate();
   const [firstName, setFirstName] = useState("");
@@ -108,6 +113,7 @@ function RegisterPage() {
     if (trialAlreadyUsed) { setError("نسخه تست قبلاً روی این دستگاه استفاده شده است."); return; }
     if (!firstName.trim() || !lastName.trim()) { setError("نام و نام خانوادگی الزامی است."); return; }
     if (!usernameField.trim()) { setError("یوزرنیم الزامی است."); return; }
+    if (!isValidIranPhone(phone)) { setError("شماره موبایل معتبر وارد کنید (مثل 09xxxxxxxxx)."); return; }
     if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
     if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
     setLoading(true);
@@ -136,6 +142,7 @@ function RegisterPage() {
     setError("");
     if (!firstName.trim() || !lastName.trim()) { setError("نام و نام خانوادگی الزامی است."); return; }
     if (!usernameField.trim()) { setError("یوزرنیم الزامی است."); return; }
+    if (!isValidIranPhone(phone)) { setError("شماره موبایل معتبر وارد کنید (مثل 09xxxxxxxxx)."); return; }
     if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
     if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
     if (!receiptFile) { setError("لطفاً عکس رسید پرداخت را آپلود کنید."); return; }
@@ -226,7 +233,7 @@ function RegisterPage() {
         />
 
         <Field
-          label="شماره موبایل (اختیاری)"
+          label="شماره موبایل"
           value={phone}
           onChange={setPhone}
           placeholder="09xxxxxxxxx"

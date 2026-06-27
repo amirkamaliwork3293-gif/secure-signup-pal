@@ -17,9 +17,22 @@ type Plan = keyof typeof PLAN_DURATION_MS;
 const VALID_PLANS: Plan[] = ["trial", "1month", "3month", "6month", "12month"];
 const PAID_PLANS: Plan[] = ["1month", "3month", "6month", "12month"];
 
-const ADMIN_USERNAME = "Amirkamali";
-const ADMIN_PASSWORD = "Amir8413293";
+// Admin credentials live in server-only env vars (ADMIN_USERNAME, ADMIN_PASSWORD).
+// We only retain the canonical email here as a non-secret identifier.
 const ADMIN_EMAIL = "amirkamali@kamali.local";
+
+function getAdminUsername(): string {
+  return (process.env.ADMIN_USERNAME || "").trim();
+}
+function getAdminPassword(): string {
+  return process.env.ADMIN_PASSWORD || "";
+}
+function ctEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
@@ -60,7 +73,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       if (d.plan === "trial") throw new Error("برای نسخه تست از فرم اختصاصی استفاده کنید.");
       if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
       if (!d.receipt_url) throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید.");
-      if (d.username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) {
         throw new Error("این یوزرنیم رزرو شده است.");
       }
       return d;

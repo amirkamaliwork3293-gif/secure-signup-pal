@@ -202,7 +202,165 @@ function createFullAudioRecognizer(): Recognizer {
   };
 }
 
-class WebAudioRecorder {
+interface WebRecorder {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+function pickWebRecorder(h: StartHandlers): WebRecorder {
+  // اگر MediaRecorder با Opus در دسترس است، آن را ترجیح می‌دهیم (پی‌لود تا ۸ برابر کوچک‌تر
+  // از WAV ۱۶ کیلوهرتز است و رونویسی به‌مراتب سریع‌تر می‌شود).
+  if (typeof window !== "undefined" && "MediaRecorder" in window) {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4;codecs=mp4a.40.2",
+      "audio/mp4",
+    ];
+    const supported = candidates.find((t) => {
+      try {
+        return (window as unknown as { MediaRecorder: typeof MediaRecorder }).MediaRecorder.isTypeSupported(t);
+      } catch {
+        return false;
+      }
+    });
+    if (supported) return new MediaRecorderRecorder(h, supported);
+  }
+  return new WebAudioRecorder(h);
+}
+
+const SILENCE_RMS = 0.012;
+const SILENCE_HOLD_MS = 1300;
+const MIN_VOICE_MS = 400;
+
+class MediaRecorderRecorder implements WebRecorder {
+  private stream: MediaStream | null = null;
+  private rec: MediaRecorder | null = null;
+  private chunks: Blob[] = [];
+  private vad: VAD | null = null;
+  private stopped = false;
+  private startedAt = 0;
+  constructor(private handlers: StartHandlers, private mime: string) {}
+
+  async start() {
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 },
+    });
+    this.rec = new MediaRecorder(this.stream, { mimeType: this.mime, audioBitsPerSecond: 32000 });
+    this.rec.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) this.chunks.push(e.data);
+    };
+    this.rec.onstop = () => this.finalize();
+    this.rec.onerror = () => this.handlers.onError("ضبط صدا قطع شد. دوباره تلاش کنید.");
+    this.startedAt = Date.now();
+    this.rec.start();
+    this.vad = new VAD(this.stream, () => this.autoStop());
+    await this.vad.start();
+  }
+
+  private autoStop() {
+    if (this.stopped) return;
+    if (Date.now() - this.startedAt < MIN_VOICE_MS) return;
+    void this.stop();
+  }
+
+  async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    try {
+      this.vad?.stop();
+      if (this.rec && this.rec.state !== "inactive") this.rec.stop();
+      else this.finalize();
+    } catch {
+      this.finalize();
+    }
+  }
+
+  private async finalize() {
+    try {
+      this.stream?.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    const blob = new Blob(this.chunks, { type: this.mime });
+    if (blob.size < 2048) {
+      this.handlers.onError(EMPTY_AUDIO_MSG);
+      this.handlers.onEnd?.();
+      return;
+    }
+    try {
+      this.handlers.onPartial?.("در حال تبدیل صدا به متن…");
+      const base64 = await blobToBase64(blob);
+      const ext = this.mime.includes("mp4") ? "m4a" : "webm";
+      const result = await transcribeAudio({ data: { audioBase64: base64, format: ext, language: "fa" } });
+      if (result.ok) this.handlers.onResult(result.text);
+      else this.handlers.onError(result.error);
+    } catch (e) {
+      this.handlers.onError("ارسال صدا ناموفق بود: " + String((e as Error)?.message ?? e));
+    } finally {
+      this.handlers.onEnd?.();
+    }
+  }
+}
+
+/** تشخیص سکوت — وقتی کاربر چند صدم ثانیه ساکت شد، ضبط را خودکار قطع می‌کند. */
+class VAD {
+  private ctx: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  private raf = 0;
+  private silenceSince = 0;
+  private heardVoice = false;
+  constructor(private stream: MediaStream, private onSilence: () => void) {}
+  async start() {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    this.ctx = new AudioCtx();
+    if (this.ctx.state === "suspended") await this.ctx.resume();
+    this.source = this.ctx.createMediaStreamSource(this.stream);
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 1024;
+    this.source.connect(this.analyser);
+    const buf = new Float32Array(this.analyser.fftSize);
+    const tick = () => {
+      if (!this.analyser) return;
+      this.analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      const rms = Math.sqrt(sum / buf.length);
+      const now = Date.now();
+      if (rms > SILENCE_RMS) {
+        this.heardVoice = true;
+        this.silenceSince = now;
+      } else if (this.heardVoice) {
+        if (now - this.silenceSince > SILENCE_HOLD_MS) {
+          this.onSilence();
+          return;
+        }
+      } else {
+        this.silenceSince = now;
+      }
+      this.raf = requestAnimationFrame(tick);
+    };
+    this.silenceSince = Date.now();
+    this.raf = requestAnimationFrame(tick);
+  }
+  stop() {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    try {
+      this.source?.disconnect();
+      this.analyser?.disconnect();
+      void this.ctx?.close();
+    } catch {
+      /* ignore */
+    }
+    this.ctx = null;
+    this.analyser = null;
+    this.source = null;
+  }
+}
+
+class WebAudioRecorder implements WebRecorder {
   private stream: MediaStream | null = null;
   private ctx: AudioContext | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
@@ -210,6 +368,8 @@ class WebAudioRecorder {
   private chunks: Float32Array[] = [];
   private sampleRate = 44100;
   private stopped = false;
+  private vad: VAD | null = null;
+  private startedAt = 0;
 
   constructor(private handlers: StartHandlers) {}
 
@@ -217,7 +377,7 @@ class WebAudioRecorder {
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) throw new Error("AudioContext unavailable");
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 },
     });
     this.ctx = new AudioCtx();
     if (this.ctx.state === "suspended") await this.ctx.resume();
@@ -231,11 +391,18 @@ class WebAudioRecorder {
     };
     this.source.connect(this.processor);
     this.processor.connect(this.ctx.destination);
+    this.startedAt = Date.now();
+    this.vad = new VAD(this.stream, () => {
+      if (Date.now() - this.startedAt < MIN_VOICE_MS) return;
+      void this.stop();
+    });
+    await this.vad.start();
   }
 
   async stop() {
     if (this.stopped) return;
     this.stopped = true;
+    this.vad?.stop();
     const chunks = this.chunks.slice();
     this.cleanup();
     if (chunks.reduce((sum, c) => sum + c.length, 0) < this.sampleRate * 0.25) {

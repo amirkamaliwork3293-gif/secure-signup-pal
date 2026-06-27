@@ -37,6 +37,10 @@ const sb = supabase as unknown as {
         opts?: { upsert?: boolean; contentType?: string },
       ) => Promise<{ error: SbError }>;
       getPublicUrl: (path: string) => { data: { publicUrl: string } };
+      createSignedUrl: (
+        path: string,
+        expiresIn: number,
+      ) => Promise<{ data: { signedUrl: string } | null; error: SbError }>;
     };
   };
 };
@@ -194,7 +198,11 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
     });
     throw res.error;
   }
-  const { data } = sb.storage.from("store-assets").getPublicUrl(path);
-  // افزودن پارامتر زمان برای جلوگیری از کش قدیمی پس از تعویض لوگو
-  return `${data.publicUrl}?v=${Date.now()}`;
+  // باکت خصوصی است؛ از URL امضاشده با اعتبار طولانی استفاده می‌کنیم (۱۰ سال)
+  const signed = await sb.storage.from("store-assets").createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+  if (signed.error || !signed.data) {
+    console.error("[storeProfile] sign url error:", signed.error);
+    throw signed.error ?? new Error("امکان ساخت لینک تصویر فراهم نشد.");
+  }
+  return `${signed.data.signedUrl}&v=${Date.now()}`;
 }

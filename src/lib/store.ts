@@ -633,6 +633,7 @@ export function cryptoId() {
 
 export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
   const existing = inv.items.find((i) => i.productId === p.id);
+  const effectivePrice = applyProductDiscount(p);
   let items;
   if (existing) {
     items = inv.items.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i));
@@ -642,7 +643,7 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
       {
         productId: p.id,
         name: p.name,
-        price: p.price,
+        price: effectivePrice,
         quantity: 1,
         buyPrice: p.buyPrice,
         unit: p.unit,
@@ -659,6 +660,7 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
  */
 export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: number): Invoice {
   const qty = quantity > 0 ? quantity : 1;
+  const effectivePrice = applyProductDiscount(p);
   const existing = inv.items.find((i) => i.productId === p.id);
   let items;
   if (existing) {
@@ -669,7 +671,7 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
       {
         productId: p.id,
         name: p.name,
-        price: p.price,
+        price: effectivePrice,
         quantity: qty,
         buyPrice: p.buyPrice,
         unit: p.unit,
@@ -677,6 +679,16 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
     ];
   }
   return recalc({ ...inv, items });
+}
+
+/**
+ * قیمت موثر پس از اعمال درصد تخفیف محصول (در صورت وجود).
+ * اگر تخفیفی نباشد، خود `price` برمی‌گردد.
+ */
+export function applyProductDiscount(p: Product): number {
+  const d = Math.max(0, Math.min(100, Number(p.discountPercent) || 0));
+  if (!d) return p.price;
+  return Math.round(p.price * (100 - d) / 100);
 }
 
 /**

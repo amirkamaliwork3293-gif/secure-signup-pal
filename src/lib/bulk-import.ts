@@ -34,6 +34,19 @@ const HEADERS: Record<string, keyof Omit<ImportRow, "rowIndex" | "errors">> = {
   "unit": "unit",
 };
 
+/**
+ * نرمال‌سازی نام ستون: حذف هرچیز داخل پرانتز (مثل «(تومان)»)،
+ * حذف فاصله‌های اضافه، یکسان‌سازی نیم‌فاصله و حروف کوچک.
+ */
+function normalizeHeader(h: string): string {
+  return String(h ?? "")
+    .replace(/\(.*?\)|\[.*?\]/g, "")
+    .replace(/[\u200c\u200f\u200e]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function num(v: unknown): number {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return v;
@@ -53,7 +66,7 @@ export async function parseFile(file: File): Promise<ImportRow[]> {
   const json: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
   if (json.length === 0) return [];
 
-  const headerRow = json[0].map((h) => String(h ?? "").trim().toLowerCase());
+  const headerRow = json[0].map((h) => normalizeHeader(String(h ?? "")));
   const colMap: (keyof Omit<ImportRow, "rowIndex" | "errors"> | null)[] = headerRow.map((h) => HEADERS[h] ?? null);
 
   const rows: ImportRow[] = [];

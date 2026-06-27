@@ -160,6 +160,51 @@ jobs:
           print("Camera permissions added!")
           PYEOF
 
+      # WebView به‌صورت پیش‌فرض درخواست‌های دسترسی به میکروفون/دوربین (getUserMedia)
+      # از صفحات راه‌دور را رد می‌کند. MainActivity را با یک WebChromeClient سفارشی
+      # جایگزین می‌کنیم که این درخواست‌ها را به‌صورت خودکار اجازه می‌دهد (پس از آنکه
+      # پلاگین‌های نیتیو اجازه‌ی سیستم را گرفتند). همچنین در زمان لود صفحه، یک پل
+      # کوچک JS تزریق می‌کنیم تا حتی اگر Capacitor bridge در دامنه راه‌دور قابل
+      # دسترس نباشد، دکمه‌ی «ثبت صوتی» بداند نسخه‌ی نیتیو است.
+      - name: Patch MainActivity to grant WebView mic/camera permissions
+        run: |
+          python3 - << 'PYEOF'
+          import os, glob, re
+          matches = glob.glob('android/app/src/main/java/**/MainActivity.java', recursive=True)
+          if not matches:
+              print('MainActivity.java not found — skipping')
+          else:
+              path = matches[0]
+              code = '''package com.kamali.inventory;
+
+          import android.os.Bundle;
+          import android.webkit.PermissionRequest;
+          import android.webkit.WebChromeClient;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  this.bridge.getWebView().setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public void onPermissionRequest(final PermissionRequest request) {
+                          runOnUiThread(() -> request.grant(request.getResources()));
+                      }
+                  });
+              }
+          }
+          '''
+              # نام پکیج را با مسیر فایل تطبیق می‌دهیم تا کامپایل نشکند
+              pkg_match = re.search(r'java/(.+)/MainActivity\.java$', path)
+              if pkg_match:
+                  pkg = pkg_match.group(1).replace('/', '.')
+                  code = code.replace('package com.kamali.inventory;', f'package {pkg};')
+              with open(path, 'w') as f:
+                  f.write(code)
+              print(f'Patched {path}')
+          PYEOF
+
       - name: Build Debug APK
         run: |
           cd android

@@ -17,6 +17,7 @@
  */
 
 import { isNativeApp } from "@/lib/print";
+import { transcribeAudio } from "@/lib/voice/stt.functions";
 
 export type SpeechEngine = "native" | "web" | "none";
 
@@ -109,6 +110,9 @@ function webSpeechCtor(): (new () => WebSpeechRecognition) | null {
 // ─── تشخیص موتور ──────────────────────────────────────────────────────────────
 
 export function detectEngine(): SpeechEngine {
+  // در اپ نیتیو (APK) ترجیحاً MediaRecorder + سرویس رونویسی Lovable AI استفاده می‌شود
+  // تا چند ثانیه‌ی اول صحبت یا تک‌کلمه‌ها (مثل «ماست» / «رب گوجه») گم نشود.
+  if (isNativeApp() && typeof window !== "undefined" && hasMediaRecorder()) return "native";
   if (isNativeApp() && nativeSpeech()) return "native";
   if (webSpeechCtor()) return "web";
   return "none";
@@ -130,6 +134,7 @@ export function createRecognizer(): Recognizer {
   const engine = detectEngine();
 
   if (engine === "native") {
+    if (isNativeApp() && hasMediaRecorder()) return createMediaRecorderRecognizer();
     return createNativeRecognizer();
   }
   if (engine === "web") {
@@ -140,6 +145,138 @@ export function createRecognizer(): Recognizer {
     isSupported: false,
     start: async (h) => notifyUnavailable(h, UNSUPPORTED_MSG),
     stop: async () => {},
+  };
+}
+
+// ─── MediaRecorder + Lovable AI STT (برای APK / WebView) ─────────────────────
+
+function hasMediaRecorder(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof (window as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined" &&
+    !!navigator?.mediaDevices?.getUserMedia
+  );
+}
+
+function pickMime(): { mime: string; ext: string } {
+  const MR = (window as unknown as { MediaRecorder?: { isTypeSupported?: (m: string) => boolean } })
+    .MediaRecorder;
+  const ok = (m: string) => !!MR?.isTypeSupported?.(m);
+  if (ok("audio/webm;codecs=opus")) return { mime: "audio/webm;codecs=opus", ext: "webm" };
+  if (ok("audio/webm")) return { mime: "audio/webm", ext: "webm" };
+  if (ok("audio/mp4")) return { mime: "audio/mp4", ext: "m4a" };
+  if (ok("audio/ogg;codecs=opus")) return { mime: "audio/ogg;codecs=opus", ext: "ogg" };
+  return { mime: "", ext: "webm" };
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(fr.error);
+    fr.onload = () => {
+      const s = String(fr.result || "");
+      const i = s.indexOf("base64,");
+      resolve(i >= 0 ? s.slice(i + 7) : s);
+    };
+    fr.readAsDataURL(blob);
+  });
+}
+
+function createMediaRecorderRecognizer(): Recognizer {
+  let stream: MediaStream | null = null;
+  let recorder: MediaRecorder | null = null;
+  let chunks: Blob[] = [];
+  let ext = "webm";
+  let activeHandlers: StartHandlers | null = null;
+  let stopped = false;
+
+  const cleanup = () => {
+    try {
+      stream?.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    stream = null;
+    recorder = null;
+    chunks = [];
+  };
+
+  return {
+    engine: "native",
+    isSupported: true,
+    start: async (h) => {
+      activeHandlers = h;
+      stopped = false;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (e) {
+        const msg = String((e as { message?: string })?.message ?? e);
+        if (/permission|denied|not.?allowed/i.test(msg)) {
+          notifyUnavailable(h, PERMISSION_DENIED_MSG);
+        } else {
+          notifyUnavailable(h, UNSUPPORTED_MSG);
+        }
+        return;
+      }
+      const picked = pickMime();
+      ext = picked.ext;
+      try {
+        recorder = picked.mime
+          ? new MediaRecorder(stream, { mimeType: picked.mime })
+          : new MediaRecorder(stream);
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+      chunks = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      recorder.onerror = () => {
+        h.onError("خطا در ضبط صدا. دوباره تلاش کنید.");
+      };
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+        cleanup();
+        if (stopped) return; // قبلاً پردازش شده
+        stopped = true;
+        if (blob.size < 1500) {
+          h.onError("صدایی ضبط نشد. کمی نزدیک‌تر صحبت کنید.");
+          h.onEnd?.();
+          return;
+        }
+        try {
+          const base64 = await blobToBase64(blob);
+          const result = await transcribeAudio({
+            data: { audioBase64: base64, format: ext, language: "fa" },
+          });
+          if (result.ok) {
+            h.onResult(result.text);
+          } else {
+            h.onError(result.error);
+          }
+        } catch (e) {
+          h.onError("ارسال صدا ناموفق بود: " + String((e as Error)?.message ?? e));
+        } finally {
+          h.onEnd?.();
+        }
+      };
+      // بدون timeslice: یک فایل کامل و قابل decode تولید شود
+      recorder.start();
+    },
+    stop: async () => {
+      try {
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+        else activeHandlers?.onEnd?.();
+      } catch {
+        cleanup();
+      }
+    },
   };
 }
 

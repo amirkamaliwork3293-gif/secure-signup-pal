@@ -207,6 +207,26 @@ function createMediaRecorderRecognizer(): Recognizer {
     start: async (h) => {
       activeHandlers = h;
       stopped = false;
+      // در اپ اندروید، فراخوانی getUserMedia فقط دیالوگ WebView را می‌سازد و
+      // دیالوگ سیستمی Android RECORD_AUDIO را خودبه‌خود نمی‌آورد. اگر پلاگین
+      // SpeechRecognition نصب باشد (که در workflow ساخت APK نصب می‌شود)،
+      // از همان برای گرفتن پرمیشن سیستمی استفاده می‌کنیم؛ بعد getUserMedia
+      // بدون reject شدن کار می‌کند.
+      try {
+        const plugin = nativeSpeech();
+        if (isNativeApp() && plugin) {
+          const cur = (await plugin.checkPermissions?.())?.speechRecognition;
+          if (cur && cur !== "granted") {
+            const req = (await plugin.requestPermissions?.())?.speechRecognition;
+            if (req && req !== "granted") {
+              notifyUnavailable(h, PERMISSION_DENIED_MSG);
+              return;
+            }
+          }
+        }
+      } catch {
+        /* اگر پلاگین در دسترس نبود، روی getUserMedia تکیه می‌کنیم */
+      }
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {

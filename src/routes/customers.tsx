@@ -981,6 +981,18 @@ function SmsCampaignModal({
                         >
                           <MessageCircle className="h-3.5 w-3.5" />
                         </button>
+                        <button
+                          onClick={async () => {
+                            const personal = text.replace(/\{name\}/g, customerFullName(c));
+                            const msg = storeLink ? `${personal}\n${storeLink}` : personal;
+                            await shareText({ text: msg, fallbackPhones: c.phone ? [c.phone] : [] });
+                            markSent([(c.phone ?? "").trim()]);
+                          }}
+                          title="اشتراک‌گذاری (روبیکا/بله/ایتا/...)"
+                          className="grid h-7 w-7 place-items-center rounded-lg text-primary hover:bg-primary/10"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                        </button>
                       </li>
                     );
                   })}

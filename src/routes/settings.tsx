@@ -354,6 +354,27 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
               dir="ltr"
               className={profileInputCls}
             />
+            <input
+              value={rubika}
+              onChange={(e) => setRubika(e.target.value)}
+              placeholder="آیدی یا شماره روبیکا (Rubika)"
+              dir="ltr"
+              className={profileInputCls}
+            />
+            <input
+              value={eitaa}
+              onChange={(e) => setEitaa(e.target.value)}
+              placeholder="آیدی یا شماره ایتا (Eitaa)"
+              dir="ltr"
+              className={profileInputCls}
+            />
+            <input
+              value={bale}
+              onChange={(e) => setBale(e.target.value)}
+              placeholder="آیدی یا شماره بله (Bale)"
+              dir="ltr"
+              className={profileInputCls}
+            />
           </div>
 
           <div>

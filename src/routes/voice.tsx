@@ -188,6 +188,19 @@ function VoicePageInner() {
       }
     }
 
+    // اگر بعد از تلاش محلی و LLM چیزی استخراج نشد، یک سطر «پیدا نشد» با گزینه افزودن محصول نشان بده
+    if (resolved.length === 0) {
+      resolved = [{
+        key: Math.random().toString(36).slice(2),
+        rawClause: trimmed,
+        productPhrase: trimmed,
+        quantity: 1,
+        unit: "عدد",
+        candidates: [],
+        status: "unknown",
+      }];
+    }
+
     setResults(resolved);
   };
 

@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -11,6 +11,7 @@ const nav = [
   { to: "/",          label: "فاکتور",   icon: Receipt  },
   { to: "/scan",      label: "اسکن",     icon: ScanLine },
   { to: "/products",  label: "محصولات",  icon: Package  },
+  { to: "/menu",      label: "منو",      icon: UtensilsCrossed },
   { to: "/customers", label: "مشتریان",  icon: Users    },
   { to: "/history",   label: "تاریخچه",  icon: History  },
   { to: "/reports",   label: "گزارش",    icon: BarChart3 },
@@ -88,7 +89,7 @@ export function Layout({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        <div className="mx-auto grid max-w-3xl grid-cols-7">
+        <div className="mx-auto grid max-w-3xl grid-cols-8">
           {nav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to;
             return (

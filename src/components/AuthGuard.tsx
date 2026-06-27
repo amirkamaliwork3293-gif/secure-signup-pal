@@ -79,7 +79,7 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
         action={
           <div className="flex gap-2">
             <Link
-              to="/register"
+              to="/renew"
               className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
             >
               تمدید اشتراک

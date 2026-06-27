@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 // جایگزین کمکی (fallback) برای تحلیل گفتار صوتی با مدل زبانی Claude.
 //
@@ -32,6 +33,7 @@ export type LlmParseResult =
     };
 
 export const parseVoiceInvoiceLLM = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
       transcript: z.string().min(1),

@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
-import { ensureAdminAccount } from "@/lib/auth.functions";
+import { verifyAdminLogin } from "@/lib/auth.functions";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { LoginPromoVideo } from "@/components/LoginPromoVideo";
@@ -12,9 +12,6 @@ export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "ورود | کمالی حسابداری" }] }),
   component: LoginPage,
 });
-
-const ADMIN_USERNAME = "Amirkamali";
-const ADMIN_PASSWORD = "Amir8413293";
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
@@ -28,7 +25,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
-  const ensureAdmin = useServerFn(ensureAdminAccount);
+  const adminLogin = useServerFn(verifyAdminLogin);
 
   const handleSubmit = async () => {
     setError("");
@@ -38,22 +35,13 @@ export function LoginPage() {
     setLoading(true);
 
     if (tab === "admin") {
-      // Hardcoded admin credentials check
-      if (u !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
-        setError("یوزرنیم یا رمز عبور ادمین اشتباه است.");
-        setLoading(false);
-        return;
-      }
       try {
-        await ensureAdmin();
-        const { error: err } = await supabase.auth.signInWithPassword({
-          email: toEmail(ADMIN_USERNAME),
-          password: ADMIN_PASSWORD,
-        });
+        const { email } = await adminLogin({ data: { username: u, password } });
+        const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) { setError(err.message); setLoading(false); return; }
         navigate({ to: "/admin" });
       } catch (e: any) {
-        setError(e?.message || "خطا در ورود ادمین.");
+        setError(e?.message || "یوزرنیم یا رمز عبور ادمین اشتباه است.");
       }
       setLoading(false);
       return;

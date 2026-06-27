@@ -17,9 +17,22 @@ type Plan = keyof typeof PLAN_DURATION_MS;
 const VALID_PLANS: Plan[] = ["trial", "1month", "3month", "6month", "12month"];
 const PAID_PLANS: Plan[] = ["1month", "3month", "6month", "12month"];
 
-const ADMIN_USERNAME = "Amirkamali";
-const ADMIN_PASSWORD = "Amir8413293";
+// Admin credentials live in server-only env vars (ADMIN_USERNAME, ADMIN_PASSWORD).
+// We only retain the canonical email here as a non-secret identifier.
 const ADMIN_EMAIL = "amirkamali@kamali.local";
+
+function getAdminUsername(): string {
+  return (process.env.ADMIN_USERNAME || "").trim();
+}
+function getAdminPassword(): string {
+  return process.env.ADMIN_PASSWORD || "";
+}
+function ctEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
@@ -60,7 +73,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       if (d.plan === "trial") throw new Error("برای نسخه تست از فرم اختصاصی استفاده کنید.");
       if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
       if (!d.receipt_url) throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید.");
-      if (d.username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) {
         throw new Error("این یوزرنیم رزرو شده است.");
       }
       return d;
@@ -236,49 +249,69 @@ export const setPasswordAfterApproval = createServerFn({ method: "POST" })
     return { success: true, email };
   });
 
-// ─── Admin bootstrap: ensure the hardcoded admin user exists ─────────────────
-export const ensureAdminAccount = createServerFn({ method: "POST" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+// ─── Admin login: validate credentials server-side and ensure account ────────
+// The previous flow exposed the admin password to the browser bundle and let any
+// anonymous caller invoke `ensureAdminAccount` to (re)create the admin user with
+// the hardcoded credentials. Both issues are fixed here: credentials live only in
+// server env vars, the comparison happens on the server, and the function only
+// returns the admin email (the user-supplied password is reused for sign-in).
+export const verifyAdminLogin = createServerFn({ method: "POST" })
+  .inputValidator((d: { username: string; password: string }) => {
+    if (!d?.username?.trim() || !d?.password) {
+      throw new Error("یوزرنیم و رمز عبور لازم است.");
+    }
+    return { username: d.username.trim(), password: d.password };
+  })
+  .handler(async ({ data }) => {
+    const expectedUser = getAdminUsername();
+    const expectedPass = getAdminPassword();
+    if (!expectedUser || !expectedPass) {
+      throw new Error("پیکربندی ادمین روی سرور انجام نشده است.");
+    }
+    // Constant-time-ish comparison; reject with a generic message either way.
+    const userOk = ctEqual(data.username.toLowerCase(), expectedUser.toLowerCase());
+    const passOk = ctEqual(data.password, expectedPass);
+    if (!userOk || !passOk) {
+      throw new Error("یوزرنیم یا رمز عبور ادمین اشتباه است.");
+    }
 
-  // Try sign in via listUsers
-  const { data: existingList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-  let admin = existingList?.users.find((u) => u.email === ADMIN_EMAIL);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  if (!admin) {
-    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-      email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      email_confirm: true,
-      user_metadata: { username: ADMIN_USERNAME },
-    });
-    if (error || !created.user) throw new Error(error?.message || "خطا در ساخت ادمین.");
-    admin = created.user;
-  } else {
-    // Force password to canonical value (hardcoded)
-    await supabaseAdmin.auth.admin.updateUserById(admin.id, { password: ADMIN_PASSWORD });
-  }
+    const { data: existingList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
+    let admin = existingList?.users.find((u) => u.email === ADMIN_EMAIL);
 
-  // Ensure profile row
-  await supabaseAdmin
-    .from("profiles")
-    .upsert(
-      {
-        id: admin.id,
-        username: ADMIN_USERNAME.toLowerCase(),
-        first_name: "Amir",
-        last_name: "Kamali",
-        status: "active" as const,
-      },
-      { onConflict: "id" },
-    );
+    if (!admin) {
+      const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+        email: ADMIN_EMAIL,
+        password: expectedPass,
+        email_confirm: true,
+        user_metadata: { username: expectedUser },
+      });
+      if (error || !created.user) throw new Error(error?.message || "خطا در ساخت ادمین.");
+      admin = created.user;
+    } else {
+      await supabaseAdmin.auth.admin.updateUserById(admin.id, { password: expectedPass });
+    }
 
-  // Ensure admin role
-  await supabaseAdmin
-    .from("user_roles")
-    .upsert({ user_id: admin.id, role: "admin" }, { onConflict: "user_id,role" });
+    await supabaseAdmin
+      .from("profiles")
+      .upsert(
+        {
+          id: admin.id,
+          username: expectedUser.toLowerCase(),
+          first_name: "Amir",
+          last_name: "Kamali",
+          status: "active" as const,
+        },
+        { onConflict: "id" },
+      );
 
-  return { email: ADMIN_EMAIL };
-});
+    await supabaseAdmin
+      .from("user_roles")
+      .upsert({ user_id: admin.id, role: "admin" }, { onConflict: "user_id,role" });
+
+    return { email: ADMIN_EMAIL };
+  });
 
 // ─── Admin: approve a signup request ─────────────────────────────────────────
 async function assertAdmin(supabase: any, userId: string) {
@@ -489,7 +522,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
       throw new Error("یوزرنیم باید ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، عدد، _ و - باشد.");
     }
     if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
-    if (d.username.toLowerCase() === ADMIN_USERNAME.toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");
+    if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");
     return d;
   })
   .handler(async ({ data }) => {

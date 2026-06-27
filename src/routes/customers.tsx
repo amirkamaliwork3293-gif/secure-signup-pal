@@ -16,7 +16,7 @@ import {
   type CustomerTx,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
-import { shortenUrl, shareText } from "@/lib/openExternal";
+import { shareText } from "@/lib/openExternal";
 import {
   Users,
   Plus,
@@ -764,26 +764,7 @@ function SmsCampaignModal({
   const [customMode, setCustomMode] = useState(false);
   const [includeLink, setIncludeLink] = useState(true);
   const [sentPhones, setSentPhones] = useState<Set<string>>(() => readSentPhones());
-  const [shortLink, setShortLink] = useState<string>("");
   const [shareNotice, setShareNotice] = useState<string | null>(null);
-
-  // لینک عمومی فروشگاه را به‌صورت کوتاه‌شده برای پیامک آماده می‌کنیم تا پیام به
-  // چند SMS تقسیم نشود و در اپراتورهای ایرانی به‌درستی برسد.
-  useEffect(() => {
-    if (!userId) {
-      setShortLink("");
-      return;
-    }
-    let alive = true;
-    const raw = storePublicUrl(userId);
-    setShortLink(raw);
-    void shortenUrl(raw).then((s) => {
-      if (alive) setShortLink(s);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [userId]);
 
   const audienceList = useMemo(() => {
     return list.filter((c) => {
@@ -809,14 +790,16 @@ function SmsCampaignModal({
     });
   };
 
-  // لینک عمومی صفحه فروشگاه (کوتاه‌شده) که در انتهای پیام افزوده می‌شود
-  const storeLink = userId && includeLink ? shortLink : "";
+  // لینک عمومی صفحه فروشگاه فقط برای واتساپ/اشتراک‌گذاری استفاده می‌شود.
+  // برای پیامک عادی طبق درخواست، هیچ لینکی افزوده نمی‌شود تا ارسال پیامک خراب نشود.
+  const storeLink = userId && includeLink ? storePublicUrl(userId) : "";
   // حذف کاراکترهای نامرئی جهت متن (RLM/LRM/RLE/PDF/...) که گاهی توسط ادیتور یا
   // مرورگر هنگام ترکیب متن فارسی + لینک انگلیسی به‌صورت خودکار تزریق می‌شوند و
   // باعث می‌شوند برخی اپ‌های پیامک اندرویدی URL را خراب تفسیر کنند.
   const stripBidi = (s: string) =>
     s.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
-  const finalText = stripBidi(storeLink ? `${text}\n${storeLink}` : text);
+  const shareFinalText = stripBidi(storeLink ? `${text}\n${storeLink}` : text);
+  const smsText = stripBidi(text);
 
   const markSent = (phones: string[]) =>
     setSentPhones((prev) => {
@@ -844,7 +827,7 @@ function SmsCampaignModal({
       alert("هیچ گیرنده‌ای انتخاب نشده.");
       return;
     }
-    window.location.href = `sms:${numbers.join(",")}?body=${encodeURIComponent(finalText)}`;
+    window.location.href = `sms:${numbers.join(",")}?body=${encodeURIComponent(smsText)}`;
     markSent(numbers);
   };
 
@@ -1027,17 +1010,17 @@ function SmsCampaignModal({
           </div>
 
           <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
-            💡 با زدن دکمه «ارسال پیامک»، اپ پیامک گوشی با همه شماره‌ها و متن آماده باز می‌شود. برای
-            روبیکا، بله و ایتا از دکمه «اشتراک در اپ‌های ایرانی» استفاده کنید؛ متن همزمان کپی می‌شود تا داخل اپ Paste کنید.
+            💡 پیامک عادی بدون لینک ارسال می‌شود تا اپ پیامک و اپراتور آن را خراب نکنند. برای ارسال
+            لینک اصلی فروشگاه از دکمه «اشتراک در اپ‌های ایرانی» استفاده کنید؛ متن همزمان کپی می‌شود تا داخل اپ Paste کنید.
           </div>
         </div>
 
         <div className="space-y-3 border-t border-border p-4">
-          {/* افزودن لینک صفحه فروشگاه به متن پیام */}
+          {/* افزودن لینک صفحه فروشگاه به اشتراک‌گذاری؛ پیامک عادی همیشه بدون لینک است */}
           <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2">
             <span className="flex items-center gap-2 text-xs">
               <Link2 className="h-4 w-4 text-primary" />
-              افزودن لینک صفحه فروشگاه به پیام
+              افزودن لینک اصلی فروشگاه به اشتراک‌گذاری
             </span>
             <input
               type="checkbox"
@@ -1052,8 +1035,8 @@ function SmsCampaignModal({
 
           <button
             type="button"
-            onClick={() => shareForApps(finalText)}
-            disabled={!finalText.trim()}
+            onClick={() => shareForApps(shareFinalText)}
+            disabled={!shareFinalText.trim()}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm font-semibold text-primary hover:bg-primary/15 disabled:opacity-50"
           >
             <Share2 className="h-4 w-4" />

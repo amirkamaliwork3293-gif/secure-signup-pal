@@ -182,6 +182,7 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
     socials: data.socials ?? {},
     description: data.description ?? undefined,
     logoUrl: data.logo_url ?? undefined,
+    portfolioImages: Array.isArray(data.portfolio_images) ? data.portfolio_images : [],
   };
 }
 
@@ -215,4 +216,37 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
     throw signed.error ?? new Error("امکان ساخت لینک تصویر فراهم نشد.");
   }
   return `${signed.data.signedUrl}&v=${Date.now()}`;
+}
+
+/** آپلود یک تصویر نمونه‌کار در باکت `store-assets` و بازگرداندن URL امضاشده‌ی طولانی‌مدت. */
+export async function uploadPortfolioImage(userId: string, file: File): Promise<string> {
+  const ext =
+    (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const path = `${userId}/portfolio/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  let res: { error: SbError };
+  try {
+    res = await sb.storage.from("store-assets").upload(path, file, {
+      upsert: true,
+      contentType: file.type || "image/jpeg",
+    });
+  } catch (e) {
+    console.error("[storeProfile] portfolio upload network/client error:", e);
+    throw e;
+  }
+  if (res.error) {
+    console.error("[storeProfile] portfolio upload server error:", {
+      code: res.error.code,
+      message: res.error.message,
+      path,
+    });
+    throw res.error;
+  }
+  const signed = await sb.storage
+    .from("store-assets")
+    .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+  if (signed.error || !signed.data) {
+    console.error("[storeProfile] portfolio sign url error:", signed.error);
+    throw signed.error ?? new Error("امکان ساخت لینک تصویر فراهم نشد.");
+  }
+  return signed.data.signedUrl;
 }

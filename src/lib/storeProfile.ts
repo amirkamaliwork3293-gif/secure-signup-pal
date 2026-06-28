@@ -65,6 +65,8 @@ export type PublicStoreProfile = {
   socials?: StoreSocials;
   description?: string;
   logoUrl?: string;
+  /** آدرس عمومی تصاویر نمونه‌کار (به ترتیب نمایش) */
+  portfolioImages?: string[];
 };
 
 type StoreProfileRow = {
@@ -76,6 +78,7 @@ type StoreProfileRow = {
   socials: StoreSocials | null;
   description: string | null;
   logo_url: string | null;
+  portfolio_images: string[] | null;
 };
 
 /**

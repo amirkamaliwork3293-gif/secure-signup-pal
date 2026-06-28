@@ -189,7 +189,7 @@ function PublicMenuPage() {
             آیتمی برای نمایش وجود ندارد.
           </div>
         ) : (
-          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <ul className="grid grid-cols-2 gap-3">
             {visibleItems.map((it) => (
               <li
                 key={it.id}
@@ -201,7 +201,7 @@ function PublicMenuPage() {
                 }}
               >
                 {it.image_url ? (
-                  <div className="relative h-48 w-full overflow-hidden">
+                  <div className="relative h-32 w-full overflow-hidden sm:h-44">
                     <img
                       src={it.image_url}
                       alt={it.name}
@@ -218,27 +218,27 @@ function PublicMenuPage() {
                   </div>
                 ) : (
                   <div
-                    className="grid h-44 w-full place-items-center"
+                    className="grid h-32 w-full place-items-center sm:h-40"
                     style={{ background: C.ink, color: C.bronze }}
                   >
                     <ImageIcon className="h-8 w-8" />
                   </div>
                 )}
-                <div className="p-4">
+                <div className="p-3 sm:p-4">
                   <div className="flex items-start justify-between gap-3">
                     <h3
                       className="leading-tight"
                       style={{
                         fontFamily: "'Cormorant Garamond', Vazirmatn, serif",
                         fontWeight: 700,
-                        fontSize: "1.15rem",
+                        fontSize: "1rem",
                         color: C.cream,
                       }}
                     >
                       {it.name}
                     </h3>
                     <span
-                      className="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold sm:text-xs"
                       style={{
                         background: `${C.wine}55`,
                         color: C.bronze,
@@ -257,7 +257,7 @@ function PublicMenuPage() {
                           background: `linear-gradient(90deg, ${C.hair}, transparent)`,
                         }}
                       />
-                      <p className="text-xs leading-6" style={{ color: C.creamMute }}>
+                      <p className="line-clamp-3 text-[11px] leading-5 sm:text-xs sm:leading-6" style={{ color: C.creamMute }}>
                         {it.description}
                       </p>
                     </>

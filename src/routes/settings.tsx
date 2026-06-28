@@ -4,7 +4,13 @@ import { useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
-import { publishStoreProfile, uploadStoreLogo, storeErrorMessage } from "@/lib/storeProfile";
+import {
+  publishStoreProfile,
+  uploadStoreLogo,
+  uploadPortfolioImage,
+  fetchStoreProfile,
+  storeErrorMessage,
+} from "@/lib/storeProfile";
 import { openExternal } from "@/lib/openExternal";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import {
@@ -19,6 +25,8 @@ import {
   ImagePlus,
   Loader2,
   Check,
+  X,
+  Images,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -161,6 +169,19 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [portfolio, setPortfolio] = useState<string[]>([]);
+  const [portfolioLoaded, setPortfolioLoaded] = useState(false);
+  const [portfolioUploading, setPortfolioUploading] = useState(false);
+
+  // در اولین باز شدن بخش، نمونه‌کارهای فعلی را از سرور بخوان
+  if (open && !portfolioLoaded && userId) {
+    setPortfolioLoaded(true);
+    void fetchStoreProfile(userId)
+      .then((p) => {
+        if (p?.portfolioImages?.length) setPortfolio(p.portfolioImages);
+      })
+      .catch(() => {});
+  }
 
   const publicUrl = userId ? storePublicUrl(userId) : "";
 
@@ -201,6 +222,7 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
       },
       description,
       logoUrl,
+      portfolioImages: portfolio,
     };
     // ذخیره‌ی محلی (به‌صورت اختیاری روی AppSettings)
     setSettings({

@@ -1,6 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
@@ -174,14 +174,46 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
   const [portfolioUploading, setPortfolioUploading] = useState(false);
 
   // در اولین باز شدن بخش، نمونه‌کارهای فعلی را از سرور بخوان
-  if (open && !portfolioLoaded && userId) {
+  useEffect(() => {
+    if (!open || portfolioLoaded || !userId) return;
     setPortfolioLoaded(true);
     void fetchStoreProfile(userId)
       .then((p) => {
         if (p?.portfolioImages?.length) setPortfolio(p.portfolioImages);
       })
       .catch(() => {});
-  }
+  }, [open, portfolioLoaded, userId]);
+
+  const onPickPortfolio = async (files: FileList | null) => {
+    if (!userId || !files || files.length === 0) return;
+    setPortfolioUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const f of Array.from(files)) {
+        const url = await uploadPortfolioImage(userId, f);
+        urls.push(url);
+      }
+      setPortfolio((prev) => [...prev, ...urls]);
+    } catch (e) {
+      console.error("[settings] portfolio upload failed:", e);
+      alert(storeErrorMessage(e));
+    } finally {
+      setPortfolioUploading(false);
+    }
+  };
+
+  const removePortfolioAt = (i: number) =>
+    setPortfolio((prev) => prev.filter((_, idx) => idx !== i));
+
+  const movePortfolio = (i: number, dir: -1 | 1) => {
+    setPortfolio((prev) => {
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = prev.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  };
 
   const publicUrl = userId ? storePublicUrl(userId) : "";
 

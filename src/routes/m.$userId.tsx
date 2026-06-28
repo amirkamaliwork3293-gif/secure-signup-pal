@@ -5,15 +5,35 @@ import { fetchStoreProfile, type PublicStoreProfile } from "@/lib/storeProfile";
 import { Loader2, UtensilsCrossed, Image as ImageIcon } from "lucide-react";
 
 export const Route = createFileRoute("/m/$userId")({
-  head: ({ params }) => ({
+  head: () => ({
     meta: [
       { title: `منو | فروشگاه` },
       { name: "description", content: "منوی دیجیتال — فروشگاه" },
       { property: "og:title", content: `منوی فروشگاه` },
     ],
+    links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=Vazirmatn:wght@400;500;700;800&display=swap",
+      },
+    ],
   }),
   component: PublicMenuPage,
 });
+
+// تم بصری منوی کافه/رستوران — هم‌خانواده با صفحه‌ی پروفایل عمومی.
+const C = {
+  ink: "#0b0608",
+  ink2: "#140a0d",
+  wine: "#5b0d1b",
+  wineGlow: "#7a1428",
+  bronze: "#c9a96a",
+  cream: "#f3e9d2",
+  creamMute: "rgba(243,233,210,0.72)",
+  hair: "rgba(201,169,106,0.28)",
+};
 
 function formatToman(n: number) {
   return new Intl.NumberFormat("fa-IR").format(n) + " تومان";
@@ -56,32 +76,89 @@ function PublicMenuPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+      <div
+        className="flex min-h-screen items-center justify-center"
+        style={{ background: C.ink, color: C.bronze }}
+      >
+        <Loader2 className="h-7 w-7 animate-spin" />
       </div>
     );
   }
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-6 text-center text-sm text-muted-foreground">
+      <div
+        className="flex min-h-screen items-center justify-center p-6 text-center text-sm"
+        style={{ background: C.ink, color: C.creamMute, fontFamily: "Vazirmatn, sans-serif" }}
+      >
         {error}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-background/60 pb-16">
-      <header className="sticky top-0 z-20 border-b border-border/40 bg-background/85 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-4 text-center">
-          <div className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-primary text-primary-foreground shadow-elegant">
-            {profile?.logoUrl ? (
-              <img src={profile.logoUrl} alt="" className="h-full w-full rounded-2xl object-cover" />
-            ) : (
-              <UtensilsCrossed className="h-6 w-6" />
-            )}
+    <div
+      className="min-h-screen pb-16"
+      dir="rtl"
+      style={{
+        background: `radial-gradient(900px 500px at 50% -10%, ${C.wineGlow}33, transparent 60%), linear-gradient(180deg, ${C.ink} 0%, ${C.ink2} 100%)`,
+        color: C.cream,
+        fontFamily: "Vazirmatn, sans-serif",
+      }}
+    >
+      <header
+        className="sticky top-0 z-20 backdrop-blur"
+        style={{
+          background: "rgba(11,6,8,0.82)",
+          borderBottom: `1px solid ${C.hair}`,
+        }}
+      >
+        <div className="mx-auto max-w-3xl px-4 pb-3 pt-6 text-center">
+          <div className="relative mx-auto h-16 w-16">
+            <div
+              className="absolute inset-0 rounded-full"
+              style={{
+                background: `conic-gradient(from 220deg, ${C.bronze}, #6f5224, ${C.bronze})`,
+                padding: 2,
+              }}
+            >
+              <div
+                className="grid h-full w-full place-items-center overflow-hidden rounded-full"
+                style={{ background: C.ink }}
+              >
+                {profile?.logoUrl ? (
+                  <img src={profile.logoUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <UtensilsCrossed className="h-6 w-6" style={{ color: C.bronze }} />
+                )}
+              </div>
+            </div>
           </div>
-          <h1 className="text-xl font-bold kamali-brand">{shopName}</h1>
-          {profile?.description && <p className="mt-1 text-xs text-muted-foreground">{profile.description}</p>}
+          <div
+            className="mx-auto mt-3 h-px w-12"
+            style={{ background: `linear-gradient(90deg, transparent, ${C.bronze}, transparent)` }}
+          />
+          <h1
+            className="mt-2 text-2xl"
+            style={{
+              fontFamily: "'Cormorant Garamond', Vazirmatn, serif",
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              color: C.cream,
+            }}
+          >
+            {shopName}
+          </h1>
+          <p
+            className="mt-0.5 text-[10px]"
+            style={{ color: C.bronze, letterSpacing: "0.32em" }}
+          >
+            M E N U
+          </p>
+          {profile?.description && (
+            <p className="mt-2 text-xs leading-6" style={{ color: C.creamMute }}>
+              {profile.description}
+            </p>
+          )}
         </div>
 
         {cats.length > 0 && (
@@ -99,35 +176,104 @@ function PublicMenuPage() {
         )}
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-5">
+      <main className="mx-auto max-w-3xl px-4 py-6">
         {visibleItems.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border py-14 text-center text-sm text-muted-foreground">
+          <div
+            className="rounded-2xl py-14 text-center text-sm"
+            style={{
+              border: `1px dashed ${C.hair}`,
+              color: C.creamMute,
+              background: `linear-gradient(180deg, ${C.ink2}, ${C.ink})`,
+            }}
+          >
             آیتمی برای نمایش وجود ندارد.
           </div>
         ) : (
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {visibleItems.map((it) => (
-              <li key={it.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-card transition hover:shadow-elegant">
+              <li
+                key={it.id}
+                className="overflow-hidden rounded-2xl transition"
+                style={{
+                  background: `linear-gradient(180deg, ${C.ink2}, ${C.ink})`,
+                  border: `1px solid ${C.hair}`,
+                  boxShadow: "0 18px 40px -28px rgba(0,0,0,0.85)",
+                }}
+              >
                 {it.image_url ? (
-                  <img src={it.image_url} alt={it.name} className="h-44 w-full object-cover" loading="lazy" />
+                  <div className="relative h-48 w-full overflow-hidden">
+                    <img
+                      src={it.image_url}
+                      alt={it.name}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-20"
+                      style={{
+                        background: `linear-gradient(180deg, transparent, ${C.ink2})`,
+                      }}
+                    />
+                  </div>
                 ) : (
-                  <div className="grid h-44 w-full place-items-center bg-muted text-muted-foreground">
+                  <div
+                    className="grid h-44 w-full place-items-center"
+                    style={{ background: C.ink, color: C.bronze }}
+                  >
                     <ImageIcon className="h-8 w-8" />
                   </div>
                 )}
                 <div className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-bold">{it.name}</h3>
-                    <span className="shrink-0 text-sm font-bold text-primary">{formatToman(Number(it.price))}</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3
+                      className="leading-tight"
+                      style={{
+                        fontFamily: "'Cormorant Garamond', Vazirmatn, serif",
+                        fontWeight: 700,
+                        fontSize: "1.15rem",
+                        color: C.cream,
+                      }}
+                    >
+                      {it.name}
+                    </h3>
+                    <span
+                      className="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+                      style={{
+                        background: `${C.wine}55`,
+                        color: C.bronze,
+                        border: `1px solid ${C.hair}`,
+                        letterSpacing: "0.02em",
+                      }}
+                    >
+                      {formatToman(Number(it.price))}
+                    </span>
                   </div>
-                  {it.description && <p className="mt-1 text-xs leading-6 text-muted-foreground">{it.description}</p>}
+                  {it.description && (
+                    <>
+                      <div
+                        className="my-2 h-px"
+                        style={{
+                          background: `linear-gradient(90deg, ${C.hair}, transparent)`,
+                        }}
+                      />
+                      <p className="text-xs leading-6" style={{ color: C.creamMute }}>
+                        {it.description}
+                      </p>
+                    </>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
         )}
 
-        <p className="mt-10 text-center text-[10px] text-muted-foreground">قدرت گرفته از کمالی حسابداری</p>
+        <p
+          className="mt-10 text-center text-[10px]"
+          style={{ color: C.creamMute, letterSpacing: "0.18em" }}
+        >
+          قدرت گرفته از کمالی حسابداری
+        </p>
       </main>
     </div>
   );
@@ -137,9 +283,24 @@ function Tab({ id, label, active, onClick }: { id: string; label: string; active
   return (
     <button
       onClick={() => onClick(id)}
-      className={`whitespace-nowrap rounded-full border px-4 py-1.5 text-xs font-medium transition ${
-        active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:bg-accent"
-      }`}
+      className="whitespace-nowrap rounded-full px-4 py-1.5 text-xs transition"
+      style={
+        active
+          ? {
+              background: `linear-gradient(180deg, ${C.wine}, #3a0712)`,
+              color: C.cream,
+              border: `1px solid ${C.bronze}`,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              boxShadow: `0 6px 18px -8px ${C.wine}cc`,
+            }
+          : {
+              background: "transparent",
+              color: C.creamMute,
+              border: `1px solid ${C.hair}`,
+              fontWeight: 500,
+            }
+      }
     >
       {label}
     </button>

@@ -154,7 +154,7 @@ function StorePage() {
     >
       {/* هدر برند — حس بوتیک، با ترکیب مشکی/زرشکی و خط طلایی ظریف */}
       <header
-        className="relative overflow-hidden px-6 pb-10 pt-14 text-center"
+        className="relative overflow-hidden px-6 pb-7 pt-10 text-center"
         style={{
           background: `linear-gradient(160deg, ${C.wine} 0%, #2a060f 55%, ${C.ink} 100%)`,
         }}
@@ -170,7 +170,7 @@ function StorePage() {
           }}
         />
         {/* قاب طلایی دور لوگو */}
-        <div className="relative mx-auto h-28 w-28">
+        <div className="relative mx-auto h-24 w-24">
           <div
             className="absolute inset-0 rounded-full"
             style={{
@@ -191,7 +191,7 @@ function StorePage() {
           </div>
         </div>
 
-        <div className="relative mt-5">
+        <div className="relative mt-4">
           <div
             className="mx-auto mb-2 h-px w-16"
             style={{ background: `linear-gradient(90deg, transparent, ${C.bronze}, transparent)` }}
@@ -224,7 +224,7 @@ function StorePage() {
         </div>
       </header>
 
-      <main className="mx-auto -mt-6 max-w-md space-y-3 px-4">
+      <main className="mx-auto mt-4 max-w-md space-y-3 px-4">
         {profile.address && (
           <InfoCard icon={<MapPin className="h-4 w-4" />} title="آدرس">
             <p className="text-sm leading-7" style={{ color: C.cream }}>{profile.address}</p>

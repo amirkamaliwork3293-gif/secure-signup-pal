@@ -133,6 +133,7 @@ export async function publishStoreProfile(userId: string, p: PublicStoreProfile)
     socials: p.socials ?? {},
     description: p.description?.trim() || null,
     logo_url: p.logoUrl?.trim() || null,
+    portfolio_images: (p.portfolioImages ?? []).map((x) => x.trim()).filter(Boolean),
     updated_at: new Date().toISOString(),
   };
   let res: { error: SbError };

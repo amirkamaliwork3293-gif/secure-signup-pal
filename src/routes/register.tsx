@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
-import { submitSignupRequest, createTrialAccount } from "@/lib/auth.functions";
-import { normalizePlans, effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
+import { submitSignupRequest, createTrialAccount, getPublicSettings } from "@/lib/auth.functions";
+import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/register")({
@@ -74,14 +74,18 @@ function RegisterPage() {
   }, []);
 
   useEffect(() => {
-    supabase.from("app_settings").select("*").eq("id", 1).maybeSingle().then(({ data }) => {
-      if (data) setCard({
-        card_number: (data as any).card_number || "",
-        card_holder: (data as any).card_holder || "",
-        bank_name: (data as any).bank_name || "",
+    getPublicSettings()
+      .then((data) => {
+        setCard({
+          card_number: data.card_number || "",
+          card_holder: data.card_holder || "",
+          bank_name: data.bank_name || "",
+        });
+        setPlansCfg(data.plans);
+      })
+      .catch(() => {
+        /* leave defaults */
       });
-      if (data) setPlansCfg(normalizePlans((data as any).plans));
-    });
   }, []);
 
   // Only show enabled plans; auto-pick a sensible default if current pick was disabled

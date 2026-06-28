@@ -458,6 +458,76 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
             />
           </div>
 
+          {/* نمونه کار */}
+          <div className="rounded-xl border border-border bg-background p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-semibold">
+                <Images className="h-4 w-4 text-primary" />
+                نمونه کار ({portfolio.length})
+              </span>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] hover:bg-accent">
+                {portfolioUploading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ImagePlus className="h-3.5 w-3.5" />
+                )}
+                افزودن عکس
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void onPickPortfolio(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            {portfolio.length === 0 ? (
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                می‌توانید چند عکس از نمونه‌کارها، محصولات یا فضای کسب‌وکار اضافه کنید تا در یک گالری
+                زیبا در صفحه‌ی عمومی نمایش داده شوند. اگر چیزی اضافه نکنید، این بخش در صفحه‌ی عمومی
+                نمایش داده نمی‌شود.
+              </p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {portfolio.map((url, i) => (
+                  <div
+                    key={url + i}
+                    className="group relative aspect-square overflow-hidden rounded-lg border border-border"
+                  >
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePortfolioAt(i)}
+                      aria-label="حذف"
+                      className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white opacity-90"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="absolute bottom-1 left-1 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => movePortfolio(i, -1)}
+                        className="rounded-full bg-black/60 px-1.5 text-[10px] text-white"
+                      >
+                        ›
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => movePortfolio(i, 1)}
+                        className="rounded-full bg-black/60 px-1.5 text-[10px] text-white"
+                      >
+                        ‹
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button
             onClick={saveProfile}
             disabled={busy || !userId}

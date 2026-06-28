@@ -725,3 +725,22 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { id: created.id };
   });
+
+// ─── Public: payment + plans info for signup/renew pages ─────────────────────
+// Returns only safe payment display fields and the active plans config.
+// Used by anon and authenticated users so we can keep the underlying table
+// locked down behind admin-only RLS.
+export const getPublicSettings = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin
+    .from("app_settings")
+    .select("card_number, card_holder, bank_name, plans")
+    .eq("id", 1)
+    .maybeSingle();
+  return {
+    card_number: (data as any)?.card_number ?? "",
+    card_holder: (data as any)?.card_holder ?? "",
+    bank_name: (data as any)?.bank_name ?? "",
+    plans: normalizePlans((data as any)?.plans),
+  };
+});

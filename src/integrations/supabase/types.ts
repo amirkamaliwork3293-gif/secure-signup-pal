@@ -225,6 +225,7 @@ export type Database = {
           hours: string | null
           logo_url: string | null
           phones: string[] | null
+          portfolio_images: Json
           shop_name: string | null
           socials: Json | null
           updated_at: string
@@ -237,6 +238,7 @@ export type Database = {
           hours?: string | null
           logo_url?: string | null
           phones?: string[] | null
+          portfolio_images?: Json
           shop_name?: string | null
           socials?: Json | null
           updated_at?: string
@@ -249,6 +251,7 @@ export type Database = {
           hours?: string | null
           logo_url?: string | null
           phones?: string[] | null
+          portfolio_images?: Json
           shop_name?: string | null
           socials?: Json | null
           updated_at?: string

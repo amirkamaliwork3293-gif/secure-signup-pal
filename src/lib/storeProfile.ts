@@ -182,6 +182,7 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
     throw error;
   }
   if (!data) return null;
+  const isPublic = (u?: string | null) => !!u && /^https?:\/\//i.test(u);
   return {
     shopName: data.shop_name ?? undefined,
     address: data.address ?? undefined,
@@ -189,8 +190,11 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
     hours: data.hours ?? undefined,
     socials: data.socials ?? {},
     description: data.description ?? undefined,
-    logoUrl: data.logo_url ?? undefined,
-    portfolioImages: Array.isArray(data.portfolio_images) ? data.portfolio_images : [],
+    // آدرس‌های blob:/data: فقط روی مرورگر آپلودکننده کار می‌کنند؛ برای بقیه‌ی کاربران نادیده گرفته می‌شوند.
+    logoUrl: isPublic(data.logo_url) ? data.logo_url! : undefined,
+    portfolioImages: Array.isArray(data.portfolio_images)
+      ? data.portfolio_images.filter((x) => isPublic(x))
+      : [],
   };
 }
 

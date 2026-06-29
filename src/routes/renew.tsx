@@ -96,8 +96,10 @@ function RenewPage() {
 
     setLoading(true);
     try {
-      const ext = receiptFile.name.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `${username}/renew-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
+      const ext = /^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg";
+      const safeUser = (String(username).trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
+      const path = `${safeUser}/renew-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error: upErr } = await supabase.storage.from("receipts").upload(path, receiptFile, {
         cacheControl: "3600", upsert: false, contentType: receiptFile.type,
       });

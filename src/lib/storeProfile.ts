@@ -124,6 +124,14 @@ export function storeErrorMessage(e: unknown): string {
 
 /** انتشار/به‌روزرسانی پروفایل عمومی فروشگاه برای کاربر جاری. */
 export async function publishStoreProfile(userId: string, p: PublicStoreProfile): Promise<void> {
+  // فیلتر آدرس‌های نامعتبر (blob:/data:/خالی) — این‌ها فقط روی مرورگر آپلودکننده کار می‌کنند
+  // و برای مشتری‌ها قابل بارگذاری نیستند. فقط URLهای واقعی http(s) ذخیره می‌شوند.
+  const isPublicUrl = (u?: string | null) =>
+    !!u && /^https?:\/\//i.test(u.trim());
+  const safeLogo = isPublicUrl(p.logoUrl) ? p.logoUrl!.trim() : null;
+  const safePortfolio = (p.portfolioImages ?? [])
+    .map((x) => x.trim())
+    .filter((x) => isPublicUrl(x));
   const row = {
     user_id: userId,
     shop_name: p.shopName?.trim() || null,
@@ -132,8 +140,8 @@ export async function publishStoreProfile(userId: string, p: PublicStoreProfile)
     hours: p.hours?.trim() || null,
     socials: p.socials ?? {},
     description: p.description?.trim() || null,
-    logo_url: p.logoUrl?.trim() || null,
-    portfolio_images: (p.portfolioImages ?? []).map((x) => x.trim()).filter(Boolean),
+    logo_url: safeLogo,
+    portfolio_images: safePortfolio,
     updated_at: new Date().toISOString(),
   };
   let res: { error: SbError };
@@ -174,6 +182,7 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
     throw error;
   }
   if (!data) return null;
+  const isPublic = (u?: string | null) => !!u && /^https?:\/\//i.test(u);
   return {
     shopName: data.shop_name ?? undefined,
     address: data.address ?? undefined,
@@ -181,8 +190,11 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
     hours: data.hours ?? undefined,
     socials: data.socials ?? {},
     description: data.description ?? undefined,
-    logoUrl: data.logo_url ?? undefined,
-    portfolioImages: Array.isArray(data.portfolio_images) ? data.portfolio_images : [],
+    // آدرس‌های blob:/data: فقط روی مرورگر آپلودکننده کار می‌کنند؛ برای بقیه‌ی کاربران نادیده گرفته می‌شوند.
+    logoUrl: isPublic(data.logo_url) ? data.logo_url! : undefined,
+    portfolioImages: Array.isArray(data.portfolio_images)
+      ? data.portfolio_images.filter((x) => isPublic(x))
+      : [],
   };
 }
 

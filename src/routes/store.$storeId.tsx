@@ -31,17 +31,17 @@ export const Route = createFileRoute("/store/$storeId")({
   component: StorePage,
 });
 
-// این صفحه عمومی است و بدون ورود (Auth) قابل مشاهده است.
-// تم بصری: مشکی عمیق + زرشکی گرم + برنزی ملایم.
+// تم بصری: سفید گرم + زرشکی + طلایی
 const C = {
-  ink: "#0b0608", // پس‌زمینه‌ی اصلی، تقریباً مشکی با ته‌رنگ گرم
-  ink2: "#140a0d",
-  wine: "#5b0d1b", // زرشکی عمیق
-  wineGlow: "#7a1428",
-  bronze: "#c9a96a", // طلایی/برنزی ملایم
-  cream: "#f3e9d2", // متن گرم
-  creamMute: "rgba(243,233,210,0.72)",
-  hair: "rgba(201,169,106,0.28)", // خط جداکننده
+  bg: "#faf7f2",           // پس‌زمینه صفحه — سفید کرمی گرم
+  bgCard: "#ffffff",       // کارت‌ها — سفید خالص
+  wine: "#5b0d1b",         // زرشکی
+  wineGlow: "#7a1428",     // زرشکی روشن‌تر
+  gold: "#c9a96a",         // طلایی
+  text: "#2b0a10",         // متن اصلی — قهوه‌ای-زرشکی تیره
+  textMute: "rgba(43,10,16,0.55)",
+  textLight: "#fff8f0",    // متن روی پس‌زمینه تیره (هدر / لایت‌باکس)
+  hair: "rgba(201,169,106,0.35)", // خط طلایی ظریف
 };
 
 function StorePage() {
@@ -104,7 +104,7 @@ function StorePage() {
     return (
       <div
         className="flex min-h-screen items-center justify-center"
-        style={{ background: C.ink, color: C.bronze }}
+        style={{ background: C.bg, color: C.gold }}
         dir="rtl"
       >
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -116,16 +116,16 @@ function StorePage() {
     return (
       <div
         className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center"
-        style={{ background: C.ink, color: C.cream, fontFamily: "Vazirmatn, sans-serif" }}
+        style={{ background: C.bg, color: C.text, fontFamily: "Vazirmatn, sans-serif" }}
         dir="rtl"
       >
         <div
           className="grid h-16 w-16 place-items-center rounded-2xl"
-          style={{ background: C.ink2, border: `1px solid ${C.hair}`, color: C.bronze }}
+          style={{ background: "#f5f0e8", border: `1px solid ${C.hair}`, color: C.gold }}
         >
           <Store className="h-8 w-8" />
         </div>
-        <p className="text-sm" style={{ color: C.creamMute }}>
+        <p className="text-sm" style={{ color: C.textMute }}>
           اطلاعات این فروشگاه هنوز ثبت نشده است.
         </p>
       </div>
@@ -146,17 +146,17 @@ function StorePage() {
     <div
       className="min-h-screen pb-14"
       style={{
-        background: `radial-gradient(1100px 600px at 50% -10%, ${C.wineGlow}33, transparent 60%), linear-gradient(180deg, ${C.ink} 0%, ${C.ink2} 100%)`,
-        color: C.cream,
+        background: C.bg,
+        color: C.text,
         fontFamily: "Vazirmatn, sans-serif",
       }}
       dir="rtl"
     >
-      {/* هدر برند — حس بوتیک، با ترکیب مشکی/زرشکی و خط طلایی ظریف */}
+      {/* هدر برند — زرشکی با جزئیات طلایی */}
       <header
         className="relative overflow-hidden px-6 pb-7 pt-10 text-center"
         style={{
-          background: `linear-gradient(160deg, ${C.wine} 0%, #2a060f 55%, ${C.ink} 100%)`,
+          background: `linear-gradient(160deg, ${C.wine} 0%, #2a060f 55%, #0b0608 100%)`,
         }}
       >
         {/* بافت ظریف نقطه‌ای */}
@@ -174,18 +174,18 @@ function StorePage() {
           <div
             className="absolute inset-0 rounded-full"
             style={{
-              background: `conic-gradient(from 220deg, ${C.bronze}, #6f5224, ${C.bronze})`,
+              background: `conic-gradient(from 220deg, ${C.gold}, #6f5224, ${C.gold})`,
               padding: 2,
             }}
           >
             <div
               className="grid h-full w-full place-items-center overflow-hidden rounded-full"
-              style={{ background: C.ink }}
+              style={{ background: C.bgCard }}
             >
               {profile.logoUrl ? (
                 <img src={profile.logoUrl} alt={profile.shopName ?? ""} className="h-full w-full object-cover" />
               ) : (
-                <Store className="h-10 w-10" style={{ color: C.bronze }} />
+                <Store className="h-10 w-10" style={{ color: C.gold }} />
               )}
             </div>
           </div>
@@ -194,7 +194,7 @@ function StorePage() {
         <div className="relative mt-4">
           <div
             className="mx-auto mb-2 h-px w-16"
-            style={{ background: `linear-gradient(90deg, transparent, ${C.bronze}, transparent)` }}
+            style={{ background: `linear-gradient(90deg, transparent, ${C.gold}, transparent)` }}
           />
           {profile.shopName && (
             <h1
@@ -203,7 +203,7 @@ function StorePage() {
                 fontFamily: "'Cormorant Garamond', Vazirmatn, serif",
                 fontWeight: 700,
                 letterSpacing: "0.02em",
-                color: C.cream,
+                color: C.textLight,
               }}
             >
               {profile.shopName}
@@ -211,12 +211,12 @@ function StorePage() {
           )}
           <div
             className="mx-auto mt-2 h-px w-16"
-            style={{ background: `linear-gradient(90deg, transparent, ${C.bronze}, transparent)` }}
+            style={{ background: `linear-gradient(90deg, transparent, ${C.gold}, transparent)` }}
           />
           {profile.description && (
             <p
               className="mx-auto mt-3 max-w-md text-[13px] leading-7"
-              style={{ color: C.creamMute }}
+              style={{ color: "rgba(255,248,240,0.85)" }}
             >
               {profile.description}
             </p>
@@ -227,7 +227,7 @@ function StorePage() {
       <main className="mx-auto mt-4 max-w-md space-y-3 px-4">
         {profile.address && (
           <InfoCard icon={<MapPin className="h-4 w-4" />} title="آدرس">
-            <p className="text-sm leading-7" style={{ color: C.cream }}>{profile.address}</p>
+            <p className="text-sm leading-7" style={{ color: C.text }}>{profile.address}</p>
           </InfoCard>
         )}
 
@@ -239,10 +239,10 @@ function StorePage() {
                   key={i}
                   onClick={() => openExternal(`tel:${ph}`)}
                   className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition active:scale-[0.99]"
-                  style={{ background: C.ink, border: `1px solid ${C.hair}`, color: C.cream }}
+                  style={{ background: C.bgCard, border: `1px solid ${C.hair}`, color: C.text }}
                 >
                   <span dir="ltr" className="font-medium tracking-wide">{ph}</span>
-                  <span className="text-[11px]" style={{ color: C.bronze }}>تماس ›</span>
+                  <span className="text-[11px]" style={{ color: C.wine }}>تماس ›</span>
                 </button>
               ))}
             </div>
@@ -251,7 +251,7 @@ function StorePage() {
 
         {profile.hours && (
           <InfoCard icon={<Clock className="h-4 w-4" />} title="ساعات کاری">
-            <p className="text-sm leading-7" style={{ color: C.cream }}>{profile.hours}</p>
+            <p className="text-sm leading-7" style={{ color: C.text }}>{profile.hours}</p>
           </InfoCard>
         )}
 
@@ -291,25 +291,25 @@ function StorePage() {
           <section
             className="rounded-2xl p-4"
             style={{
-              background: `linear-gradient(180deg, ${C.ink2}, ${C.ink})`,
+              background: C.bgCard,
               border: `1px solid ${C.hair}`,
-              boxShadow: "0 18px 40px -28px rgba(0,0,0,0.8)",
+              boxShadow: "0 14px 30px -22px rgba(0,0,0,0.15)",
             }}
           >
             <div className="mb-3 flex items-center justify-center gap-3">
-              <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${C.bronze}66)` }} />
+              <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, transparent, ${C.gold}66)` }} />
               <h2
                 className="text-[15px]"
                 style={{
                   fontFamily: "'Cormorant Garamond', Vazirmatn, serif",
                   fontWeight: 700,
-                  color: C.bronze,
+                  color: C.gold,
                   letterSpacing: "0.18em",
                 }}
               >
                 نمونه کار
               </h2>
-              <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${C.bronze}66, transparent)` }} />
+              <span className="h-px flex-1" style={{ background: `linear-gradient(90deg, ${C.gold}66, transparent)` }} />
             </div>
             <div className="grid grid-cols-3 gap-2">
               {portfolio.map((url, i) => (
@@ -327,7 +327,7 @@ function StorePage() {
                   />
                   <span
                     className="pointer-events-none absolute inset-0"
-                    style={{ boxShadow: `inset 0 0 0 1px ${C.bronze}22` }}
+                    style={{ boxShadow: `inset 0 0 0 1px ${C.gold}22` }}
                   />
                 </button>
               ))}
@@ -338,7 +338,7 @@ function StorePage() {
 
       <footer
         className="mt-10 text-center text-[11px]"
-        style={{ color: C.creamMute, letterSpacing: "0.08em" }}
+        style={{ color: C.textMute, letterSpacing: "0.08em" }}
       >
         ساخته‌شده با کمالی حسابداری
       </footer>
@@ -353,7 +353,7 @@ function StorePage() {
           <button
             aria-label="بستن"
             className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full"
-            style={{ background: "rgba(255,255,255,0.08)", color: C.cream }}
+            style={{ background: "rgba(255,255,255,0.08)", color: C.textLight }}
             onClick={(e) => {
               e.stopPropagation();
               closeLb();
@@ -366,7 +366,7 @@ function StorePage() {
               <button
                 aria-label="قبلی"
                 className="absolute right-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full sm:right-6"
-                style={{ background: "rgba(255,255,255,0.08)", color: C.cream }}
+                style={{ background: "rgba(255,255,255,0.08)", color: C.textLight }}
                 onClick={(e) => {
                   e.stopPropagation();
                   stepLb(-1);
@@ -377,7 +377,7 @@ function StorePage() {
               <button
                 aria-label="بعدی"
                 className="absolute left-2 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full sm:left-6"
-                style={{ background: "rgba(255,255,255,0.08)", color: C.cream }}
+                style={{ background: "rgba(255,255,255,0.08)", color: C.textLight }}
                 onClick={(e) => {
                   e.stopPropagation();
                   stepLb(1);
@@ -391,12 +391,12 @@ function StorePage() {
             src={portfolio[lightboxIdx]}
             alt=""
             className="max-h-[88vh] max-w-[94vw] rounded-xl object-contain"
-            style={{ boxShadow: `0 0 0 1px ${C.bronze}33, 0 30px 80px rgba(0,0,0,0.6)` }}
+            style={{ boxShadow: `0 0 0 1px ${C.gold}33, 0 30px 80px rgba(0,0,0,0.6)` }}
             onClick={(e) => e.stopPropagation()}
           />
           <div
             className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-xs"
-            style={{ background: "rgba(255,255,255,0.08)", color: C.cream }}
+            style={{ background: "rgba(255,255,255,0.08)", color: C.textLight }}
           >
             {lightboxIdx + 1} / {portfolio.length}
           </div>
@@ -450,17 +450,17 @@ function InfoCard({
     <section
       className="rounded-2xl p-4"
       style={{
-        background: `linear-gradient(180deg, ${C.ink2}, ${C.ink})`,
+        background: C.bgCard,
         border: `1px solid ${C.hair}`,
-        boxShadow: "0 14px 30px -22px rgba(0,0,0,0.8)",
+        boxShadow: "0 14px 30px -22px rgba(0,0,0,0.12)",
       }}
     >
       <h2
         className="mb-3 flex items-center gap-2 text-[12px]"
-        style={{ color: C.bronze, letterSpacing: "0.16em", fontWeight: 700 }}
+        style={{ color: C.gold, letterSpacing: "0.16em", fontWeight: 700 }}
       >
         <span className="grid h-7 w-7 place-items-center rounded-full"
-          style={{ background: `${C.wine}33`, border: `1px solid ${C.hair}`, color: C.bronze }}>
+          style={{ background: `${C.wine}12`, border: `1px solid ${C.hair}`, color: C.gold }}>
           {icon}
         </span>
         {title}
@@ -484,12 +484,12 @@ function SocialButton({
       onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm transition active:scale-[0.98]"
       style={{
-        background: C.ink,
+        background: C.bgCard,
         border: `1px solid ${C.hair}`,
-        color: C.cream,
+        color: C.text,
       }}
     >
-      <span style={{ color: C.bronze }}>{icon}</span>
+      <span style={{ color: C.gold }}>{icon}</span>
       {label}
     </button>
   );

@@ -124,6 +124,14 @@ export function storeErrorMessage(e: unknown): string {
 
 /** انتشار/به‌روزرسانی پروفایل عمومی فروشگاه برای کاربر جاری. */
 export async function publishStoreProfile(userId: string, p: PublicStoreProfile): Promise<void> {
+  // فیلتر آدرس‌های نامعتبر (blob:/data:/خالی) — این‌ها فقط روی مرورگر آپلودکننده کار می‌کنند
+  // و برای مشتری‌ها قابل بارگذاری نیستند. فقط URLهای واقعی http(s) ذخیره می‌شوند.
+  const isPublicUrl = (u?: string | null) =>
+    !!u && /^https?:\/\//i.test(u.trim());
+  const safeLogo = isPublicUrl(p.logoUrl) ? p.logoUrl!.trim() : null;
+  const safePortfolio = (p.portfolioImages ?? [])
+    .map((x) => x.trim())
+    .filter((x) => isPublicUrl(x));
   const row = {
     user_id: userId,
     shop_name: p.shopName?.trim() || null,
@@ -132,8 +140,8 @@ export async function publishStoreProfile(userId: string, p: PublicStoreProfile)
     hours: p.hours?.trim() || null,
     socials: p.socials ?? {},
     description: p.description?.trim() || null,
-    logo_url: p.logoUrl?.trim() || null,
-    portfolio_images: (p.portfolioImages ?? []).map((x) => x.trim()).filter(Boolean),
+    logo_url: safeLogo,
+    portfolio_images: safePortfolio,
     updated_at: new Date().toISOString(),
   };
   let res: { error: SbError };

@@ -148,7 +148,7 @@ function PublicMenuPage() {
                 {profile?.logoUrl ? (
                   <img src={profile.logoUrl} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <UtensilsCrossed className="h-6 w-6" style={{ color: C.bronze }} />
+                  <UtensilsCrossed className="h-10 w-10" style={{ color: C.bronze }} />
                 )}
               </div>
             </div>

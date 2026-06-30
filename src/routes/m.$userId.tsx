@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { fetchPublicMenu, type MenuCategory, type MenuItem } from "@/lib/menu";
-import { fetchStoreProfile, type PublicStoreProfile } from "@/lib/storeProfile";
+import { fetchPublicMenu, SubscriptionExpiredError, type MenuCategory, type MenuItem } from "@/lib/menu";
+import { fetchStoreProfile, StoreSubscriptionExpiredError, type PublicStoreProfile } from "@/lib/storeProfile";
 import { Loader2, UtensilsCrossed, Image as ImageIcon } from "lucide-react";
 
 export const Route = createFileRoute("/m/$userId")({
@@ -43,6 +43,7 @@ function PublicMenuPage() {
   const { userId } = Route.useParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expired, setExpired] = useState(false);
   const [cats, setCats] = useState<MenuCategory[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [profile, setProfile] = useState<PublicStoreProfile | null>(null);
@@ -60,7 +61,11 @@ function PublicMenuPage() {
         setItems(menu.items);
         setProfile(prof);
       } catch (e: any) {
-        setError(e?.message || "خطا در بارگذاری منو.");
+        if (e instanceof SubscriptionExpiredError || e instanceof StoreSubscriptionExpiredError || e?.message === "SUBSCRIPTION_EXPIRED") {
+          setExpired(true);
+        } else {
+          setError(e?.message || "خطا در بارگذاری منو.");
+        }
       }
       setLoading(false);
     })();
@@ -81,6 +86,21 @@ function PublicMenuPage() {
         style={{ background: C.ink, color: C.bronze }}
       >
         <Loader2 className="h-7 w-7 animate-spin" />
+      </div>
+    );
+  }
+  if (expired) {
+    return (
+      <div
+        className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center"
+        style={{ background: C.ink, color: C.cream, fontFamily: "Vazirmatn, sans-serif" }}
+        dir="rtl"
+      >
+        <UtensilsCrossed className="h-10 w-10" style={{ color: C.bronze }} />
+        <h2 className="text-lg font-bold" style={{ color: C.bronze }}>منو موقتاً در دسترس نیست</h2>
+        <p className="max-w-xs text-xs leading-6" style={{ color: C.creamMute }}>
+          اشتراک این فروشگاه به پایان رسیده است. پس از تمدید اشتراک توسط مدیر فروشگاه، منو دوباره نمایش داده می‌شود.
+        </p>
       </div>
     );
   }

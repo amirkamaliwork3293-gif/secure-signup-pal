@@ -70,13 +70,14 @@ function StorePage() {
           setState("notfound");
         }
       })
-      .catch(() => alive && setState("notfound"));
-    // override: detect expired subscription separately
-    fetchStoreProfile(storeId).catch((e) => {
-      if (alive && (e instanceof StoreSubscriptionExpiredError || e?.message === "SUBSCRIPTION_EXPIRED")) {
-        setState("expired");
-      }
-    });
+      .catch((e: any) => {
+        if (!alive) return;
+        if (e instanceof StoreSubscriptionExpiredError || e?.message === "SUBSCRIPTION_EXPIRED") {
+          setState("expired");
+        } else {
+          setState("notfound");
+        }
+      });
     return () => {
       alive = false;
     };

@@ -1,5 +1,18 @@
 import { supabase } from "@/integrations/supabase/client";
 
+/** خطای اختصاصی برای پلن منقضی‌شده‌ی صاحب فروشگاه. */
+export class StoreSubscriptionExpiredError extends Error {
+  constructor() { super("SUBSCRIPTION_EXPIRED"); this.name = "StoreSubscriptionExpiredError"; }
+}
+
+async function ownerActive(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await (supabase as any).rpc("is_subscription_active", { _user_id: userId });
+    if (error) return true;
+    return data === true;
+  } catch { return true; }
+}
+
 /**
  * انتشار و خواندن «پروفایل عمومی فروشگاه» در جدول store_profiles.
  *
@@ -167,6 +180,9 @@ export async function publishStoreProfile(userId: string, p: PublicStoreProfile)
 
 /** خواندن پروفایل عمومی یک فروشگاه با شناسه‌ی کاربر (بدون نیاز به ورود). */
 export async function fetchStoreProfile(userId: string): Promise<PublicStoreProfile | null> {
+  if (!(await ownerActive(userId))) {
+    throw new StoreSubscriptionExpiredError();
+  }
   const { data, error } = await sb
     .from("store_profiles")
     .select("*")

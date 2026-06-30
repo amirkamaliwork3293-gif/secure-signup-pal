@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { fetchStoreProfile, type PublicStoreProfile } from "@/lib/storeProfile";
+import { fetchStoreProfile, StoreSubscriptionExpiredError, type PublicStoreProfile } from "@/lib/storeProfile";
 import { openExternal, toIntlPhone } from "@/lib/openExternal";
 import {
   Store,
@@ -47,7 +47,7 @@ const C = {
 function StorePage() {
   const { storeId } = Route.useParams();
   const [profile, setProfile] = useState<PublicStoreProfile | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "notfound">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "notfound" | "expired">("loading");
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
   useEffect(() => {
@@ -70,7 +70,14 @@ function StorePage() {
           setState("notfound");
         }
       })
-      .catch(() => alive && setState("notfound"));
+      .catch((e: any) => {
+        if (!alive) return;
+        if (e instanceof StoreSubscriptionExpiredError || e?.message === "SUBSCRIPTION_EXPIRED") {
+          setState("expired");
+        } else {
+          setState("notfound");
+        }
+      });
     return () => {
       alive = false;
     };
@@ -113,6 +120,26 @@ function StorePage() {
   }
 
   if (state === "notfound" || !profile) {
+    if (state === "expired") {
+      return (
+        <div
+          className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center"
+          style={{ background: C.bg, color: C.text, fontFamily: "Vazirmatn, sans-serif" }}
+          dir="rtl"
+        >
+          <div
+            className="grid h-16 w-16 place-items-center rounded-2xl"
+            style={{ background: "#f5f0e8", border: `1px solid ${C.hair}`, color: C.gold }}
+          >
+            <Store className="h-8 w-8" />
+          </div>
+          <h2 className="text-base font-bold" style={{ color: C.wine }}>صفحه فروشگاه موقتاً غیرفعال است</h2>
+          <p className="max-w-xs text-xs leading-6" style={{ color: C.textMute }}>
+            اشتراک این فروشگاه به پایان رسیده است. پس از تمدید اشتراک توسط مدیر فروشگاه، صفحه دوباره فعال خواهد شد.
+          </p>
+        </div>
+      );
+    }
     return (
       <div
         className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center"

@@ -1,5 +1,19 @@
 import { supabase } from "@/integrations/supabase/client";
 
+/** آیا اشتراک صاحب فروشگاه فعال است؟ (تابع SECURITY DEFINER عمومی) */
+export async function isOwnerSubscriptionActive(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("is_subscription_active", { _user_id: userId } as any);
+    if (error) return true; // در صورت خطا، رفتار قبلی را حفظ کن
+    return data === true;
+  } catch { return true; }
+}
+
+/** خطای اختصاصی برای پلن منقضی‌شده — تا UI پیام مناسب نشان دهد. */
+export class SubscriptionExpiredError extends Error {
+  constructor() { super("SUBSCRIPTION_EXPIRED"); this.name = "SubscriptionExpiredError"; }
+}
+
 export type MenuCategory = {
   id: string;
   user_id: string;
@@ -108,6 +122,9 @@ export async function uploadMenuImage(userId: string, file: File): Promise<strin
 
 /** خواندن عمومی منوی یک فروشگاه (با شناسه کاربر) — بدون نیاز به ورود. */
 export async function fetchPublicMenu(userId: string): Promise<{ categories: MenuCategory[]; items: MenuItem[] }> {
+  if (!(await isOwnerSubscriptionActive(userId))) {
+    throw new SubscriptionExpiredError();
+  }
   const [cats, its] = await Promise.all([
     supabase
       .from("menu_categories")

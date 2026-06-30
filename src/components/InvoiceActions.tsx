@@ -5,16 +5,16 @@
  */
 
 import { useState } from "react";
-import { Printer, Download, Share2, Loader2 } from "lucide-react";
+import { Printer, Download, Share2, Loader2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
-import { settings } from "@/lib/store";
+import { settings, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
 import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
 import { buildInvoicePdf } from "@/lib/invoice-pdf";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
 export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
-  const date = new Date(inv.createdAt).toLocaleDateString("fa-IR");
+  const date = formatJalaliDateTime(inv.createdAt);
   const customer = inv.customer;
   const customerName =
     customer
@@ -69,6 +69,7 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
   <div><span>تاریخ: </span><strong>${date}</strong></div>
   <div><span>مشتری: </span><strong>${customerName}</strong></div>
   <div><span>تلفن: </span><strong>${customer?.phone || "—"}</strong></div>
+  ${inv.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[inv.paymentMethod]}</strong></div>` : ""}
 </div>
 <table>
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
@@ -83,6 +84,64 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
 <div class="footer">با تشکر از خرید شما — ${shopName}</div>
 </body>
 </html>`;
+}
+
+// ─── HTML فاکتور حرارتی (۸۰ میلی‌متر) — مخصوص پرینتر فیش/رسید ─────────────
+export function buildThermalInvoiceHTML(inv: Invoice): string {
+  const date = formatJalaliDateTime(inv.createdAt);
+  const customer = inv.customer;
+  const customerName = customer
+    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
+    : "";
+  const shopName = inv.shopName || "فروشگاه";
+  const fmt = (n: number) => new Intl.NumberFormat("fa-IR").format(n);
+  const rows = inv.items
+    .map(
+      (it) => `
+      <div class="row">
+        <div class="name">${it.name}</div>
+        <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
+      </div>`
+    )
+    .join("");
+  return `<!DOCTYPE html>
+<html lang="fa" dir="rtl"><head>
+<meta charset="utf-8"/>
+<title>فیش ${inv.id.toUpperCase()}</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Vazirmatn',Tahoma,sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
+  .center{text-align:center}
+  .shop{font-weight:700;font-size:14px}
+  .muted{color:#444;font-size:10.5px}
+  .sep{border-top:1px dashed #000;margin:6px 0}
+  .meta{font-size:11px}
+  .meta div{display:flex;justify-content:space-between;gap:6px}
+  .row{padding:3px 0}
+  .name{font-weight:700}
+  .line{display:flex;justify-content:space-between;font-size:11px;color:#222}
+  .total{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-top:4px}
+  .foot{font-size:10.5px;text-align:center;margin-top:6px}
+  @media print { body { width: 80mm; } }
+</style></head><body>
+<div class="center shop">${shopName}</div>
+<div class="center muted">فاکتور فروش</div>
+<div class="sep"></div>
+<div class="meta">
+  <div><span>شماره:</span><span>${inv.id.toUpperCase()}</span></div>
+  <div><span>تاریخ:</span><span>${date}</span></div>
+  ${customerName ? `<div><span>مشتری:</span><span>${customerName}</span></div>` : ""}
+  ${customer?.phone ? `<div><span>تلفن:</span><span>${customer.phone}</span></div>` : ""}
+  ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
+</div>
+<div class="sep"></div>
+${rows}
+<div class="sep"></div>
+<div class="total"><span>جمع کل</span><span>${fmt(inv.total)} تومان</span></div>
+<div class="foot">با تشکر از خرید شما</div>
+</body></html>`;
 }
 
 // ─── متن ساده برای اشتراک‌گذاری ───────────────────────────────────────────
@@ -130,6 +189,13 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const handlePrint = async () => {
     const html = buildInvoiceHTML(inv, fontSize);
     const ok = await printHtml(html, `فاکتور ${inv.id.toUpperCase()}`);
+    if (!ok) alert(OLD_APP_MESSAGE);
+  };
+
+  // ── چاپ حرارتی ۸۰ میلی‌متر ────────────────────────────────────────────────
+  const handleThermalPrint = async () => {
+    const html = buildThermalInvoiceHTML(inv);
+    const ok = await printHtml(html, `فیش ${inv.id.toUpperCase()}`);
     if (!ok) alert(OLD_APP_MESSAGE);
   };
 
@@ -196,10 +262,20 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         type="button"
         onClick={handlePrint}
         className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="پرینت فاکتور"
+        title="پرینت فاکتور (A4)"
       >
         <Printer className={iconSize} />
         {showLabels && <span>پرینت</span>}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleThermalPrint}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
+        title="چاپ حرارتی ۸۰ میلی‌متر (فیش/رسید)"
+      >
+        <Receipt className={iconSize} />
+        {showLabels && <span>چاپ حرارتی</span>}
       </button>
 
       <button

@@ -718,6 +718,29 @@ export function formatToman(n: number): string {
   return formatNumber(n) + " تومان";
 }
 
+// ─── Jalali (Persian) date helpers ─────────────────────────────────────────
+// Use the Persian calendar via Intl so day/month/year/time are all accurate.
+const _jDate = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  year: "numeric", month: "2-digit", day: "2-digit",
+});
+const _jDateTime = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
+const _jLong = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+  weekday: "long", year: "numeric", month: "long", day: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
+export function formatJalaliDate(ts: number | string | Date): string {
+  try { return _jDate.format(new Date(ts)); } catch { return ""; }
+}
+export function formatJalaliDateTime(ts: number | string | Date): string {
+  try { return _jDateTime.format(new Date(ts)); } catch { return ""; }
+}
+export function formatJalaliLong(ts: number | string | Date): string {
+  try { return _jLong.format(new Date(ts)); } catch { return ""; }
+}
+
 /**
  * تبدیل ورودی کاربر به عدد: ارقام فارسی/عربی را به انگلیسی تبدیل و
  * جداکننده‌ها را حذف می‌کند. اعشار (برای واحدهای وزنی) پشتیبانی می‌شود.

@@ -3,12 +3,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
-import { invoice, formatToman, formatNumber, settings, type Invoice, type InvoiceItem } from "@/lib/store";
+import {
+  invoice, products, formatToman, formatNumber, formatJalaliDateTime, settings,
+  PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
+  type Invoice, type InvoiceItem, type Product, type PaymentMethod,
+} from "@/lib/store";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
   User, Pencil, Trash2, Check, X,
-  Minus, Plus, Search,
+  Minus, Plus, Search, PlusCircle, Wallet,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -37,15 +41,14 @@ function EditableItem({
   onRemove: () => void;
 }) {
   return (
-    <li className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{item.name}</div>
-        <div className="text-xs text-muted-foreground">
-          {formatToman(item.price)} واحد
+    <li className="space-y-2 rounded-xl border border-border bg-background px-3 py-2">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{item.name}</div>
+          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(item.price * item.quantity)}</div>
         </div>
-      </div>
-      {/* تعداد */}
-      <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
+        {/* تعداد */}
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
         <button
           type="button"
           onClick={() => onChange({ ...item, quantity: Math.max(1, item.quantity - 1) })}
@@ -63,14 +66,26 @@ function EditableItem({
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+          title="حذف"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] text-muted-foreground">قیمت واحد:</label>
+        <input
+          inputMode="numeric"
+          value={item.price.toLocaleString("fa-IR")}
+          onChange={(e) => onChange({ ...item, price: Math.max(0, parseNumberInput(e.target.value)) })}
+          className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
+        />
+        <span className="text-[11px] text-muted-foreground">تومان</span>
+      </div>
     </li>
   );
 }
@@ -79,11 +94,13 @@ function EditableItem({
 
 function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [appSettings] = settings.useAll();
+  const [allProducts] = products.useAll();
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Invoice>(initialInv);
   // نگه داری آخرین نسخه ذخیره‌شده (برای نمایش بعد از save)
   const [saved, setSaved] = useState<Invoice>(initialInv);
+  const [addQuery, setAddQuery] = useState("");
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -93,11 +110,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     setDraft({ ...saved, shopName: saved.shopName || appSettings.shopName });
     setEditing(true);
     setIsOpen(true);
+    setAddQuery("");
   };
 
   const cancelEdit = () => {
     setDraft(saved);
     setEditing(false);
+    setAddQuery("");
   };
 
   const saveEdit = () => {
@@ -108,6 +127,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     setSaved(updated);
     setDraft(updated);
     setEditing(false);
+    setAddQuery("");
   };
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -128,6 +148,29 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     setDraft((d) => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
   };
 
+  const addProduct = (p: Product) => {
+    setDraft((d) => {
+      const exists = d.items.find((i) => i.productId === p.id);
+      const effective = applyProductDiscount(p);
+      if (exists) {
+        return { ...d, items: d.items.map((i) => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i) };
+      }
+      return {
+        ...d,
+        items: [...d.items, { productId: p.id, name: p.name, price: effective, quantity: 1, buyPrice: p.buyPrice, unit: p.unit }],
+      };
+    });
+    setAddQuery("");
+  };
+
+  const matchingProducts = useMemo(() => {
+    const q = addQuery.trim();
+    if (!q) return [] as Product[];
+    return allProducts
+      .filter((p) => p.name.includes(q) || (p.code ?? "").includes(q))
+      .slice(0, 8);
+  }, [addQuery, allProducts]);
+
   // فاکتور آماده برای InvoiceActions (با shopName)
   const printInv = { ...saved, shopName: saved.shopName || appSettings.shopName };
 
@@ -142,9 +185,14 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-primary">{formatToman(saved.total)}</span>
             {hasCustomer && <User className="h-3.5 w-3.5 text-muted-foreground" />}
+            {saved.paymentMethod && (
+              <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {PAYMENT_LABEL[saved.paymentMethod]}
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            {new Date(saved.createdAt).toLocaleString("fa-IR")} · {saved.items.length} قلم
+            {formatJalaliDateTime(saved.createdAt)} · {saved.items.length} قلم
           </div>
         </div>
 
@@ -238,6 +286,29 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
               />
 
+              {/* روش پرداخت */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Wallet className="h-3.5 w-3.5" /> روش پرداخت
+                </div>
+                <div className="flex gap-1.5">
+                  {(["cash","card","credit"] as PaymentMethod[]).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setDraft((d) => ({ ...d, paymentMethod: m }))}
+                      className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+                        draft.paymentMethod === m
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      {PAYMENT_LABEL[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* اقلام */}
               <ul className="space-y-2">
                 {draft.items.map((item, idx) => (
@@ -249,6 +320,35 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                   />
                 ))}
               </ul>
+
+              {/* افزودن محصول */}
+              <div className="rounded-xl border border-dashed border-border bg-background p-2">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <PlusCircle className="h-3.5 w-3.5" /> افزودن محصول
+                </div>
+                <input
+                  value={addQuery}
+                  onChange={(e) => setAddQuery(e.target.value)}
+                  placeholder="نام یا بارکد محصول..."
+                  className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                {matchingProducts.length > 0 && (
+                  <ul className="mt-1.5 max-h-44 space-y-1 overflow-y-auto">
+                    {matchingProducts.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => addProduct(p)}
+                          className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
+                        >
+                          <span className="truncate">{p.name}</span>
+                          <span className="shrink-0 text-muted-foreground">{formatToman(applyProductDiscount(p))}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               {/* جمع موقت */}
               <div className="text-left text-sm font-semibold text-primary">

@@ -5,16 +5,16 @@
  */
 
 import { useState } from "react";
-import { Printer, Download, Share2, Loader2 } from "lucide-react";
+import { Printer, Download, Share2, Loader2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
-import { settings } from "@/lib/store";
+import { settings, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
 import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
 import { buildInvoicePdf } from "@/lib/invoice-pdf";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
 export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
-  const date = new Date(inv.createdAt).toLocaleDateString("fa-IR");
+  const date = formatJalaliDateTime(inv.createdAt);
   const customer = inv.customer;
   const customerName =
     customer
@@ -69,6 +69,7 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
   <div><span>تاریخ: </span><strong>${date}</strong></div>
   <div><span>مشتری: </span><strong>${customerName}</strong></div>
   <div><span>تلفن: </span><strong>${customer?.phone || "—"}</strong></div>
+  ${inv.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[inv.paymentMethod]}</strong></div>` : ""}
 </div>
 <table>
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>

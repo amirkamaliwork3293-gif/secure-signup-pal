@@ -134,6 +134,13 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
     if (!ok) alert(OLD_APP_MESSAGE);
   };
 
+  // ── چاپ حرارتی ۸۰ میلی‌متر ────────────────────────────────────────────────
+  const handleThermalPrint = async () => {
+    const html = buildThermalInvoiceHTML(inv);
+    const ok = await printHtml(html, `فیش ${inv.id.toUpperCase()}`);
+    if (!ok) alert(OLD_APP_MESSAGE);
+  };
+
   // ── دانلود PDF — وب: دانلود مستقیم، اپ اندروید: ذخیره + اشتراک ────────────
   const handleDownload = async () => {
     if (busy) return;
@@ -197,10 +204,20 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         type="button"
         onClick={handlePrint}
         className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="پرینت فاکتور"
+        title="پرینت فاکتور (A4)"
       >
         <Printer className={iconSize} />
         {showLabels && <span>پرینت</span>}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleThermalPrint}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
+        title="چاپ حرارتی ۸۰ میلی‌متر (فیش/رسید)"
+      >
+        <Receipt className={iconSize} />
+        {showLabels && <span>چاپ حرارتی</span>}
       </button>
 
       <button

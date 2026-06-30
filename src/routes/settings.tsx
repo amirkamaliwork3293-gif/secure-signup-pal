@@ -35,19 +35,40 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPageInner() {
+  const { state: authState } = useAuth();
+  const meId = authState.status === "authenticated" ? authState.session.user.id : null;
   const [appSettings, setSettings] = settings.useAll();
   const [shopName, setShopName] = useState(appSettings.shopName);
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
   const [weightUnits, setWeightUnits] = useState(!!appSettings.weightUnits);
   const [saved, setSaved] = useState(false);
 
-  const save = () => {
+  const save = async () => {
+    const nextName = shopName.trim() || "فروشگاه من";
     setSettings({
       ...appSettings,
-      shopName: shopName.trim() || "فروشگاه من",
+      shopName: nextName,
       invoiceFontSize,
       weightUnits,
     });
+    // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
+    if (meId && nextName !== (appSettings.shopName || "").trim()) {
+      try {
+        const current = await fetchStoreProfile(meId).catch(() => null);
+        await publishStoreProfile(meId, {
+          shopName: nextName,
+          address: current?.address,
+          phones: current?.phones ?? [],
+          hours: current?.hours,
+          socials: current?.socials ?? {},
+          description: current?.description,
+          logoUrl: current?.logoUrl,
+          portfolioImages: current?.portfolioImages ?? [],
+        });
+      } catch (e) {
+        console.warn("[settings] sync shop name to public profile failed", e);
+      }
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };

@@ -133,7 +133,7 @@ function PublicMenuPage() {
         }}
       >
         <div className="mx-auto max-w-3xl px-4 pb-3 pt-6 text-center">
-          <div className="relative mx-auto h-16 w-16">
+            <div className="relative mx-auto h-24 w-24">
             <div
               className="absolute inset-0 rounded-full"
               style={{

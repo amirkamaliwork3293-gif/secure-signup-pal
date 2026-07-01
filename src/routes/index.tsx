@@ -13,6 +13,7 @@ import {
   customers,
   addProductToInvoice,
   isWeightUnit,
+  applyProductDiscount,
   PAYMENT_LABEL,
   type CustomerInfo,
   type PaymentMethod,
@@ -31,6 +32,7 @@ import {
   Plus as PlusIcon,
   Pencil,
   Mic,
+  Package,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 

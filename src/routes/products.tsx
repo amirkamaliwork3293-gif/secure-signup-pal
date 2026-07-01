@@ -126,6 +126,8 @@ function ProductsPageInner() {
       "قیمت خرید (تومان)": p.buyPrice ?? "",
       "قیمت مصرف‌کننده (تومان)": p.consumerPrice ?? "",
       "قیمت همکار (تومان)": p.sellerPrice ?? "",
+      "قیمت عمده/کارتنی (تومان)": p.wholesalePrice ?? "",
+      "حداقل تعداد عمده": p.wholesaleMinQty ?? "",
       "درصد تخفیف": p.discountPercent ?? "",
       "هشدار موجودی کم": p.lowStockThreshold ?? 5,
       "توضیحات": p.description ?? "",
@@ -135,7 +137,7 @@ function ProductsPageInner() {
     ws["!cols"] = [
       { wch: 25 }, { wch: 18 }, { wch: 10 }, { wch: 8 }, { wch: 20 },
       { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
-      { wch: 12 }, { wch: 16 }, { wch: 25 },
+      { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 25 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");

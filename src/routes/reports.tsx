@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
+  formatJalaliDate,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
-  TrendingUp, TrendingDown, Package,
+  TrendingUp, TrendingDown, Package, FileCheck,
 } from "lucide-react";
 
 export const Route = createFileRoute("/reports")({
@@ -46,6 +47,7 @@ function summarize(list: Invoice[]) {
     cash: { count: 0, total: 0 },
     card: { count: 0, total: 0 },
     credit: { count: 0, total: 0 },
+    check: { count: 0, total: 0 },
     unknown: { count: 0, total: 0 },
   };
   let total = 0;

@@ -52,6 +52,7 @@ function RegisterPage() {
   const [password2, setPassword2] = useState("");
   const submit = useServerFn(submitSignupRequest);
   const trial = useServerFn(createTrialAccount);
+  const signReceiptUpload = useServerFn(createReceiptUploadUrl);
   const fileRef = useRef<HTMLInputElement>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);

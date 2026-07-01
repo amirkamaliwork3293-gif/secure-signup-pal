@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   products, customers, invoice, customerBalance, customerFullName, formatToman,
+  formatJalaliDate,
   type Product, type Customer, type Invoice,
 } from "@/lib/store";
 import { Search, X, Package, Users, Receipt, Wallet, ChevronLeft } from "lucide-react";
@@ -160,7 +161,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
                   <ResultRow
                     key={inv.id}
                     title={`${formatToman(inv.total)}${name ? ` — ${name}` : ""}`}
-                    subtitle={`${new Date(inv.createdAt).toLocaleDateString("fa-IR")} · ${inv.id.toUpperCase()}`}
+                    subtitle={`${formatJalaliDate(inv.createdAt)} · ${inv.id.toUpperCase()}`}
                     onClick={() => go("/history", { q: query })}
                   />
                 );

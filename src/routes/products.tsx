@@ -421,12 +421,14 @@ function ProductModal({
   const [unit, setUnit]       = useState(initial?.unit ?? COUNT_UNIT);
   // فیلدهای اختیاری — صرفاً پیشنهادی، هیچ‌کدام الزامی نیستند
   const [showOptional, setShowOptional] = useState(
-    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent),
+    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent || initial?.wholesalePrice),
   );
   const [buyPrice, setBuyPrice]           = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
   const [consumerPrice, setConsumerPrice] = useState(initial?.consumerPrice ? String(initial.consumerPrice) : "");
   const [sellerPrice, setSellerPrice]     = useState(initial?.sellerPrice ? String(initial.sellerPrice) : "");
   const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
+  const [wholesalePrice, setWholesalePrice] = useState(initial?.wholesalePrice ? String(initial.wholesalePrice) : "");
+  const [wholesaleMinQty, setWholesaleMinQty] = useState(initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -446,6 +448,8 @@ function ProductModal({
       consumerPrice: parseNumberInput(consumerPrice) || undefined,
       sellerPrice: parseNumberInput(sellerPrice) || undefined,
       discountPercent: discountNum || undefined,
+      wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
+      wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);

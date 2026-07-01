@@ -143,6 +143,9 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
 ${rows}
 <div class="sep"></div>
 <div class="total"><span>جمع کل</span><span>${fmt(inv.total)} تومان</span></div>
+${inv.paidAmount ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(inv.paidAmount)}</span></div>` : ""}
+${inv.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(inv.checkAmount)}</span></div>` : ""}
+${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<div class="line"><span>مانده نسیه</span><span>${fmt(Math.max(0, inv.total - (inv.paidAmount || 0)))}</span></div>` : ""}
 <div class="foot">با تشکر از خرید شما</div>
 </body></html>`;
 }

@@ -22,6 +22,10 @@ export type Product = {
   discountPercent?: number;
   /** واحد فروش: «عدد» یا واحدهای وزنی وقتی فروش وزنی فعال باشد */
   unit?: string;
+  /** قیمت عمده/کارتنی (اختیاری) — برای فروش تعداد بالا */
+  wholesalePrice?: number;
+  /** حداقل تعداد برای اعمال خودکار قیمت عمده (اختیاری) */
+  wholesaleMinQty?: number;
 };
 
 export const COUNT_UNIT = "عدد";

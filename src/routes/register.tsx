@@ -157,14 +157,17 @@ function RegisterPage() {
     try {
       setUploading(true);
       const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
-      const ext = /^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg";
-      const safeUser = (usernameField.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
-      const path = `${safeUser}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("receipts").upload(path, receiptFile, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: receiptFile.type,
+      const ext = (/^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg") as
+        "jpg" | "jpeg" | "png" | "webp" | "heic" | "heif";
+      const { path, token } = await signReceiptUpload({
+        data: { username: usernameField, ext, kind: "signup" },
       });
+      const { error: upErr } = await supabase.storage
+        .from("receipts")
+        .uploadToSignedUrl(path, token, receiptFile, {
+          contentType: receiptFile.type,
+          upsert: false,
+        });
       setUploading(false);
       if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
 

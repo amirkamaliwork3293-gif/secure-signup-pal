@@ -7,7 +7,7 @@
  * و دقیقاً همان چیدمان نسخه چاپی سایت را دارد.
  */
 import { jsPDF } from "jspdf";
-import { formatNumber, PAYMENT_LABEL, type Invoice } from "@/lib/store";
+import { formatNumber, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
@@ -94,7 +94,7 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number): number {
     const customerName = customer
       ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
       : "—";
-    const date = new Date(inv.createdAt).toLocaleDateString("fa-IR");
+    const date = formatJalaliDate(inv.createdAt);
     const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—";
 
     ctx.font = `400 ${3.6 * SCALE}px ${FONT}`;

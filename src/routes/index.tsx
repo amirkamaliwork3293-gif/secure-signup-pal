@@ -53,6 +53,10 @@ function InvoicePageInner() {
   const [showCustomer, setShowCustomer] = useState(false);
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(inv.paymentMethod ?? "cash");
+  const [paidAmount, setPaidAmount] = useState<number>(inv.paidAmount ?? 0);
+  const [checkAmount, setCheckAmount] = useState<number>(inv.checkAmount ?? 0);
+  const [checkNumber, setCheckNumber] = useState<string>(inv.checkNumber ?? "");
+  const [checkDueDate, setCheckDueDate] = useState<string>(inv.checkDueDate ?? "");
   const [showSearch, setShowSearch] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
@@ -63,6 +67,10 @@ function InvoicePageInner() {
   useEffect(() => {
     setCustomer(inv.customer ?? {});
     setPaymentMethod(inv.paymentMethod ?? "cash");
+    setPaidAmount(inv.paidAmount ?? 0);
+    setCheckAmount(inv.checkAmount ?? 0);
+    setCheckNumber(inv.checkNumber ?? "");
+    setCheckDueDate(inv.checkDueDate ?? "");
     setShowCustomer(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inv.id]);
@@ -107,21 +115,42 @@ function InvoicePageInner() {
       customer.lastName?.trim() ||
       customer.phone?.trim()
     );
-    if (paymentMethod === "credit" && !hasCustomer) {
+    if ((paymentMethod === "credit" || paymentMethod === "check") && !hasCustomer) {
       setShowCustomer(true);
       alert(
-        "برای فاکتور نسیه، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.",
+        "برای فاکتور نسیه یا چک، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.",
       );
       return;
     }
-    const finalInv = { ...inv, customer, paymentMethod, shopName: appSettings.shopName };
+    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از جمع کل بیشتر باشند
+    const paid = Math.min(inv.total, Math.max(0, Math.round(paidAmount || 0)));
+    const chk = paymentMethod === "check"
+      ? Math.min(inv.total - paid, Math.max(0, Math.round(checkAmount || (inv.total - paid))))
+      : 0;
+    const finalInv = {
+      ...inv,
+      customer,
+      paymentMethod,
+      shopName: appSettings.shopName,
+      paidAmount: paymentMethod === "credit" || paymentMethod === "check" ? paid : undefined,
+      checkAmount: paymentMethod === "check" ? chk : undefined,
+      checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
+      checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+    };
     invoice.archive(finalInv);
-    // فاکتور نسیه → ثبت خودکار بدهی در بخش مشتریان/بدهکاران
+    // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
-      customers.recordInvoiceDebt(customer, finalInv);
+      const debt = Math.max(0, inv.total - paid);
+      if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
+    } else if (paymentMethod === "check") {
+      if (chk > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: chk, note: "چک دریافتی" });
     }
     setCustomer({});
     setPaymentMethod("cash");
+    setPaidAmount(0);
+    setCheckAmount(0);
+    setCheckNumber("");
+    setCheckDueDate("");
     setShowCustomer(false);
   };
 
@@ -361,8 +390,8 @@ function InvoicePageInner() {
       {/* Payment method picker */}
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
         <div className="mb-2 text-xs font-semibold text-muted-foreground">روش پرداخت</div>
-        <div className="grid grid-cols-3 gap-2">
-          {(["cash", "card", "credit"] as PaymentMethod[]).map((m) => {
+        <div className="grid grid-cols-4 gap-2">
+          {(["cash", "card", "credit", "check"] as PaymentMethod[]).map((m) => {
             const active = paymentMethod === m;
             return (
               <button
@@ -372,7 +401,7 @@ function InvoicePageInner() {
                   setPaymentMethod(m);
                   setInv((prev) => ({ ...prev, paymentMethod: m }));
                 }}
-                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                className={`rounded-xl px-2 py-2 text-xs sm:text-sm font-medium transition ${
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "bg-background border border-border text-muted-foreground hover:bg-accent"
@@ -383,6 +412,84 @@ function InvoicePageInner() {
             );
           })}
         </div>
+
+        {/* پرداخت جزئی نقدی برای نسیه */}
+        {paymentMethod === "credit" && inv.items.length > 0 && (
+          <div className="mt-3 space-y-1.5 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <label className="block text-[11px] font-medium text-muted-foreground">
+              مبلغ پرداخت‌شده نقد (اختیاری) — بقیه نسیه ثبت می‌شود
+            </label>
+            <input
+              value={paidAmount ? formatNumber(paidAmount) : ""}
+              onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
+              placeholder="۰"
+              inputMode="numeric"
+              dir="ltr"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b></span>
+              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(Math.max(0, inv.total - (paidAmount || 0)))}</b></span>
+            </div>
+          </div>
+        )}
+
+        {/* پرداخت با چک */}
+        {paymentMethod === "check" && inv.items.length > 0 && (
+          <div className="mt-3 space-y-2 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground">مبلغ نقدی (اختیاری)</label>
+                <input
+                  value={paidAmount ? formatNumber(paidAmount) : ""}
+                  onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground">مبلغ چک</label>
+                <input
+                  value={
+                    checkAmount
+                      ? formatNumber(checkAmount)
+                      : formatNumber(Math.max(0, inv.total - (paidAmount || 0)))
+                  }
+                  onChange={(e) => setCheckAmount(parseNumberInput(e.target.value))}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={checkNumber}
+                onChange={(e) => setCheckNumber(e.target.value)}
+                placeholder="شماره چک (اختیاری)"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+              <input
+                type="date"
+                value={checkDueDate ? checkDueDate.slice(0, 10) : ""}
+                onChange={(e) => setCheckDueDate(e.target.value)}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                title="تاریخ سررسید چک"
+              />
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b> · بدهی مشتری (چک):{" "}
+              <b className="text-destructive">
+                {formatToman(
+                  checkAmount || Math.max(0, inv.total - (paidAmount || 0)),
+                )}
+              </b>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Items list */}

@@ -551,6 +551,24 @@ function ProductModal({
                   <PriceInput value={sellerPrice} onChange={setSellerPrice} placeholder="—" />
                 </Field>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="قیمت عمده / کارتنی">
+                  <PriceInput value={wholesalePrice} onChange={setWholesalePrice} placeholder="—" />
+                </Field>
+                <Field label="حداقل تعداد برای قیمت عمده">
+                  <input
+                    value={wholesaleMinQty}
+                    onChange={(e) => setWholesaleMinQty(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="مثلاً ۱۲"
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-5">
+                در صورت وارد کردن «قیمت عمده»، هنگام ثبت فاکتور می‌توانید با یک کلیک قیمت هر ردیف را به قیمت عمده تغییر دهید.
+                اگر «حداقل تعداد» را هم وارد کنید، وقتی تعداد فاکتور به آن حد رسید قیمت به‌طور خودکار عمده حساب می‌شود.
+              </p>
               {parseNumberInput(buyPrice) > 0 && parseNumberInput(price) > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   سود هر واحد:{" "}

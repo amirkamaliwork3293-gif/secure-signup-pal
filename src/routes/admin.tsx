@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
+import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -252,7 +253,7 @@ function RequestsTab({
                   {(r as any).phone && (
                     <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{(r as any).phone}</span>
                   )}
-                  <span>{new Date(r.created_at).toLocaleString("fa-IR")}</span>
+                  <span>{formatJalaliDateTime(r.created_at)}</span>
                 </div>
               </div>
               <StatusBadge status={r.status} />
@@ -425,7 +426,7 @@ function UsersTab({
                     {u.end_date && (
                       <span className="flex items-center gap-1">
                         <CalendarClock className="h-3 w-3" />
-                        تا {new Date(u.end_date).toLocaleDateString("fa-IR")}
+                        تا {formatJalaliDate(u.end_date)}
                         {daysLeft !== null && (
                           <span className={daysLeft < 7 ? "text-destructive" : ""}>
                             {" "}({daysLeft} روز)
@@ -823,7 +824,7 @@ function PlanCard({
           {cfg.discount_percent > 0 && (
             <p className="mt-2 text-[10px] text-rose-600">
               قیمت نهایی: {new Intl.NumberFormat("fa-IR").format(Math.floor(cfg.price * (100 - cfg.discount_percent) / 100))} تومان
-              {cfg.discount_until && ` — تا ${new Date(cfg.discount_until).toLocaleString("fa-IR")}`}
+              {cfg.discount_until && ` — تا ${formatJalaliDateTime(cfg.discount_until)}`}
             </p>
           )}
         </div>

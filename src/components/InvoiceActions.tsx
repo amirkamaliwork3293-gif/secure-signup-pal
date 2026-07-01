@@ -79,6 +79,9 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
       <td colspan="4">جمع کل</td>
       <td>${new Intl.NumberFormat("fa-IR").format(inv.total)} تومان</td>
     </tr>
+    ${inv.paidAmount ? `<tr><td colspan="4">پرداخت نقدی</td><td>${new Intl.NumberFormat("fa-IR").format(inv.paidAmount)} تومان</td></tr>` : ""}
+    ${inv.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${new Intl.NumberFormat("fa-IR").format(inv.checkAmount)} تومان</td></tr>` : ""}
+    ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<tr><td colspan="4">مانده نسیه</td><td>${new Intl.NumberFormat("fa-IR").format(Math.max(0, inv.total - (inv.paidAmount || 0)))} تومان</td></tr>` : ""}
   </tfoot>
 </table>
 <div class="footer">با تشکر از خرید شما — ${shopName}</div>

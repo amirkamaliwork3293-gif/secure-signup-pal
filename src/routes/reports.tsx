@@ -197,7 +197,7 @@ function ReportsPageInner() {
         </section>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <SummaryCard
           icon={<Wallet className="h-4 w-4" />}
           label={PAYMENT_LABEL.cash}
@@ -215,6 +215,12 @@ function ReportsPageInner() {
           label={PAYMENT_LABEL.credit}
           total={summary.by.credit.total}
           count={summary.by.credit.count}
+        />
+        <SummaryCard
+          icon={<FileCheck className="h-4 w-4" />}
+          label={PAYMENT_LABEL.check}
+          total={summary.by.check.total}
+          count={summary.by.check.count}
         />
       </div>
 
@@ -271,7 +277,8 @@ function ReportsPageInner() {
           <ul className="space-y-2">
             {daily.map(([key, value]) => {
               const [y, m, d] = key.split("-").map(Number);
-              const dateLabel = new Date(y, m - 1, d).toLocaleDateString("fa-IR");
+              // key از new Date().getFullYear/Month/Date ساخته شده (میلادی) — تبدیل به شمسی از طریق timestamp
+              const dateLabel = formatJalaliDate(new Date(y, m - 1, d).getTime());
               const pct = (value / maxDay) * 100;
               return (
                 <li key={key} className="space-y-1">

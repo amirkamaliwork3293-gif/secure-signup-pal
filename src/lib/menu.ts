@@ -106,11 +106,14 @@ export async function deleteItem(id: string) {
 
 /** آپلود عکس آیتم منو در باکت خصوصی + بازگرداندن لینک امضاشده با اعتبار ۱۰ سال. */
 export async function uploadMenuImage(userId: string, file: File): Promise<string> {
-  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
+  assertMaxFileSize(file, 10);
+  const compressed = await compressImage(file, { maxDim: 1280, quality: 0.8 });
+  const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const { error } = await supabase.storage.from("menu-images").upload(path, file, {
+  const { error } = await supabase.storage.from("menu-images").upload(path, compressed, {
     upsert: false,
-    contentType: file.type || "image/jpeg",
+    contentType: compressed.type || "image/jpeg",
   });
   if (error) throw error;
   const { data: signed, error: signErr } = await supabase.storage

@@ -216,14 +216,19 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
 
 /** آپلود لوگوی فروشگاه در باکت عمومی و بازگرداندن URL عمومی. */
 export async function uploadStoreLogo(userId: string, file: File): Promise<string> {
+  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
+  assertMaxFileSize(file, 10);
+  // لوگو: ابعاد کوچک‌تر برای صرفه‌جویی بیشتر
+  const compressed = await compressImage(file, { maxDim: 512, quality: 0.85 });
   const ext =
-    (file.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+    (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  // نام ثابت + upsert=true → لوگوی قبلی خودکار جایگزین می‌شود و انباشته نمی‌شود
   const path = `${userId}/logo.${ext}`;
   let res: { error: SbError };
   try {
-    res = await sb.storage.from("store-assets").upload(path, file, {
+    res = await sb.storage.from("store-assets").upload(path, compressed, {
       upsert: true,
-      contentType: file.type || "image/png",
+      contentType: compressed.type || "image/jpeg",
     });
   } catch (e) {
     console.error("[storeProfile] logo upload network/client error:", e);
@@ -248,14 +253,17 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
 
 /** آپلود یک تصویر نمونه‌کار در باکت `store-assets` و بازگرداندن URL امضاشده‌ی طولانی‌مدت. */
 export async function uploadPortfolioImage(userId: string, file: File): Promise<string> {
+  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
+  assertMaxFileSize(file, 10);
+  const compressed = await compressImage(file, { maxDim: 1280, quality: 0.8 });
   const ext =
-    (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${userId}/portfolio/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   let res: { error: SbError };
   try {
-    res = await sb.storage.from("store-assets").upload(path, file, {
+    res = await sb.storage.from("store-assets").upload(path, compressed, {
       upsert: true,
-      contentType: file.type || "image/jpeg",
+      contentType: compressed.type || "image/jpeg",
     });
   } catch (e) {
     console.error("[storeProfile] portfolio upload network/client error:", e);

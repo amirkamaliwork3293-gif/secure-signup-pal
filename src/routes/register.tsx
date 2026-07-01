@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitSignupRequest, createTrialAccount, getPublicSettings } from "@/lib/auth.functions";
+import { createReceiptUploadUrl } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
@@ -51,6 +52,7 @@ function RegisterPage() {
   const [password2, setPassword2] = useState("");
   const submit = useServerFn(submitSignupRequest);
   const trial = useServerFn(createTrialAccount);
+  const signReceiptUpload = useServerFn(createReceiptUploadUrl);
   const fileRef = useRef<HTMLInputElement>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
@@ -155,14 +157,17 @@ function RegisterPage() {
     try {
       setUploading(true);
       const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
-      const ext = /^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg";
-      const safeUser = (usernameField.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
-      const path = `${safeUser}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("receipts").upload(path, receiptFile, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: receiptFile.type,
+      const ext = (/^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg") as
+        "jpg" | "jpeg" | "png" | "webp" | "heic" | "heif";
+      const { path, token } = await signReceiptUpload({
+        data: { username: usernameField, ext, kind: "signup" },
       });
+      const { error: upErr } = await supabase.storage
+        .from("receipts")
+        .uploadToSignedUrl(path, token, receiptFile, {
+          contentType: receiptFile.type,
+          upsert: false,
+        });
       setUploading(false);
       if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
 

@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/lib/AuthContext";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
+import { createReceiptUploadUrl } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
@@ -22,6 +23,7 @@ function RenewPage() {
   const { state, signOut, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const submit = useServerFn(submitRenewalRequest);
+  const signReceiptUpload = useServerFn(createReceiptUploadUrl);
   const [plan, setPlan] = useState<SubscriptionPlan>("1month");
   const [paid, setPaid] = useState(false);
   const [card, setCard] = useState({ card_number: "", card_holder: "", bank_name: "" });
@@ -97,12 +99,17 @@ function RenewPage() {
     setLoading(true);
     try {
       const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
-      const ext = /^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg";
-      const safeUser = (String(username).trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
-      const path = `${safeUser}/renew-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("receipts").upload(path, receiptFile, {
-        cacheControl: "3600", upsert: false, contentType: receiptFile.type,
+      const ext = (/^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg") as
+        "jpg" | "jpeg" | "png" | "webp" | "heic" | "heif";
+      const { path, token } = await signReceiptUpload({
+        data: { username: String(username || "user"), ext, kind: "renew" },
       });
+      const { error: upErr } = await supabase.storage
+        .from("receipts")
+        .uploadToSignedUrl(path, token, receiptFile, {
+          contentType: receiptFile.type,
+          upsert: false,
+        });
       if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
 
       await submit({ data: { plan, receipt_url: path, payment_confirmed: paid } });

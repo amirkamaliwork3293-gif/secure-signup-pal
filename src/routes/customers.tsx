@@ -12,6 +12,7 @@ import {
   cryptoId,
   settings,
   storePublicUrl,
+  formatJalaliDateTime,
   type Customer,
   type CustomerTx,
 } from "@/lib/store";
@@ -378,7 +379,7 @@ function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
           {isDebt ? "بدهی" : "پرداخت"} — {formatToman(tx.amount)}
         </div>
         <div className="text-[10px] text-muted-foreground">
-          {new Date(tx.at).toLocaleString("fa-IR")}
+          {formatJalaliDateTime(tx.at)}
           {tx.note && ` · ${tx.note}`}
         </div>
       </div>

@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Printer, Download, Share2, Loader2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
-import { settings, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
+import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
 import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
 import { buildInvoicePdf } from "@/lib/invoice-pdf";
 
@@ -79,6 +79,9 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
       <td colspan="4">جمع کل</td>
       <td>${new Intl.NumberFormat("fa-IR").format(inv.total)} تومان</td>
     </tr>
+    ${inv.paidAmount ? `<tr><td colspan="4">پرداخت نقدی</td><td>${new Intl.NumberFormat("fa-IR").format(inv.paidAmount)} تومان</td></tr>` : ""}
+    ${inv.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${new Intl.NumberFormat("fa-IR").format(inv.checkAmount)} تومان</td></tr>` : ""}
+    ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<tr><td colspan="4">مانده نسیه</td><td>${new Intl.NumberFormat("fa-IR").format(Math.max(0, inv.total - (inv.paidAmount || 0)))} تومان</td></tr>` : ""}
   </tfoot>
 </table>
 <div class="footer">با تشکر از خرید شما — ${shopName}</div>
@@ -140,6 +143,9 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
 ${rows}
 <div class="sep"></div>
 <div class="total"><span>جمع کل</span><span>${fmt(inv.total)} تومان</span></div>
+${inv.paidAmount ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(inv.paidAmount)}</span></div>` : ""}
+${inv.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(inv.checkAmount)}</span></div>` : ""}
+${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<div class="line"><span>مانده نسیه</span><span>${fmt(Math.max(0, inv.total - (inv.paidAmount || 0)))}</span></div>` : ""}
 <div class="foot">با تشکر از خرید شما</div>
 </body></html>`;
 }
@@ -147,7 +153,7 @@ ${rows}
 // ─── متن ساده برای اشتراک‌گذاری ───────────────────────────────────────────
 
 function buildShareText(inv: Invoice): string {
-  const date = new Date(inv.createdAt).toLocaleDateString("fa-IR");
+  const date = formatJalaliDate(inv.createdAt);
   const customer = inv.customer;
   const customerName =
     customer

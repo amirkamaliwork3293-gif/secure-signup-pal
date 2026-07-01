@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { askReportAssistant, type ReportInsightsSummary } from "@/lib/insights.functions";
-import { customerBalance, customers, products, invoice, type Invoice } from "@/lib/store";
+import { customerBalance, customers, products, invoice, formatJalaliShort, type Invoice } from "@/lib/store";
 import { Bot, Send, Loader2, AlertCircle, X, Sparkles } from "lucide-react";
 
 type Range = "today" | "month" | "year" | "all";
@@ -98,7 +98,7 @@ function buildSummary(history: Invoice[], range: Range): ReportInsightsSummary {
       .filter((inv) => inv.createdAt >= dayStart && inv.createdAt < dayEnd)
       .reduce((s, inv) => s + inv.total, 0);
     days.push({
-      label: new Date(dayStart).toLocaleDateString("fa-IR", { month: "short", day: "numeric" }),
+      label: formatJalaliShort(dayStart),
       total,
     });
   }

@@ -58,12 +58,13 @@ export type CustomerInfo = {
   phone?: string;
 };
 
-export type PaymentMethod = "cash" | "card" | "credit";
+export type PaymentMethod = "cash" | "card" | "credit" | "check";
 
 export const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "نقد",
   card: "کارت",
   credit: "نسیه",
+  check: "چک",
 };
 
 export type Invoice = {
@@ -74,6 +75,14 @@ export type Invoice = {
   customer?: CustomerInfo;
   shopName?: string;
   paymentMethod?: PaymentMethod;
+  /** مبلغ نقد پرداخت‌شده (برای نسیهٔ جزئی یا فاکتور چک با پیش‌پرداخت نقدی) */
+  paidAmount?: number;
+  /** مبلغ چک صادرشده توسط مشتری (برای روش پرداخت «چک») */
+  checkAmount?: number;
+  /** شماره چک — اختیاری */
+  checkNumber?: string;
+  /** تاریخ سررسید چک (ISO) — اختیاری */
+  checkDueDate?: string;
 };
 
 // ─── Customers / Debtors ─────────────────────────────────────────────────────

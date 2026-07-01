@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Printer, Download, Share2, Loader2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
-import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatNumber } from "@/lib/store";
+import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
 import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
 import { buildInvoicePdf } from "@/lib/invoice-pdf";
 

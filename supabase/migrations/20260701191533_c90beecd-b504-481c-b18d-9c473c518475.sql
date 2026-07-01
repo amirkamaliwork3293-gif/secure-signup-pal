@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "anyone_upload_receipts" ON storage.objects;

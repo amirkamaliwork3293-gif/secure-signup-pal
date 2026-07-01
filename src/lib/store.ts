@@ -599,9 +599,11 @@ export const customers = {
    * ثبت خودکار بدهی برای فاکتور نسیه. مشتری موجود (بر اساس تلفن یا نام) پیدا
    * می‌شود و در غیر این صورت ساخته می‌شود.
    */
-  recordInvoiceDebt: (info: CustomerInfo, inv: Invoice) => {
+  recordInvoiceDebt: (info: CustomerInfo, inv: Invoice, opts?: { amount?: number; note?: string }) => {
     const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
     if (!name && !info.phone?.trim()) return;
+    const debtAmount = Math.max(0, Math.round(opts?.amount ?? inv.total));
+    if (debtAmount <= 0) return;
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
     let target = list.find(
       (c) =>
@@ -622,8 +624,8 @@ export const customers = {
     const tx: CustomerTx = {
       id: cryptoId(),
       type: "debt",
-      amount: inv.total,
-      note: "فاکتور نسیه",
+      amount: debtAmount,
+      note: opts?.note ?? "فاکتور نسیه",
       at: inv.createdAt || Date.now(),
       invoiceId: inv.id,
     };

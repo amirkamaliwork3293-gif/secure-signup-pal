@@ -126,6 +126,8 @@ function ProductsPageInner() {
       "قیمت خرید (تومان)": p.buyPrice ?? "",
       "قیمت مصرف‌کننده (تومان)": p.consumerPrice ?? "",
       "قیمت همکار (تومان)": p.sellerPrice ?? "",
+      "قیمت عمده/کارتنی (تومان)": p.wholesalePrice ?? "",
+      "حداقل تعداد عمده": p.wholesaleMinQty ?? "",
       "درصد تخفیف": p.discountPercent ?? "",
       "هشدار موجودی کم": p.lowStockThreshold ?? 5,
       "توضیحات": p.description ?? "",
@@ -135,7 +137,7 @@ function ProductsPageInner() {
     ws["!cols"] = [
       { wch: 25 }, { wch: 18 }, { wch: 10 }, { wch: 8 }, { wch: 20 },
       { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
-      { wch: 12 }, { wch: 16 }, { wch: 25 },
+      { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 25 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
@@ -419,12 +421,14 @@ function ProductModal({
   const [unit, setUnit]       = useState(initial?.unit ?? COUNT_UNIT);
   // فیلدهای اختیاری — صرفاً پیشنهادی، هیچ‌کدام الزامی نیستند
   const [showOptional, setShowOptional] = useState(
-    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent),
+    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent || initial?.wholesalePrice),
   );
   const [buyPrice, setBuyPrice]           = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
   const [consumerPrice, setConsumerPrice] = useState(initial?.consumerPrice ? String(initial.consumerPrice) : "");
   const [sellerPrice, setSellerPrice]     = useState(initial?.sellerPrice ? String(initial.sellerPrice) : "");
   const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
+  const [wholesalePrice, setWholesalePrice] = useState(initial?.wholesalePrice ? String(initial.wholesalePrice) : "");
+  const [wholesaleMinQty, setWholesaleMinQty] = useState(initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -444,6 +448,8 @@ function ProductModal({
       consumerPrice: parseNumberInput(consumerPrice) || undefined,
       sellerPrice: parseNumberInput(sellerPrice) || undefined,
       discountPercent: discountNum || undefined,
+      wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
+      wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);
@@ -545,6 +551,24 @@ function ProductModal({
                   <PriceInput value={sellerPrice} onChange={setSellerPrice} placeholder="—" />
                 </Field>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="قیمت عمده / کارتنی">
+                  <PriceInput value={wholesalePrice} onChange={setWholesalePrice} placeholder="—" />
+                </Field>
+                <Field label="حداقل تعداد برای قیمت عمده">
+                  <input
+                    value={wholesaleMinQty}
+                    onChange={(e) => setWholesaleMinQty(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="مثلاً ۱۲"
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-5">
+                در صورت وارد کردن «قیمت عمده»، هنگام ثبت فاکتور می‌توانید با یک کلیک قیمت هر ردیف را به قیمت عمده تغییر دهید.
+                اگر «حداقل تعداد» را هم وارد کنید، وقتی تعداد فاکتور به آن حد رسید قیمت به‌طور خودکار عمده حساب می‌شود.
+              </p>
               {parseNumberInput(buyPrice) > 0 && parseNumberInput(price) > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   سود هر واحد:{" "}

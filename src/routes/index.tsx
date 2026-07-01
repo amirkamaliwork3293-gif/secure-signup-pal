@@ -13,6 +13,7 @@ import {
   customers,
   addProductToInvoice,
   isWeightUnit,
+  applyProductDiscount,
   PAYMENT_LABEL,
   type CustomerInfo,
   type PaymentMethod,
@@ -31,6 +32,7 @@ import {
   Plus as PlusIcon,
   Pencil,
   Mic,
+  Package,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
@@ -408,13 +410,24 @@ function InvoicePageInner() {
         <ul className="space-y-2">
           {inv.items.map((item) => {
             const weight = isWeightUnit(item.unit);
+            const prod = allProducts.find((p) => p.id === item.productId);
+            const wholesalePrice = prod?.wholesalePrice || 0;
+            const retailPrice = prod ? applyProductDiscount(prod) : item.price;
+            const isWholesale = wholesalePrice > 0 && item.price === wholesalePrice;
             return (
               <li
                 key={item.productId}
                 className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{item.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate font-medium">{item.name}</span>
+                    {isWholesale && (
+                      <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-400">
+                        عمده
+                      </span>
+                    )}
+                  </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                     {editingPrice === item.productId ? (
                       <input
@@ -451,6 +464,27 @@ function InvoicePageInner() {
                     <span className="font-semibold text-primary">
                       = {formatToman(Math.round(item.price * item.quantity))}
                     </span>
+                    {wholesalePrice > 0 && !weight && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemPrice(item.productId, isWholesale ? retailPrice : wholesalePrice)
+                        }
+                        className={`inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition ${
+                          isWholesale
+                            ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                            : "border-border bg-background text-muted-foreground hover:border-primary hover:text-primary"
+                        }`}
+                        title={
+                          isWholesale
+                            ? `تغییر به قیمت تکی: ${formatToman(retailPrice)}`
+                            : `تغییر به قیمت عمده: ${formatToman(wholesalePrice)}`
+                        }
+                      >
+                        <Package className="h-2.5 w-2.5" />
+                        {isWholesale ? "قیمت تکی" : "قیمت عمده"}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {weight ? (

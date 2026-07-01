@@ -22,6 +22,10 @@ export type Product = {
   discountPercent?: number;
   /** واحد فروش: «عدد» یا واحدهای وزنی وقتی فروش وزنی فعال باشد */
   unit?: string;
+  /** قیمت عمده/کارتنی (اختیاری) — برای فروش تعداد بالا */
+  wholesalePrice?: number;
+  /** حداقل تعداد برای اعمال خودکار قیمت عمده (اختیاری) */
+  wholesaleMinQty?: number;
 };
 
 export const COUNT_UNIT = "عدد";
@@ -639,11 +643,13 @@ export function cryptoId() {
 
 export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
   const existing = inv.items.find((i) => i.productId === p.id);
-  const effectivePrice = applyProductDiscount(p);
   let items;
   if (existing) {
-    items = inv.items.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i));
+    items = inv.items.map((i) =>
+      i.productId === p.id ? applyAutoWholesale({ ...i, quantity: i.quantity + 1 }, p) : i,
+    );
   } else {
+    const effectivePrice = applyProductDiscount(p);
     items = [
       ...inv.items,
       {
@@ -666,12 +672,14 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
  */
 export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: number): Invoice {
   const qty = quantity > 0 ? quantity : 1;
-  const effectivePrice = applyProductDiscount(p);
   const existing = inv.items.find((i) => i.productId === p.id);
   let items;
   if (existing) {
-    items = inv.items.map((i) => (i.productId === p.id ? { ...i, quantity: i.quantity + qty } : i));
+    items = inv.items.map((i) =>
+      i.productId === p.id ? applyAutoWholesale({ ...i, quantity: i.quantity + qty }, p) : i,
+    );
   } else {
+    const effectivePrice = applyProductDiscount(p);
     items = [
       ...inv.items,
       {
@@ -683,6 +691,8 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
         unit: p.unit,
       },
     ];
+    // If starting quantity already meets wholesale threshold, snap to wholesale
+    items = items.map((i) => (i.productId === p.id ? applyAutoWholesale(i, p) : i));
   }
   return recalc({ ...inv, items });
 }
@@ -695,6 +705,23 @@ export function applyProductDiscount(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent) || 0));
   if (!d) return p.price;
   return Math.round(p.price * (100 - d) / 100);
+}
+
+/**
+ * اگر برای محصول قیمت عمده و حداقل تعداد تعریف شده باشد و تعداد ردیف به آن حد رسیده باشد
+ * و قیمت فعلی همچنان قیمت تک‌فروشی (با/بدون تخفیف) باشد، قیمت را به عمده تبدیل می‌کند.
+ * ویرایش دستی قیمت توسط کاربر حفظ می‌شود (فقط از قیمت پایه به عمده سوییچ می‌کند).
+ */
+export function applyAutoWholesale(item: InvoiceItem, p: Product): InvoiceItem {
+  const wp = Number(p.wholesalePrice) || 0;
+  const minQty = Number(p.wholesaleMinQty) || 0;
+  if (!wp || !minQty) return item;
+  const retail = applyProductDiscount(p);
+  // Only auto-switch if current price is still the retail price (user hasn't manually customized)
+  if (item.quantity >= minQty && item.price === retail) {
+    return { ...item, price: wp };
+  }
+  return item;
 }
 
 /**

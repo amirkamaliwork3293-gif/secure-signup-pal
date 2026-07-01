@@ -5,6 +5,7 @@ import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from
 import { submitSignupRequest, createTrialAccount, getPublicSettings } from "@/lib/auth.functions";
 import { createReceiptUploadUrl } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
+import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/register")({
@@ -212,6 +213,12 @@ function RegisterPage() {
             رفتن به صفحه ورود
             <ArrowRight className="h-4 w-4 rotate-180" />
           </Link>
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="mb-2 text-xs text-muted-foreground">
+              اکنون می‌توانید اپلیکیشن اندروید را دانلود و نصب کنید:
+            </p>
+            <ApkDownloadButton className="w-full" />
+          </div>
         </div>
       </div>
     );

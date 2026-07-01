@@ -3,7 +3,6 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
-import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { LoginPromoVideo } from "@/components/LoginPromoVideo";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
@@ -161,7 +160,9 @@ export function LoginPage() {
         )}
       </div>
 
-      <ApkDownloadButton className="mt-6" />
+      <p className="mt-6 text-center text-xs text-muted-foreground">
+        پس از ثبت‌نام، اپلیکیشن اندروید را می‌توانید دانلود کنید.
+      </p>
       <LoginHelpDialog />
       <LoginPromoVideo className="mt-6 mb-4" />
     </div>

@@ -1,0 +1,263 @@
+name: Build Signed Release APK
+
+# این workflow یک APK امضاشده Release برای انتشار در کافه‌بازار / مایکت می‌سازد.
+#
+# دو حالت دارد:
+#   حالت A (خودکار — بدون هیچ تنظیمی): اگر secretهای keystore تنظیم نشده باشند،
+#     workflow خودش یک keystore جدید می‌سازد و APK را با آن امضا می‌کند.
+#     در پایان، فایل release.keystore و رمزها به عنوان artifact قابل دانلود هستند.
+#     ⚠️ برای انتشار در استور: این keystore و رمزها را در جای امن ذخیره کنید،
+#     چون آپدیت‌های بعدی حتماً باید با همین keystore امضا شوند (وگرنه استور رد می‌کند).
+#
+#   حالت B (توصیه‌شده برای آپدیت‌های بعدی): 4 secret زیر را در
+#     Settings → Secrets and variables → Actions اضافه کنید:
+#       ANDROID_KEYSTORE_BASE64     → خروجی `base64 -w0 release.keystore`
+#       ANDROID_KEYSTORE_PASSWORD
+#       ANDROID_KEY_ALIAS
+#       ANDROID_KEY_PASSWORD
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "versionName (مثلا 1.0.0)"
+        required: true
+        default: "1.0.0"
+      version_code:
+        description: "versionCode (عدد صحیح، برای هر انتشار +1)"
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-apk
+  cancel-in-progress: true
+
+env:
+  APP_URL: https://secure-signup-pal.lovable.app
+  APP_ID: com.kamali.inventory
+  APP_NAME: کمالی حسابداری
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Capacitor + native plugins
+        run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer
+
+      - name: Create fallback web folder
+        run: |
+          rm -rf android dist
+          mkdir -p dist
+          cat > dist/index.html << HTMLEOF
+          <!doctype html>
+          <html lang="fa" dir="rtl">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+              <meta http-equiv="refresh" content="0;url=${APP_URL}" />
+              <title>کمالی حسابداری</title>
+            </head>
+            <body>
+              <script>window.location.replace("${APP_URL}");</script>
+            </body>
+          </html>
+          HTMLEOF
+
+      - name: Create capacitor.config.ts
+        run: |
+          cat > capacitor.config.ts << 'CAPEOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: process.env.APP_ID || 'com.kamali.inventory',
+            appName: process.env.APP_NAME || 'کمالی حسابداری',
+            webDir: 'dist',
+            server: {
+              url: process.env.APP_URL || 'https://secure-signup-pal.lovable.app',
+              cleartext: false,
+            },
+            android: {
+              webContentsDebuggingEnabled: false,
+              allowMixedContent: false,
+            },
+          };
+          export default config;
+          CAPEOF
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Set versionName / versionCode + minSdk
+        run: |
+          python3 - << PYEOF
+          import re
+          path = 'android/app/build.gradle'
+          with open(path, 'r', encoding='utf-8') as f:
+              content = f.read()
+          content = re.sub(r'versionCode\s+\d+', 'versionCode ${{ github.event.inputs.version_code }}', content)
+          content = re.sub(r'versionName\s+"[^"]*"', 'versionName "${{ github.event.inputs.version_name }}"', content)
+          content = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 22', content)
+          content = re.sub(r'minSdk\s*=\s*\d+', 'minSdk = 22', content)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(content)
+          PYEOF
+
+      - name: Force single Kotlin stdlib version
+        run: |
+          cat >> android/app/build.gradle << 'GRADLEEOF'
+
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.8.22'
+              }
+          }
+          GRADLEEOF
+
+      - name: Add camera + audio permissions
+        run: |
+          python3 - << 'PYEOF'
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path, 'r') as f: content = f.read()
+          for perm in [
+              '<uses-permission android:name="android.permission.CAMERA" />',
+              '<uses-feature android:name="android.hardware.camera" android:required="false" />',
+              '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />',
+              '<uses-permission android:name="android.permission.RECORD_AUDIO" />',
+              '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />',
+          ]:
+              if perm not in content:
+                  content = content.replace('<application', perm + '\n    <application', 1)
+          with open(path, 'w') as f: f.write(content)
+          PYEOF
+
+      - name: Prepare keystore (use secret if present, otherwise auto-generate)
+        id: keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p keystore-output
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "✅ استفاده از keystore ذخیره‌شده در Secrets"
+            echo "$KS_B64" | base64 -d > android/app/release.keystore
+            echo "store_pass=$KS_PASS" >> $GITHUB_OUTPUT
+            echo "key_alias=$KEY_ALIAS" >> $GITHUB_OUTPUT
+            echo "key_pass=$KEY_PASS" >> $GITHUB_OUTPUT
+            echo "generated=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Secretها تنظیم نشده — ساخت خودکار keystore جدید"
+            GEN_PASS=$(openssl rand -hex 16)
+            GEN_ALIAS="kamali"
+            keytool -genkeypair -v \
+              -keystore android/app/release.keystore \
+              -alias "$GEN_ALIAS" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$GEN_PASS" -keypass "$GEN_PASS" \
+              -dname "CN=Kamali Accounting, OU=Mobile, O=Kamali, L=Tehran, ST=Tehran, C=IR"
+            # کپی برای دانلود توسط کاربر
+            cp android/app/release.keystore keystore-output/release.keystore
+            cat > keystore-output/CREDENTIALS.txt << CREDEOF
+          ⚠️ این فایل را حتماً در جای امن ذخیره کنید!
+          بدون این keystore و رمزها نمی‌توانید در آینده آپدیت منتشر کنید.
+
+          Keystore Password: $GEN_PASS
+          Key Alias:         $GEN_ALIAS
+          Key Password:      $GEN_PASS
+
+          برای build بعدی این مقادیر را در Settings → Secrets → Actions اضافه کنید:
+            ANDROID_KEYSTORE_BASE64     = خروجی base64 -w0 release.keystore
+            ANDROID_KEYSTORE_PASSWORD   = $GEN_PASS
+            ANDROID_KEY_ALIAS           = $GEN_ALIAS
+            ANDROID_KEY_PASSWORD        = $GEN_PASS
+          CREDEOF
+            base64 -w0 android/app/release.keystore > keystore-output/release.keystore.base64
+            echo "store_pass=$GEN_PASS" >> $GITHUB_OUTPUT
+            echo "key_alias=$GEN_ALIAS" >> $GITHUB_OUTPUT
+            echo "key_pass=$GEN_PASS" >> $GITHUB_OUTPUT
+            echo "generated=true" >> $GITHUB_OUTPUT
+          fi
+          ls -la android/app/release.keystore
+
+      - name: Configure signing in build.gradle
+        run: |
+          cat >> android/app/build.gradle << 'SIGNEOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file('release.keystore')
+                      storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                      keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                      minifyEnabled false
+                  }
+              }
+          }
+          SIGNEOF
+
+      - name: Build Release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ steps.keystore.outputs.store_pass }}
+          ANDROID_KEY_ALIAS: ${{ steps.keystore.outputs.key_alias }}
+          ANDROID_KEY_PASSWORD: ${{ steps.keystore.outputs.key_pass }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: |
+          mkdir -p release-output
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "release-output/kamali-accounting-v${{ github.event.inputs.version_name }}-release.apk"
+          ls -la release-output/
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kamali-accounting-release-v${{ github.event.inputs.version_name }}
+          path: release-output/*.apk
+          retention-days: 30
+
+      - name: Upload auto-generated keystore (only if generated this run)
+        if: steps.keystore.outputs.generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KEYSTORE-BACKUP-KEEP-SAFE
+          path: keystore-output/*
+          retention-days: 90

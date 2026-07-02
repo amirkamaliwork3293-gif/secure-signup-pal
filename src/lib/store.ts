@@ -126,6 +126,9 @@ const HISTORY_KEY = "acc.invoices.v2";
 const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
+// Persisted set of cloud field names that have local changes not yet confirmed
+// synced to the server. Survives reloads so offline edits are never dropped.
+const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
@@ -139,6 +142,11 @@ const CLOUD_FIELDS: Record<
   [SETTINGS_KEY]: "settings",
   [CUSTOMERS_KEY]: "customers",
 };
+
+// Reverse map: cloud column name -> local storage key
+const FIELD_TO_LOCAL_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(CLOUD_FIELDS).map(([k, v]) => [v, k]),
+);
 
 export type AppSettings = {
   invoiceFontSize: number;
@@ -236,11 +244,59 @@ function write<T>(key: string, value: T) {
 let cloudUserId: string | null = null;
 const pendingPush: Record<string, unknown> = {};
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryDelay = 5000;
+
+function readDirtySet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(scopedKey(CLOUD_DIRTY_KEY));
+    const arr = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDirtySet(set: Set<string>) {
+  if (typeof window === "undefined") return;
+  try {
+    if (set.size === 0) localStorage.removeItem(scopedKey(CLOUD_DIRTY_KEY));
+    else localStorage.setItem(scopedKey(CLOUD_DIRTY_KEY), JSON.stringify([...set]));
+  } catch {}
+}
+
+function markDirty(fields: string[]) {
+  const set = readDirtySet();
+  for (const f of fields) set.add(f);
+  writeDirtySet(set);
+}
+
+function clearDirty(fields: string[]) {
+  const set = readDirtySet();
+  for (const f of fields) set.delete(f);
+  writeDirtySet(set);
+}
+
+function scheduleRetry() {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (cloudUserId && Object.keys(pendingPush).length > 0) {
+      flushCloudPush();
+    }
+  }, retryDelay);
+  // Exponential backoff, capped at 5 minutes
+  retryDelay = Math.min(retryDelay * 2, 5 * 60 * 1000);
+}
 
 function scheduleCloudPush(key: string, value: unknown) {
   const field = CLOUD_FIELDS[key];
   if (!field || !cloudUserId) return;
   pendingPush[field] = value;
+  // Persist dirty marker immediately so a page reload before the debounced
+  // flush still knows this field has unsynced local changes.
+  markDirty([field]);
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(flushCloudPush, 600);
 }
@@ -248,30 +304,65 @@ function scheduleCloudPush(key: string, value: unknown) {
 async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
+  const fieldsToPush = { ...pendingPush };
+  const fieldNames = Object.keys(fieldsToPush);
+  if (fieldNames.length === 0) return;
   const userId = cloudUserId;
   const payload: Record<string, unknown> = {
-    ...pendingPush,
+    ...fieldsToPush,
     user_id: userId,
     updated_at: new Date().toISOString(),
   };
-  for (const k of Object.keys(pendingPush)) delete pendingPush[k];
   try {
-    const { error } = await supabase
+    let { error } = await supabase
       .from("user_data")
       .upsert(payload as never, { onConflict: "user_id" });
     // If the customers column doesn't exist yet in this deployment, retry without
     // it so syncing of products/invoices/settings is never blocked.
     if (error && /customers/.test(error.message) && "customers" in payload) {
       delete payload.customers;
-      await supabase.from("user_data").upsert(payload as never, { onConflict: "user_id" });
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
     }
+    if (error) throw error;
+    // Success: clear only the field values we actually pushed, and only if
+    // they haven't been re-written to a newer value while the upsert was in
+    // flight. Any newer writes stay pending and will trigger another flush.
+    const confirmed: string[] = [];
+    for (const f of fieldNames) {
+      if (pendingPush[f] === fieldsToPush[f]) {
+        delete pendingPush[f];
+        confirmed.push(f);
+      }
+    }
+    clearDirty(confirmed);
+    retryDelay = 5000;
   } catch (e) {
     console.warn("[store] cloud push failed", e);
+    // Failure: keep values in pendingPush and dirty markers persisted, then
+    // retry with exponential backoff. The online listener also retries.
+    for (const f of fieldNames) {
+      if (!(f in pendingPush)) pendingPush[f] = fieldsToPush[f];
+    }
+    scheduleRetry();
   }
 }
 
 export async function hydrateFromCloud(userId: string) {
   cloudUserId = userId;
+  // Restore any unsynced local changes from a previous session so they get
+  // re-pushed and are never overwritten by cloud data below.
+  const dirty = readDirtySet();
+  for (const field of dirty) {
+    const localKey = FIELD_TO_LOCAL_KEY[field];
+    if (!localKey) continue;
+    try {
+      const raw = localStorage.getItem(scopedKey(localKey));
+      if (raw != null) pendingPush[field] = JSON.parse(raw);
+    } catch {}
+  }
   try {
     const { data, error } = await supabase
       .from("user_data")
@@ -292,16 +383,27 @@ export async function hydrateFromCloud(userId: string) {
       await supabase.from("user_data").insert(seed);
       return;
     }
-    // Overwrite local cache with cloud data
-    if (data.products != null) writeLocalOnly(PRODUCTS_KEY, data.products);
-    if (data.categories != null) writeLocalOnly(CATEGORIES_KEY, data.categories);
-    if (data.invoices != null) writeLocalOnly(HISTORY_KEY, data.invoices);
-    if (data.current_invoice != null) writeLocalOnly(INVOICE_KEY, data.current_invoice);
-    if (data.settings != null) writeLocalOnly(SETTINGS_KEY, data.settings);
-    const cloudCustomers = (data as Record<string, unknown>).customers;
-    if (cloudCustomers != null) writeLocalOnly(CUSTOMERS_KEY, cloudCustomers);
+    // Overwrite local cache with cloud data — but NEVER for fields that have
+    // unsynced local changes (dirty), otherwise offline edits would be lost.
+    const overwrite = (field: string, key: string, value: unknown) => {
+      if (value == null) return;
+      if (dirty.has(field)) return;
+      writeLocalOnly(key, value);
+    };
+    overwrite("products", PRODUCTS_KEY, data.products);
+    overwrite("categories", CATEGORIES_KEY, data.categories);
+    overwrite("invoices", HISTORY_KEY, data.invoices);
+    overwrite("current_invoice", INVOICE_KEY, data.current_invoice);
+    overwrite("settings", SETTINGS_KEY, data.settings);
+    overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
+  } finally {
+    // Flush any restored offline edits back to the cloud.
+    if (Object.keys(pendingPush).length > 0) {
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(flushCloudPush, 600);
+    }
   }
 }
 
@@ -311,13 +413,22 @@ export function stopCloudSync() {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
   for (const k of Object.keys(pendingPush)) delete pendingPush[k];
+  // Do NOT clear the persisted dirty set here — it must survive sign-out /
+  // reload so a subsequent sign-in can still resync offline edits.
 }
 
 // Re-flush pending changes when the browser regains connectivity
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
-    if (cloudUserId && Object.keys(pendingPush).length > 0) {
+    if (!cloudUserId) return;
+    retryDelay = 5000;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (Object.keys(pendingPush).length > 0) {
       flushCloudPush();
     }
   });

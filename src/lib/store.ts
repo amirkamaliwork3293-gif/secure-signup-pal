@@ -126,6 +126,9 @@ const HISTORY_KEY = "acc.invoices.v2";
 const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
+// Persisted set of cloud field names that have local changes not yet confirmed
+// synced to the server. Survives reloads so offline edits are never dropped.
+const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
@@ -139,6 +142,11 @@ const CLOUD_FIELDS: Record<
   [SETTINGS_KEY]: "settings",
   [CUSTOMERS_KEY]: "customers",
 };
+
+// Reverse map: cloud column name -> local storage key
+const FIELD_TO_LOCAL_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(CLOUD_FIELDS).map(([k, v]) => [v, k]),
+);
 
 export type AppSettings = {
   invoiceFontSize: number;

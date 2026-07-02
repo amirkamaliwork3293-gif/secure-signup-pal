@@ -1,11 +1,20 @@
 name: Build Signed Release APK
 
 # این workflow یک APK امضاشده Release برای انتشار در کافه‌بازار / مایکت می‌سازد.
-# برای اجرا لازم است این 4 secret در GitHub تنظیم شوند:
-#   ANDROID_KEYSTORE_BASE64     → خروجی `base64 -w0 release.keystore`
-#   ANDROID_KEYSTORE_PASSWORD   → رمز فایل keystore
-#   ANDROID_KEY_ALIAS           → alias کلید (مثلاً kamali)
-#   ANDROID_KEY_PASSWORD        → رمز alias
+#
+# دو حالت دارد:
+#   حالت A (خودکار — بدون هیچ تنظیمی): اگر secretهای keystore تنظیم نشده باشند،
+#     workflow خودش یک keystore جدید می‌سازد و APK را با آن امضا می‌کند.
+#     در پایان، فایل release.keystore و رمزها به عنوان artifact قابل دانلود هستند.
+#     ⚠️ برای انتشار در استور: این keystore و رمزها را در جای امن ذخیره کنید،
+#     چون آپدیت‌های بعدی حتماً باید با همین keystore امضا شوند (وگرنه استور رد می‌کند).
+#
+#   حالت B (توصیه‌شده برای آپدیت‌های بعدی): 4 secret زیر را در
+#     Settings → Secrets and variables → Actions اضافه کنید:
+#       ANDROID_KEYSTORE_BASE64     → خروجی `base64 -w0 release.keystore`
+#       ANDROID_KEYSTORE_PASSWORD
+#       ANDROID_KEY_ALIAS
+#       ANDROID_KEY_PASSWORD
 
 on:
   workflow_dispatch:
@@ -37,22 +46,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Verify signing secrets
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          missing=0
-          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!v}" ]; then echo "secret خالی: $v"; missing=1; fi
-          done
-          if [ $missing -eq 1 ]; then
-            echo "لطفاً secretهای امضا را در Settings → Secrets and variables → Actions اضافه کنید."
-            exit 1
-          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -165,11 +158,54 @@ jobs:
           with open(path, 'w') as f: f.write(content)
           PYEOF
 
-      - name: Decode keystore
+      - name: Prepare keystore (use secret if present, otherwise auto-generate)
+        id: keystore
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "$KS_B64" | base64 -d > android/app/release.keystore
+          mkdir -p keystore-output
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "✅ استفاده از keystore ذخیره‌شده در Secrets"
+            echo "$KS_B64" | base64 -d > android/app/release.keystore
+            echo "store_pass=$KS_PASS" >> $GITHUB_OUTPUT
+            echo "key_alias=$KEY_ALIAS" >> $GITHUB_OUTPUT
+            echo "key_pass=$KEY_PASS" >> $GITHUB_OUTPUT
+            echo "generated=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Secretها تنظیم نشده — ساخت خودکار keystore جدید"
+            GEN_PASS=$(openssl rand -hex 16)
+            GEN_ALIAS="kamali"
+            keytool -genkeypair -v \
+              -keystore android/app/release.keystore \
+              -alias "$GEN_ALIAS" \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$GEN_PASS" -keypass "$GEN_PASS" \
+              -dname "CN=Kamali Accounting, OU=Mobile, O=Kamali, L=Tehran, ST=Tehran, C=IR"
+            # کپی برای دانلود توسط کاربر
+            cp android/app/release.keystore keystore-output/release.keystore
+            cat > keystore-output/CREDENTIALS.txt << CREDEOF
+          ⚠️ این فایل را حتماً در جای امن ذخیره کنید!
+          بدون این keystore و رمزها نمی‌توانید در آینده آپدیت منتشر کنید.
+
+          Keystore Password: $GEN_PASS
+          Key Alias:         $GEN_ALIAS
+          Key Password:      $GEN_PASS
+
+          برای build بعدی این مقادیر را در Settings → Secrets → Actions اضافه کنید:
+            ANDROID_KEYSTORE_BASE64     = خروجی base64 -w0 release.keystore
+            ANDROID_KEYSTORE_PASSWORD   = $GEN_PASS
+            ANDROID_KEY_ALIAS           = $GEN_ALIAS
+            ANDROID_KEY_PASSWORD        = $GEN_PASS
+          CREDEOF
+            base64 -w0 android/app/release.keystore > keystore-output/release.keystore.base64
+            echo "store_pass=$GEN_PASS" >> $GITHUB_OUTPUT
+            echo "key_alias=$GEN_ALIAS" >> $GITHUB_OUTPUT
+            echo "key_pass=$GEN_PASS" >> $GITHUB_OUTPUT
+            echo "generated=true" >> $GITHUB_OUTPUT
+          fi
           ls -la android/app/release.keystore
 
       - name: Configure signing in build.gradle
@@ -196,9 +232,9 @@ jobs:
 
       - name: Build Release APK
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ steps.keystore.outputs.store_pass }}
+          ANDROID_KEY_ALIAS: ${{ steps.keystore.outputs.key_alias }}
+          ANDROID_KEY_PASSWORD: ${{ steps.keystore.outputs.key_pass }}
         run: |
           cd android
           chmod +x gradlew
@@ -217,3 +253,11 @@ jobs:
           name: kamali-accounting-release-v${{ github.event.inputs.version_name }}
           path: release-output/*.apk
           retention-days: 30
+
+      - name: Upload auto-generated keystore (only if generated this run)
+        if: steps.keystore.outputs.generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KEYSTORE-BACKUP-KEEP-SAFE
+          path: keystore-output/*
+          retention-days: 90

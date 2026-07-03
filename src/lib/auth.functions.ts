@@ -382,6 +382,7 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
         .update({ plan, status: "active", start_date: start.toISOString(), end_date: end.toISOString() })
         .eq("id", targetId);
       if (renErr) throw new Error(renErr.message);
+      await purgeReceipt(supabaseAdmin, data.id);
       return { success: true };
     }
 

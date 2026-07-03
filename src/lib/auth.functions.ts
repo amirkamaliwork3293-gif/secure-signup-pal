@@ -324,6 +324,28 @@ async function assertAdmin(supabase: any, userId: string) {
   if (!data) throw new Error("دسترسی ادمین لازم است.");
 }
 
+// حذف فایل رسید از استوریج + پاک‌کردن ستون receipt_url
+// (بعد از تایید/رد درخواست فراخوانی می‌شود تا فضای هاست الکی پر نشود)
+async function purgeReceipt(supabaseAdmin: any, requestId: string) {
+  try {
+    const { data: row } = await supabaseAdmin
+      .from("signup_requests")
+      .select("receipt_url")
+      .eq("id", requestId)
+      .maybeSingle();
+    const path = row?.receipt_url as string | null | undefined;
+    if (path) {
+      await supabaseAdmin.storage.from("receipts").remove([path]);
+    }
+    await supabaseAdmin
+      .from("signup_requests")
+      .update({ receipt_url: null })
+      .eq("id", requestId);
+  } catch {
+    // حذف رسید بحرانی نیست؛ اگر شکست خورد جریان تایید/رد را قطع نکن
+  }
+}
+
 export const approveSignupRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { id: string }) => {
@@ -389,6 +411,9 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       if (actErr) throw new Error(actErr.message);
     }
 
+    // رسید پس از تایید دیگر لازم نیست — از استوریج حذف شود
+    await purgeReceipt(supabaseAdmin, data.id);
+
     return { success: true };
   });
 
@@ -422,6 +447,9 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
         .eq("username", req.username)
         .eq("status", "pending");
     }
+
+    // رسید پس از رد هم لازم نیست
+    await purgeReceipt(supabaseAdmin, data.id);
 
     return { success: true };
   });

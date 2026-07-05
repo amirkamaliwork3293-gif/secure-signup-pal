@@ -868,36 +868,147 @@ export function formatToman(n: number): string {
 }
 
 // ─── Jalali (Persian) date helpers ─────────────────────────────────────────
-// Use the Persian calendar via Intl so day/month/year/time are all accurate.
-const _jDate = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-  year: "numeric", month: "2-digit", day: "2-digit",
-  timeZone: "Asia/Tehran",
-});
-const _jDateTime = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-  year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", hour12: false,
-  timeZone: "Asia/Tehran",
-});
-const _jLong = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-  weekday: "long", year: "numeric", month: "long", day: "numeric",
-  hour: "2-digit", minute: "2-digit", hour12: false,
-  timeZone: "Asia/Tehran",
-});
-const _jShort = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-  month: "short", day: "numeric",
-  timeZone: "Asia/Tehran",
-});
+// Deterministic Gregorian↔Jalali conversion (jalaali-js algorithm by Behrang Noruzi Niya)
+// Independent of the host ICU calendar so results are identical across browsers/OSes and
+// always match the official Iranian Solar Hijri calendar.
+
+function div(a: number, b: number): number { return ~~(a / b); }
+
+/** Convert Gregorian (gy, gm, gd) → Julian Day Number */
+function g2d(gy: number, gm: number, gd: number): number {
+  let d = div((gy + div(gm - 8, 6) + 100100) * 1461, 4)
+    + div(153 * ((gm + 9) % 12) + 2, 5)
+    + gd - 34840408;
+  d = d - div(div(gy + 100100 + div(gm - 8, 6), 100) * 3, 4) + 752;
+  return d;
+}
+
+/** Is a given Jalali year a leap year (Khayyam-Borkowski algorithm)? */
+function jalCal(jy: number): { leap: number; gy: number; march: number } {
+  const breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210,
+    1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178];
+  const bl = breaks.length;
+  const gy = jy + 621;
+  let leapJ = -14;
+  let jp = breaks[0];
+  if (jy < jp || jy >= breaks[bl - 1]) throw new Error("Invalid Jalali year " + jy);
+  let jump = 0;
+  let jm: number;
+  for (let i = 1; i < bl; i += 1) {
+    jm = breaks[i];
+    jump = jm - jp;
+    if (jy < jm) break;
+    leapJ = leapJ + div(jump, 33) * 8 + div(jump % 33, 4);
+    jp = jm;
+  }
+  let n = jy - jp;
+  leapJ = leapJ + div(n, 33) * 8 + div((n % 33) + 3, 4);
+  if (jump % 33 === 4 && jump - n === 4) leapJ += 1;
+  const leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150;
+  const march = 20 + leapJ - leapG;
+  if (jump - n < 6) n = n - jump + div(jump + 4, 33) * 33;
+  let leap = (((n + 1) % 33) - 1) % 4;
+  if (leap === -1) leap = 4;
+  return { leap, gy, march };
+}
+
+/** Convert Julian Day Number → Jalali (jy, jm, jd) */
+function d2j(jdn: number): { jy: number; jm: number; jd: number } {
+  const gy = d2g(jdn).gy;
+  let jy = gy - 621;
+  const r = jalCal(jy);
+  const jdn1f = g2d(gy, 3, r.march);
+  let k = jdn - jdn1f;
+  if (k >= 0) {
+    if (k <= 185) {
+      const jm = 1 + div(k, 31);
+      const jd = (k % 31) + 1;
+      return { jy, jm, jd };
+    }
+    k -= 186;
+  } else {
+    jy -= 1;
+    k += 179;
+    if (r.leap === 1) k += 1;
+  }
+  const jm = 7 + div(k, 30);
+  const jd = (k % 30) + 1;
+  return { jy, jm, jd };
+}
+
+/** Convert Julian Day Number → Gregorian (gy, gm, gd) */
+function d2g(jdn: number): { gy: number; gm: number; gd: number } {
+  let j = 4 * jdn + 139361631;
+  j = j + div(div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908;
+  const i = div((j % 1461), 4) * 5 + 308;
+  const gd = div(i % 153, 5) + 1;
+  const gm = ((div(i, 153)) % 12) + 1;
+  const gy = div(j, 1461) - 100100 + div(8 - gm, 6);
+  return { gy, gm, gd };
+}
+
+/** Extract Gregorian y/m/d/h/m in Asia/Tehran regardless of host timezone. */
+function tehranParts(d: Date): { y: number; m: number; day: number; h: number; min: number; dow: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tehran",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+    weekday: "short",
+  }).formatToParts(d);
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const dowMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  let h = parseInt(map.hour, 10);
+  if (h === 24) h = 0; // some ICU builds return "24" for midnight
+  return {
+    y: parseInt(map.year, 10),
+    m: parseInt(map.month, 10),
+    day: parseInt(map.day, 10),
+    h,
+    min: parseInt(map.minute, 10),
+    dow: dowMap[map.weekday] ?? 0,
+  };
+}
+
+const FA_DIGITS = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
+function toFa(s: string | number): string {
+  return String(s).replace(/[0-9]/g, (d) => FA_DIGITS[+d]);
+}
+function pad2(n: number): string { return n < 10 ? "0" + n : String(n); }
+
+const JMONTHS_LONG = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+  "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+const JMONTHS_SHORT = JMONTHS_LONG; // Persian months don't have a distinct short form
+const WEEKDAYS_FA = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
+
+function toJalali(ts: number | string | Date): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const g = tehranParts(d);
+  const jdn = g2d(g.y, g.m, g.day);
+  const j = d2j(jdn);
+  return { jy: j.jy, jm: j.jm, jd: j.jd, h: g.h, min: g.min, dow: g.dow };
+}
+
 export function formatJalaliDate(ts: number | string | Date): string {
-  try { return _jDate.format(new Date(ts)); } catch { return ""; }
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${toFa(j.jy)}/${toFa(pad2(j.jm))}/${toFa(pad2(j.jd))}`;
 }
 export function formatJalaliDateTime(ts: number | string | Date): string {
-  try { return _jDateTime.format(new Date(ts)); } catch { return ""; }
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${toFa(j.jy)}/${toFa(pad2(j.jm))}/${toFa(pad2(j.jd))}، ${toFa(pad2(j.h))}:${toFa(pad2(j.min))}`;
 }
 export function formatJalaliLong(ts: number | string | Date): string {
-  try { return _jLong.format(new Date(ts)); } catch { return ""; }
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${WEEKDAYS_FA[j.dow]} ${toFa(j.jd)} ${JMONTHS_LONG[j.jm - 1]} ${toFa(j.jy)}، ساعت ${toFa(pad2(j.h))}:${toFa(pad2(j.min))}`;
 }
 export function formatJalaliShort(ts: number | string | Date): string {
-  try { return _jShort.format(new Date(ts)); } catch { return ""; }
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${toFa(j.jd)} ${JMONTHS_SHORT[j.jm - 1]}`;
 }
 
 /**

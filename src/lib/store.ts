@@ -631,10 +631,12 @@ export const invoice = {
   archive: (inv: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     inv.items.forEach((item) => products.decreaseStock(item.productId, item.quantity));
-    write(HISTORY_KEY, [inv, ...hist]);
+    // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
+    const stamped: Invoice = { ...inv, createdAt: Date.now() };
+    write(HISTORY_KEY, [stamped, ...hist]);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
-    const filtered = b.open.filter((i) => i.id !== inv.id);
+    const filtered = b.open.filter((i) => i.id !== stamped.id);
     if (filtered.length === 0) {
       const fresh = emptyInvoice();
       writeBoard({ open: [fresh], activeId: fresh.id });

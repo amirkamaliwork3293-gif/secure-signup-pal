@@ -632,7 +632,11 @@ export const invoice = {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     inv.items.forEach((item) => products.decreaseStock(item.productId, item.quantity));
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
-    const stamped: Invoice = { ...inv, createdAt: Date.now() };
+    // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
+    // همین تاریخ را ببینند و بین «تاریخچه» و «دفتر بدهی مشتری» اختلاف نیفتد.
+    const finalizedAt = Date.now();
+    inv.createdAt = finalizedAt;
+    const stamped: Invoice = { ...inv, createdAt: finalizedAt };
     write(HISTORY_KEY, [stamped, ...hist]);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();

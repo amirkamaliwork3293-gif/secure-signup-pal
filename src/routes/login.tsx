@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
+import { BusinessGuideDialog } from "@/components/BusinessGuideDialog";
 import { LoginPromoVideo } from "@/components/LoginPromoVideo";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
 
@@ -164,6 +165,7 @@ export function LoginPage() {
         پس از ثبت‌نام، اپلیکیشن اندروید را می‌توانید دانلود کنید.
       </p>
       <LoginHelpDialog />
+      <BusinessGuideDialog />
       <LoginPromoVideo className="mt-6 mb-4" />
     </div>
   );

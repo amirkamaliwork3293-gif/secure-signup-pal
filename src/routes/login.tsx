@@ -6,7 +6,8 @@ import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { BusinessGuideDialog } from "@/components/BusinessGuideDialog";
 import { LoginPromoVideo } from "@/components/LoginPromoVideo";
-import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
+import { ApkDownloadButton } from "@/components/ApkDownloadButton";
+import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "ورود | کمالی حسابداری" }] }),
@@ -161,9 +162,19 @@ export function LoginPage() {
         )}
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted-foreground">
-        پس از ثبت‌نام، اپلیکیشن اندروید را می‌توانید دانلود کنید.
-      </p>
+      <div className="mt-6 w-full max-w-sm rounded-2xl border-2 border-primary/40 bg-gradient-to-br from-primary/10 to-primary/5 p-4 shadow-elegant">
+        <div className="mb-3 flex items-center justify-center gap-2 text-center">
+          <Smartphone className="h-6 w-6 text-primary" />
+          <p className="text-base font-extrabold text-foreground leading-7">
+            پس از ثبت‌نام، اپلیکیشن اندروید را دانلود کنید
+          </p>
+        </div>
+        <p className="mb-3 text-center text-xs leading-6 text-muted-foreground">
+          نسخه اندروید سریع‌تر، آفلاین و همیشه در دسترس شماست.
+        </p>
+        <ApkDownloadButton />
+      </div>
+
       <LoginHelpDialog />
       <BusinessGuideDialog />
       <LoginPromoVideo className="mt-6 mb-4" />

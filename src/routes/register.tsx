@@ -213,9 +213,12 @@ function RegisterPage() {
             رفتن به صفحه ورود
             <ArrowRight className="h-4 w-4 rotate-180" />
           </Link>
-          <div className="mt-5 border-t border-border pt-4">
-            <p className="mb-2 text-xs text-muted-foreground">
-              اکنون می‌توانید اپلیکیشن اندروید را دانلود و نصب کنید:
+          <div className="mt-6 rounded-2xl border-2 border-primary/40 bg-gradient-to-br from-primary/10 to-primary/5 p-4 shadow-elegant">
+            <p className="mb-2 text-base font-extrabold text-foreground leading-7">
+              اکنون اپلیکیشن اندروید را دانلود و نصب کنید
+            </p>
+            <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
+              نسخه اندروید سریع‌تر، آفلاین و همیشه در دسترس شماست. راهنمای تصویری نصب در پایین آمده است.
             </p>
             <ApkDownloadButton className="w-full" />
           </div>

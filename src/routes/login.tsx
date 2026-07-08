@@ -6,7 +6,6 @@ import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { BusinessGuideDialog } from "@/components/BusinessGuideDialog";
 import { LoginPromoVideo } from "@/components/LoginPromoVideo";
-import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
@@ -162,17 +161,16 @@ export function LoginPage() {
         )}
       </div>
 
-      <div className="mt-6 w-full max-w-sm rounded-2xl border-2 border-primary/40 bg-gradient-to-br from-primary/10 to-primary/5 p-4 shadow-elegant">
-        <div className="mb-3 flex items-center justify-center gap-2 text-center">
-          <Smartphone className="h-6 w-6 text-primary" />
-          <p className="text-base font-extrabold text-foreground leading-7">
-            پس از ثبت‌نام، اپلیکیشن اندروید را دانلود کنید
+      <div className="mt-6 w-full max-w-sm rounded-2xl border border-primary/30 bg-primary/5 p-4 text-center">
+        <div className="mb-1.5 flex items-center justify-center gap-2">
+          <Smartphone className="h-5 w-5 text-primary" />
+          <p className="text-sm font-bold text-foreground">
+            لینک دانلود اپلیکیشن اندروید
           </p>
         </div>
-        <p className="mb-3 text-center text-xs leading-6 text-muted-foreground">
-          نسخه اندروید سریع‌تر، آفلاین و همیشه در دسترس شماست.
+        <p className="text-[11px] leading-6 text-muted-foreground">
+          بعد از تکمیل ثبت‌نام، لینک دانلود اپلیکیشن اندروید (APK) به همراه راهنمای تصویری نصب برای شما نمایش داده می‌شود.
         </p>
-        <ApkDownloadButton />
       </div>
 
       <LoginHelpDialog />

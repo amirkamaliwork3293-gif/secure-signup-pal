@@ -475,15 +475,6 @@ export function BusinessGuideDialog() {
                     </p>
                   )}
 
-                  <div className="mt-4 rounded-2xl border-2 border-primary/40 bg-gradient-to-l from-primary/10 to-primary/5 p-3 text-center">
-                    <div className="text-xs font-extrabold text-foreground">
-                      همین حالا با <span className="text-primary">نسخه تست رایگان</span> امتحان کنید
-                    </div>
-                    <div className="mt-1 text-[10px] text-muted-foreground">
-                      بعد از تست، پلن اشتراک مناسب خودتان را انتخاب کنید.
-                    </div>
-                  </div>
-
                   <button
                     type="button"
                     onClick={() => {

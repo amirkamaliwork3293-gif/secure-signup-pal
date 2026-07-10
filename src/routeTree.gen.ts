@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VoiceRouteImport } from './routes/voice'
+import { Route as StudentsRouteImport } from './routes/students'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as ScanRouteImport } from './routes/scan'
@@ -31,6 +32,11 @@ import { Route as MUserIdRouteImport } from './routes/m.$userId'
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudentsRoute = StudentsRouteImport.update({
+  id: '/students',
+  path: '/students',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -176,6 +184,7 @@ export interface FileRoutesById {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -198,6 +207,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/students'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -218,6 +228,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/students'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/students'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   ScanRoute: typeof ScanRoute
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  StudentsRoute: typeof StudentsRoute
   VoiceRoute: typeof VoiceRoute
   MUserIdRoute: typeof MUserIdRoute
   StoreStoreIdRoute: typeof StoreStoreIdRoute
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       path: '/voice'
       fullPath: '/voice'
       preLoaderRoute: typeof VoiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/students': {
+      id: '/students'
+      path: '/students'
+      fullPath: '/students'
+      preLoaderRoute: typeof StudentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -411,6 +431,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScanRoute: ScanRoute,
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  StudentsRoute: StudentsRoute,
   VoiceRoute: VoiceRoute,
   MUserIdRoute: MUserIdRoute,
   StoreStoreIdRoute: StoreStoreIdRoute,

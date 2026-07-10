@@ -763,6 +763,119 @@ export const customers = {
   },
 };
 
+// ─── Students (کلاس‌ها، باشگاه، هنرجوها) ────────────────────────────────────
+
+export type StudentPayment = {
+  id: string;
+  amount: number;
+  at: number;
+  /** تاریخ شروع دورهٔ پرداخت‌شده */
+  periodStart: number;
+  /** تاریخ سررسید بعدی پس از این پرداخت */
+  nextDueAt: number;
+  note?: string;
+};
+
+export type Student = {
+  id: string;
+  firstName: string;
+  lastName?: string;
+  phone?: string;
+  /** رشته/کلاس (مثلاً کاراته، بدنسازی) — اختیاری */
+  discipline?: string;
+  /** مبلغ شهریه در هر دوره (تومان) */
+  fee: number;
+  /** طول دوره بر حسب روز (مثلاً ۳۰ = ماهانه) */
+  periodDays: number;
+  /** تاریخ ثبت‌نام */
+  startDate: number;
+  /** تاریخ سررسید پرداخت بعدی */
+  nextDueAt: number;
+  active: boolean;
+  note?: string;
+  createdAt: number;
+  payments: StudentPayment[];
+};
+
+function todayStartTs(): number {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
+  return new Date(parts + "T00:00:00+03:30").getTime();
+}
+
+/** روزهای باقی‌مانده تا سررسید (منفی = گذشته) */
+export function studentDaysToDue(s: Student): number {
+  const today = todayStartTs();
+  return Math.round((s.nextDueAt - today) / 86_400_000);
+}
+
+export type StudentStatus = "overdue" | "due-today" | "soon" | "ok";
+
+export function studentStatus(s: Student): StudentStatus {
+  if (!s.active) return "ok";
+  const d = studentDaysToDue(s);
+  if (d < 0) return "overdue";
+  if (d === 0) return "due-today";
+  if (d <= 3) return "soon";
+  return "ok";
+}
+
+export const students = {
+  useAll: () => useStore<Student[]>(STUDENTS_KEY, []),
+  getAll: () => read<Student[]>(STUDENTS_KEY, []),
+  save: (list: Student[]) => write(STUDENTS_KEY, list),
+
+  add: (s: Omit<Student, "id" | "createdAt" | "payments" | "nextDueAt" | "active"> & { nextDueAt?: number; active?: boolean }): Student => {
+    const nextDueAt = s.nextDueAt ?? s.startDate + s.periodDays * 86_400_000;
+    const created: Student = {
+      ...s,
+      id: cryptoId(),
+      createdAt: Date.now(),
+      active: s.active ?? true,
+      nextDueAt,
+      payments: [],
+    };
+    write(STUDENTS_KEY, [created, ...read<Student[]>(STUDENTS_KEY, [])]);
+    return created;
+  },
+
+  update: (updated: Student) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    write(STUDENTS_KEY, list.map((s) => (s.id === updated.id ? updated : s)));
+  },
+
+  remove: (id: string) => {
+    write(STUDENTS_KEY, read<Student[]>(STUDENTS_KEY, []).filter((s) => s.id !== id));
+  },
+
+  /** ثبت پرداخت و پیش‌بردن سررسید بعدی */
+  recordPayment: (studentId: string, opts: { amount?: number; days?: number; note?: string }) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    const next = list.map((s) => {
+      if (s.id !== studentId) return s;
+      const amount = opts.amount ?? s.fee;
+      const days = opts.days ?? s.periodDays;
+      const today = todayStartTs();
+      // اگر خیلی عقب افتاده، از امروز مبنا می‌گیریم تا سررسید بی‌نهایت عقب نماند
+      const base = Math.max(s.nextDueAt, today);
+      const nextDueAt = base + days * 86_400_000;
+      const payment: StudentPayment = {
+        id: cryptoId(),
+        amount,
+        at: Date.now(),
+        periodStart: s.nextDueAt,
+        nextDueAt,
+        note: opts.note,
+      };
+      return { ...s, nextDueAt, payments: [payment, ...s.payments] };
+    });
+    write(STUDENTS_KEY, next);
+  },
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export function emptyInvoice(): Invoice {

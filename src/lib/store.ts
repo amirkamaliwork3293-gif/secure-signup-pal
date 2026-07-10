@@ -125,6 +125,7 @@ const INVOICE_KEY = "acc.currentInvoice.v2";
 const HISTORY_KEY = "acc.invoices.v2";
 const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
+const STUDENTS_KEY = "acc.students.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -133,7 +134,7 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
   string,
-  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers"
+  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers" | "students"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -141,6 +142,7 @@ const CLOUD_FIELDS: Record<
   [INVOICE_KEY]: "current_invoice",
   [SETTINGS_KEY]: "settings",
   [CUSTOMERS_KEY]: "customers",
+  [STUDENTS_KEY]: "students",
 };
 
 // Reverse map: cloud column name -> local storage key
@@ -326,6 +328,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /students/.test(error.message) && "students" in payload) {
+      delete payload.students;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -396,6 +405,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("current_invoice", INVOICE_KEY, data.current_invoice);
     overwrite("settings", SETTINGS_KEY, data.settings);
     overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
+    overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {

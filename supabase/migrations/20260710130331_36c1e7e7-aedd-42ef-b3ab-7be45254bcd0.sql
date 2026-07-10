@@ -1,0 +1,1 @@
+ALTER TABLE public.user_data ADD COLUMN IF NOT EXISTS students jsonb NOT NULL DEFAULT '[]'::jsonb;

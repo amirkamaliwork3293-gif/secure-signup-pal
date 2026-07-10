@@ -266,6 +266,7 @@ export type Database = {
           invoices: Json
           products: Json
           settings: Json
+          students: Json
           updated_at: string
           user_id: string
         }
@@ -275,6 +276,7 @@ export type Database = {
           invoices?: Json
           products?: Json
           settings?: Json
+          students?: Json
           updated_at?: string
           user_id: string
         }
@@ -284,6 +286,7 @@ export type Database = {
           invoices?: Json
           products?: Json
           settings?: Json
+          students?: Json
           updated_at?: string
           user_id?: string
         }

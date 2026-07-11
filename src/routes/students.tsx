@@ -30,6 +30,8 @@ import {
   AlertTriangle,
   Wallet,
   Power,
+  MessageCircle,
+  Share2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/students")({
@@ -62,7 +64,7 @@ function StudentsPage() {
 }
 
 function StudentsInner() {
-  const [list, setList] = studentsStore.useAll();
+  const [list] = studentsStore.useAll();
   const [appSettings] = settings.useAll();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -304,7 +306,6 @@ function StudentsInner() {
                         onClick={() => {
                           const updated = { ...s, active: !s.active };
                           studentsStore.update(updated);
-                          setList((prev) => prev.map((x) => x.id === s.id ? updated : x));
                         }}
                         className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
                       >
@@ -315,7 +316,6 @@ function StudentsInner() {
                         onClick={() => {
                           if (confirm(`حذف هنرجو «${s.firstName}»؟`)) {
                             studentsStore.remove(s.id);
-                            setList((prev) => prev.filter((x) => x.id !== s.id));
                           }
                         }}
                         className="flex items-center gap-1 rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-500/5"
@@ -355,10 +355,8 @@ function StudentsInner() {
           onSave={(s) => {
             if (editing) {
               studentsStore.update(s);
-              setList((prev) => prev.map((x) => x.id === s.id ? s : x));
             } else {
-              const created = studentsStore.add(s);
-              setList((prev) => [created, ...prev]);
+              studentsStore.add(s);
             }
             setShowForm(false);
             setEditing(null);
@@ -375,8 +373,6 @@ function StudentsInner() {
             setPayFor(null);
             // پس از ثبت، پیشنهاد ارسال پیامک تشکر:
             setSmsFor({ student: { ...st }, payment: { amount, nextDueAt } });
-            // refresh list
-            setList(studentsStore.getAll());
           }}
         />
       )}
@@ -590,19 +586,11 @@ function SmsDialog({ student, payment, shopName, onClose }: {
   onClose: () => void;
 }) {
   const [text, setText] = useState(() => buildSmsBody({ student, payment, shopName }));
-
-  const send = async () => {
-    if (!student.phone) {
-      alert("شماره موبایل هنرجو ثبت نشده است.");
-      return;
-    }
-    await shareText({
-      text,
-      title: "ارسال پیامک/پیام",
-      fallbackPhones: [student.phone],
-    });
-    onClose();
-  };
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const phoneRaw = student.phone ?? "";
+  const intl = toIntlPhone(phoneRaw);
+  const smsUrl = phoneRaw ? `sms:${phoneRaw}?body=${encodeURIComponent(text)}` : "#";
+  const waUrl = intl ? `https://wa.me/${intl}?text=${encodeURIComponent(text)}` : "#";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-2 sm:items-center" onClick={onClose}>
@@ -616,7 +604,7 @@ function SmsDialog({ student, payment, shopName, onClose }: {
         </div>
         <p className="mb-2 text-xs text-muted-foreground">
           گیرنده: <span className="font-semibold text-foreground">{student.firstName} {student.lastName ?? ""}</span>
-          {student.phone && <> — <span className="text-primary">{student.phone}</span></>}
+          {student.phone && <> — <span className="text-primary" dir="ltr">{student.phone}</span></>}
         </p>
         <textarea
           className={`${inputCls} min-h-[140px] leading-6`}
@@ -625,16 +613,64 @@ function SmsDialog({ student, payment, shopName, onClose }: {
           dir="rtl"
         />
         <p className="mt-1 text-[10px] text-muted-foreground">
-          متن قبل از ارسال قابل ویرایش است. با زدن دکمهٔ ارسال، پنجرهٔ پیامک/اشتراک‌گذاری موبایل باز می‌شود.
+          متن قابل ویرایش است. با انتخاب هر گزینه، مستقیماً وارد چت با هنرجو در همان پیام‌رسان می‌شوید.
         </p>
-        <div className="mt-3 flex gap-2">
-          <button onClick={onClose} className="flex-1 rounded-xl border border-border py-2.5 text-sm">بستن</button>
-          <button onClick={send} className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground">
-            <Send className="ml-1 inline h-4 w-4" />
-            ارسال
-          </button>
-        </div>
+        {!phoneRaw ? (
+          <p className="mt-3 text-center text-[11px] text-destructive">شماره موبایل هنرجو ثبت نشده است.</p>
+        ) : (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onClose}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-green-700 ${!intl ? "pointer-events-none opacity-50" : ""}`}
+              >
+                <MessageCircle className="h-4 w-4" />
+                واتساپ
+              </a>
+              <a
+                href={smsUrl}
+                onClick={onClose}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+              >
+                <Send className="h-4 w-4" />
+                پیامک
+              </a>
+            </div>
+            <button
+              onClick={async () => {
+                const result = await shareText({ title: "پیام به هنرجو", text });
+                setShareNotice(
+                  result === "shared"
+                    ? "پنجره اشتراک باز شد؛ اگر متن نیامد، از کلیپ‌بورد Paste کنید."
+                    : "متن در کلیپ‌بورد کپی شد؛ در روبیکا/بله/ایتا/تلگرام Paste کنید.",
+                );
+              }}
+              className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-semibold hover:bg-accent"
+            >
+              <Share2 className="h-4 w-4" />
+              اشتراک‌گذاری در روبیکا / بله / ایتا / تلگرام …
+            </button>
+            {shareNotice && <p className="mt-2 text-center text-[11px] text-primary">{shareNotice}</p>}
+            {!intl && (
+              <p className="mt-2 text-center text-[11px] text-destructive">شماره برای واتساپ نامعتبر است.</p>
+            )}
+          </>
+        )}
+        <button onClick={onClose} className="mt-3 w-full rounded-xl border border-border py-2 text-sm">بستن</button>
       </div>
     </div>
   );
+}
+
+function toIntlPhone(input: string): string {
+  const digits = (input || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0098")) return digits.slice(2);
+  if (digits.startsWith("98")) return digits;
+  if (digits.startsWith("0")) return "98" + digits.slice(1);
+  if (digits.startsWith("9") && digits.length === 10) return "98" + digits;
+  return digits;
 }

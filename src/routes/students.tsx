@@ -30,6 +30,8 @@ import {
   AlertTriangle,
   Wallet,
   Power,
+  MessageCircle,
+  Share2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/students")({
@@ -62,7 +64,7 @@ function StudentsPage() {
 }
 
 function StudentsInner() {
-  const [list, setList] = studentsStore.useAll();
+  const [list] = studentsStore.useAll();
   const [appSettings] = settings.useAll();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -304,7 +306,6 @@ function StudentsInner() {
                         onClick={() => {
                           const updated = { ...s, active: !s.active };
                           studentsStore.update(updated);
-                          setList((prev) => prev.map((x) => x.id === s.id ? updated : x));
                         }}
                         className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
                       >
@@ -315,7 +316,6 @@ function StudentsInner() {
                         onClick={() => {
                           if (confirm(`حذف هنرجو «${s.firstName}»؟`)) {
                             studentsStore.remove(s.id);
-                            setList((prev) => prev.filter((x) => x.id !== s.id));
                           }
                         }}
                         className="flex items-center gap-1 rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs text-red-500 hover:bg-red-500/5"
@@ -355,10 +355,8 @@ function StudentsInner() {
           onSave={(s) => {
             if (editing) {
               studentsStore.update(s);
-              setList((prev) => prev.map((x) => x.id === s.id ? s : x));
             } else {
-              const created = studentsStore.add(s);
-              setList((prev) => [created, ...prev]);
+              studentsStore.add(s);
             }
             setShowForm(false);
             setEditing(null);
@@ -375,8 +373,6 @@ function StudentsInner() {
             setPayFor(null);
             // پس از ثبت، پیشنهاد ارسال پیامک تشکر:
             setSmsFor({ student: { ...st }, payment: { amount, nextDueAt } });
-            // refresh list
-            setList(studentsStore.getAll());
           }}
         />
       )}

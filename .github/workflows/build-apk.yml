@@ -111,18 +111,28 @@ jobs:
       - name: Apply Kamix app icon
         run: |
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p "android/app/src/main/res/mipmap-$d-v4"
-            mkdir -p "android/app/src/main/res/mipmap-$d"
+            # از هر دو پوشه فقط یکی را استفاده می‌کنیم تا Duplicate resources ندهد:
+            # اگر mipmap-$d-v4 از قبل وجود دارد همان را پر می‌کنیم،
+            # وگرنه اگر mipmap-$d وجود دارد از آن استفاده می‌کنیم،
+            # و فقط اگر هیچ‌کدام نبود، mipmap-$d-v4 را می‌سازیم.
+            if [ -d "android/app/src/main/res/mipmap-$d-v4" ]; then
+              target="android/app/src/main/res/mipmap-$d-v4"
+            elif [ -d "android/app/src/main/res/mipmap-$d" ]; then
+              target="android/app/src/main/res/mipmap-$d"
+            else
+              target="android/app/src/main/res/mipmap-$d-v4"
+              mkdir -p "$target"
+            fi
 
             for f in ic_launcher.png ic_launcher_round.png ic_launcher_foreground.png; do
               src="branding/android-icons/mipmap-$d-v4/$f"
               if [ -f "$src" ]; then
-                cp "$src" "android/app/src/main/res/mipmap-$d-v4/$f"
-                cp "$src" "android/app/src/main/res/mipmap-$d/$f"
+                cp "$src" "$target/$f"
               else
                 echo "Warning: source icon not found: $src (skipping)"
               fi
             done
+            echo "Icons for $d applied to $target"
           done
           echo "Kamix icons applied"
 

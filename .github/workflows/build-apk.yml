@@ -111,9 +111,18 @@ jobs:
       - name: Apply Kamix app icon
         run: |
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            cp branding/android-icons/mipmap-$d-v4/ic_launcher.png android/app/src/main/res/mipmap-$d-v4/ic_launcher.png
-            cp branding/android-icons/mipmap-$d-v4/ic_launcher_round.png android/app/src/main/res/mipmap-$d-v4/ic_launcher_round.png
-            cp branding/android-icons/mipmap-$d-v4/ic_launcher_foreground.png android/app/src/main/res/mipmap-$d-v4/ic_launcher_foreground.png
+            mkdir -p "android/app/src/main/res/mipmap-$d-v4"
+            mkdir -p "android/app/src/main/res/mipmap-$d"
+
+            for f in ic_launcher.png ic_launcher_round.png ic_launcher_foreground.png; do
+              src="branding/android-icons/mipmap-$d-v4/$f"
+              if [ -f "$src" ]; then
+                cp "$src" "android/app/src/main/res/mipmap-$d-v4/$f"
+                cp "$src" "android/app/src/main/res/mipmap-$d/$f"
+              else
+                echo "Warning: source icon not found: $src (skipping)"
+              fi
+            done
           done
           echo "Kamix icons applied"
 

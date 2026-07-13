@@ -29,7 +29,7 @@ export function LoginPromoVideo({ className = "" }: { className?: string }) {
             controls={false}
             disablePictureInPicture
             className="absolute inset-0 h-full w-full object-cover"
-            aria-label="ویدیوی معرفی برنامه‌ی کمالی حسابداری"
+            aria-label="ویدیوی معرفی برنامه‌ی KAMIX"
           />
         </div>
       </div>

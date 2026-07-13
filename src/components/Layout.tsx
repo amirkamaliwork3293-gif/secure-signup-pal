@@ -50,7 +50,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
             <div className="leading-tight">
               <div className="text-base font-bold kamali-brand">{shopName}</div>
-              <div className="text-[11px] text-muted-foreground">کمالی حسابداری</div>
+              <div className="text-[11px] text-muted-foreground">KAMIX</div>
             </div>
           </Link>
           </div>

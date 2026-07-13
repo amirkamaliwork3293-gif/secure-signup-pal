@@ -31,7 +31,7 @@ import {
 export const Route = createFileRoute("/voice")({
   head: () => ({
     meta: [
-      { title: "ثبت صوتی | کمالی حسابداری" },
+      { title: "ثبت صوتی | KAMIX" },
       { name: "description", content: "افزودن کالا به فاکتور با گفتار فارسی — بدون تایپ." },
     ],
   }),

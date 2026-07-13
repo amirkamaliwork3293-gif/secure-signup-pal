@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 export const Route = createFileRoute("/menu")({
-  head: () => ({ meta: [{ title: "منوی دیجیتال | کمالی" }] }),
+  head: () => ({ meta: [{ title: "منوی دیجیتال | KAMIX" }] }),
   component: () => (
     <AuthGuard>
       <MenuPage />

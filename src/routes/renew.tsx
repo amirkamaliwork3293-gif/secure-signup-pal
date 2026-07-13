@@ -9,7 +9,7 @@ import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } fro
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/renew")({
-  head: () => ({ meta: [{ title: "تمدید اشتراک | کمالی" }] }),
+  head: () => ({ meta: [{ title: "تمدید اشتراک | KAMIX" }] }),
   component: RenewPage,
 });
 

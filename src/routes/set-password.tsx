@@ -7,7 +7,7 @@ import { PLAN_LABEL } from "@/lib/supabase";
 
 export const Route = createFileRoute("/set-password")({
   validateSearch: (s: Record<string, unknown>) => ({ u: (s.u as string) || "" }),
-  head: () => ({ meta: [{ title: "تنظیم رمز عبور | کمالی" }] }),
+  head: () => ({ meta: [{ title: "تنظیم رمز عبور | KAMIX" }] }),
   component: SetPasswordPage,
 });
 

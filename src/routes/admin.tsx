@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
+import { LandingEditor } from "@/components/admin/LandingEditor";
 import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
-  head: () => ({ meta: [{ title: "پنل ادمین | کمالی" }] }),
+  head: () => ({ meta: [{ title: "پنل ادمین | KAMIX" }] }),
   component: () => (
     <AuthGuard adminOnly>
       <AdminPage />
@@ -28,7 +29,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "plans" | "settings";
+type Tab = "requests" | "users" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -120,7 +121,7 @@ function AdminPage() {
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-bold kamali-brand">پنل ادمین کمالی</div>
+              <div className="text-sm font-bold kamali-brand">پنل ادمین KAMIX</div>
               <div className="text-[10px] text-muted-foreground">مدیریت کاربران و درخواست‌ها</div>
             </div>
           </div>
@@ -158,6 +159,7 @@ function AdminPage() {
             { id: "users" as Tab, label: "کاربران", icon: Users },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
+            { id: "landing" as Tab, label: "معرفی", icon: ImageIcon },
           ]).map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -197,6 +199,7 @@ function AdminPage() {
             )}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
+            {tab === "landing" && <LandingEditor />}
           </>
         )}
       </main>

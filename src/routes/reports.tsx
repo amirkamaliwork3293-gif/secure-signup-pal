@@ -15,7 +15,7 @@ import {
 export const Route = createFileRoute("/reports")({
   head: () => ({
     meta: [
-      { title: "گزارش سود و درآمد | کمالی حسابداری" },
+      { title: "گزارش سود و درآمد | KAMIX" },
       { name: "description", content: "گزارش روزانه، ماهانه و سالانه درآمد و سود به تفکیک محصول." },
     ],
   }),

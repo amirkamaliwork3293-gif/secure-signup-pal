@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { LoginPage } from "@/routes/login";
+import { LandingPage } from "@/components/LandingPage";
+import { isWebView } from "@/lib/isWebView";
 import { ShieldOff, Lock, Clock, CalendarX } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
@@ -23,7 +25,11 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
     );
   }
 
-  if (state.status === "unauthenticated") return <LoginPage />;
+  if (state.status === "unauthenticated") {
+    // داخل اپلیکیشن (وب‌ویو) یا مسیر ادمین → مستقیم صفحه‌ی ورود.
+    // در مرورگر وب → ابتدا صفحه‌ی معرفی نمایش داده می‌شود.
+    return isWebView() || adminOnly ? <LoginPage /> : <LandingPage />;
+  }
 
   if (state.status === "pending") {
     return (

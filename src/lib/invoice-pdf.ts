@@ -78,7 +78,7 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number): number {
 
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
   ctx.fillStyle = MUTED;
-  ctx.fillText(pageNo === 1 ? "کمالی حسابداری | فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
+  ctx.fillText(pageNo === 1 ? "KAMIX | فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
   y += 5 * SCALE;
 
   ctx.strokeStyle = INK;

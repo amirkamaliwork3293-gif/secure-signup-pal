@@ -9,7 +9,7 @@ import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
 export const Route = createFileRoute("/register")({
-  head: () => ({ meta: [{ title: "ثبت‌نام | کمالی حسابداری" }] }),
+  head: () => ({ meta: [{ title: "ثبت‌نام | KAMIX" }] }),
   component: RegisterPage,
 });
 
@@ -234,7 +234,7 @@ function RegisterPage() {
           <Receipt className="h-6 w-6 text-primary-foreground" />
         </div>
         <div className="text-center">
-          <div className="text-lg font-bold kamali-brand">ثبت‌نام در کمالی</div>
+          <div className="text-lg font-bold kamali-brand">ثبت‌نام در KAMIX</div>
           <div className="text-xs text-muted-foreground">فرم زیر را تکمیل و واریز را انجام دهید</div>
         </div>
       </div>

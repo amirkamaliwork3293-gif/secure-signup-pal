@@ -9,7 +9,7 @@ import { LoginPromoVideo } from "@/components/LoginPromoVideo";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [{ title: "ورود | کمالی حسابداری" }] }),
+  head: () => ({ meta: [{ title: "ورود | KAMIX" }] }),
   component: LoginPage,
 });
 
@@ -71,7 +71,7 @@ export function LoginPage() {
           <Receipt className="h-7 w-7 text-primary-foreground" />
         </div>
         <div className="text-center">
-          <div className="text-xl font-bold kamali-brand">کمالی حسابداری</div>
+          <div className="text-xl font-bold kamali-brand">KAMIX</div>
           <div className="text-xs text-muted-foreground">مدیریت فروش، انبار و حساب‌ها</div>
         </div>
       </div>

@@ -39,7 +39,7 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "کمالی حسابداری | فاکتور جاری" },
+      { title: "KAMIX | فاکتور جاری" },
       { name: "description", content: "فاکتور حسابداری با اسکن بارکد و QR کد توسط دوربین موبایل." },
     ],
   }),

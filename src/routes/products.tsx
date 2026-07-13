@@ -24,7 +24,7 @@ export const Route = createFileRoute("/products")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "محصولات | کمالی حسابداری" },
+      { title: "محصولات | KAMIX" },
       { name: "description", content: "مدیریت محصولات و کدهای بارکد/QR." },
     ],
   }),

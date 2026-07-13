@@ -22,7 +22,7 @@ export const Route = createFileRoute("/history")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "تاریخچه فاکتورها | کمالی حسابداری" },
+      { title: "تاریخچه فاکتورها | KAMIX" },
       { name: "description", content: "تاریخچه فاکتورهای ثبت‌شده." },
     ],
   }),

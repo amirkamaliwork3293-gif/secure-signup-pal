@@ -10,7 +10,7 @@ import { Plus, Trash2, Zap, Printer, ArrowRight } from "lucide-react";
 type Draft = { id: string; name: string; price: string };
 
 export const Route = createFileRoute("/quick-add")({
-  head: () => ({ meta: [{ title: "ثبت سریع محصولات | کمالی حسابداری" }] }),
+  head: () => ({ meta: [{ title: "ثبت سریع محصولات | KAMIX" }] }),
   component: () => <AuthGuard><QuickAdd /></AuthGuard>,
 });
 

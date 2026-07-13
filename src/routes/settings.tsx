@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
-  head: () => ({ meta: [{ title: "تنظیمات | کمالی حسابداری" }] }),
+  head: () => ({ meta: [{ title: "تنظیمات | KAMIX" }] }),
   component: SettingsPage,
 });
 

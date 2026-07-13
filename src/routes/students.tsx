@@ -37,7 +37,7 @@ import {
 export const Route = createFileRoute("/students")({
   head: () => ({
     meta: [
-      { title: "هنرجویان و شهریه | کمالی حسابداری" },
+      { title: "هنرجویان و شهریه | KAMIX" },
       {
         name: "description",
         content:

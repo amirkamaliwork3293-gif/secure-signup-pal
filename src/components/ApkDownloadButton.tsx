@@ -54,7 +54,7 @@ export function ApkDownloadButton({ className = "" }: { className?: string }) {
             <div className="rounded-xl border border-border bg-background p-2">
               <img
                 src={installGuideAsset.url}
-                alt="راهنمای تصویری نصب فایل APK کمالی حسابداری روی اندروید"
+                alt="راهنمای تصویری نصب فایل APK KAMIX روی اندروید"
                 loading="lazy"
                 className="mx-auto w-full max-w-xs rounded-lg"
               />

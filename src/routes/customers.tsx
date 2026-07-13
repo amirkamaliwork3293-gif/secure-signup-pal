@@ -47,7 +47,7 @@ export const Route = createFileRoute("/customers")({
   validateSearch: searchSchema,
   head: () => ({
     meta: [
-      { title: "مشتریان و بدهکاران | کمالی حسابداری" },
+      { title: "مشتریان و بدهکاران | KAMIX" },
       { name: "description", content: "مدیریت حساب مشتریان، بدهی‌ها و پرداخت‌ها." },
     ],
   }),

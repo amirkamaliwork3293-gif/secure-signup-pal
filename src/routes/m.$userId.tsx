@@ -292,7 +292,7 @@ function PublicMenuPage() {
           className="mt-10 text-center text-[10px]"
           style={{ color: C.creamMute, letterSpacing: "0.18em" }}
         >
-          قدرت گرفته از کمالی حسابداری
+          قدرت گرفته از KAMIX
         </p>
       </main>
     </div>

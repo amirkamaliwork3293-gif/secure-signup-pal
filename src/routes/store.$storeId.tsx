@@ -367,7 +367,7 @@ function StorePage() {
         className="mt-10 text-center text-[11px]"
         style={{ color: C.textMute, letterSpacing: "0.08em" }}
       >
-        ساخته‌شده با کمالی حسابداری
+        ساخته‌شده با KAMIX
       </footer>
 
       {/* لایت‌باکس */}

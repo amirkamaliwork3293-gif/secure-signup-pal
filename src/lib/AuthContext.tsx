@@ -158,15 +158,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-      // SIGNED_IN for the already-authenticated user is a no-op on mobile resume.
+      // SIGNED_IN for the already-authenticated (or pending/expired) user is a
+      // no-op on tab focus / mobile resume — Supabase re-emits it after every
+      // TOKEN_REFRESHED and window focus. Re-running loadState there causes
+      // the "در حال احراز هویت..." flicker the user is complaining about.
       const cur = stateRef.current;
-      if (
-        event === "SIGNED_IN" &&
-        session &&
-        cur.status === "authenticated" &&
-        cur.session.user.id === session.user.id
-      ) {
-        return;
+      if (event === "SIGNED_IN" && session) {
+        const sameUser =
+          (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
+          (cur.status === "expired" && cur.profile.id === session.user.id) ||
+          (cur.status === "pending" && cur.username) ||
+          (cur.status === "rejected" && cur.username);
+        if (sameUser) return;
       }
       void syncSession(session);
     });

@@ -164,12 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the "در حال احراز هویت..." flicker the user is complaining about.
       const cur = stateRef.current;
       if (event === "SIGNED_IN" && session) {
-        const sameUser =
-          (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
-          (cur.status === "expired" && cur.profile.id === session.user.id) ||
-          (cur.status === "pending" && cur.username) ||
-          (cur.status === "rejected" && cur.username);
-        if (sameUser) return;
+        // Any resolved state means we've already loaded this user's profile.
+        // A truly new user only arrives after an explicit SIGNED_OUT.
+        if (cur.status !== "loading" && cur.status !== "unauthenticated") return;
       }
       void syncSession(session);
     });

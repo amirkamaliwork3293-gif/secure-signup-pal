@@ -15,10 +15,13 @@ function isCapacitor(): boolean {
 function uaLooksLikeWebView(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";
-  // برچسب سفارشی اگر اپ آن را تنظیم کند، یا Android System WebView (";wv")
-  if (/KAMIX(App)?/i.test(ua)) return true;
-  const isAndroid = /Android/i.test(ua);
-  return isAndroid && /;\s*wv\)/i.test(ua);
+  // فقط برچسب سفارشی خودِ اپ کامیکس را معتبر می‌دانیم.
+  // توجه: امضای عمومی Android WebView (";wv)") عمداً چک نمی‌شود، چون
+  // مرورگرهای درون‌برنامه‌ای اینستاگرام/فیسبوک/لینکدین و... هم از همین
+  // WebView سیستمی استفاده می‌کنند و باعث تشخیص اشتباهِ «داخل اپ کامیکس»
+  // می‌شدند (نتیجه‌اش: رد شدن اشتباهیِ صفحه‌ی معرفی برای بازدیدکننده‌های
+  // لینک بایوی اینستاگرام).
+  return /KAMIX(App)?/i.test(ua);
 }
 
 /**

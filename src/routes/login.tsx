@@ -4,8 +4,6 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
-import { BusinessGuideDialog } from "@/components/BusinessGuideDialog";
-import { LoginPromoVideo } from "@/components/LoginPromoVideo";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
@@ -174,8 +172,6 @@ export function LoginPage() {
       </div>
 
       <LoginHelpDialog />
-      <BusinessGuideDialog />
-      <LoginPromoVideo className="mt-6 mb-4" />
     </div>
   );
 }

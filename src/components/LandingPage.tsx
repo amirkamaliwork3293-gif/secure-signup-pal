@@ -28,6 +28,7 @@ import {
   Mail,
 } from "lucide-react";
 import heroBannerUrl from "@/assets/kamix-hero-banner.png";
+import { SmartBusinessGuide } from "@/components/SmartBusinessGuide";
 
 const FEATURE_ICONS = [Receipt, ScanLine, Package, BarChart3, Users, ShieldCheck];
 
@@ -237,6 +238,9 @@ export function LandingPage() {
           })}
         </div>
       </section>
+
+      {/* Smart business guide — persuasive, category-specific breakdown */}
+      <SmartBusinessGuide />
 
       {/* Bottom CTA */}
       <section className="mx-auto max-w-5xl px-4 pb-16">

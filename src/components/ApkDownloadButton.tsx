@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { Download, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
 import { isNativeApp } from "@/lib/print";
-import installGuideAsset from "@/assets/apk-install-guide.jpeg.asset.json";
+import installGuideImage from "@/assets/apk-install-guide.png";
 
 export const APK_DOWNLOAD_URL = "/kamali-accounting.apk";
 
@@ -53,7 +53,7 @@ export function ApkDownloadButton({ className = "" }: { className?: string }) {
             </ol>
             <div className="rounded-xl border border-border bg-background p-2">
               <img
-                src={installGuideAsset.url}
+                src={installGuideImage}
                 alt="راهنمای تصویری نصب فایل APK KAMIX روی اندروید"
                 loading="lazy"
                 className="mx-auto w-full max-w-xs rounded-lg"

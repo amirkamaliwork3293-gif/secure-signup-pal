@@ -143,7 +143,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
         (cur.status === "expired" && cur.profile.id === session.user.id);
       if (!disposed && currentRevision === revision && !sameUser) {
-        setState({ status: "loading" });
+        // Optimistic hydration: اگر پروفایل این کاربر در کش داریم،
+        // مستقیم وضعیت authenticated را نشان بده تا اسپینر
+        // «در حال احراز هویت...» ظاهر نشود. loadState در پس‌زمینه
+        // اجرا می‌شود و در صورت تغییر، وضعیت را reconcile می‌کند.
+        const cached = readProfileCache(session.user.id);
+        const usableCache =
+          cached &&
+          (cached.isAdmin ||
+            (cached.profile.status !== "pending" &&
+              cached.profile.status !== "rejected" &&
+              cached.profile.status !== "expired" &&
+              (!cached.profile.end_date ||
+                new Date(cached.profile.end_date) >= new Date())));
+        if (usableCache) {
+          setStorageScope(session.user.id);
+          setState({
+            status: "authenticated",
+            session,
+            profile: cached!.profile,
+            isAdmin: cached!.isAdmin,
+          });
+        } else {
+          setState({ status: "loading" });
+        }
       }
 
       const nextState = await loadState(session);

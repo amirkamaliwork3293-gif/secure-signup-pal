@@ -120,8 +120,10 @@ const DEVICE_TIER: "low" | "mid" | "high" = (() => {
 
 // Decode canvas size — adapts to device tier.
 // Higher resolution = small/dense barcodes are decoded reliably (user-priority).
-const DW = DEVICE_TIER === "low" ? 384 : DEVICE_TIER === "mid" ? 560 : 720;
-const DH = DEVICE_TIER === "low" ? 288 : DEVICE_TIER === "mid" ? 420 : 540;
+// Bumped mid/high tiers so tiny/dense barcodes (EAN-13 روی برچسب‌های کوچک،
+// QRهای متراکم) با جزئیات کافی به دیکودر برسند.
+const DW = DEVICE_TIER === "low" ? 416 : DEVICE_TIER === "mid" ? 640 : 800;
+const DH = DEVICE_TIER === "low" ? 312 : DEVICE_TIER === "mid" ? 480 : 600;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 

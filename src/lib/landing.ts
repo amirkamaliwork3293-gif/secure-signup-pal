@@ -25,6 +25,11 @@ export type LandingContact = {
   email?: string;
 };
 
+export type LandingStory = {
+  image_url: string;
+  caption?: string;
+};
+
 export type LandingContent = {
   brand_name: string;
   headline: string;
@@ -33,6 +38,7 @@ export type LandingContent = {
   media: LandingMedia[];
   features: LandingFeature[];
   contact: LandingContact;
+  stories: LandingStory[];
 };
 
 export const DEFAULT_LANDING: LandingContent = {
@@ -49,6 +55,7 @@ export const DEFAULT_LANDING: LandingContent = {
     { title: "گزارش سود", description: "درآمد، سود و عملکرد فروشگاه را لحظه‌ای ببینید." },
   ],
   contact: {},
+  stories: [],
 };
 
 function normalize(row: Partial<LandingContent> | null | undefined): LandingContent {
@@ -63,6 +70,9 @@ function normalize(row: Partial<LandingContent> | null | undefined): LandingCont
       ? row.features.filter((f) => f && (f.title || f.description))
       : DEFAULT_LANDING.features,
     contact: (row.contact && typeof row.contact === "object" ? row.contact : {}) as LandingContact,
+    stories: Array.isArray((row as any).stories)
+      ? ((row as any).stories as LandingStory[]).filter((s) => s && s.image_url)
+      : [],
   };
 }
 
@@ -89,13 +99,15 @@ export async function saveLandingContent(content: LandingContent): Promise<void>
     media: content.media,
     features: content.features,
     contact: content.contact || {},
+    stories: content.stories || [],
     updated_at: new Date().toISOString(),
   };
   const { error } = await table().upsert(payload, { onConflict: "id" });
   if (error) {
-    // Fallback for DBs that don't have the newer `contact` column yet.
-    if (/contact/i.test(error.message || "")) {
-      const { contact: _c, ...rest } = payload;
+    // Fallback for older DBs missing the newer `contact` or `stories` columns.
+    const msg = error.message || "";
+    if (/contact|stories/i.test(msg)) {
+      const { contact: _c, stories: _s, ...rest } = payload;
       const { error: err2 } = await table().upsert(rest, { onConflict: "id" });
       if (err2) throw new Error(err2.message);
       return;

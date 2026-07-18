@@ -11,11 +11,12 @@ import {
   uploadLandingMedia,
   type LandingContent,
   type LandingMedia,
+  type LandingStory,
 } from "@/lib/landing";
 import {
   Save, Loader2, Plus, Trash2, Upload, Film, Image as ImageIcon,
   Link as LinkIcon, CheckCircle2, AlertTriangle,
-  Phone, Instagram, Send, MessageCircle, Mail,
+  Phone, Instagram, Send, MessageCircle, Mail, Sparkles,
 } from "lucide-react";
 
 const INPUT = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
@@ -31,6 +32,8 @@ export function LandingEditor() {
   const [newUrl, setNewUrl] = useState("");
   const [newType, setNewType] = useState<"video" | "image">("video");
   const fileRef = useRef<HTMLInputElement>(null);
+  const storyFileRef = useRef<HTMLInputElement>(null);
+  const [storyUploading, setStoryUploading] = useState(false);
 
   useEffect(() => {
     loadLandingContent().then((c) => {
@@ -47,6 +50,41 @@ export function LandingEditor() {
 
   const addMedia = (m: LandingMedia) => set("media", [...content.media, m]);
   const removeMedia = (i: number) => set("media", content.media.filter((_, idx) => idx !== i));
+
+  // ── Stories ────────────────────────────────────────────────────────────
+  const addStory = (s: LandingStory) => set("stories", [...(content.stories || []), s]);
+  const updateStory = (i: number, patch: Partial<LandingStory>) => {
+    const arr = [...(content.stories || [])];
+    arr[i] = { ...arr[i], ...patch };
+    set("stories", arr);
+  };
+  const removeStory = (i: number) =>
+    set("stories", (content.stories || []).filter((_, idx) => idx !== i));
+
+  const onPickStoryFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image"));
+    e.target.value = "";
+    if (files.length === 0) return;
+    setStoryUploading(true);
+    setMsg(null);
+    const added: LandingStory[] = [];
+    let failed = 0;
+    for (const file of files) {
+      try {
+        const url = await uploadLandingMedia(file);
+        added.push({ image_url: url, caption: "" });
+      } catch { failed++; }
+    }
+    if (added.length > 0) {
+      setContent((c) => ({ ...c, stories: [...(c.stories || []), ...added] }));
+    }
+    setMsg(
+      failed === 0
+        ? { type: "ok", text: `${added.length} استوری اضافه شد. برای اعمال، «ذخیره» را بزنید.` }
+        : { type: "err", text: `${added.length} استوری اضافه شد، ${failed} فایل ناموفق بود.` },
+    );
+    setStoryUploading(false);
+  };
 
   const addUrlMedia = () => {
     const url = newUrl.trim();
@@ -164,7 +202,12 @@ export function LandingEditor() {
       {/* Media */}
       <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-card">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-bold">ویدیو و عکس‌های معرفی</div>
+          <div>
+            <div className="text-sm font-bold">ویدیوهای معرفی برنامه</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              فقط ویدیوها در بخش «معرفی برنامه» نمایش داده می‌شوند. عکس‌ها را در بخش «استوری‌ها» بالای این کارت اضافه کنید.
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => fileRef.current?.click()}

@@ -199,6 +199,68 @@ export function LandingEditor() {
         </Field>
       </div>
 
+      {/* Stories bar — Instagram-style horizontal reel on the landing page */}
+      <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-card">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-sm font-bold">
+              <Sparkles className="h-4 w-4 text-primary" />
+              استوری‌ها (نوار عکس بالای سایت)
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              دایره‌های افقی شبیه اینستاگرام در بالای صفحه‌ی معرفی. برای هر عکس می‌توانید یک کپشن کوتاه بنویسید.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => storyFileRef.current?.click()}
+            disabled={storyUploading}
+            className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            {storyUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            افزودن استوری
+          </button>
+          <input
+            ref={storyFileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onPickStoryFiles}
+            className="hidden"
+          />
+        </div>
+
+        {(content.stories || []).length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            هنوز استوری‌ای اضافه نشده است.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {(content.stories || []).map((s, i) => (
+              <div key={i} className="overflow-hidden rounded-xl border border-border bg-background">
+                <img src={s.image_url} alt="" className="aspect-square w-full object-cover" />
+                <div className="space-y-2 p-2">
+                  <input
+                    value={s.caption || ""}
+                    onChange={(e) => updateStory(i, { caption: e.target.value })}
+                    placeholder="کپشن (اختیاری)"
+                    className={`${INPUT} py-1.5 text-xs`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeStory(i)}
+                    className="flex w-full items-center justify-center gap-1 rounded-lg py-1.5 text-[11px] font-semibold text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    حذف
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Media */}
       <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-card">
         <div className="flex items-center justify-between">

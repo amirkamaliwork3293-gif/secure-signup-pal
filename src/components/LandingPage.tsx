@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import heroBannerUrl from "@/assets/kamix-hero-banner.png";
 import { SmartBusinessGuide } from "@/components/SmartBusinessGuide";
+import { StoriesBar } from "@/components/StoriesBar";
 
 const FEATURE_ICONS = [Receipt, ScanLine, Package, BarChart3, Users, ShieldCheck];
 
@@ -118,6 +119,9 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* Stories bar — Instagram-style horizontal reel, admin-managed */}
+      <StoriesBar stories={content.stories} />
+
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-primary/10 via-background to-background" />
@@ -167,23 +171,33 @@ export function LandingPage() {
               <CheckCircle2 className="h-4 w-4 text-primary" /> پشتیبان‌گیری ابری
             </span>
           </div>
+
+          {/* Download-after-signup notice — visible, no direct link (as requested) */}
+          <div className="mx-auto mt-8 flex max-w-xl items-center justify-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3 text-center text-sm font-semibold text-primary shadow-card">
+            <Smartphone className="h-5 w-5 shrink-0" />
+            <span>
+              پس از ثبت‌نام، لینک دانلود <strong>اپلیکیشن اندروید KAMIX</strong> برای شما نمایش داده می‌شود.
+            </span>
+          </div>
         </div>
       </section>
 
-      {/* Media gallery */}
-      {content.media.length > 0 && (
+      {/* Video introduction — videos only (images are shown as stories above) */}
+      {content.media.filter((m) => m.type === "video").length > 0 && (
         <section className="mx-auto max-w-6xl px-4 py-10">
           <h2 className="mb-6 text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
-            نگاهی به KAMIX
+            معرفی برنامه در چند ویدیو
           </h2>
+          <p className="mx-auto -mt-4 mb-6 max-w-xl text-center text-sm text-muted-foreground">
+            کارکرد بخش‌های مختلف برنامه را از نزدیک ببینید.
+          </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {content.media.map((m, i) => (
+            {content.media.filter((m) => m.type === "video").map((m, i) => (
               <figure
                 key={i}
                 className="group overflow-hidden rounded-2xl border border-border bg-card shadow-card transition hover:shadow-elegant"
               >
-                {m.type === "video" ? (
-                  <video
+                <video
                     src={m.url}
                     autoPlay
                     muted
@@ -193,14 +207,6 @@ export function LandingPage() {
                     preload="metadata"
                     className="aspect-video w-full bg-black object-cover transition duration-500 group-hover:scale-[1.02]"
                   />
-                ) : (
-                  <img
-                    src={m.url}
-                    alt={m.caption || "معرفی KAMIX"}
-                    loading="lazy"
-                    className="aspect-video w-full object-cover transition duration-500 group-hover:scale-[1.02]"
-                  />
-                )}
                 {m.caption && (
                   <figcaption className="px-4 py-3 text-center text-sm text-muted-foreground">
                     {m.caption}

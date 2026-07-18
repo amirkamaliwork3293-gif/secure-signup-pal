@@ -53,6 +53,45 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_content: {
+        Row: {
+          brand_name: string
+          contact: Json
+          description: string
+          features: Json
+          headline: string
+          id: number
+          media: Json
+          stories: Json
+          subheadline: string
+          updated_at: string
+        }
+        Insert: {
+          brand_name?: string
+          contact?: Json
+          description?: string
+          features?: Json
+          headline?: string
+          id?: number
+          media?: Json
+          stories?: Json
+          subheadline?: string
+          updated_at?: string
+        }
+        Update: {
+          brand_name?: string
+          contact?: Json
+          description?: string
+          features?: Json
+          headline?: string
+          id?: number
+          media?: Json
+          stories?: Json
+          subheadline?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       menu_categories: {
         Row: {
           created_at: string

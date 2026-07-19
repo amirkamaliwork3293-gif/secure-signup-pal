@@ -6,12 +6,13 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 import {
   invoice, products, formatToman, formatNumber, formatJalaliDateTime, settings,
   PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
+  toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp,
   type Invoice, type InvoiceItem, type Product, type PaymentMethod,
 } from "@/lib/store";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
-  User, Pencil, Trash2, Check, X,
+  User, Pencil, Trash2, Check, X, Calendar,
   Minus, Plus, Search, PlusCircle, Wallet,
 } from "lucide-react";
 import { z } from "zod";
@@ -101,6 +102,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   // نگه داری آخرین نسخه ذخیره‌شده (برای نمایش بعد از save)
   const [saved, setSaved] = useState<Invoice>(initialInv);
   const [addQuery, setAddQuery] = useState("");
+  const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(initialInv.createdAt));
+  const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
+  const [dateErr, setDateErr] = useState<string | null>(null);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -111,23 +115,33 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     setEditing(true);
     setIsOpen(true);
     setAddQuery("");
+    setDateStr(toJalaliInputDate(saved.createdAt));
+    setTimeStr(toJalaliInputTime(saved.createdAt));
+    setDateErr(null);
   };
 
   const cancelEdit = () => {
     setDraft(saved);
     setEditing(false);
     setAddQuery("");
+    setDateErr(null);
   };
 
   const saveEdit = () => {
     // محاسبه مجدد جمع کل
     const total = draft.items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const updated = { ...draft, total };
+    // پارس تاریخ/ساعت شمسی
+    const jd = parseJalaliInput(dateStr);
+    const tm = parseTimeInput(timeStr) ?? { h: 0, min: 0 };
+    if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
+    const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
+    const updated = { ...draft, total, createdAt: newCreatedAt };
     invoice.updateHistory(updated);
     setSaved(updated);
     setDraft(updated);
     setEditing(false);
     setAddQuery("");
+    setDateErr(null);
   };
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -256,6 +270,30 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
           {/* حالت ویرایش */}
           {editing && (
             <div className="space-y-3">
+              {/* تاریخ و ساعت فاکتور */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Calendar className="h-3.5 w-3.5" /> تاریخ و ساعت فاکتور (شمسی)
+                </div>
+                <div className="flex gap-2" dir="ltr">
+                  <input
+                    value={dateStr}
+                    onChange={(e) => { setDateStr(e.target.value); setDateErr(null); }}
+                    placeholder="1403/05/12"
+                    inputMode="numeric"
+                    className="flex-1 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                  />
+                  <input
+                    value={timeStr}
+                    onChange={(e) => setTimeStr(e.target.value)}
+                    placeholder="14:30"
+                    inputMode="numeric"
+                    className="w-24 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                  />
+                </div>
+                {dateErr && <div className="mt-1 text-[10px] text-destructive">{dateErr}</div>}
+              </div>
+
               {/* نام مشتری */}
               <div className="grid grid-cols-2 gap-2">
                 <input

@@ -4,12 +4,12 @@ import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
-  formatJalaliDate,
+  formatJalaliDate, parseJalaliInput, jalaliToTimestamp,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
-  TrendingUp, TrendingDown, Package, FileCheck,
+  TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch,
 } from "lucide-react";
 
 export const Route = createFileRoute("/reports")({
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/reports")({
   component: ReportsPage,
 });
 
-type Range = "today" | "month" | "year" | "all";
+type Range = "today" | "month" | "year" | "all" | "custom";
 
 function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -120,18 +120,35 @@ function daysInMonthBreakdown(list: Invoice[]) {
 }
 
 const RANGE_LABEL: Record<Range, string> = {
-  today: "امروز", month: "این ماه", year: "امسال", all: "کل",
+  today: "امروز", month: "این ماه", year: "امسال", all: "کل", custom: "بازه دلخواه",
 };
 
 function ReportsPageInner() {
   const [history] = invoice.useHistory();
   const [range, setRange] = useState<Range>("today");
+  const [fromStr, setFromStr] = useState<string>("");
+  const [toStr, setToStr] = useState<string>("");
+  const [rangeErr, setRangeErr] = useState<string | null>(null);
+
+  const customRange = useMemo(() => {
+    if (range !== "custom") return null;
+    const from = parseJalaliInput(fromStr);
+    const to = parseJalaliInput(toStr);
+    if (!from || !to) return null;
+    const fromTs = jalaliToTimestamp(from.jy, from.jm, from.jd, 0, 0);
+    const toTs = jalaliToTimestamp(to.jy, to.jm, to.jd, 23, 59) + 59_999;
+    return { fromTs, toTs };
+  }, [range, fromStr, toStr]);
 
   const filtered = useMemo(() => {
     if (range === "all") return history;
+    if (range === "custom") {
+      if (!customRange) return [];
+      return history.filter((i) => i.createdAt >= customRange.fromTs && i.createdAt <= customRange.toTs);
+    }
     const from = range === "today" ? startOfDay() : range === "month" ? startOfMonth() : startOfYear();
     return history.filter((i) => i.createdAt >= from);
-  }, [history, range]);
+  }, [history, range, customRange]);
 
   const summary = summarize(filtered);
   const profitSummary = useMemo(() => computeProfit(filtered), [filtered]);
@@ -172,7 +189,62 @@ function ReportsPageInner() {
         <RangeButton value="month" icon={CalendarDays} />
         <RangeButton value="year" icon={CalendarRange} />
         <RangeButton value="all" icon={Clock} />
+        <RangeButton value="custom" icon={CalendarSearch} />
       </div>
+
+      {range === "custom" && (
+        <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+            <CalendarSearch className="h-3.5 w-3.5 text-primary" />
+            انتخاب بازه (تاریخ شمسی)
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="flex flex-1 items-center gap-2 text-xs">
+              <span className="w-8 shrink-0 text-muted-foreground">از:</span>
+              <input
+                value={fromStr}
+                onChange={(e) => { setFromStr(e.target.value); setRangeErr(null); }}
+                placeholder="1403/05/12"
+                inputMode="numeric"
+                dir="ltr"
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex flex-1 items-center gap-2 text-xs">
+              <span className="w-8 shrink-0 text-muted-foreground">تا:</span>
+              <input
+                value={toStr}
+                onChange={(e) => { setToStr(e.target.value); setRangeErr(null); }}
+                placeholder="1403/05/20"
+                inputMode="numeric"
+                dir="ltr"
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 outline-none focus:border-primary"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                const today = formatJalaliDate(Date.now());
+                setFromStr(today); setToStr(today);
+              }}
+              className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+            >
+              فقط امروز
+            </button>
+          </div>
+          {range === "custom" && !customRange && (fromStr || toStr) && (
+            <div className="mt-2 text-[11px] text-destructive">
+              تاریخ نامعتبر است. فرمت درست: ۱۴۰۳/۰۵/۱۲
+            </div>
+          )}
+          {customRange && (
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              نمایش از {formatJalaliDate(customRange.fromTs)} تا {formatJalaliDate(customRange.toTs)}
+            </div>
+          )}
+          {rangeErr && <div className="mt-2 text-[11px] text-destructive">{rangeErr}</div>}
+        </div>
+      )}
 
       {/* درآمد + سود */}
       <div className="mb-4 grid grid-cols-2 gap-2">

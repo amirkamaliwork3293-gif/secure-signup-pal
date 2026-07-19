@@ -677,6 +677,22 @@ export const adminResetUserPassword = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+// ─── Admin: fetch phone map (username → phone) for all users ─────────────────
+export const adminGetUserPhones = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const map: Record<string, string | null> = {};
+    for (const u of users ?? []) {
+      const uname = (u.user_metadata?.username as string | undefined)?.toLowerCase();
+      const phone = (u.user_metadata?.phone as string | undefined) || null;
+      if (uname) map[uname] = phone;
+    }
+    return map;
+  });
+
 // ─── Admin: update full per-plan configuration (enabled/price/duration/discount) ──
 export const updatePlanConfigs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

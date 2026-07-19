@@ -1140,6 +1140,68 @@ export function formatJalaliShort(ts: number | string | Date): string {
   return `${toFa(j.jd)} ${JMONTHS_SHORT[j.jm - 1]}`;
 }
 
+// Jalali → Julian Day Number (inverse of d2j)
+function j2d(jy: number, jm: number, jd: number): number {
+  const r = jalCal(jy);
+  return g2d(r.gy, 3, r.march)
+    + (jm - 1) * 31
+    - div(jm, 7) * (jm - 7)
+    + jd - 1;
+}
+
+/** Convert a Jalali date (interpreted in Asia/Tehran) to a UTC timestamp (ms). */
+export function jalaliToTimestamp(
+  jy: number, jm: number, jd: number, h = 0, min = 0,
+): number {
+  const g = d2g(j2d(jy, jm, jd));
+  // Guess as if the wall-clock were UTC, then correct by Tehran's offset.
+  const guess = Date.UTC(g.gy, g.gm - 1, g.gd, h, min, 0);
+  const t = tehranParts(new Date(guess));
+  const asUTCFromTehran = Date.UTC(t.y, t.m - 1, t.day, t.h, t.min, 0);
+  const offset = asUTCFromTehran - guess; // Tehran ahead of UTC in ms
+  return guess - offset;
+}
+
+/** Parse strings like `1403/05/12` (Persian/Arabic digits OK) into Jalali parts. */
+export function parseJalaliInput(s: string): { jy: number; jm: number; jd: number } | null {
+  if (!s) return null;
+  const en = s
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .trim();
+  const m = en.match(/^(\d{3,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (!m) return null;
+  const jy = +m[1], jm = +m[2], jd = +m[3];
+  if (jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+  return { jy, jm, jd };
+}
+
+/** Parse `HH:MM` (Persian digits OK). Returns null on invalid input. */
+export function parseTimeInput(s: string): { h: number; min: number } | null {
+  if (!s) return null;
+  const en = s
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .trim();
+  const m = en.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  const h = +m[1], min = +m[2];
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return { h, min };
+}
+
+/** Get Jalali parts formatted as `YYYY/MM/DD` in Latin digits (for editing inputs). */
+export function toJalaliInputDate(ts: number | string | Date): string {
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${j.jy}/${pad2(j.jm)}/${pad2(j.jd)}`;
+}
+export function toJalaliInputTime(ts: number | string | Date): string {
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${pad2(j.h)}:${pad2(j.min)}`;
+}
+
 /**
  * تبدیل ورودی کاربر به عدد: ارقام فارسی/عربی را به انگلیسی تبدیل و
  * جداکننده‌ها را حذف می‌کند. اعشار (برای واحدهای وزنی) پشتیبانی می‌شود.

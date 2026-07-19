@@ -160,6 +160,7 @@ function AdminPage() {
         <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
+            { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
             { id: "users" as Tab, label: "کاربران", icon: Users },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },

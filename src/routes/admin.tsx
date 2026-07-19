@@ -202,6 +202,9 @@ function AdminPage() {
                 onResetPassword={handleResetPassword}
               />
             )}
+            {tab === "renewals" && (
+              <RenewalsTab users={users} phones={phones} />
+            )}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
             {tab === "landing" && <LandingEditor />}

@@ -224,11 +224,8 @@ function ReportsPageInner() {
             <button
               type="button"
               onClick={() => {
-                const today = new Date();
-                const iso = today.toISOString();
-                // Populate a same-day range with today
-                const parts = formatJalaliDate(today.getTime()).replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
-                setFromStr(parts); setToStr(parts); void iso;
+                const today = formatJalaliDate(Date.now());
+                setFromStr(today); setToStr(today);
               }}
               className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
             >

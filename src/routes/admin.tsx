@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
-  updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone,
+  updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
@@ -17,7 +17,7 @@ import {
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
-  Package, Power, Percent, Timer, Search, KeyRound,
+  Package, Power, Percent, Timer, Search, KeyRound, BellRing, Phone, MessageSquare,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -29,13 +29,14 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
   const [tab, setTab] = useState<Tab>("requests");
   const [requests, setRequests] = useState<SignupRequest[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [phones, setPhones] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ function AdminPage() {
   const delUser = useServerFn(deleteUserAccount);
   const resetPwd = useServerFn(adminResetUserPassword);
   const getRequests = useServerFn(adminGetRequestsWithPhone);
+  const getPhones = useServerFn(adminGetUserPhones);
 
   const fetchAll = async () => {
     if (state.status !== "authenticated" || !state.isAdmin) {
@@ -55,15 +57,17 @@ function AdminPage() {
     }
 
     setLoading(true);
-    const [requestsData, u] = await Promise.all([
+    const [requestsData, u, phoneMap] = await Promise.all([
       getRequests(),
       supabase.from("profiles").select("*").order("created_at", { ascending: false }),
+      getPhones().catch(() => ({} as Record<string, string | null>)),
     ]);
 
     if (u.error) throw new Error(u.error.message);
 
     setRequests((requestsData as unknown as SignupRequest[]) || []);
     setUsers((u.data as UserProfile[]) || []);
+    setPhones((phoneMap as Record<string, string | null>) || {});
     setLoading(false);
   };
 

@@ -791,8 +791,8 @@ function SmsCampaignModal({
     });
   };
 
-  // لینک عمومی صفحه فروشگاه فقط برای واتساپ/اشتراک‌گذاری استفاده می‌شود.
-  // برای پیامک عادی طبق درخواست، هیچ لینکی افزوده نمی‌شود تا ارسال پیامک خراب نشود.
+  // لینک عمومی صفحه فروشگاه؛ در صورت فعال بودن سوییچ «افزودن لینک»، هم به پیامک
+  // و هم به متن اشتراک‌گذاری افزوده می‌شود.
   const storeLink = userId && includeLink ? storePublicUrl(userId) : "";
   // حذف کاراکترهای نامرئی جهت متن (RLM/LRM/RLE/PDF/...) که گاهی توسط ادیتور یا
   // مرورگر هنگام ترکیب متن فارسی + لینک انگلیسی به‌صورت خودکار تزریق می‌شوند و
@@ -800,7 +800,7 @@ function SmsCampaignModal({
   const stripBidi = (s: string) =>
     s.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
   const shareFinalText = stripBidi(storeLink ? `${text}\n${storeLink}` : text);
-  const smsText = stripBidi(text);
+  const smsText = shareFinalText;
 
   const markSent = (phones: string[]) =>
     setSentPhones((prev) => {
@@ -1011,17 +1011,18 @@ function SmsCampaignModal({
           </div>
 
           <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
-            💡 پیامک عادی بدون لینک ارسال می‌شود تا اپ پیامک و اپراتور آن را خراب نکنند. برای ارسال
-            لینک اصلی فروشگاه از دکمه «اشتراک در اپ‌های ایرانی» استفاده کنید؛ متن همزمان کپی می‌شود تا داخل اپ Paste کنید.
+            💡 اگر سوییچ «افزودن لینک صفحه فروشگاه» را روشن کنید، لینک عمومی فروشگاه هم به
+            پیامک و هم به متن اشتراک‌گذاری اضافه می‌شود. اگر می‌خواهید پیامک کوتاه‌تر باشد یا
+            نگران خرابی لینک در برخی اپراتورها/گوشی‌ها هستید، این سوییچ را خاموش بگذارید.
           </div>
         </div>
 
         <div className="space-y-3 border-t border-border p-4">
-          {/* افزودن لینک صفحه فروشگاه به اشتراک‌گذاری؛ پیامک عادی همیشه بدون لینک است */}
+          {/* افزودن لینک صفحه فروشگاه؛ روی پیامک و اشتراک‌گذاری هر دو اثر دارد */}
           <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-background px-3 py-2">
             <span className="flex items-center gap-2 text-xs">
               <Link2 className="h-4 w-4 text-primary" />
-              افزودن لینک اصلی فروشگاه به اشتراک‌گذاری
+              افزودن لینک صفحه فروشگاه به پیامک و اشتراک‌گذاری
             </span>
             <input
               type="checkbox"

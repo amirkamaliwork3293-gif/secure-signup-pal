@@ -843,3 +843,119 @@ function PlanCard({
     </div>
   );
 }
+
+// ─── Renewals tab ────────────────────────────────────────────────────────────
+function RenewalsTab({
+  users, phones,
+}: {
+  users: UserProfile[];
+  phones: Record<string, string | null>;
+}) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  type Row = { u: UserProfile; end: number; daysLeft: number; phone: string | null };
+  const rows: Row[] = users
+    .filter((u) => u.end_date)
+    .map((u) => {
+      const end = new Date(u.end_date!).getTime();
+      const daysLeft = Math.ceil((end - now) / DAY);
+      const phone = phones[u.username?.toLowerCase()] || null;
+      return { u, end, daysLeft, phone };
+    })
+    .filter((r) => r.daysLeft <= 7) // منقضی + نزدیک به انقضا (≤۷ روز)
+    .sort((a, b) => a.end - b.end);
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
+        فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
+      </div>
+    );
+  }
+
+  const buildMsg = (u: UserProfile, daysLeft: number) => {
+    const name = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
+    if (daysLeft <= 0) {
+      return `سلام ${name} عزیز،\nاشتراک شما در برنامه کمالی (KAMIX) منقضی شده است. لطفاً برای ادامه استفاده، از بخش «تمدید» اقدام بفرمایید.\nبا تشکر 🌹`;
+    }
+    return `سلام ${name} عزیز،\nاشتراک شما در برنامه کمالی (KAMIX) تا ${daysLeft} روز دیگر به پایان می‌رسد. لطفاً پیش از انقضا نسبت به تمدید اقدام کنید.\nبا تشکر 🌹`;
+  };
+
+  const normalizePhone = (p: string) => p.replace(/[^\d+]/g, "");
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
+        نمایش کاربرانی که اشتراکشان تا ۷ روز آینده تمام می‌شود یا منقضی شده — جهت یادآوری تمدید.
+      </div>
+      <ul className="space-y-2">
+        {rows.map(({ u, daysLeft, phone }) => {
+          const expired = daysLeft <= 0;
+          const msg = buildMsg(u, daysLeft);
+          const encoded = encodeURIComponent(msg);
+          const localPhone = phone ? normalizePhone(phone) : "";
+          return (
+            <li key={u.id} className="rounded-2xl border border-border bg-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="font-medium">
+                    {u.first_name || "—"} {u.last_name || ""}
+                    <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{u.username}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {u.plan && (
+                      <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">{PLAN_LABEL[u.plan]}</span>
+                    )}
+                    <span className={`flex items-center gap-1 rounded px-2 py-0.5 ${expired ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700 dark:text-amber-400"}`}>
+                      <CalendarClock className="h-3 w-3" />
+                      {expired ? "منقضی شده" : `${daysLeft} روز مانده`}
+                    </span>
+                    {u.end_date && <span>{formatJalaliDate(u.end_date)}</span>}
+                    {phone ? (
+                      <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{phone}</span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">بدون شماره تماس</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {localPhone ? (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <a
+                    href={`tel:${localPhone}`}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    تماس
+                  </a>
+                  <a
+                    href={`sms:${localPhone}?body=${encoded}`}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 py-2 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-500/20"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    پیامک
+                  </a>
+                  <a
+                    href={`https://wa.me/${localPhone.replace(/^0/, "98").replace(/^\+/, "")}?text=${encoded}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-green-500/10 py-2 text-xs font-semibold text-green-700 dark:text-green-400 hover:bg-green-500/20"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    واتساپ
+                  </a>
+                </div>
+              ) : (
+                <div className="mt-3 text-[11px] text-muted-foreground">
+                  شماره تماسی برای این کاربر ثبت نشده است.
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VoiceRouteImport } from './routes/voice'
 import { Route as StudentsRouteImport } from './routes/students'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as ScanRouteImport } from './routes/scan'
@@ -18,6 +19,7 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RenewRouteImport } from './routes/renew'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as QuickAddRouteImport } from './routes/quick-add'
+import { Route as PurchasesRouteImport } from './routes/purchases'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as MenuQrRouteImport } from './routes/menu-qr'
 import { Route as MenuRouteImport } from './routes/menu'
@@ -37,6 +39,11 @@ const VoiceRoute = VoiceRouteImport.update({
 const StudentsRoute = StudentsRouteImport.update({
   id: '/students',
   path: '/students',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -72,6 +79,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const QuickAddRoute = QuickAddRouteImport.update({
   id: '/quick-add',
   path: '/quick-add',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PurchasesRoute = PurchasesRouteImport.update({
+  id: '/purchases',
+  path: '/purchases',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductsRoute = ProductsRouteImport.update({
@@ -134,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -141,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -155,6 +169,7 @@ export interface FileRoutesByTo {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -162,6 +177,7 @@ export interface FileRoutesByTo {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -177,6 +193,7 @@ export interface FileRoutesById {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -184,6 +201,7 @@ export interface FileRoutesById {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -200,6 +218,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -207,6 +226,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -221,6 +241,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -228,6 +249,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -242,6 +264,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -249,6 +272,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -264,6 +288,7 @@ export interface RootRouteChildren {
   MenuRoute: typeof MenuRoute
   MenuQrRoute: typeof MenuQrRoute
   ProductsRoute: typeof ProductsRoute
+  PurchasesRoute: typeof PurchasesRoute
   QuickAddRoute: typeof QuickAddRoute
   RegisterRoute: typeof RegisterRoute
   RenewRoute: typeof RenewRoute
@@ -271,6 +296,7 @@ export interface RootRouteChildren {
   ScanRoute: typeof ScanRoute
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StudentsRoute: typeof StudentsRoute
   VoiceRoute: typeof VoiceRoute
   MUserIdRoute: typeof MUserIdRoute
@@ -291,6 +317,13 @@ declare module '@tanstack/react-router' {
       path: '/students'
       fullPath: '/students'
       preLoaderRoute: typeof StudentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -340,6 +373,13 @@ declare module '@tanstack/react-router' {
       path: '/quick-add'
       fullPath: '/quick-add'
       preLoaderRoute: typeof QuickAddRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/purchases': {
+      id: '/purchases'
+      path: '/purchases'
+      fullPath: '/purchases'
+      preLoaderRoute: typeof PurchasesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/products': {
@@ -424,6 +464,7 @@ const rootRouteChildren: RootRouteChildren = {
   MenuRoute: MenuRoute,
   MenuQrRoute: MenuQrRoute,
   ProductsRoute: ProductsRoute,
+  PurchasesRoute: PurchasesRoute,
   QuickAddRoute: QuickAddRoute,
   RegisterRoute: RegisterRoute,
   RenewRoute: RenewRoute,
@@ -431,6 +472,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScanRoute: ScanRoute,
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   StudentsRoute: StudentsRoute,
   VoiceRoute: VoiceRoute,
   MUserIdRoute: MUserIdRoute,
@@ -439,3 +481,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

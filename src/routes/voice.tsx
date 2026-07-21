@@ -74,8 +74,9 @@ function VoicePageInner() {
     setEngine(rec.engine);
     if (rec.engine === "none") setManualMode(true);
 
-    // آیا پلاگین نیتیو SpeechRecognition واقعاً داخل APK کامپایل شده؟ (مثل Printer)
-    // PluginHeaders فهرست قطعی پلاگین‌های نیتیوِ ثبت‌شده روی پل Capacitor است.
+    // آیا پل صوتی نیتیو KamaliVoice واقعاً داخل APK تزریق شده؟
+    // این یک رابط خام WebView است (addJavascriptInterface)، نه یک پلاگین Capacitor،
+    // پس باید مستقیماً روی window چک شود.
     try {
       const cap = (
         window as unknown as {
@@ -84,13 +85,16 @@ function VoicePageInner() {
             Plugins?: Record<string, unknown>;
             PluginHeaders?: Array<{ name: string }>;
           };
+          KamaliVoice?: { start?: unknown };
         }
       ).Capacitor;
-      const native = !!cap?.isNativePlatform?.();
+      const kamaliVoice = (window as unknown as { KamaliVoice?: { start?: unknown } }).KamaliVoice;
+      const native = !!cap?.isNativePlatform?.() || !!kamaliVoice;
       const headers = cap?.PluginHeaders?.map((h) => h.name) ?? [];
       const keys = cap?.Plugins ? Object.keys(cap.Plugins) : [];
-      const plugins = (headers.length ? headers : keys).sort();
-      if (native) setCapInfo({ native, plugins });
+      const plugins = (headers.length ? headers : keys).slice();
+      if (kamaliVoice && typeof kamaliVoice.start === "function") plugins.push("KamaliVoice");
+      if (native) setCapInfo({ native, plugins: plugins.sort() });
     } catch {
       /* ignore */
     }
@@ -431,8 +435,8 @@ function VoicePageInner() {
               داخل اپ نیتیو: <b>{capInfo.native ? "بله" : "خیر"}</b>
             </div>
             <div>
-              پلاگین SpeechRecognition:{" "}
-              <b>{capInfo.plugins.includes("SpeechRecognition") ? "موجود ✓" : "نصب نشده ✗"}</b>
+              پل صوتی نیتیو (KamaliVoice):{" "}
+              <b>{capInfo.plugins.includes("KamaliVoice") ? "موجود ✓" : "یافت نشد ✗"}</b>
             </div>
             <div className="break-all">
               پلاگین‌های نصب‌شده:{" "}

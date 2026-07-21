@@ -191,8 +191,9 @@ jobs:
 
       # WebView به‌صورت پیش‌فرض درخواست‌های دسترسی به میکروفون/دوربین (getUserMedia)
       # از صفحات راه‌دور را رد می‌کند. علاوه بر WebChromeClient، یک پل صوتی اختصاصی
-      # KamaliVoice با Android MediaRecorder تزریق می‌کنیم تا «ثبت صوتی» حتی بدون
-      # Web Speech / getUserMedia / پلاگین Capacitor هم در APK کار کند.
+      # KamaliVoice تزریق می‌کنیم که مستقیماً از android.speech.SpeechRecognizer
+      # (همان موتور آفلاین/آنلاین گوگل، رایگان و بدون کلید API) استفاده می‌کند و
+      # متن نهایی را برمی‌گرداند — بدون نیاز به هیچ سرور یا آپلود فایل صوتی.
       - name: Patch MainActivity to grant WebView mic/camera permissions
         run: |
           python3 - << 'PYEOF'
@@ -213,11 +214,13 @@ jobs:
               code = '''package com.kamali.inventory;
 
           import android.Manifest;
+          import android.content.Intent;
           import android.content.pm.PackageManager;
-          import android.media.MediaRecorder;
           import android.os.Build;
           import android.os.Bundle;
-          import android.util.Base64;
+          import android.speech.RecognitionListener;
+          import android.speech.RecognizerIntent;
+          import android.speech.SpeechRecognizer;
           import android.webkit.JavascriptInterface;
           import android.webkit.PermissionRequest;
           import android.webkit.WebView;
@@ -226,14 +229,11 @@ jobs:
           import com.getcapacitor.BridgeActivity;
           import com.getcapacitor.BridgeWebChromeClient;
           import org.json.JSONObject;
-          import java.io.ByteArrayOutputStream;
-          import java.io.File;
-          import java.io.FileInputStream;
+          import java.util.ArrayList;
 
           public class MainActivity extends BridgeActivity {
               private static final int REQ_MEDIA = 1207;
-              private MediaRecorder voiceRecorder;
-              private File voiceFile;
+              private SpeechRecognizer speechRecognizer;
               private boolean pendingVoiceStart = false;
               private PermissionRequest pendingWebPermissionRequest;
 
@@ -260,6 +260,15 @@ jobs:
               }
 
               @Override
+              protected void onDestroy() {
+                  if (speechRecognizer != null) {
+                      try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+                      speechRecognizer = null;
+                  }
+                  super.onDestroy();
+              }
+
+              @Override
               public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
                   super.onRequestPermissionsResult(requestCode, permissions, grantResults);
                   if (requestCode != REQ_MEDIA) return;
@@ -273,7 +282,7 @@ jobs:
 
                   if (pendingVoiceStart) {
                       pendingVoiceStart = false;
-                      if (hasRecordPermission()) startVoiceRecordingNow();
+                      if (hasRecordPermission()) startSpeechRecognitionNow();
                       else dispatchVoiceError("اجازه میکروفون داده نشد. از تنظیمات گوشی، دسترسی میکروفون برنامه را فعال کنید.");
                   }
               }
@@ -320,55 +329,93 @@ jobs:
 
               private void dispatchVoiceError(String message) {
                   WebView webView = this.bridge.getWebView();
-                  String js = "window.dispatchEvent(new CustomEvent('kamali-native-audio-error',{detail:{error:" + JSONObject.quote(message) + "}}));";
+                  String js = "window.dispatchEvent(new CustomEvent('kamali-native-speech-error',{detail:{error:" + JSONObject.quote(message) + "}}));";
                   webView.post(() -> webView.evaluateJavascript(js, null));
               }
 
-              private void dispatchVoiceResult(String base64) {
+              private void dispatchVoicePartial(String text) {
                   WebView webView = this.bridge.getWebView();
-                  String js = "window.dispatchEvent(new CustomEvent('kamali-native-audio',{detail:{audioBase64:" + JSONObject.quote(base64) + ",format:'m4a'}}));";
+                  String js = "window.dispatchEvent(new CustomEvent('kamali-native-speech-partial',{detail:{text:" + JSONObject.quote(text) + "}}));";
                   webView.post(() -> webView.evaluateJavascript(js, null));
               }
 
-              private byte[] readFile(File file) throws Exception {
-                  ByteArrayOutputStream out = new ByteArrayOutputStream();
-                  FileInputStream in = new FileInputStream(file);
-                  byte[] buf = new byte[8192];
-                  int n;
-                  while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                  in.close();
-                  return out.toByteArray();
+              private void dispatchVoiceResult(String text) {
+                  WebView webView = this.bridge.getWebView();
+                  String js = "window.dispatchEvent(new CustomEvent('kamali-native-speech-result',{detail:{text:" + JSONObject.quote(text) + "}}));";
+                  webView.post(() -> webView.evaluateJavascript(js, null));
               }
 
-              private void stopRecorderOnly() {
-                  if (voiceRecorder != null) {
-                      try { voiceRecorder.stop(); } catch (Exception ignored) {}
-                      try { voiceRecorder.release(); } catch (Exception ignored) {}
-                      voiceRecorder = null;
+              private String speechErrorMessage(int error) {
+                  switch (error) {
+                      case SpeechRecognizer.ERROR_NO_MATCH:
+                      case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                          return "صدایی شنیده نشد. دوباره تلاش کنید.";
+                      case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                          return "اجازه میکروفون داده نشد.";
+                      case SpeechRecognizer.ERROR_NETWORK:
+                      case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                          return "اتصال اینترنت لازم برای تشخیص گفتار برقرار نشد.";
+                      case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                          return "تشخیص گفتار مشغول است. یک لحظه صبر کنید و دوباره امتحان کنید.";
+                      case SpeechRecognizer.ERROR_AUDIO:
+                          return "خطای ضبط صدا. دوباره تلاش کنید.";
+                      default:
+                          return "خطا در تشخیص گفتار. دوباره تلاش کنید.";
                   }
               }
 
-              private void startVoiceRecordingNow() {
-                  try {
-                      stopRecorderOnly();
-                      voiceFile = File.createTempFile("kamali-voice-", ".m4a", getCacheDir());
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) voiceRecorder = new MediaRecorder(MainActivity.this);
-                      else voiceRecorder = new MediaRecorder();
-                      try {
-                          voiceRecorder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION);
-                      } catch (Exception ignored) {
-                          voiceRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+              /** بهترین رونوشت از نتیجه‌ی SpeechRecognizer را برمی‌گرداند (آیتم اول = بیشترین اطمینان) */
+              private String bestResult(Bundle results, String key) {
+                  ArrayList<String> list = results.getStringArrayList(key);
+                  if (list == null || list.isEmpty()) return "";
+                  return list.get(0);
+              }
+
+              private void startSpeechRecognitionNow() {
+                  if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                      dispatchVoiceError("تشخیص گفتار روی این دستگاه در دسترس نیست (اپ Google روی گوشی نصب/فعال نیست).");
+                      return;
+                  }
+                  if (speechRecognizer == null) {
+                      speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                  }
+                  speechRecognizer.setRecognitionListener(new RecognitionListener() {
+                      @Override public void onReadyForSpeech(Bundle params) {}
+                      @Override public void onBeginningOfSpeech() {}
+                      @Override public void onRmsChanged(float rmsdB) {}
+                      @Override public void onBufferReceived(byte[] buffer) {}
+                      @Override public void onEndOfSpeech() {}
+
+                      @Override
+                      public void onPartialResults(Bundle partialResults) {
+                          String text = bestResult(partialResults, SpeechRecognizer.RESULTS_RECOGNITION);
+                          if (!text.isEmpty()) dispatchVoicePartial(text);
                       }
-                      voiceRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-                      voiceRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-                      voiceRecorder.setAudioEncodingBitRate(128000);
-                      voiceRecorder.setAudioSamplingRate(44100);
-                      voiceRecorder.setOutputFile(voiceFile.getAbsolutePath());
-                      voiceRecorder.prepare();
-                      voiceRecorder.start();
+
+                      @Override
+                      public void onResults(Bundle results) {
+                          String text = bestResult(results, SpeechRecognizer.RESULTS_RECOGNITION);
+                          dispatchVoiceResult(text);
+                      }
+
+                      @Override
+                      public void onError(int error) {
+                          dispatchVoiceError(speechErrorMessage(error));
+                      }
+
+                      @Override public void onEvent(int eventType, Bundle params) {}
+                  });
+
+                  Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                  intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                  intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR");
+                  intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                  intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                  intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+                  try {
+                      speechRecognizer.startListening(intent);
                   } catch (Exception e) {
-                      stopRecorderOnly();
-                      dispatchVoiceError("ضبط صدا در اپلیکیشن شروع نشد: " + e.getMessage());
+                      dispatchVoiceError("تشخیص گفتار شروع نشد: " + e.getMessage());
                   }
               }
 
@@ -381,29 +428,15 @@ jobs:
                               requestRuntimeMediaPermissions(true, false);
                               return;
                           }
-                          startVoiceRecordingNow();
+                          startSpeechRecognitionNow();
                       });
                   }
 
                   @JavascriptInterface
                   public void stop() {
                       runOnUiThread(() -> {
-                          try {
-                              if (voiceRecorder == null || voiceFile == null) {
-                                  dispatchVoiceError("ضبطی فعال نبود.");
-                                  return;
-                              }
-                              stopRecorderOnly();
-                              byte[] data = readFile(voiceFile);
-                              if (data.length < 2048) {
-                                  dispatchVoiceError("صدایی ضبط نشد. دوباره ضبط کنید.");
-                                  return;
-                              }
-                              dispatchVoiceResult(Base64.encodeToString(data, Base64.NO_WRAP));
-                              try { voiceFile.delete(); } catch (Exception ignored) {}
-                          } catch (Exception e) {
-                              stopRecorderOnly();
-                              dispatchVoiceError("پردازش صدای ضبط‌شده ناموفق بود: " + e.getMessage());
+                          if (speechRecognizer != null) {
+                              try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
                           }
                       });
                   }

@@ -8,7 +8,7 @@ import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } fro
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
-const REGISTER_URL = "https://secure-signup-pal.lovable.app/register";
+const REGISTER_URL = "https://kamixapp.ir/register";
 
 export const Route = createFileRoute("/register")({
   head: () => ({

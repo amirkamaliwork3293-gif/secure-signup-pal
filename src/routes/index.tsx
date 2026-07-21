@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
-const HOME_URL = "https://secure-signup-pal.lovable.app/";
+const HOME_URL = "https://kamixapp.ir/";
 
 export const Route = createFileRoute("/")({
   head: () => ({

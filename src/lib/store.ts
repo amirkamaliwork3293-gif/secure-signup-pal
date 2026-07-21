@@ -1094,7 +1094,7 @@ export function storePublicUrl(userId: string): string {
   const origin =
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
-      : "https://secure-signup-pal.lovable.app";
+      : "https://kamixapp.ir";
   return `${origin}/store/${userId}`;
 }
 

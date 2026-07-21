@@ -69,7 +69,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-const BASE_URL = "https://secure-signup-pal.lovable.app";
+const BASE_URL = "https://kamixapp.ir";
 const OG_IMAGE = "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png";
 
 const organizationLd = {

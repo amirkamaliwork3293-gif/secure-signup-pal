@@ -6,7 +6,7 @@ import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
-const LOGIN_URL = "https://secure-signup-pal.lovable.app/login";
+const LOGIN_URL = "https://kamixapp.ir/login";
 
 export const Route = createFileRoute("/login")({
   head: () => ({

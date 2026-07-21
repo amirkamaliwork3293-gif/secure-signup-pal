@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://secure-signup-pal.lovable.app/sitemap.xml
+Sitemap: https://kamixapp.ir/sitemap.xml

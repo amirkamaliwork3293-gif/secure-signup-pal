@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://secure-signup-pal.lovable.app/sitemap.xml

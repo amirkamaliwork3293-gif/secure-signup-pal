@@ -45,10 +45,10 @@ jobs:
         run: npm install --legacy-peer-deps
 
       # پلاگین‌های نیتیو:
-      #   Printer    → چاپ واقعی فاکتور/لیبل داخل اپ (دیالوگ چاپ اندروید + ذخیره PDF)
-      #   Filesystem → ذخیره فایل PDF/PNG داخل اپ
-      #   Share      → باز کردن پنجره ذخیره/ارسال فایل اندروید
-      #   Voice bridge → ضبط مستقیم میکروفون اندروید برای «ثبت صوتی»
+      #    Printer    → چاپ واقعی فاکتور/لیبل داخل اپ (دیالوگ چاپ اندروید + ذخیره PDF)
+      #    Filesystem → ذخیره فایل PDF/PNG داخل اپ
+      #    Share      → باز کردن پنجره ذخیره/ارسال فایل اندروید
+      #    Voice bridge → ضبط مستقیم میکروفون اندروید برای «ثبت صوتی»
       - name: Install Capacitor + native plugins
         run: npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/filesystem @capacitor/share @bcyesil/capacitor-plugin-printer
 
@@ -171,6 +171,7 @@ jobs:
       - name: Add camera permissions to AndroidManifest
         run: |
           python3 - << 'PYEOF'
+          manifest_path = 'android/app/src/main/java/**/AndroidManifest.xml' # modified context path match if needed, kept original logic
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest_path, 'r') as f:
               content = f.read()
@@ -260,7 +261,7 @@ jobs:
               }
 
               @Override
-              protected void onDestroy() {
+              public void onDestroy() {
                   if (speechRecognizer != null) {
                       try { speechRecognizer.destroy(); } catch (Exception ignored) {}
                       speechRecognizer = null;

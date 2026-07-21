@@ -15,14 +15,24 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
   const { state, signOut, refreshProfile } = useAuth();
 
   if (state.status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">در حال بررسی هویت...</p>
+    // مسیر ادمین یا داخل اپ (وب‌ویو) → همچنان اسپینر (این حالت‌ها اهمیتی برای
+    // سئو ندارند و کاربر واقعی معمولاً خیلی سریع رد می‌شود).
+    // در مرورگر وب برای بازدیدکننده‌ی معمولی/گوگل‌بات → همان صفحه‌ی معرفی
+    // (Landing) بلافاصله نمایش داده می‌شود تا محتوای کامل صفحه از همان
+    // ابتدا (حتی در HTML سمت سرور، پیش از اجرای جاوااسکریپت) در دسترس باشد.
+    // اگر کاربر واقعاً لاگین بوده باشد، به‌محض تایید نشست، همین کامپوننت با
+    // محتوای اصلی اپلیکیشن جایگزین می‌شود.
+    if (adminOnly || isWebView()) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground">در حال بررسی هویت...</p>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    return <LandingPage />;
   }
 
   if (state.status === "unauthenticated") {

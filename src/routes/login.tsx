@@ -6,8 +6,20 @@ import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
 
+const LOGIN_URL = "https://kamixapp.ir/login";
+
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [{ title: "ورود | KAMIX" }] }),
+  head: () => ({
+    meta: [
+      { title: "ورود به KAMIX (کامیکس) — حسابداری فروشگاهی" },
+      { name: "description", content: "وارد حساب KAMIX (کامیکس) شوید. سیستم حسابداری، فاکتور و انبار موبایل با اسکن بارکد." },
+      { property: "og:url", content: LOGIN_URL },
+      { property: "og:title", content: "ورود به KAMIX (کامیکس)" },
+      { property: "og:description", content: "وارد حساب KAMIX (کامیکس) شوید. سیستم حسابداری، فاکتور و انبار موبایل." },
+      { property: "og:type", content: "website" },
+    ],
+    links: [{ rel: "canonical", href: LOGIN_URL }],
+  }),
   component: LoginPage,
 });
 

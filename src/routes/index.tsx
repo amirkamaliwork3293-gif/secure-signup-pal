@@ -37,11 +37,21 @@ import {
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
+const HOME_URL = "https://kamixapp.ir/";
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "KAMIX | فاکتور جاری" },
-      { name: "description", content: "فاکتور حسابداری با اسکن بارکد و QR کد توسط دوربین موبایل." },
+      { title: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
+      { name: "description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل. ثبت‌نام، دانلود APK و شروع رایگان." },
+      { name: "keywords", content: "کامیکس, حسابداری کامیکس, حسابداری فروشگاهی, فاکتور موبایل, صدور فاکتور, انبار موبایل, اسکن بارکد, QR, حسابداری اندروید" },
+      { property: "og:url", content: HOME_URL },
+      { property: "og:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
+      { property: "og:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
+      { property: "og:type", content: "website" },
+    ],
+    links: [
+      { rel: "canonical", href: HOME_URL },
     ],
   }),
   component: InvoicePage,

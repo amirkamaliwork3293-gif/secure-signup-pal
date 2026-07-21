@@ -104,7 +104,15 @@ async function loadState(session: Session): Promise<AuthState> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({ status: "loading" });
+  // نکته‌ی مهم SEO: مقدار اولیه‌ی وضعیت عمداً "unauthenticated" است، نه "loading".
+  // این کامپوننت هم روی سرور (SSR) و هم در اولین رندر کلاینت (پیش از اجرای
+  // useEffect زیر) دقیقاً یک خروجی یکسان تولید می‌کند تا هیدریشن به‌هم نخورد.
+  // نتیجه: صفحه‌ی اصلی برای گوگل‌بات و هر بازدیدکننده‌ای، همان لحظه‌ی اول،
+  // محتوای واقعی صفحه‌ی معرفی (LandingPage) را نشان می‌دهد — نه یک اسپینر
+  // خالی «در حال بررسی هویت...» که هیچ متنی برای ایندکس‌شدن نداشت.
+  // برای کاربرانِ واقعاً واردشده، همین useEffect در چند صد میلی‌ثانیه‌ی اول
+  // وضعیت را به authenticated اصلاح می‌کند؛ رفتار برنامه تغییری نمی‌کند.
+  const [state, setState] = useState<AuthState>({ status: "unauthenticated" });
   const stateRef = useRef(state);
   stateRef.current = state;
 

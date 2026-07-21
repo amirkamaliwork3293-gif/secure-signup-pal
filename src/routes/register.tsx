@@ -8,8 +8,21 @@ import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } fro
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
 
+const REGISTER_URL = "https://kamixapp.ir/register";
+
 export const Route = createFileRoute("/register")({
-  head: () => ({ meta: [{ title: "ثبت‌نام | KAMIX" }] }),
+  head: () => ({
+    meta: [
+      { title: "ثبت‌نام KAMIX (کامیکس) — حسابداری فروشگاهی رایگان" },
+      { name: "description", content: "در KAMIX (کامیکس) ثبت‌نام کنید: حسابداری فروشگاهی، صدور فاکتور، انبار و اسکن بارکد روی موبایل. پس از ثبت‌نام، APK اندروید را دریافت کنید." },
+      { name: "keywords", content: "ثبت‌نام کامیکس, حسابداری کامیکس, اپلیکیشن حسابداری اندروید, فاکتور موبایل" },
+      { property: "og:url", content: REGISTER_URL },
+      { property: "og:title", content: "ثبت‌نام KAMIX (کامیکس) — حسابداری فروشگاهی رایگان" },
+      { property: "og:description", content: "در KAMIX (کامیکس) ثبت‌نام کنید: حسابداری فروشگاهی، صدور فاکتور، انبار و اسکن بارکد روی موبایل." },
+      { property: "og:type", content: "website" },
+    ],
+    links: [{ rel: "canonical", href: REGISTER_URL }],
+  }),
   component: RegisterPage,
 });
 

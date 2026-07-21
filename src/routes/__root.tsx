@@ -69,6 +69,31 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
+const BASE_URL = "https://kamixapp.ir";
+const OG_IMAGE = "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png";
+
+const organizationLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "KAMIX (کامیکس) — حسابداری فروشگاهی",
+  url: BASE_URL,
+  logo: `${BASE_URL}/icon-512.png`,
+  sameAs: [],
+  description: "سیستم حسابداری و صدور فاکتور فارسی با اسکن بارکد و QR روی موبایل.",
+};
+
+const websiteLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "KAMIX (کامیکس) — حسابداری فروشگاهی",
+  url: BASE_URL,
+  potentialAction: {
+    "@type": "SearchAction",
+    target: `${BASE_URL}/?q={search_term_string}`,
+    "query-input": "required name=search_term_string",
+  },
+};
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
@@ -78,18 +103,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
       { name: "apple-mobile-web-app-title", content: "KAMIX" },
-      { title: "KAMIX" },
-      { name: "description", content: "KAMIX — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
+      { title: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
+      { name: "description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل. ثبت‌نام، دانلود APK و شروع رایگان." },
+      { name: "keywords", content: "کامیکس, حسابداری کامیکس, حسابداری فروشگاهی, فاکتور موبایل, صدور فاکتور, انبار موبایل, اسکن بارکد, QR, حسابداری اندروید" },
       { name: "author", content: "Kamali" },
-      { property: "og:title", content: "KAMIX" },
-      { property: "og:description", content: "KAMIX — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
+      { name: "robots", content: "index, follow" },
+      { property: "og:site_name", content: "KAMIX (کامیکس)" },
+      { property: "og:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
+      { property: "og:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "KAMIX" },
-      { name: "twitter:description", content: "KAMIX — سیستم حسابداری ساده فارسی با اسکن بارکد و QR توسط دوربین موبایل." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png" },
+      { property: "og:url", content: BASE_URL },
+      { property: "og:image", content: OG_IMAGE },
+      { property: "og:image:alt", content: "KAMIX — اپلیکیشن حسابداری موبایل" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
+      { name: "twitter:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
+      { name: "twitter:image", content: OG_IMAGE },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -97,6 +126,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
       { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
       { rel: "apple-touch-icon", href: "/icon-192.png" },
+    ],
+    scripts: [
+      { type: "application/ld+json", children: JSON.stringify(organizationLd) },
+      { type: "application/ld+json", children: JSON.stringify(websiteLd) },
     ],
   }),
   shellComponent: RootShell,

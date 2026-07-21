@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VoiceRouteImport } from './routes/voice'
 import { Route as StudentsRouteImport } from './routes/students'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as ScanRouteImport } from './routes/scan'
@@ -38,6 +39,11 @@ const VoiceRoute = VoiceRouteImport.update({
 const StudentsRoute = StudentsRouteImport.update({
   id: '/students',
   path: '/students',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -170,6 +177,7 @@ export interface FileRoutesByTo {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
@@ -217,6 +226,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/scan'
     | '/set-password'
     | '/settings'
+    | '/sitemap.xml'
     | '/students'
     | '/voice'
     | '/m/$userId'
@@ -284,6 +296,7 @@ export interface RootRouteChildren {
   ScanRoute: typeof ScanRoute
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StudentsRoute: typeof StudentsRoute
   VoiceRoute: typeof VoiceRoute
   MUserIdRoute: typeof MUserIdRoute
@@ -304,6 +317,13 @@ declare module '@tanstack/react-router' {
       path: '/students'
       fullPath: '/students'
       preLoaderRoute: typeof StudentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -452,6 +472,7 @@ const rootRouteChildren: RootRouteChildren = {
   ScanRoute: ScanRoute,
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   StudentsRoute: StudentsRoute,
   VoiceRoute: VoiceRoute,
   MUserIdRoute: MUserIdRoute,

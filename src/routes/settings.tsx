@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/AuthContext";
 import {
   publishStoreProfile,
@@ -27,6 +28,9 @@ import {
   Check,
   X,
   Images,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -155,6 +159,9 @@ function SettingsPageInner() {
         </button>
       </div>
 
+      {/* تغییر رمز عبور */}
+      <ChangePasswordSection />
+
       {/* پروفایل عمومی فروشگاه */}
       <StoreProfileSection shopName={shopName} />
 
@@ -168,6 +175,144 @@ function SettingsPageInner() {
 
 const profileInputCls =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
+
+function ChangePasswordSection() {
+  const { state } = useAuth();
+  const username =
+    state.status === "authenticated" || state.status === "expired" ? state.profile.username : "";
+
+  const [open, setOpen] = useState(false);
+  const [currentPass, setCurrentPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [show, setShow] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const submit = async () => {
+    setMsg(null);
+    if (!currentPass) {
+      setMsg({ type: "err", text: "رمز عبور فعلی را وارد کنید." });
+      return;
+    }
+    if (newPass.length < 6) {
+      setMsg({ type: "err", text: "رمز عبور جدید باید حداقل ۶ کاراکتر باشد." });
+      return;
+    }
+    if (newPass !== confirmPass) {
+      setMsg({ type: "err", text: "تکرار رمز عبور جدید مطابقت ندارد." });
+      return;
+    }
+    if (!username) {
+      setMsg({ type: "err", text: "کاربر شناسایی نشد. دوباره وارد شوید." });
+      return;
+    }
+    setLoading(true);
+    try {
+      // پیش از تغییر، رمز فعلی را با ورود مجدد تایید می‌کنیم تا کسی جز خود
+      // کاربر (که رمز فعلی را می‌داند) نتواند رمز را عوض کند.
+      const email = `${username.trim().toLowerCase()}@kamali.local`;
+      const { error: reauthErr } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPass,
+      });
+      if (reauthErr) {
+        setMsg({ type: "err", text: "رمز عبور فعلی صحیح نیست." });
+        setLoading(false);
+        return;
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPass });
+      if (error) throw error;
+      setMsg({ type: "ok", text: "رمز عبور با موفقیت تغییر کرد." });
+      setCurrentPass("");
+      setNewPass("");
+      setConfirmPass("");
+    } catch (e: any) {
+      setMsg({ type: "err", text: e?.message || "تغییر رمز عبور ناموفق بود." });
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-card p-4">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2"
+      >
+        <span className="flex items-center gap-2 text-sm font-bold">
+          <KeyRound className="h-4 w-4 text-primary" />
+          تغییر رمز عبور
+        </span>
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-3">
+          <div className="relative">
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور فعلی</label>
+            <input
+              type={show ? "text" : "password"}
+              value={currentPass}
+              onChange={(e) => setCurrentPass(e.target.value)}
+              dir="ltr"
+              className={profileInputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور جدید</label>
+            <input
+              type={show ? "text" : "password"}
+              value={newPass}
+              onChange={(e) => setNewPass(e.target.value)}
+              dir="ltr"
+              className={profileInputCls}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تکرار رمز عبور جدید</label>
+            <input
+              type={show ? "text" : "password"}
+              value={confirmPass}
+              onChange={(e) => setConfirmPass(e.target.value)}
+              dir="ltr"
+              className={profileInputCls}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {show ? "پنهان کردن رمزها" : "نمایش رمزها"}
+          </button>
+
+          {msg && (
+            <div
+              className={`rounded-xl px-3 py-2.5 text-xs ${
+                msg.type === "ok"
+                  ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+            >
+              {msg.text}
+            </div>
+          )}
+
+          <button
+            onClick={submit}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+            تغییر رمز عبور
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StoreProfileSection({ shopName }: { shopName: string }) {
   const { state } = useAuth();

@@ -85,6 +85,43 @@ export type Invoice = {
   checkDueDate?: string;
 };
 
+// ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────
+
+export type PurchaseItem = {
+  /** اگر کالا از قبل در انبار موجود بوده، شناسه‌اش؛ وگرنه خالی و با ثبت، کالای جدید ساخته می‌شود */
+  productId: string;
+  name: string;
+  quantity: number;
+  /** قیمت خرید واحد در این فاکتور — بعد از ثبت، قیمت خرید کالا به‌روزرسانی می‌شود */
+  buyPrice: number;
+  /** قیمت فروش پیشنهادی برای کالای جدید (اختیاری، فقط هنگام ساخت کالای جدید) */
+  sellPrice?: number;
+  unit?: string;
+  category?: string;
+};
+
+export type Purchase = {
+  id: string;
+  createdAt: number;
+  items: PurchaseItem[];
+  total: number;
+  supplierName?: string;
+  supplierPhone?: string;
+  note?: string;
+  paymentMethod?: PaymentMethod;
+  /** مبلغ نقد پرداخت‌شده از این فاکتور خرید (اگر نسیه/چک بود، باقی بدهی به تامین‌کننده است) */
+  paidAmount?: number;
+};
+
+export function emptyPurchase(): Purchase {
+  return { id: cryptoId(), createdAt: Date.now(), items: [], total: 0, paymentMethod: "cash" };
+}
+
+export function recalcPurchase(p: Purchase): Purchase {
+  const total = p.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
+  return { ...p, total };
+}
+
 // ─── Customers / Debtors ─────────────────────────────────────────────────────
 
 export type CustomerTx = {
@@ -126,6 +163,7 @@ const HISTORY_KEY = "acc.invoices.v2";
 const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
 const STUDENTS_KEY = "acc.students.v1";
+const PURCHASES_KEY = "acc.purchases.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -134,7 +172,7 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
   string,
-  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers" | "students"
+  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers" | "students" | "purchases"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -143,6 +181,7 @@ const CLOUD_FIELDS: Record<
   [SETTINGS_KEY]: "settings",
   [CUSTOMERS_KEY]: "customers",
   [STUDENTS_KEY]: "students",
+  [PURCHASES_KEY]: "purchases",
 };
 
 // Reverse map: cloud column name -> local storage key
@@ -335,6 +374,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /purchases/.test(error.message) && "purchases" in payload) {
+      delete payload.purchases;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -406,6 +452,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("settings", SETTINGS_KEY, data.settings);
     overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
     overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
+    overwrite("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {
@@ -670,6 +717,70 @@ export const invoice = {
     write(
       HISTORY_KEY,
       hist.filter((inv) => inv.id !== id),
+    );
+  },
+};
+
+// ─── Purchase invoices ───────────────────────────────────────────────────────
+
+export const purchases = {
+  useAll: () => useStore<Purchase[]>(PURCHASES_KEY, []),
+  getAll: () => read<Purchase[]>(PURCHASES_KEY, []),
+  save: (list: Purchase[]) => write(PURCHASES_KEY, list),
+  /**
+   * ثبت نهایی فاکتور خرید:
+   *  - برای کالاهای موجود: موجودی را اضافه و قیمت خرید را به‌روزرسانی می‌کند.
+   *  - برای اقلامی که productId ندارند (کالای جدید تایپ‌شده): یک کالای جدید در انبار می‌سازد.
+   * سپس فاکتور را در تاریخچه‌ی خرید ذخیره می‌کند.
+   */
+  archive: (p: Purchase) => {
+    const finalizedAt = Date.now();
+    const stamped: Purchase = { ...p, createdAt: finalizedAt };
+
+    const list = read<Product[]>(PRODUCTS_KEY, []);
+    const cats = read<Category[]>(CATEGORIES_KEY, DEFAULT_CATEGORIES);
+    const nextProducts = [...list];
+    const resolvedItems: PurchaseItem[] = [];
+
+    for (const item of stamped.items) {
+      const idx = item.productId ? nextProducts.findIndex((pr) => pr.id === item.productId) : -1;
+      if (idx >= 0) {
+        const prev = nextProducts[idx];
+        nextProducts[idx] = {
+          ...prev,
+          stock: (prev.stock || 0) + item.quantity,
+          buyPrice: item.buyPrice,
+        };
+        resolvedItems.push({ ...item, productId: prev.id, name: prev.name });
+      } else {
+        // کالای جدید — در انبار ساخته می‌شود تا از این پس در فروش هم قابل انتخاب باشد
+        const category = item.category || cats[0]?.name || "";
+        const newProduct: Product = {
+          id: cryptoId(),
+          name: item.name.trim() || "کالای بدون نام",
+          price: item.sellPrice && item.sellPrice > 0 ? item.sellPrice : Math.round(item.buyPrice * 1.3),
+          category,
+          code: "",
+          stock: item.quantity,
+          buyPrice: item.buyPrice,
+          unit: item.unit || COUNT_UNIT,
+        };
+        nextProducts.push(newProduct);
+        resolvedItems.push({ ...item, productId: newProduct.id, name: newProduct.name });
+      }
+    }
+
+    products.save(nextProducts);
+    const hist = read<Purchase[]>(PURCHASES_KEY, []);
+    write(PURCHASES_KEY, [{ ...stamped, items: resolvedItems }, ...hist]);
+  },
+  useHistory: () => useStore<Purchase[]>(PURCHASES_KEY, []),
+  getHistory: () => read<Purchase[]>(PURCHASES_KEY, []),
+  deleteFromHistory: (id: string) => {
+    const hist = read<Purchase[]>(PURCHASES_KEY, []);
+    write(
+      PURCHASES_KEY,
+      hist.filter((p) => p.id !== id),
     );
   },
 };

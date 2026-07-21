@@ -9,6 +9,7 @@ import {
   formatJalaliDate,
   type Product, type Customer, type Invoice,
 } from "@/lib/store";
+import { filterAndRankSearch } from "@/lib/search";
 import { Search, X, Package, Users, Receipt, Wallet, ChevronLeft } from "lucide-react";
 
 const LIMIT = 5;
@@ -51,24 +52,30 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
     const allCustomers = customers.getAll();
     const history = invoice.getHistory();
 
-    const matchedProducts = allProducts
-      .filter((p) => p.name.includes(query) || p.code.includes(query) || (p.category ?? "").includes(query))
-      .slice(0, LIMIT);
+    const matchedProducts = filterAndRankSearch(
+      allProducts,
+      query,
+      (p) => [p.name, p.code, p.category],
+    ).slice(0, LIMIT);
 
-    const matchedCustomers = allCustomers
-      .filter((c) => customerFullName(c).includes(query) || (c.phone ?? "").includes(query))
-      .slice(0, LIMIT);
+    const matchedCustomers = filterAndRankSearch(
+      allCustomers,
+      query,
+      (c) => [customerFullName(c), c.phone],
+    ).slice(0, LIMIT);
 
     const matchedDebtors = matchedCustomers.filter((c) => customerBalance(c) > 0);
 
-    const matchedInvoices = history
-      .filter((inv) =>
-        inv.id.toUpperCase().includes(query.toUpperCase()) ||
-        [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ").includes(query) ||
-        (inv.customer?.phone ?? "").includes(query) ||
-        inv.items.some((i) => i.name.includes(query)),
-      )
-      .slice(0, LIMIT);
+    const matchedInvoices = filterAndRankSearch(
+      history,
+      query,
+      (inv) => [
+        inv.id,
+        [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+        inv.customer?.phone,
+        ...inv.items.map((i) => i.name),
+      ],
+    ).slice(0, LIMIT);
 
     return { matchedProducts, matchedCustomers, matchedDebtors, matchedInvoices };
   }, [query]);

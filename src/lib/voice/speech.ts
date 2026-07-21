@@ -42,7 +42,28 @@ type WebSpeechRecognition = {
 
 const MIC_DENIED_MSG = "اجازه میکروفون داده نشد. یک‌بار دیگر دکمه میکروفون را بزنید و اجازه را تأیید کنید.";
 const MIC_MISSING_MSG = "میکروفون باز نشد. لطفاً دسترسی میکروفون اپلیکیشن را از تنظیمات گوشی فعال کنید.";
+const MIC_TIMEOUT_MSG =
+  "میکروفون پاسخ نداد. از «تنظیمات گوشی ← برنامه‌ها ← KAMIX ← مجوزها» دسترسی میکروفون را فعال کنید، سپس دوباره امتحان کنید.";
 const EMPTY_AUDIO_MSG = "صدایی ضبط نشد. دکمه را بزنید، واضح صحبت کنید و بعد دوباره بزنید.";
+
+/** اگر promise در بازه‌ی زمانی مشخص تمام نشود (مثلاً getUserMedia در برخی WebViewها
+ * که تنظیم مجوز ندارند بی‌صدا برای همیشه معلق می‌ماند)، این کمک می‌کند به‌جای هنگ
+ * بی‌نهایت، خطای روشنی به کاربر نشان داده شود. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("TIMEOUT")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 
 function notifyUnavailable(h: StartHandlers, message: string) {
   if (h.onUnavailable) h.onUnavailable(message);
@@ -178,10 +199,14 @@ function createFullAudioRecognizer(): Recognizer {
       try {
         webRecorder = pickWebRecorder(h);
         // اولین await واقعی همین getUserMedia است تا WebView زنجیره کلیک را از دست ندهد.
-        await webRecorder.start();
+        // با timeout: در برخی WebViewهای اندروید که onPermissionRequest تنظیم نشده،
+        // getUserMedia بدون خطا و بدون نتیجه، برای همیشه معلق می‌ماند — این تضمین
+        // می‌کند کاربر حداکثر بعد از چند ثانیه پیام روشنی ببیند، نه سکوت بی‌پایان.
+        await withTimeout(webRecorder.start(), 8000);
       } catch (e) {
         const msg = String((e as { name?: string; message?: string })?.name ?? (e as Error)?.message ?? e);
-        if (/NotAllowed|Security|permission|denied/i.test(msg)) notifyUnavailable(h, MIC_DENIED_MSG);
+        if (msg === "TIMEOUT") notifyUnavailable(h, MIC_TIMEOUT_MSG);
+        else if (/NotAllowed|Security|permission|denied/i.test(msg)) notifyUnavailable(h, MIC_DENIED_MSG);
         else if (/NotFound|DevicesNotFound/i.test(msg)) notifyUnavailable(h, "میکروفونی روی این دستگاه پیدا نشد.");
         else notifyUnavailable(h, MIC_MISSING_MSG);
         h.onEnd?.();

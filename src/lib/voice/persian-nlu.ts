@@ -358,6 +358,77 @@ function reconcile(
 
 // ─── تابع اصلی ────────────────────────────────────────────────────────────────
 
+/**
+ * آیا این توکن، شروع یک عبارت مقداری جدید است (رقم، عدد نوشتاری، یا کسر وزنی)؟
+ * برای تشخیص مرز بین دو قلم کالا وقتی فروشنده بدون «و» پشت سر هم می‌گوید
+ * (مثلاً «۲ تا شیر ۳ تا پنیر صبا ۴ تا دستمال»).
+ */
+function isQuantityStarter(t: string): boolean {
+  return /^\d+(\.\d+)?$/.test(t) || t in NUMBER_WORDS || t in FRACTION_KG;
+}
+
+function isUnitOrCountWord(t: string): boolean {
+  return COUNT_WORDS.has(t) || KILO_WORDS.has(t) || GRAM_WORDS.has(t);
+}
+
+/**
+ * یک بخش را در مرزهای «قلم جدید» می‌شکند: هر بار که بعد از دیدن حداقل یک
+ * کلمه‌ی محصول، دوباره یک عدد/کسر جدید شروع شود، یعنی قلم بعدی شروع شده —
+ * حتی اگر فروشنده هیچ «و»ی بین دو قلم نگفته باشد.
+ */
+function splitByQuantityBoundaries(segment: string): string[] {
+  const tokens = segment.split(" ").filter(Boolean);
+  const clauses: string[] = [];
+  let current: string[] = [];
+  let sawProductToken = false;
+
+  for (const t of tokens) {
+    if (isQuantityStarter(t) && sawProductToken && current.length > 0) {
+      clauses.push(current.join(" "));
+      current = [];
+      sawProductToken = false;
+    }
+    current.push(t);
+    if (!isQuantityStarter(t) && !isUnitOrCountWord(t) && t !== "و" && !STOPWORDS.has(t)) {
+      sawProductToken = true;
+    }
+  }
+  if (current.length > 0) clauses.push(current.join(" "));
+  return clauses;
+}
+
+/**
+ * تقسیم کل جمله به بخش‌های قلم‌به‌قلم — قوی‌تر از یک split ساده:
+ *  ۱) ابتدا با «،»/«,» جدا می‌شود (جداکننده‌ی قطعی).
+ *  ۲) سپس با « و » جدا می‌شود، مگر وقتی «و» بخشی از اصطلاح کسری باشد
+ *     («یک کیلو و نیم») که در این حالت با بخش قبلی ادغام می‌ماند.
+ *  ۳) در نهایت هر بخش با تشخیص مرز مقدار/کسر جدید، دوباره شکسته می‌شود تا
+ *     فهرست پشت‌سرهم بدون «و» هم درست جدا شود.
+ */
+function splitIntoClauses(body: string): string[] {
+  const hardSegments = body
+    .split(/،|,/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const clauses: string[] = [];
+  for (const seg of hardSegments) {
+    const parts = seg.split(/\s+و\s+/).filter(Boolean);
+    const merged: string[] = [];
+    for (const part of parts) {
+      const firstWord = part.split(" ")[0];
+      if (merged.length > 0 && firstWord in FRACTION_KG) {
+        // ادامه‌ی اصطلاح کسری («... و نیم») — با بخش قبلی یکی می‌شود
+        merged[merged.length - 1] = `${merged[merged.length - 1]} و ${part}`;
+      } else {
+        merged.push(part);
+      }
+    }
+    for (const m of merged) clauses.push(...splitByQuantityBoundaries(m));
+  }
+  return clauses.map((c) => c.trim()).filter(Boolean);
+}
+
 export function parseVoiceText(rawTranscript: string, products: Product[]): ParseResult {
   const normalized = normalizeFa(rawTranscript);
   if (!normalized) return { items: [] };
@@ -367,11 +438,9 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
   const cust = extractCustomer(pay.rest);
   const body = cust.rest;
 
-  // تقسیم به بخش‌ها بر اساس «و» یا «،»
-  const clauses = body
-    .split(/\s+و\s+|،|,/)
-    .map((c) => c.trim())
-    .filter(Boolean);
+  // تقسیم به بخش‌ها: جداکننده‌ی صریح («و»/«،») + تشخیص مرز قلم جدید حتی
+  // بدون جداکننده (پشت‌سرهم گفتن چند قلم)
+  const clauses = splitIntoClauses(body);
 
   const items: ParsedItem[] = [];
   for (const clause of clauses) {

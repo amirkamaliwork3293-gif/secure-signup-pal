@@ -18,6 +18,7 @@ import {
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
+import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
   Plus,
@@ -166,7 +167,7 @@ function InvoicePageInner() {
   };
 
   const filtered = searchQ.trim()
-    ? allProducts.filter((p) => p.name.includes(searchQ) || p.code.includes(searchQ))
+    ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code])
     : [];
 
   return (

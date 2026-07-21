@@ -17,6 +17,7 @@ import {
   type CustomerTx,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
+import { filterAndRankSearch } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
 import {
   Users,
@@ -91,15 +92,15 @@ function CustomersPageInner() {
 
   const filtered = useMemo(() => {
     const q = searchQ.trim();
-    return list
+    const statusFiltered = list
       .filter((c) => {
-        if (q && !customerFullName(c).includes(q) && !(c.phone ?? "").includes(q)) return false;
         const b = customerBalance(c);
         if (filter === "debtor") return b > 0;
         if (filter === "settled") return b <= 0;
         return true;
       })
       .sort((a, b) => customerBalance(b) - customerBalance(a));
+    return q ? filterAndRankSearch(statusFiltered, q, (c) => [customerFullName(c), c.phone]) : statusFiltered;
   }, [list, searchQ, filter]);
 
   const removeCustomer = (c: Customer) => {

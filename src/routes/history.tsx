@@ -9,6 +9,7 @@ import {
   toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp,
   type Invoice, type InvoiceItem, type Product, type PaymentMethod,
 } from "@/lib/store";
+import { filterAndRankSearch } from "@/lib/search";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
@@ -180,9 +181,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const matchingProducts = useMemo(() => {
     const q = addQuery.trim();
     if (!q) return [] as Product[];
-    return allProducts
-      .filter((p) => p.name.includes(q) || (p.code ?? "").includes(q))
-      .slice(0, 8);
+    return filterAndRankSearch(allProducts, q, (p) => [p.name, p.code]).slice(0, 8);
   }, [addQuery, allProducts]);
 
   // فاکتور آماده برای InvoiceActions (با shopName)
@@ -438,12 +437,12 @@ function HistoryPageInner() {
   const filtered = useMemo(() => {
     const q = searchQ.trim();
     if (!q) return list;
-    return list.filter((inv) =>
-      inv.id.toUpperCase().includes(q.toUpperCase()) ||
-      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ").includes(q) ||
-      (inv.customer?.phone ?? "").includes(q) ||
-      inv.items.some((i) => i.name.includes(q)),
-    );
+    return filterAndRankSearch(list, q, (inv) => [
+      inv.id,
+      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+      inv.customer?.phone,
+      ...inv.items.map((i) => i.name),
+    ]);
   }, [list, searchQ]);
 
   return (

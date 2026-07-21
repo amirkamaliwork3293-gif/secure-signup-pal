@@ -8,12 +8,13 @@ import {
   type Product, type Category,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode";
+import { filterAndRankSearch } from "@/lib/search";
 import { BulkImportModal } from "@/components/BulkImportModal";
 import { BarcodePrintModal } from "@/components/BarcodePrintModal";
 import { BarcodeViewModal } from "@/components/BarcodeViewModal";
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
-  Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet,
+  Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
 } from "lucide-react";
 import { z } from "zod";
 import * as XLSX from "xlsx";
@@ -75,11 +76,11 @@ function ProductsPageInner() {
     setEditTarget(null);
   };
 
-  const filtered = list.filter((p) => {
-    const matchQ = !searchQ.trim() || p.name.includes(searchQ) || p.code.includes(searchQ);
-    const matchCat = filterCat === "all" || p.category === filterCat;
-    return matchQ && matchCat;
-  });
+  const filtered = filterAndRankSearch(
+    list.filter((p) => filterCat === "all" || p.category === filterCat),
+    searchQ,
+    (p) => [p.name, p.code],
+  );
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -195,12 +196,15 @@ function ProductsPageInner() {
       )}
 
       {/* Action toolbar */}
-      <div className="mb-3 grid grid-cols-3 gap-1.5">
+      <div className="mb-3 grid grid-cols-4 gap-1.5">
         <button onClick={() => setShowImport(true)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
           <Upload className="h-3.5 w-3.5" /> ورود گروهی
         </button>
         <Link to="/quick-add" className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
           <Zap className="h-3.5 w-3.5" /> ثبت سریع
+        </Link>
+        <Link to="/purchases" className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
+          <ShoppingBag className="h-3.5 w-3.5" /> فاکتور خرید
         </Link>
         <button onClick={() => { setSelectMode((v) => !v); clearSelection(); }} className={`inline-flex items-center justify-center gap-1 rounded-xl border px-2 py-2 text-[11px] ${selectMode ? "border-primary bg-primary/5 text-primary" : "border-border bg-card"}`}>
           {selectMode ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />} انتخاب گروهی

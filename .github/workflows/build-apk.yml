@@ -199,7 +199,15 @@ jobs:
           import os, glob, re
           matches = glob.glob('android/app/src/main/java/**/MainActivity.java', recursive=True)
           if not matches:
-              print('MainActivity.java not found — skipping')
+              # این خطا عمداً build را متوقف می‌کند: اگر این پچ اعمال نشود، APK
+              # بدون پل صوتی KamaliVoice ساخته می‌شود و «ثبت صوتی» در اپلیکیشن
+              # کار نخواهد کرد — بهتر است ساخت APK همینجا متوقف شود تا این مشکل
+              # بی‌سروصدا منتشر نشود.
+              raise SystemExit(
+                  'MainActivity.java not found — voice bridge patch (KamaliVoice) '
+                  'was NOT applied. Failing the build instead of shipping an APK '
+                  'without microphone support. Check the Capacitor android project path.'
+              )
           else:
               path = matches[0]
               code = '''package com.kamali.inventory;

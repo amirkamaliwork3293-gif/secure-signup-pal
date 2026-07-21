@@ -15,6 +15,7 @@ import {
   type Student,
 } from "@/lib/store";
 import { shareText } from "@/lib/openExternal";
+import { filterAndRankSearch } from "@/lib/search";
 import {
   GraduationCap,
   Plus,
@@ -81,10 +82,8 @@ function StudentsInner() {
   const soonCount = list.filter((s) => studentStatus(s) === "soon").length;
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const query = q.trim();
     const items = list.filter((s) => {
-      const name = `${s.firstName} ${s.lastName ?? ""} ${s.discipline ?? ""} ${s.phone ?? ""}`.toLowerCase();
-      if (query && !name.includes(query)) return false;
       const st = studentStatus(s);
       if (filter === "due" && !(st === "overdue" || st === "due-today")) return false;
       if (filter === "active" && !s.active) return false;
@@ -99,11 +98,17 @@ function StudentsInner() {
       if (st === "soon") return 2;
       return 3;
     };
-    return items.sort((a, b) => {
+    const sorted = items.sort((a, b) => {
       const w = weight(a) - weight(b);
       if (w !== 0) return w;
       return a.nextDueAt - b.nextDueAt;
     });
+    if (!query) return sorted;
+    return filterAndRankSearch(sorted, query, (s) => [
+      `${s.firstName} ${s.lastName ?? ""}`,
+      s.discipline,
+      s.phone,
+    ]);
   }, [list, q, filter]);
 
   return (

@@ -18,6 +18,7 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RenewRouteImport } from './routes/renew'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as QuickAddRouteImport } from './routes/quick-add'
+import { Route as PurchasesRouteImport } from './routes/purchases'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as MenuQrRouteImport } from './routes/menu-qr'
 import { Route as MenuRouteImport } from './routes/menu'
@@ -72,6 +73,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const QuickAddRoute = QuickAddRouteImport.update({
   id: '/quick-add',
   path: '/quick-add',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PurchasesRoute = PurchasesRouteImport.update({
+  id: '/purchases',
+  path: '/purchases',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductsRoute = ProductsRouteImport.update({
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
   '/products': typeof ProductsRoute
+  '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
   '/renew': typeof RenewRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/menu'
     | '/menu-qr'
     | '/products'
+    | '/purchases'
     | '/quick-add'
     | '/register'
     | '/renew'
@@ -264,6 +276,7 @@ export interface RootRouteChildren {
   MenuRoute: typeof MenuRoute
   MenuQrRoute: typeof MenuQrRoute
   ProductsRoute: typeof ProductsRoute
+  PurchasesRoute: typeof PurchasesRoute
   QuickAddRoute: typeof QuickAddRoute
   RegisterRoute: typeof RegisterRoute
   RenewRoute: typeof RenewRoute
@@ -340,6 +353,13 @@ declare module '@tanstack/react-router' {
       path: '/quick-add'
       fullPath: '/quick-add'
       preLoaderRoute: typeof QuickAddRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/purchases': {
+      id: '/purchases'
+      path: '/purchases'
+      fullPath: '/purchases'
+      preLoaderRoute: typeof PurchasesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/products': {
@@ -424,6 +444,7 @@ const rootRouteChildren: RootRouteChildren = {
   MenuRoute: MenuRoute,
   MenuQrRoute: MenuQrRoute,
   ProductsRoute: ProductsRoute,
+  PurchasesRoute: PurchasesRoute,
   QuickAddRoute: QuickAddRoute,
   RegisterRoute: RegisterRoute,
   RenewRoute: RenewRoute,
@@ -439,3 +460,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

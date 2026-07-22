@@ -217,12 +217,18 @@ export type AppSettings = {
   storeDescription?: string;
   /** آدرس لوگو یا تصویر فروشگاه */
   logoUrl?: string;
+  /** نمایش گزینه «منو» در نوار پایین — پیش‌فرض غیرفعال (برای فروشگاه‌های عادی نیازی نیست) */
+  showMenuFeature?: boolean;
+  /** نمایش گزینه «هنرجویان/شهریه‌پرداز» در نوار پایین — پیش‌فرض غیرفعال */
+  showStudentsFeature?: boolean;
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
   shopName: "فروشگاه من",
   invoiceFontSize: 13,
   weightUnits: false,
+  showMenuFeature: false,
+  showStudentsFeature: false,
 };
 
 function getStorageScope() {

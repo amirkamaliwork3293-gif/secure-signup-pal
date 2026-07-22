@@ -51,6 +51,29 @@ export function LandingEditor() {
   const addMedia = (m: LandingMedia) => set("media", [...content.media, m]);
   const removeMedia = (i: number) => set("media", content.media.filter((_, idx) => idx !== i));
 
+  // ── Video cover (poster) images ──────────────────────────────────────────
+  const setMediaCover = (i: number, coverUrl: string | undefined) => {
+    const arr = [...content.media];
+    arr[i] = { ...arr[i], coverUrl };
+    set("media", arr);
+  };
+  const [coverUploadingIndex, setCoverUploadingIndex] = useState<number | null>(null);
+  const onPickCoverFile = async (i: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setCoverUploadingIndex(i);
+    setMsg(null);
+    try {
+      const url = await uploadLandingMedia(file);
+      setMediaCover(i, url);
+      setMsg({ type: "ok", text: "کاور ویدیو تنظیم شد. برای اعمال، «ذخیره» را بزنید." });
+    } catch {
+      setMsg({ type: "err", text: "آپلود کاور ناموفق بود." });
+    }
+    setCoverUploadingIndex(null);
+  };
+
   // ── Stories ────────────────────────────────────────────────────────────
   const addStory = (s: LandingStory) => set("stories", [...(content.stories || []), s]);
   const updateStory = (i: number, patch: Partial<LandingStory>) => {
@@ -360,7 +383,14 @@ export function LandingEditor() {
             {content.media.map((m, i) => (
               <div key={i} className="overflow-hidden rounded-xl border border-border bg-background">
                 {m.type === "video" ? (
-                  <video src={m.url} muted playsInline controls className="aspect-video w-full bg-black object-cover" />
+                  <video
+                    src={m.url}
+                    poster={m.coverUrl}
+                    muted
+                    playsInline
+                    controls
+                    className="aspect-video w-full bg-black object-cover"
+                  />
                 ) : (
                   <img src={m.url} alt="" className="aspect-video w-full object-cover" />
                 )}
@@ -377,6 +407,43 @@ export function LandingEditor() {
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
+
+                {/* کاور ویدیو — تصویری که قبل از پخش نمایش داده می‌شود تا کاربر بداند محتوای ویدیو چیست */}
+                {m.type === "video" && (
+                  <div className="flex items-center gap-2 border-t border-border p-2">
+                    {m.coverUrl ? (
+                      <img src={m.coverUrl} alt="کاور" className="h-10 w-16 rounded-md object-cover" />
+                    ) : (
+                      <div className="grid h-10 w-16 place-items-center rounded-md border border-dashed border-border text-[9px] text-muted-foreground">
+                        بدون کاور
+                      </div>
+                    )}
+                    <label className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-primary/40 px-2 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/5">
+                      {coverUploadingIndex === i ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ImageIcon className="h-3.5 w-3.5" />
+                      )}
+                      {m.coverUrl ? "تغییر کاور" : "افزودن کاور"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => onPickCoverFile(i, e)}
+                      />
+                    </label>
+                    {m.coverUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setMediaCover(i, undefined)}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                        title="حذف کاور"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

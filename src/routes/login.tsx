@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
-import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User, Smartphone } from "lucide-react";
+import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
 
 const LOGIN_URL = "https://kamixapp.ir/login";
 
@@ -169,18 +169,6 @@ export function LoginPage() {
             </div>
           </div>
         )}
-      </div>
-
-      <div className="mt-6 w-full max-w-sm rounded-2xl border border-primary/30 bg-primary/5 p-4 text-center">
-        <div className="mb-1.5 flex items-center justify-center gap-2">
-          <Smartphone className="h-5 w-5 text-primary" />
-          <p className="text-sm font-bold text-foreground">
-            لینک دانلود اپلیکیشن اندروید
-          </p>
-        </div>
-        <p className="text-[11px] leading-6 text-muted-foreground">
-          بعد از تکمیل ثبت‌نام، لینک دانلود اپلیکیشن اندروید (APK) به همراه راهنمای تصویری نصب برای شما نمایش داده می‌شود.
-        </p>
       </div>
 
       <LoginHelpDialog />

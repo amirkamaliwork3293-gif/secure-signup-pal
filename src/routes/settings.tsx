@@ -31,6 +31,8 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  UtensilsCrossed,
+  GraduationCap,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -45,6 +47,8 @@ function SettingsPageInner() {
   const [shopName, setShopName] = useState(appSettings.shopName);
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
   const [weightUnits, setWeightUnits] = useState(!!appSettings.weightUnits);
+  const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
+  const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
@@ -54,6 +58,8 @@ function SettingsPageInner() {
       shopName: nextName,
       invoiceFontSize,
       weightUnits,
+      showMenuFeature,
+      showStudentsFeature,
     });
     // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
     if (meId && nextName !== (appSettings.shopName || "").trim()) {
@@ -147,6 +153,44 @@ function SettingsPageInner() {
             مخصوص فروشگاه‌های عمده و وزنی. با فعال‌شدن، در فرم محصول واحد فروش (عدد/کیلوگرم/گرم)
             اضافه می‌شود و در فاکتور می‌توانید مقدار اعشاری (مثلاً ۲٫۵ کیلوگرم) وارد کنید. در حالت
             غیرفعال هیچ چیز اضافه‌ای نمایش داده نمی‌شود.
+          </p>
+        </div>
+
+        {/* منو — قابلیت اختیاری کافه/رستوران؛ پیش‌فرض غیرفعال تا شلوغی بی‌مورد ایجاد نشود */}
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <UtensilsCrossed className="h-4 w-4 text-primary" />
+              نمایش گزینه «منو» در نوار پایین
+            </span>
+            <input
+              type="checkbox"
+              checked={showMenuFeature}
+              onChange={(e) => setShowMenuFeature(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            مخصوص کافه و رستوران. با فعال‌شدن، گزینه‌ی «منو» در نوار پایین اضافه می‌شود.
+          </p>
+        </div>
+
+        {/* هنرجویان/شهریه‌پرداز — قابلیت اختیاری آموزشگاه؛ پیش‌فرض غیرفعال */}
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <GraduationCap className="h-4 w-4 text-primary" />
+              نمایش گزینه «هنرجویان / شهریه‌پرداز» در نوار پایین
+            </span>
+            <input
+              type="checkbox"
+              checked={showStudentsFeature}
+              onChange={(e) => setShowStudentsFeature(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            مخصوص آموزشگاه‌ها. با فعال‌شدن، گزینه‌ی «هنرجویان» برای مدیریت شهریه در نوار پایین اضافه می‌شود.
           </p>
         </div>
 

@@ -10,6 +10,8 @@ export type LandingMedia = {
   type: "video" | "image";
   url: string;
   caption?: string;
+  /** تصویر کاور — فقط برای ویدیوها؛ قبل از پخش نمایش داده می‌شود تا کاربر بداند محتوای ویدیو چیست */
+  coverUrl?: string;
 };
 
 export type LandingFeature = {

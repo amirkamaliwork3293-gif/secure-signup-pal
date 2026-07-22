@@ -7,21 +7,24 @@ import { GlobalSearch } from "@/components/GlobalSearch";
 import { useState, useEffect } from "react";
 
 const nav = [
-  { to: "/",          label: "فاکتور",   icon: Receipt  },
-  { to: "/scan",      label: "اسکن",     icon: ScanLine },
-  { to: "/products",  label: "محصولات",  icon: Package  },
-  { to: "/menu",      label: "منو",      icon: UtensilsCrossed },
-  { to: "/customers", label: "مشتریان",  icon: Users    },
-  { to: "/students",  label: "هنرجویان", icon: GraduationCap },
-  { to: "/history",   label: "تاریخچه",  icon: History  },
-  { to: "/reports",   label: "گزارش",    icon: BarChart3 },
-  { to: "/settings",  label: "تنظیمات",  icon: Settings },
+  { to: "/",          label: "فاکتور",   icon: Receipt,  settingKey: null },
+  { to: "/scan",      label: "اسکن",     icon: ScanLine, settingKey: null },
+  { to: "/products",  label: "محصولات",  icon: Package,  settingKey: null },
+  { to: "/menu",      label: "منو",      icon: UtensilsCrossed, settingKey: "showMenuFeature" },
+  { to: "/customers", label: "مشتریان",  icon: Users,    settingKey: null },
+  { to: "/students",  label: "هنرجویان", icon: GraduationCap, settingKey: "showStudentsFeature" },
+  { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
+  { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
+  { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },
 ] as const;
 
 export function Layout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [appSettings] = settings.useAll();
   const shopName = appSettings.shopName || "کمالی";
+  const visibleNav = nav.filter(
+    (item) => item.settingKey === null || appSettings[item.settingKey],
+  );
   const { state, signOut } = useAuth();
   const [studentsList] = studentsStore.useAll();
   const dueCount = studentsList.filter((s) => {
@@ -92,8 +95,11 @@ export function Layout({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        <div className="mx-auto grid max-w-3xl grid-cols-9">
-          {nav.map(({ to, label, icon: Icon }) => {
+        <div
+          className="mx-auto grid max-w-3xl"
+          style={{ gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))` }}
+        >
+          {visibleNav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to;
             const showBadge = to === "/students" && dueCount > 0;
             return (

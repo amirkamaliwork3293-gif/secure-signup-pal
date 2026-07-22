@@ -3,7 +3,7 @@
  * تم آبی/سفید، معرفی برنامه، ویدیو/عکس‌های قابل‌مدیریت از پنل ادمین،
  * و دکمه‌های واضح «ثبت‌نام» و «ورود».
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   DEFAULT_LANDING,
@@ -199,6 +199,7 @@ export function LandingPage() {
               >
                 <video
                     src={m.url}
+                    poster={m.coverUrl}
                     autoPlay
                     muted
                     loop
@@ -308,9 +309,57 @@ export function LandingPage() {
         </section>
       )}
 
+      {/* Active users — نمادین/تبلیغاتی، برای نمایش اعتماد اجتماعی در ابتدای راه */}
+      <section className="mx-auto max-w-5xl px-4 pb-10">
+        <ActiveUsersBadge />
+      </section>
+
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
+    </div>
+  );
+}
+
+/**
+ * نشان «کاربران فعال» — کاملاً نمادین و برای تبلیغات است (نه آمار واقعی).
+ * عدد پایه بین ۱۰۰۰ تا ۲۰۰۰ است و هر از گاهی کمی بالا می‌رود تا حس زنده و
+ * پویا بودن سایت را منتقل کند.
+ */
+function ActiveUsersBadge() {
+  const baseCount = useMemo(() => {
+    // بر اساس روز جاری یک عدد پایه‌ی ثابت (نه کاملاً تصادفی روی هر رفرش) بین
+    // ۱۰۰۰ تا ۱۶۰۰ می‌سازد تا در طول یک روز عدد پایدار بماند.
+    const day = Math.floor(Date.now() / 86_400_000);
+    const seeded = ((day * 9301 + 49297) % 233280) / 233280;
+    return 1000 + Math.floor(seeded * 600);
+  }, []);
+  const [count, setCount] = useState(baseCount);
+
+  useEffect(() => {
+    const tick = () => {
+      setCount((c) => {
+        const next = c + Math.floor(Math.random() * 14) + 1;
+        return next > 2000 ? 1000 + Math.floor(Math.random() * 150) : next;
+      });
+    };
+    const id = setInterval(tick, 9000 + Math.random() * 9000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="inline-flex items-center gap-2.5 rounded-full border border-primary/20 bg-primary/5 px-5 py-2.5 shadow-card">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        </span>
+        <Users className="h-4 w-4 text-primary" />
+        <span className="text-sm font-extrabold tabular-nums text-foreground">
+          {count.toLocaleString("fa-IR")}
+        </span>
+        <span className="text-xs text-muted-foreground">کاربر فعال KAMIX</span>
+      </div>
     </div>
   );
 }

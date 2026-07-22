@@ -323,29 +323,52 @@ export function LandingPage() {
 
 /**
  * نشان «کاربران فعال» — کاملاً نمادین و برای تبلیغات است (نه آمار واقعی).
- * عدد پایه بین ۱۰۰۰ تا ۲۰۰۰ است و هر از گاهی کمی بالا می‌رود تا حس زنده و
- * پویا بودن سایت را منتقل کند.
+ * وقتی صفحه باز می‌شود عدد از صفر با یک انیمیشن جذاب تا حدود ۵۰۰۰ نفر بالا
+ * می‌رود، سپس هر از گاهی کمی بیشتر می‌شود تا حس زنده و پویا بودن سایت را
+ * منتقل کند.
  */
 function ActiveUsersBadge() {
-  const baseCount = useMemo(() => {
+  const targetCount = useMemo(() => {
     // بر اساس روز جاری یک عدد پایه‌ی ثابت (نه کاملاً تصادفی روی هر رفرش) بین
-    // ۱۰۰۰ تا ۱۶۰۰ می‌سازد تا در طول یک روز عدد پایدار بماند.
+    // ۵۰۰۰ تا ۵۹۰۰ می‌سازد تا در طول یک روز عدد پایدار بماند.
     const day = Math.floor(Date.now() / 86_400_000);
     const seeded = ((day * 9301 + 49297) % 233280) / 233280;
-    return 1000 + Math.floor(seeded * 600);
+    return 5000 + Math.floor(seeded * 900);
   }, []);
-  const [count, setCount] = useState(baseCount);
+  const [count, setCount] = useState(0);
+  const [countUpDone, setCountUpDone] = useState(false);
 
+  // شمارش جذاب از صفر تا عدد هدف هنگام ورود به صفحه
   useEffect(() => {
+    let frameId: number;
+    const duration = 1800;
+    const start = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out
+      setCount(Math.floor(eased * targetCount));
+      if (progress < 1) {
+        frameId = requestAnimationFrame(step);
+      } else {
+        setCountUpDone(true);
+      }
+    };
+    frameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frameId);
+  }, [targetCount]);
+
+  // بعد از پایان انیمیشن ورودی، هر از گاهی کمی عدد را بالا می‌برد
+  useEffect(() => {
+    if (!countUpDone) return;
     const tick = () => {
       setCount((c) => {
         const next = c + Math.floor(Math.random() * 14) + 1;
-        return next > 2000 ? 1000 + Math.floor(Math.random() * 150) : next;
+        return next > 6000 ? 5000 + Math.floor(Math.random() * 300) : next;
       });
     };
     const id = setInterval(tick, 9000 + Math.random() * 9000);
     return () => clearInterval(id);
-  }, []);
+  }, [countUpDone]);
 
   return (
     <div className="flex flex-col items-center gap-2">

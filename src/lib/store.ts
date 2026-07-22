@@ -50,6 +50,10 @@ export type InvoiceItem = {
   buyPrice?: number;
   /** واحد فروش (عدد / کیلوگرم / گرم) */
   unit?: string;
+  /** درصد تخفیفی که در لحظه‌ی فروش روی این کالا اعمال شده (در صورت وجود) */
+  discountPercent?: number;
+  /** قیمت اصلی قبل از تخفیف — فقط وقتی تخفیفی اعمال شده باشد */
+  originalPrice?: number;
 };
 
 export type CustomerInfo = {
@@ -1018,6 +1022,7 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
     );
   } else {
     const effectivePrice = applyProductDiscount(p);
+    const hasDiscount = effectivePrice < p.price;
     items = [
       ...inv.items,
       {
@@ -1027,6 +1032,8 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
         quantity: 1,
         buyPrice: p.buyPrice,
         unit: p.unit,
+        discountPercent: hasDiscount ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0)) : undefined,
+        originalPrice: hasDiscount ? p.price : undefined,
       },
     ];
   }
@@ -1048,6 +1055,7 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
     );
   } else {
     const effectivePrice = applyProductDiscount(p);
+    const hasDiscount = effectivePrice < p.price;
     items = [
       ...inv.items,
       {
@@ -1057,6 +1065,8 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
         quantity: qty,
         buyPrice: p.buyPrice,
         unit: p.unit,
+        discountPercent: hasDiscount ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0)) : undefined,
+        originalPrice: hasDiscount ? p.price : undefined,
       },
     ];
     // If starting quantity already meets wholesale threshold, snap to wholesale

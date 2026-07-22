@@ -104,7 +104,11 @@ function InvoicePageInner() {
   const setItemPrice = (productId: string, price: number) => {
     if (price <= 0) return;
     setInv((prev) => {
-      const items = prev.items.map((i) => (i.productId === productId ? { ...i, price } : i));
+      const items = prev.items.map((i) =>
+        i.productId === productId
+          ? { ...i, price, discountPercent: undefined, originalPrice: undefined }
+          : i,
+      );
       return recalc({ ...prev, items });
     });
   };
@@ -545,6 +549,11 @@ function InvoicePageInner() {
                         عمده
                       </span>
                     )}
+                    {!isWholesale && !!item.discountPercent && (
+                      <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-400">
+                        ٪{formatNumber(item.discountPercent)} تخفیف
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                     {editingPrice === item.productId ? (
@@ -571,6 +580,11 @@ function InvoicePageInner() {
                         className="flex items-center gap-0.5 hover:text-primary"
                         title="ویرایش قیمت"
                       >
+                        {!!item.originalPrice && (
+                          <span className="text-muted-foreground/60 line-through">
+                            {formatToman(item.originalPrice)}
+                          </span>
+                        )}
                         {formatToman(item.price)}
                         <Pencil className="h-2.5 w-2.5 opacity-50" />
                       </button>

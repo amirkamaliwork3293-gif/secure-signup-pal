@@ -55,7 +55,7 @@ export const Route = createFileRoute("/customers")({
   component: CustomersPage,
 });
 
-type Filter = "all" | "debtor" | "settled";
+type Filter = "all" | "debtor" | "creditor" | "settled";
 
 const inputCls =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
@@ -80,14 +80,19 @@ function CustomersPageInner() {
   const totals = useMemo(() => {
     let receivable = 0; // مجموع طلب ما از بدهکارها
     let debtors = 0;
+    let payable = 0; // مجموع طلب مشتریان از ما (طلبکاران)
+    let creditors = 0;
     for (const c of list) {
       const b = customerBalance(c);
       if (b > 0) {
         receivable += b;
         debtors++;
+      } else if (b < 0) {
+        payable += -b;
+        creditors++;
       }
     }
-    return { receivable, debtors };
+    return { receivable, debtors, payable, creditors };
   }, [list]);
 
   const filtered = useMemo(() => {
@@ -96,7 +101,8 @@ function CustomersPageInner() {
       .filter((c) => {
         const b = customerBalance(c);
         if (filter === "debtor") return b > 0;
-        if (filter === "settled") return b <= 0;
+        if (filter === "creditor") return b < 0;
+        if (filter === "settled") return b === 0;
         return true;
       })
       .sort((a, b) => customerBalance(b) - customerBalance(a));
@@ -137,17 +143,30 @@ function CustomersPageInner() {
         پنل پیامکی — ارسال جشنواره / تخفیف / تبلیغ
       </button>
 
-      {/* جمع کل طلب */}
-      <section className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs opacity-80">مجموع طلب شما (بدهی مشتریان)</div>
-            <div className="mt-1 text-2xl font-bold">{formatToman(totals.receivable)}</div>
-            <div className="mt-0.5 text-xs opacity-80">{formatNumber(totals.debtors)} بدهکار</div>
+      {/* جمع کل طلب و بدهی */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <section className="rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs opacity-80">مجموع طلب شما (بدهی مشتریان)</div>
+              <div className="mt-1 text-2xl font-bold">{formatToman(totals.receivable)}</div>
+              <div className="mt-0.5 text-xs opacity-80">{formatNumber(totals.debtors)} بدهکار</div>
+            </div>
+            <Wallet className="h-10 w-10 opacity-80" />
           </div>
-          <Wallet className="h-10 w-10 opacity-80" />
-        </div>
-      </section>
+        </section>
+
+        <section className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-sky-800 shadow-card dark:text-sky-300">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs opacity-80">مجموع طلب مشتریان از شما</div>
+              <div className="mt-1 text-2xl font-bold">{formatToman(totals.payable)}</div>
+              <div className="mt-0.5 text-xs opacity-80">{formatNumber(totals.creditors)} طلبکار</div>
+            </div>
+            <ArrowDownCircle className="h-10 w-10 opacity-80" />
+          </div>
+        </section>
+      </div>
 
       {/* جستجو و فیلتر */}
       <div className="mb-3 flex gap-2">
@@ -167,6 +186,7 @@ function CustomersPageInner() {
         >
           <option value="all">همه</option>
           <option value="debtor">بدهکاران</option>
+          <option value="creditor">طلبکاران</option>
           <option value="settled">تسویه‌شده</option>
         </select>
       </div>
@@ -268,6 +288,10 @@ function CustomerCard({
               <span className="rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold text-destructive">
                 بدهکار
               </span>
+            ) : balance < 0 ? (
+              <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 dark:text-sky-400">
+                طلبکار
+              </span>
             ) : (
               <span className="rounded-md bg-green-500/10 px-1.5 py-0.5 text-[10px] font-bold text-green-600">
                 تسویه
@@ -276,9 +300,15 @@ function CustomerCard({
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
             <span
-              className={`font-semibold ${balance > 0 ? "text-destructive" : "text-green-600"}`}
+              className={`font-semibold ${
+                balance > 0 ? "text-destructive" : balance < 0 ? "text-sky-700 dark:text-sky-400" : "text-green-600"
+              }`}
             >
-              {balance > 0 ? `بدهی: ${formatToman(balance)}` : "بدون بدهی"}
+              {balance > 0
+                ? `بدهی: ${formatToman(balance)}`
+                : balance < 0
+                  ? `طلب مشتری: ${formatToman(-balance)}`
+                  : "بدون بدهی"}
             </span>
             {customer.phone && (
               <span className="flex items-center gap-1" dir="ltr">
@@ -537,6 +567,13 @@ function TxModal({
               — بدهی فعلی: <strong className="text-destructive">{formatToman(balance)}</strong>
             </>
           )}
+          {balance < 0 && (
+            <>
+              {" "}
+              — طلب مشتری از شما:{" "}
+              <strong className="text-sky-700 dark:text-sky-400">{formatToman(-balance)}</strong>
+            </>
+          )}
         </p>
         <form onSubmit={submit} className="space-y-3">
           <div>
@@ -562,6 +599,15 @@ function TxModal({
               className="w-full rounded-xl border border-dashed border-green-500/50 px-3 py-2 text-xs text-green-700 dark:text-green-400 hover:bg-green-500/10"
             >
               تسویه کامل — {formatToman(balance)}
+            </button>
+          )}
+          {isDebt && balance < 0 && (
+            <button
+              type="button"
+              onClick={() => setAmount(String(-balance))}
+              className="w-full rounded-xl border border-dashed border-sky-500/50 px-3 py-2 text-xs text-sky-700 dark:text-sky-400 hover:bg-sky-500/10"
+            >
+              تسویه طلب مشتری — {formatToman(-balance)}
             </button>
           )}
           <input
@@ -698,7 +744,7 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
 
 // ─── پنل پیامکی (ارسال گروهی) ──────────────────────────────────────────────
 
-type Audience = "all" | "debtors" | "settled";
+type Audience = "all" | "debtors" | "creditors" | "settled";
 
 const TEMPLATES: { id: string; label: string; body: (shop: string) => string }[] = [
   {
@@ -773,7 +819,8 @@ function SmsCampaignModal({
       if (!c.phone) return false;
       const b = customerBalance(c);
       if (audience === "debtors") return b > 0;
-      if (audience === "settled") return b <= 0;
+      if (audience === "creditors") return b < 0;
+      if (audience === "settled") return b === 0;
       return true;
     });
   }, [list, audience]);
@@ -918,11 +965,12 @@ function SmsCampaignModal({
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
               گیرندگان
             </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
               {(
                 [
                   { v: "all", l: "همه" },
                   { v: "debtors", l: "بدهکاران" },
+                  { v: "creditors", l: "طلبکاران" },
                   { v: "settled", l: "تسویه‌شده" },
                 ] as { v: Audience; l: string }[]
               ).map((o) => (

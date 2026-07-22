@@ -1,15 +1,13 @@
 /**
  * InvoiceActions.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * سه‌گانه عملیات فاکتور: پرینت، دانلود PDF، اشتراک‌گذاری
+ * دوتایی عملیات فاکتور: پرینت (A4/حرارتی — شامل ذخیره‌ی PDF از طریق دیالوگ چاپ مرورگر)، اشتراک‌گذاری
  */
 
-import { useState } from "react";
-import { Printer, Download, Share2, Loader2, Receipt } from "lucide-react";
+import { Printer, Share2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
 import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
-import { printHtml, savePdf, OLD_APP_MESSAGE } from "@/lib/print";
-import { buildInvoicePdf } from "@/lib/invoice-pdf";
+import { printHtml, OLD_APP_MESSAGE } from "@/lib/print";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
@@ -25,9 +23,17 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
     .map(
       (item, i) => `<tr>
         <td>${(i + 1).toLocaleString("fa-IR")}</td>
-        <td>${item.name}</td>
+        <td>${item.name}${
+          item.discountPercent
+            ? ` <span style="color:#16a34a;font-size:0.85em;font-weight:700;">(٪${item.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>`
+            : ""
+        }</td>
         <td>${item.quantity.toLocaleString("fa-IR")}</td>
-        <td>${new Intl.NumberFormat("fa-IR").format(item.price)}</td>
+        <td>${
+          item.originalPrice
+            ? `<span style="text-decoration:line-through;color:#999;margin-left:6px;">${new Intl.NumberFormat("fa-IR").format(item.originalPrice)}</span>`
+            : ""
+        }${new Intl.NumberFormat("fa-IR").format(item.price)}</td>
         <td>${new Intl.NumberFormat("fa-IR").format(item.price * item.quantity)}</td>
       </tr>`
     )
@@ -102,8 +108,8 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
     .map(
       (it) => `
       <div class="row">
-        <div class="name">${it.name}</div>
-        <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
+        <div class="name">${it.name}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
+        <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
       </div>`
     )
     .join("");
@@ -189,7 +195,6 @@ type Props = {
 export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) {
   const [appSettings] = settings.useAll();
   const fontSize = appSettings.invoiceFontSize ?? 13;
-  const [busy, setBusy] = useState(false);
 
   // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
   const handlePrint = async () => {
@@ -203,22 +208,6 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
     const html = buildThermalInvoiceHTML(inv);
     const ok = await printHtml(html, `فیش ${inv.id.toUpperCase()}`);
     if (!ok) alert(OLD_APP_MESSAGE);
-  };
-
-  // ── دانلود PDF — وب: دانلود مستقیم، اپ اندروید: ذخیره + اشتراک ────────────
-  const handleDownload = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const pdf = await buildInvoicePdf(inv);
-      const ok = await savePdf(pdf, `invoice-${inv.id.toUpperCase()}.pdf`);
-      if (!ok) alert(OLD_APP_MESSAGE);
-    } catch (e) {
-      console.warn("[invoice] pdf failed", e);
-      alert("خطا در ساخت PDF فاکتور.");
-    } finally {
-      setBusy(false);
-    }
   };
 
   // ── اشتراک‌گذاری ──────────────────────────────────────────────────────────
@@ -282,17 +271,6 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
       >
         <Receipt className={iconSize} />
         {showLabels && <span>چاپ حرارتی</span>}
-      </button>
-
-      <button
-        type="button"
-        onClick={handleDownload}
-        disabled={busy}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-50`}
-        title="دانلود PDF فاکتور"
-      >
-        {busy ? <Loader2 className={`${iconSize} animate-spin`} /> : <Download className={iconSize} />}
-        {showLabels && <span>دانلود</span>}
       </button>
 
       <button

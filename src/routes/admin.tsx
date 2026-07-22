@@ -196,6 +196,7 @@ function AdminPage() {
             {tab === "users" && (
               <UsersTab
                 users={users}
+                phones={phones}
                 acting={acting}
                 onExtend={handleExtend}
                 onDelete={handleDelete}
@@ -365,9 +366,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function UsersTab({
-  users, acting, onExtend, onDelete, onResetPassword,
+  users, phones, acting, onExtend, onDelete, onResetPassword,
 }: {
   users: UserProfile[];
+  phones: Record<string, string | null>;
   acting: string | null;
   onExtend: (u: UserProfile, plan: SubscriptionPlan) => void;
   onDelete: (u: UserProfile) => void;
@@ -377,6 +379,7 @@ function UsersTab({
   const [resetTarget, setResetTarget] = useState<UserProfile | null>(null);
   const [newPwd, setNewPwd] = useState("");
   const [pwdSaving, setPwdSaving] = useState(false);
+  const [messageTarget, setMessageTarget] = useState<UserProfile | null>(null);
 
   const filtered = searchQ.trim()
     ? users.filter((u) =>
@@ -450,6 +453,16 @@ function UsersTab({
                 <StatusBadge status={u.status} />
               </div>
 
+              <div className="mt-3">
+                <button
+                  onClick={() => setMessageTarget(u)}
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/5"
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  ارسال پیام به این کاربر
+                </button>
+              </div>
+
               {u.username !== "amirkamali" && (
                 <div className="mt-3 space-y-2">
                   <div className="flex flex-wrap gap-2">
@@ -520,6 +533,91 @@ function UsersTab({
           </div>
         </div>
       )}
+      {/* Message modal — ارسال پیام به هر کاربر ثبت‌نامی (نه فقط تمدیدی‌ها) */}
+      {messageTarget && (
+        <MessageUserModal
+          user={messageTarget}
+          phone={phones[messageTarget.username?.toLowerCase()] || null}
+          onClose={() => setMessageTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── پیام به یک کاربر (تماس/پیامک/واتساپ) ─────────────────────────────────
+function MessageUserModal({
+  user,
+  phone,
+  onClose,
+}: {
+  user: UserProfile;
+  phone: string | null;
+  onClose: () => void;
+}) {
+  const name = `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username;
+  const [text, setText] = useState(`سلام ${name} عزیز،\nاز اینکه KAMIX (کامیکس) را انتخاب کرده‌اید سپاسگزاریم.\nبا تشکر 🌹`);
+  const normalizePhone = (p: string) => p.replace(/[^\d+]/g, "");
+  const localPhone = phone ? normalizePhone(phone) : "";
+  const encoded = encodeURIComponent(text);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-bold flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            پیام به {name}
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {localPhone ? (
+          <span dir="ltr" className="mb-3 inline-block rounded bg-secondary px-2 py-0.5 text-xs">{localPhone}</span>
+        ) : (
+          <p className="mb-3 text-xs text-muted-foreground">شماره تماسی برای این کاربر ثبت نشده است.</p>
+        )}
+
+        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">متن پیام</label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={5}
+          className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm leading-6 outline-none focus:border-primary"
+        />
+
+        {localPhone && (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <a
+              href={`tel:${localPhone}`}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+            >
+              <Phone className="h-3.5 w-3.5" />
+              تماس
+            </a>
+            <a
+              href={`sms:${localPhone}?body=${encoded}`}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 py-2 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-500/20"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              پیامک
+            </a>
+            <a
+              href={`https://wa.me/${localPhone.replace(/^0/, "98").replace(/^\+/, "")}?text=${encoded}`}
+              target="_blank" rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-green-500/10 py-2 text-xs font-semibold text-green-700 dark:text-green-400 hover:bg-green-500/20"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              واتساپ
+            </a>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

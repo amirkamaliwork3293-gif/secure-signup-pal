@@ -147,6 +147,8 @@ function InvoicePageInner() {
       customer,
       paymentMethod,
       shopName: appSettings.shopName,
+      shopAddress: appSettings.storeAddress || undefined,
+      shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
       paidAmount: paymentMethod === "credit" || paymentMethod === "check" ? paid : undefined,
       checkAmount: paymentMethod === "check" ? chk : undefined,
       checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
@@ -619,8 +621,53 @@ function InvoicePageInner() {
                     )}
                   </div>
                 </div>
-                {weight ? (
-                  /* محصول وزنی: مقدار اعشاری قابل تایپ (مثلاً ۲.۵ کیلوگرم) */
+                {weight && item.unit === "کیلوگرم" ? (
+                  /* محصول کیلوگرمی: ورودی جداگانه کیلو + گرم باقیمانده — راحت‌تر از تایپ اعشار */
+                  <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-1.5">
+                    <input
+                      defaultValue={Math.floor(item.quantity)}
+                      key={`${item.productId}-kg-${item.quantity}`}
+                      onBlur={(e) => {
+                        const kg = Math.max(0, Math.floor(parseNumberInput(e.target.value)));
+                        const gram = Math.round((item.quantity - Math.floor(item.quantity)) * 1000);
+                        const q = kg + gram / 1000;
+                        if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
+                        else e.target.value = String(Math.floor(item.quantity));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      inputMode="numeric"
+                      dir="ltr"
+                      className="h-9 w-9 bg-transparent text-center text-sm font-semibold outline-none"
+                      aria-label="کیلوگرم"
+                      title="کیلوگرم"
+                    />
+                    <span className="text-[10px] text-muted-foreground">کیلو</span>
+                    <span className="text-muted-foreground/40">+</span>
+                    <input
+                      defaultValue={Math.round((item.quantity - Math.floor(item.quantity)) * 1000)}
+                      key={`${item.productId}-g-${item.quantity}`}
+                      onBlur={(e) => {
+                        const gram = Math.max(0, Math.min(999, Math.round(parseNumberInput(e.target.value))));
+                        const kg = Math.floor(item.quantity);
+                        const q = kg + gram / 1000;
+                        if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
+                        else e.target.value = String(Math.round((item.quantity - Math.floor(item.quantity)) * 1000));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      inputMode="numeric"
+                      dir="ltr"
+                      className="h-9 w-11 bg-transparent text-center text-sm font-semibold outline-none"
+                      aria-label="گرم"
+                      title="گرم باقیمانده"
+                    />
+                    <span className="text-[10px] text-muted-foreground">گرم</span>
+                  </div>
+                ) : weight ? (
+                  /* محصول وزنی (واحد گرم): مقدار اعشاری قابل تایپ */
                   <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2">
                     <input
                       defaultValue={item.quantity}

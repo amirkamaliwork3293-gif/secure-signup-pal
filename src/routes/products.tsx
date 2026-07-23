@@ -1,23 +1,30 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
 import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
   parseNumberInput, COUNT_UNIT, WEIGHT_UNITS,
   type Product, type Category,
 } from "@/lib/store";
-import { generateUniqueCode } from "@/lib/barcode";
+import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
-import { BulkImportModal } from "@/components/BulkImportModal";
-import { BarcodePrintModal } from "@/components/BarcodePrintModal";
-import { BarcodeViewModal } from "@/components/BarcodeViewModal";
+// مودال‌های سنگین فقط هنگام باز شدن بارگذاری می‌شوند (bwip-js/jsPDF/xlsx) تا
+// خودِ صفحه‌ی محصولات سریع باز شود.
+const BulkImportModal = lazy(() =>
+  import("@/components/BulkImportModal").then((m) => ({ default: m.BulkImportModal })),
+);
+const BarcodePrintModal = lazy(() =>
+  import("@/components/BarcodePrintModal").then((m) => ({ default: m.BarcodePrintModal })),
+);
+const BarcodeViewModal = lazy(() =>
+  import("@/components/BarcodeViewModal").then((m) => ({ default: m.BarcodeViewModal })),
+);
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
   Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
 } from "lucide-react";
 import { z } from "zod";
-import * as XLSX from "xlsx";
 
 const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
 
@@ -114,8 +121,9 @@ function ProductsPageInner() {
   const totalInventoryValue = list.reduce((sum, p) => sum + p.price * p.stock, 0);
   const totalBuyValue = list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0);
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
+    const XLSX = await import("xlsx");
     const rows = list.map((p) => ({
       "نام محصول": p.name,
       "قیمت فروش (تومان)": p.price,
@@ -367,9 +375,11 @@ function ProductsPageInner() {
         />
       )}
 
-      {showImport && <BulkImportModal onClose={() => setShowImport(false)} />}
-      {viewBarcode && <BarcodeViewModal product={viewBarcode} onClose={() => setViewBarcode(null)} />}
-      {printTargets && <BarcodePrintModal items={printTargets} onClose={() => setPrintTargets(null)} />}
+      <Suspense fallback={null}>
+        {showImport && <BulkImportModal onClose={() => setShowImport(false)} />}
+        {viewBarcode && <BarcodeViewModal product={viewBarcode} onClose={() => setViewBarcode(null)} />}
+        {printTargets && <BarcodePrintModal items={printTargets} onClose={() => setPrintTargets(null)} />}
+      </Suspense>
     </Layout>
   );
 }

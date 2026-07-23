@@ -33,6 +33,7 @@ import {
   EyeOff,
   UtensilsCrossed,
   GraduationCap,
+  Coins,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -49,6 +50,9 @@ function SettingsPageInner() {
   const [weightUnits, setWeightUnits] = useState(!!appSettings.weightUnits);
   const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
+  const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
+    appSettings.currencyUnit === "rial" ? "rial" : "toman",
+  );
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
@@ -60,6 +64,7 @@ function SettingsPageInner() {
       weightUnits,
       showMenuFeature,
       showStudentsFeature,
+      currencyUnit,
     });
     // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
     if (meId && nextName !== (appSettings.shopName || "").trim()) {
@@ -133,6 +138,38 @@ function SettingsPageInner() {
           >
             نمونه متن فاکتور — ۱۲۵,۰۰۰ تومان
           </div>
+        </div>
+
+        {/* واحد نمایش مبالغ — تومان / ریال */}
+        <div className="rounded-xl border border-border bg-background p-3">
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <Coins className="h-4 w-4 text-primary" />
+            واحد نمایش مبالغ
+          </span>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {([
+              { v: "toman", l: "تومان" },
+              { v: "rial", l: "ریال" },
+            ] as { v: "toman" | "rial"; l: string }[]).map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                onClick={() => setCurrencyUnit(o.v)}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  currencyUnit === o.v
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            همه‌ی قیمت‌ها و مبالغ برنامه (فاکتور، گزارش، مشتریان و...) با این واحد نمایش داده
+            می‌شوند. توجه: مبالغ همیشه <strong>به تومان وارد و ذخیره</strong> می‌شوند؛ این گزینه
+            فقط نحوه‌ی نمایش را تغییر می‌دهد (هر ۱ تومان = ۱۰ ریال).
+          </p>
         </div>
 
         {/* فروش وزنی — قابلیت پیشرفته اختیاری؛ برای فروشگاه‌های عادی مخفی می‌ماند */}
@@ -527,6 +564,9 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
           <p className="text-xs leading-5 text-muted-foreground">
             این اطلاعات در یک صفحه‌ی عمومی نمایش داده می‌شود که می‌توانید لینک آن را برای مشتریان
             بفرستید. فقط فیلدهای پرشده نمایش داده می‌شوند.
+          </p>
+          <p className="rounded-lg bg-primary/5 px-2.5 py-2 text-[11px] leading-5 text-primary">
+            «آدرس» و اولین «شماره تماس» زیر روی فاکتورهای چاپی و PDF شما هم نمایش داده می‌شوند.
           </p>
 
           {/* لوگو */}

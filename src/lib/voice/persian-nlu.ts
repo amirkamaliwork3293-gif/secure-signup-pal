@@ -108,6 +108,18 @@ const NUMBER_WORDS: Record<string, number> = {
   هیجده: 18,
   نوزده: 19,
   بیست: 20,
+  // صدگان — برای مقادیر گرمی مثل «سیصد گرم» یا «هفتصد گرم» ضروری است
+  صد: 100,
+  دویست: 200,
+  سیصد: 300,
+  چهارصد: 400,
+  پانصد: 500,
+  پونصد: 500,
+  ششصد: 600,
+  هفتصد: 700,
+  هشتصد: 800,
+  نهصد: 900,
+  هزار: 1000,
 };
 
 /** کلمات کسری وزنی → مقدار به کیلوگرم */
@@ -236,6 +248,14 @@ function parseClause(clause: string): ClauseParse {
     // عدد به‌صورت کلمه
     if (t in NUMBER_WORDS) {
       const n = NUMBER_WORDS[t];
+      // اگر بلافاصله بعدش «گرم» بیاید → مقدار گرمی (مثلاً «هفتصد گرم»)
+      const next = tokens[i + 1];
+      if (next && GRAM_WORDS.has(next)) {
+        gramAmount = (gramAmount ?? 0) + n;
+        spokenUnit = spokenUnit ?? "gram";
+        i++;
+        continue;
+      }
       count = count === undefined ? n : count * n;
       continue;
     }
@@ -278,9 +298,10 @@ function parseClause(clause: string): ClauseParse {
     spokenUnit = "kg";
     // تعداد در این حالت بخشی از وزن است، نه شمارش جداگانه
     if (count !== undefined && fractionKg !== undefined) count = undefined;
-  } else if (spokenUnit === "kg" && count !== undefined && weightKg === undefined) {
-    // «چهار کیلو» → عدد به‌عنوان وزن
-    weightKg = count;
+  } else if (spokenUnit === "kg" && count !== undefined) {
+    // «دو کیلو» → عدد به‌عنوان وزن؛ اگر مقدار گرمی هم گفته شده باشد
+    // (مثلاً «دو کیلو و هفتصد گرم») با آن جمع می‌شود، نه جایگزین آن
+    weightKg = (weightKg ?? 0) + count;
     count = undefined;
   }
 
@@ -405,6 +426,25 @@ function splitByQuantityBoundaries(segment: string): string[] {
  *  ۳) در نهایت هر بخش با تشخیص مرز مقدار/کسر جدید، دوباره شکسته می‌شود تا
  *     فهرست پشت‌سرهم بدون «و» هم درست جدا شود.
  */
+/**
+ * آیا این بخش («part») تا این‌جا فقط شامل عدد/واحد است و هنوز هیچ نام کالایی
+ * در آن گفته نشده؟ برای تشخیص اینکه آیا هنوز داریم مقدار را کامل می‌کنیم
+ * (مثلاً «دو کیلو») یا کالا شروع شده است.
+ */
+function isQuantityOnlyBuffer(part: string): boolean {
+  const tokens = part.split(" ").filter(Boolean);
+  if (tokens.length === 0) return false;
+  return tokens.every(
+    (t) =>
+      /^\d+(\.\d+)?$/.test(t) ||
+      t in NUMBER_WORDS ||
+      t in FRACTION_KG ||
+      KILO_WORDS.has(t) ||
+      GRAM_WORDS.has(t) ||
+      COUNT_WORDS.has(t),
+  );
+}
+
 function splitIntoClauses(body: string): string[] {
   const hardSegments = body
     .split(/،|,/)
@@ -417,8 +457,15 @@ function splitIntoClauses(body: string): string[] {
     const merged: string[] = [];
     for (const part of parts) {
       const firstWord = part.split(" ")[0];
-      if (merged.length > 0 && firstWord in FRACTION_KG) {
-        // ادامه‌ی اصطلاح کسری («... و نیم») — با بخش قبلی یکی می‌شود
+      const isFractionContinuation = merged.length > 0 && firstWord in FRACTION_KG;
+      // ادامه‌ی مقدار وزنی مرکب («دو کیلو و هفتصد گرم گوجه») — وقتی بخش قبلی
+      // هنوز فقط عدد/واحد بوده (نام کالایی نداشته) و بخش بعدی هم با یک عدد
+      // شروع می‌شود، این دو باید یک قلم واحد به‌حساب بیایند.
+      const isWeightContinuation =
+        merged.length > 0 &&
+        isQuantityOnlyBuffer(merged[merged.length - 1]) &&
+        (/^\d+(\.\d+)?$/.test(firstWord) || firstWord in NUMBER_WORDS);
+      if (isFractionContinuation || isWeightContinuation) {
         merged[merged.length - 1] = `${merged[merged.length - 1]} و ${part}`;
       } else {
         merged.push(part);

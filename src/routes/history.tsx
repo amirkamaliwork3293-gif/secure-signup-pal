@@ -112,7 +112,12 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const startEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setDraft({ ...saved, shopName: saved.shopName || appSettings.shopName });
+    setDraft({
+      ...saved,
+      shopName: saved.shopName || appSettings.shopName,
+      shopAddress: saved.shopAddress || appSettings.storeAddress,
+      shopPhone: saved.shopPhone || appSettings.storePhones?.[0],
+    });
     setEditing(true);
     setIsOpen(true);
     setAddQuery("");
@@ -184,8 +189,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     return filterAndRankSearch(allProducts, q, (p) => [p.name, p.code]).slice(0, 8);
   }, [addQuery, allProducts]);
 
-  // فاکتور آماده برای InvoiceActions (با shopName)
-  const printInv = { ...saved, shopName: saved.shopName || appSettings.shopName };
+  // فاکتور آماده برای InvoiceActions (با shopName/آدرس/تلفن)
+  const printInv = {
+    ...saved,
+    shopName: saved.shopName || appSettings.shopName,
+    shopAddress: saved.shopAddress || appSettings.storeAddress,
+    shopPhone: saved.shopPhone || appSettings.storePhones?.[0],
+  };
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">

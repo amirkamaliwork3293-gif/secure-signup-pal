@@ -1,10 +1,13 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
 import { products, cryptoId, formatNumber, parseNumberInput, type Product } from "@/lib/store";
-import { generateUniqueCode } from "@/lib/barcode";
-import { BarcodePrintModal } from "@/components/BarcodePrintModal";
+import { generateUniqueCode } from "@/lib/barcode-code";
+// مودال چاپ بارکد (bwip-js/jsPDF) فقط هنگام چاپ بارگذاری می‌شود
+const BarcodePrintModal = lazy(() =>
+  import("@/components/BarcodePrintModal").then((m) => ({ default: m.BarcodePrintModal })),
+);
 import { Plus, Trash2, Zap, Printer, ArrowRight } from "lucide-react";
 
 type Draft = { id: string; name: string; price: string };
@@ -83,7 +86,9 @@ function QuickAdd() {
         </button>
       </div>
 
-      {printItems && <BarcodePrintModal items={printItems} onClose={() => { setPrintItems(null); setDrafts([{ id: cryptoId(), name: "", price: "" }]); }} />}
+      <Suspense fallback={null}>
+        {printItems && <BarcodePrintModal items={printItems} onClose={() => { setPrintItems(null); setDrafts([{ id: cryptoId(), name: "", price: "" }]); }} />}
+      </Suspense>
     </Layout>
   );
 }

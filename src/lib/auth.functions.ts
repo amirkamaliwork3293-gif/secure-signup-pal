@@ -38,6 +38,15 @@ function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
 }
 
+// یوزرنیم مبنای ایمیل داخلی ورود کاربر است (username@kamali.local)، بنابراین
+// باید یک شناسه‌ی امن برای ایمیل باشد: فقط حروف/عدد انگلیسی و _ . - در وسط،
+// بدون فاصله/@ و بدون حروف فارسی/یونیکد (تا ورود همیشه قابل‌اعتماد کار کند).
+// در غیر این محدودیت فنی، کاربر می‌تواند هر یوزرنیمی که دوست دارد انتخاب کند —
+// تنها محدودیت واقعی، تکراری نبودن آن است (پیام خطای اختصاصی جدا کنترل می‌شود).
+const USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9_.-]{0,38}[a-zA-Z0-9])?$/;
+const USERNAME_HINT =
+  "یوزرنیم باید ۲ تا ۴۰ کاراکتر انگلیسی باشد (حروف، عدد، نقطه، خط تیره یا زیرخط — بدون فاصله).";
+
 async function loadPlansConfig(admin: any): Promise<PlansConfig> {
   const { data } = await admin.from("app_settings").select("plans").eq("id", 1).maybeSingle();
   return normalizePlans((data as any)?.plans);
@@ -65,8 +74,8 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       phone?: string;
     }) => {
       if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
-      if (!d.username?.trim() || !/^[a-zA-Z0-9_-]{3,32}$/.test(d.username)) {
-        throw new Error("یوزرنیم باید ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، عدد، _ و - باشد.");
+      if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
+        throw new Error(USERNAME_HINT);
       }
       if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
       if (!VALID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
@@ -547,8 +556,8 @@ export const updatePlanPrices = createServerFn({ method: "POST" })
 export const createTrialAccount = createServerFn({ method: "POST" })
   .inputValidator((d: { first_name: string; last_name: string; username: string; password: string }) => {
     if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
-    if (!d.username?.trim() || !/^[a-zA-Z0-9_-]{3,32}$/.test(d.username)) {
-      throw new Error("یوزرنیم باید ۳ تا ۳۲ کاراکتر و فقط شامل حروف انگلیسی، عدد، _ و - باشد.");
+    if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
+      throw new Error(USERNAME_HINT);
     }
     if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
     if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");

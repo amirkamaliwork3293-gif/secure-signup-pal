@@ -6,7 +6,7 @@ import { submitSignupRequest, createTrialAccount, getPublicSettings } from "@/li
 import { createReceiptUploadUrl } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
-import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle } from "lucide-react";
+import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Clock, AlertTriangle, Eye, EyeOff } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
 
@@ -64,6 +64,8 @@ function RegisterPage() {
   const [copied, setCopied] = useState(false);
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [showPass2, setShowPass2] = useState(false);
   const submit = useServerFn(submitSignupRequest);
   const trial = useServerFn(createTrialAccount);
   const signReceiptUpload = useServerFn(createReceiptUploadUrl);
@@ -262,7 +264,7 @@ function RegisterPage() {
           label="یوزرنیم (انگلیسی)"
           value={usernameField}
           onChange={setUsernameField}
-          placeholder="ali123"
+          placeholder="مثلاً: ali123 یا ali.rezaei"
           dir="ltr"
         />
 
@@ -278,25 +280,45 @@ function RegisterPage() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              dir="ltr"
-              autoComplete="new-password"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-            />
+            <div className="relative">
+              <input
+                type={showPass ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                dir="ltr"
+                autoComplete="new-password"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 pl-9 text-sm outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass((v) => !v)}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                tabIndex={-1}
+              >
+                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تکرار رمز</label>
-            <input
-              type="password"
-              value={password2}
-              onChange={(e) => setPassword2(e.target.value)}
-              dir="ltr"
-              autoComplete="new-password"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-            />
+            <div className="relative">
+              <input
+                type={showPass2 ? "text" : "password"}
+                value={password2}
+                onChange={(e) => setPassword2(e.target.value)}
+                dir="ltr"
+                autoComplete="new-password"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 pl-9 text-sm outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass2((v) => !v)}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                tabIndex={-1}
+              >
+                {showPass2 ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
         </div>
 

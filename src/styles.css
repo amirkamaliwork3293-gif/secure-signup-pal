@@ -82,6 +82,24 @@
   font-display: swap;
 }
 
+/* فونت اختصاصی صفحه‌ی معرفی — استعداد (وریبل، همه‌ی وزن‌ها در یک فایل، self-host) */
+@font-face {
+  font-family: "Estedad";
+  src: url("/fonts/Estedad-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* صفحه‌ی معرفی (Landing) فقط برای وب است؛ داخل اپ اندروید (data-app توسط
+   اسکریپت inline در head ست می‌شود) حتی قبل از اجرای ری‌اکت پنهان می‌ماند. */
+html[data-app="1"] .landing-page {
+  display: none !important;
+}
+
+.landing-page {
+  font-family: "Estedad", "Vazirmatn", system-ui, sans-serif;
+}
+
 @layer base {
   * {
     border-color: var(--color-border);

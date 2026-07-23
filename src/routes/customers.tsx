@@ -72,6 +72,8 @@ function CustomersPageInner() {
   );
   const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
   const [showCampaign, setShowCampaign] = useState(false);
+  // ثبت سریع: "debt" = مشتری به ما بدهکار شد (طلب ما)، "payment" = ما به مشتری بدهکاریم (طلب مشتری)
+  const [quickEntry, setQuickEntry] = useState<"debt" | "payment" | null>(null);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -109,11 +111,42 @@ function CustomersPageInner() {
     return q ? filterAndRankSearch(statusFiltered, q, (c) => [customerFullName(c), c.phone]) : statusFiltered;
   }, [list, searchQ, filter]);
 
+  // در حالت «همه» (بدون جستجو) فهرست به سه گروه مجزا تقسیم می‌شود تا طلب و بدهی قاطی نشوند
+  const grouped = useMemo(() => {
+    if (filter !== "all" || searchQ.trim()) return null;
+    const debtors: Customer[] = [];
+    const creditors: Customer[] = [];
+    const settled: Customer[] = [];
+    for (const c of filtered) {
+      const b = customerBalance(c);
+      (b > 0 ? debtors : b < 0 ? creditors : settled).push(c);
+    }
+    // طلبکاران: بزرگ‌ترین بدهی ما اول
+    creditors.sort((a, b) => customerBalance(a) - customerBalance(b));
+    return { debtors, creditors, settled };
+  }, [filtered, filter, searchQ]);
+
   const removeCustomer = (c: Customer) => {
     if (!confirm(`حساب «${customerFullName(c)}» حذف شود؟ تمام سوابق بدهی و پرداخت پاک می‌شود.`))
       return;
     customers.remove(c.id);
   };
+
+  const renderCards = (items: Customer[]) => (
+    <ul className="space-y-2">
+      {items.map((c) => (
+        <CustomerCard
+          key={c.id}
+          customer={c}
+          onDebt={() => setTxTarget({ customer: c, type: "debt" })}
+          onPayment={() => setTxTarget({ customer: c, type: "payment" })}
+          onEdit={() => setEditTarget(c)}
+          onDelete={() => removeCustomer(c)}
+          onRemind={() => setReminderTarget(c)}
+        />
+      ))}
+    </ul>
+  );
 
   return (
     <Layout>
@@ -143,34 +176,80 @@ function CustomersPageInner() {
         پنل پیامکی — ارسال جشنواره / تخفیف / تبلیغ
       </button>
 
-      {/* جمع کل طلب و بدهی */}
+      {/* دو بخش کاملاً مجزا: «طلب شما» و «بدهی شما» — هر کدام با دکمه ثبت مخصوص خودش */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <section className="rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs opacity-80">مجموع طلب شما (بدهی مشتریان)</div>
-              <div className="mt-1 text-2xl font-bold">{formatToman(totals.receivable)}</div>
-              <div className="mt-0.5 text-xs opacity-80">{formatNumber(totals.debtors)} بدهکار</div>
+        {/* طلب شما — مشتریانی که به شما بدهکارند */}
+        <section
+          className={`overflow-hidden rounded-2xl bg-gradient-primary text-primary-foreground shadow-elegant transition ${
+            filter === "debtor" ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setFilter((f) => (f === "debtor" ? "all" : "debtor"))}
+            className="block w-full p-4 text-right"
+            title={filter === "debtor" ? "نمایش همه" : "فقط نمایش بدهکاران"}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold">طلب شما</div>
+                <div className="text-[10px] opacity-80">مشتریانی که به شما بدهکارند</div>
+                <div className="mt-1 text-xl font-bold">{formatToman(totals.receivable)}</div>
+                <div className="mt-0.5 text-[11px] opacity-80">
+                  {formatNumber(totals.debtors)} بدهکار · برای فیلتر لمس کنید
+                </div>
+              </div>
+              <Wallet className="h-9 w-9 opacity-80" />
             </div>
-            <Wallet className="h-10 w-10 opacity-80" />
-          </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickEntry("debt")}
+            className="flex w-full items-center justify-center gap-1.5 bg-background/15 px-3 py-2.5 text-xs font-bold backdrop-blur transition hover:bg-background/25"
+          >
+            <Plus className="h-4 w-4" />
+            ثبت طلب جدید (مشتری بدهکار شد)
+          </button>
         </section>
 
-        <section className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-sky-800 shadow-card dark:text-sky-300">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs opacity-80">مجموع طلب مشتریان از شما</div>
-              <div className="mt-1 text-2xl font-bold">{formatToman(totals.payable)}</div>
-              <div className="mt-0.5 text-xs opacity-80">{formatNumber(totals.creditors)} طلبکار</div>
+        {/* بدهی شما — مشتریانی که از شما طلب دارند */}
+        <section
+          className={`overflow-hidden rounded-2xl border border-sky-500/30 bg-sky-500/10 text-sky-800 shadow-card transition dark:text-sky-300 ${
+            filter === "creditor" ? "ring-2 ring-sky-500 ring-offset-2 ring-offset-background" : ""
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setFilter((f) => (f === "creditor" ? "all" : "creditor"))}
+            className="block w-full p-4 text-right"
+            title={filter === "creditor" ? "نمایش همه" : "فقط نمایش طلبکاران"}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold">بدهی شما</div>
+                <div className="text-[10px] opacity-80">مشتریانی که از شما طلب دارند</div>
+                <div className="mt-1 text-xl font-bold">{formatToman(totals.payable)}</div>
+                <div className="mt-0.5 text-[11px] opacity-80">
+                  {formatNumber(totals.creditors)} طلبکار · برای فیلتر لمس کنید
+                </div>
+              </div>
+              <ArrowDownCircle className="h-9 w-9 opacity-80" />
             </div>
-            <ArrowDownCircle className="h-10 w-10 opacity-80" />
-          </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickEntry("payment")}
+            className="flex w-full items-center justify-center gap-1.5 bg-sky-500/20 px-3 py-2.5 text-xs font-bold transition hover:bg-sky-500/30"
+          >
+            <Plus className="h-4 w-4" />
+            ثبت بدهی جدید (شما بدهکار شدید)
+          </button>
         </section>
       </div>
 
       {/* جستجو و فیلتر */}
-      <div className="mb-3 flex gap-2">
-        <div className="relative flex-1">
+      <div className="mb-3 space-y-2">
+        <div className="relative">
           <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             value={searchQ}
@@ -179,16 +258,33 @@ function CustomersPageInner() {
             className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
           />
         </div>
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value as Filter)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-        >
-          <option value="all">همه</option>
-          <option value="debtor">بدهکاران</option>
-          <option value="creditor">طلبکاران</option>
-          <option value="settled">تسویه‌شده</option>
-        </select>
+        <div className="grid grid-cols-4 gap-1.5">
+          {(
+            [
+              { v: "all", l: "همه" },
+              { v: "debtor", l: "بدهکاران" },
+              { v: "creditor", l: "طلبکاران" },
+              { v: "settled", l: "تسویه" },
+            ] as { v: Filter; l: string }[]
+          ).map((o) => (
+            <button
+              key={o.v}
+              type="button"
+              onClick={() => setFilter(o.v)}
+              className={`rounded-xl border px-2 py-1.5 text-xs font-medium transition ${
+                filter === o.v
+                  ? o.v === "creditor"
+                    ? "border-sky-500 bg-sky-500/10 text-sky-700 dark:text-sky-400"
+                    : o.v === "debtor"
+                      ? "border-destructive bg-destructive/10 text-destructive"
+                      : "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {o.l}
+            </button>
+          ))}
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -200,20 +296,38 @@ function CustomersPageInner() {
               : "مشتری‌ای با این مشخصات یافت نشد."}
           </p>
         </div>
+      ) : grouped ? (
+        <div className="space-y-5">
+          {grouped.debtors.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-destructive">
+                <ArrowUpCircle className="h-4 w-4" />
+                به شما بدهکارند — طلب شما ({formatNumber(grouped.debtors.length)})
+              </h2>
+              {renderCards(grouped.debtors)}
+            </section>
+          )}
+          {grouped.creditors.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-400">
+                <ArrowDownCircle className="h-4 w-4" />
+                از شما طلب دارند — بدهی شما ({formatNumber(grouped.creditors.length)})
+              </h2>
+              {renderCards(grouped.creditors)}
+            </section>
+          )}
+          {grouped.settled.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+                <Check className="h-4 w-4" />
+                تسویه‌شده ({formatNumber(grouped.settled.length)})
+              </h2>
+              {renderCards(grouped.settled)}
+            </section>
+          )}
+        </div>
       ) : (
-        <ul className="space-y-2">
-          {filtered.map((c) => (
-            <CustomerCard
-              key={c.id}
-              customer={c}
-              onDebt={() => setTxTarget({ customer: c, type: "debt" })}
-              onPayment={() => setTxTarget({ customer: c, type: "payment" })}
-              onEdit={() => setEditTarget(c)}
-              onDelete={() => removeCustomer(c)}
-              onRemind={() => setReminderTarget(c)}
-            />
-          ))}
-        </ul>
+        renderCards(filtered)
       )}
 
       {showAdd && (
@@ -243,6 +357,10 @@ function CustomersPageInner() {
           type={txTarget.type}
           onClose={() => setTxTarget(null)}
         />
+      )}
+
+      {quickEntry && (
+        <QuickEntryModal type={quickEntry} list={list} onClose={() => setQuickEntry(null)} />
       )}
 
       {reminderTarget && (
@@ -621,6 +739,202 @@ function TxModal({
             className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white ${isDebt ? "bg-destructive" : "bg-green-600"}`}
           >
             ثبت
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── مودال ثبت سریع طلب/بدهی (انتخاب یا ساخت مشتری + مبلغ، همه در یک مرحله) ──
+
+function QuickEntryModal({
+  type,
+  list,
+  onClose,
+}: {
+  /** debt = مشتری به ما بدهکار شد (طلب ما) · payment = ما به مشتری بدهکار شدیم (طلب مشتری) */
+  type: "debt" | "payment";
+  list: Customer[];
+  onClose: () => void;
+}) {
+  const isDebt = type === "debt";
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Customer | null>(null);
+  const [phone, setPhone] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+
+  const matches =
+    query.trim() && !selected
+      ? filterAndRankSearch(list, query, (c) => [customerFullName(c), c.phone]).slice(0, 6)
+      : [];
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = parseNumberInput(amount);
+    if (!n || n <= 0) {
+      alert("مبلغ معتبر وارد کنید.");
+      return;
+    }
+    let target = selected;
+    if (!target) {
+      const name = query.trim();
+      if (!name) {
+        alert("نام مشتری را بنویسید یا از فهرست انتخاب کنید.");
+        return;
+      }
+      target = customers.add({ firstName: name, phone: phone.trim() || undefined });
+    }
+    customers.addTx(target.id, {
+      type,
+      amount: n,
+      note: note.trim() || (isDebt ? "ثبت طلب" : "بدهی ما به مشتری"),
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <div className="mb-1 flex items-center justify-between">
+          <h3
+            className={`flex items-center gap-1.5 text-base font-bold ${
+              isDebt ? "text-destructive" : "text-sky-700 dark:text-sky-400"
+            }`}
+          >
+            {isDebt ? (
+              <ArrowUpCircle className="h-5 w-5" />
+            ) : (
+              <ArrowDownCircle className="h-5 w-5" />
+            )}
+            {isDebt ? "ثبت طلب جدید" : "ثبت بدهی شما به مشتری"}
+          </h3>
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-4 text-xs leading-5 text-muted-foreground">
+          {isDebt
+            ? "وقتی مشتری جنس برده یا پول قرض گرفته و به شما بدهکار شده است."
+            : "وقتی از مشتری جنس یا پول گرفته‌اید و به او بدهکار شده‌اید؛ حساب او «طلبکار» می‌شود."}
+        </p>
+        <form onSubmit={submit} className="space-y-3">
+          {selected ? (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2.5">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{customerFullName(selected)}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {customerBalance(selected) > 0
+                    ? `بدهی فعلی: ${formatToman(customerBalance(selected))}`
+                    : customerBalance(selected) < 0
+                      ? `طلب فعلی مشتری: ${formatToman(-customerBalance(selected))}`
+                      : "حساب تسویه است"}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
+                title="تغییر مشتری"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                نام مشتری *
+              </label>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+                placeholder="جستجو یا نام مشتری جدید..."
+                className={inputCls}
+              />
+              {matches.length > 0 && (
+                <div className="mt-1 overflow-hidden rounded-xl border border-border bg-background">
+                  {matches.map((c) => {
+                    const b = customerBalance(c);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelected(c)}
+                        className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
+                      >
+                        <span className="truncate font-medium">{customerFullName(c)}</span>
+                        <span
+                          className={`shrink-0 text-[10px] font-semibold ${
+                            b > 0
+                              ? "text-destructive"
+                              : b < 0
+                                ? "text-sky-700 dark:text-sky-400"
+                                : "text-green-600"
+                          }`}
+                        >
+                          {b > 0 ? `بدهکار ${formatToman(b)}` : b < 0 ? `طلبکار ${formatToman(-b)}` : "تسویه"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {query.trim() && matches.length === 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  مشتری‌ای با این نام نیست — با ثبت، مشتری جدیدی با همین نام ساخته می‌شود.
+                </p>
+              )}
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="شماره تلفن (اختیاری — برای مشتری جدید)"
+                inputMode="tel"
+                dir="ltr"
+                className={`${inputCls} mt-2`}
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              مبلغ (تومان) *
+            </label>
+            <input
+              value={amount ? formatNumber(parseNumberInput(amount)) : ""}
+              onChange={(e) => {
+                const n = parseNumberInput(e.target.value);
+                setAmount(n ? String(n) : "");
+              }}
+              inputMode="numeric"
+              placeholder="۱۰۰٬۰۰۰"
+              className={inputCls}
+            />
+          </div>
+
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="بابت... (اختیاری)"
+            className={inputCls}
+          />
+
+          <button
+            type="submit"
+            className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white ${
+              isDebt ? "bg-destructive" : "bg-sky-600"
+            }`}
+          >
+            {isDebt ? "ثبت طلب" : "ثبت بدهی"}
           </button>
         </form>
       </div>

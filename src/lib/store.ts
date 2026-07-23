@@ -78,6 +78,10 @@ export type Invoice = {
   total: number;
   customer?: CustomerInfo;
   shopName?: string;
+  /** آدرس فروشگاه — از تنظیمات، برای نمایش روی فاکتور */
+  shopAddress?: string;
+  /** شماره تماس فروشگاه — از تنظیمات، برای نمایش روی فاکتور */
+  shopPhone?: string;
   paymentMethod?: PaymentMethod;
   /** مبلغ نقد پرداخت‌شده (برای نسیهٔ جزئی یا فاکتور چک با پیش‌پرداخت نقدی) */
   paidAmount?: number;
@@ -225,6 +229,8 @@ export type AppSettings = {
   showMenuFeature?: boolean;
   /** نمایش گزینه «هنرجویان/شهریه‌پرداز» در نوار پایین — پیش‌فرض غیرفعال */
   showStudentsFeature?: boolean;
+  /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
+  currencyUnit?: "toman" | "rial";
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -280,8 +286,11 @@ function writeLocalOnly<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   const keyWithScope = scopedKey(key);
   localStorage.setItem(keyWithScope, JSON.stringify(value));
+  // مقدار تازه را داخل خود رویداد می‌فرستیم تا مشترک‌ها مجبور نباشند کل داده را
+  // دوباره از localStorage بخوانند و JSON.parse کنند — این باعث می‌شود ثبت هر
+  // تغییر (ثبت پرداخت، افزودن کالا، ...) و همچنین هیدریت اولیه‌ی ابری روان‌تر شود.
   window.dispatchEvent(
-    new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key } }),
+    new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key, value } }),
   );
 }
 
@@ -514,10 +523,18 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
         }
         return;
       }
-      const detail = (e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean }>)
-        .detail;
-      if (detail?.scopeChanged || detail?.key === currentKey || detail?.baseKey === key) {
+      const detail = (
+        e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean; value?: unknown }>
+      ).detail;
+      if (detail?.scopeChanged) {
         setState(read(key, fallback));
+        return;
+      }
+      if (detail?.key === currentKey || detail?.baseKey === key) {
+        // اگر مقدار تازه همراه رویداد آمده، مستقیم استفاده کن (بدون JSON.parse دوباره).
+        // برای کامپوننتی که خودش نوشته، همان مرجع قبلی است و React رندر اضافه نمی‌کند.
+        if (detail && "value" in detail) setState(detail.value as T);
+        else setState(read(key, fallback));
       }
     };
     window.addEventListener("store-change", onChange);
@@ -1119,8 +1136,40 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat("fa-IR").format(n);
 }
 
+// ─── واحد نمایش مبالغ (تومان/ریال) ──────────────────────────────────────────
+// همه‌ی مبالغ همیشه «به تومان» ذخیره می‌شوند؛ این تنظیم فقط نمایش را تغییر می‌دهد.
+// ponytail: display-only conversion — ورودی‌ها همچنان به تومان هستند؛ اگر روزی
+// ورودِ ریالی لازم شد، باید یک fromDisplayAmount در تمام فرم‌های مبلغ اضافه شود.
+
+export type CurrencyUnit = "toman" | "rial";
+
+let cachedCurrencyUnit: CurrencyUnit | null = null;
+if (typeof window !== "undefined") {
+  // با هر تغییر تنظیمات (یا تعویض کاربر) کش واحد نمایش باطل می‌شود
+  window.addEventListener("store-change", () => { cachedCurrencyUnit = null; });
+  window.addEventListener("storage", () => { cachedCurrencyUnit = null; });
+}
+
+export function getCurrencyUnit(): CurrencyUnit {
+  if (cachedCurrencyUnit == null) {
+    cachedCurrencyUnit = settings.get().currencyUnit === "rial" ? "rial" : "toman";
+  }
+  return cachedCurrencyUnit;
+}
+
+/** برچسب واحد نمایش («تومان» یا «ریال») */
+export function currencyLabel(): string {
+  return getCurrencyUnit() === "rial" ? "ریال" : "تومان";
+}
+
+/** عدد مبلغ (ذخیره‌شده به تومان) در واحد نمایش انتخابی — بدون برچسب */
+export function formatAmount(n: number): string {
+  return formatNumber(getCurrencyUnit() === "rial" ? n * 10 : n);
+}
+
+/** نمایش کامل مبلغ با برچسب واحد، بر اساس انتخاب کاربر در تنظیمات */
 export function formatToman(n: number): string {
-  return formatNumber(n) + " تومان";
+  return formatAmount(n) + " " + currencyLabel();
 }
 
 // ─── Jalali (Persian) date helpers ─────────────────────────────────────────

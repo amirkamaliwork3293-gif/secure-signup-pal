@@ -74,7 +74,7 @@ export function LandingPage() {
   if (c.email) socials.push({ href: `mailto:${c.email}`, label: c.email, icon: Mail });
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background text-foreground">
+    <div dir="rtl" className="landing-page min-h-screen bg-background text-foreground">
       {/* Nav */}
       <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">

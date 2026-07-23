@@ -8,23 +8,12 @@
  */
 import bwipjs from "bwip-js/browser";
 import { jsPDF } from "jspdf";
-import { products, formatToman } from "@/lib/store";
+import { formatToman } from "@/lib/store";
 import { printHtml } from "@/lib/print";
 
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-export function generateUniqueCode(existing?: Set<string>): string {
-  const taken = existing ?? new Set(products.getAll().map((p) => p.code).filter(Boolean));
-  for (let i = 0; i < 50; i++) {
-    let code = "P";
-    for (let j = 0; j < 9; j++) code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-    if (!taken.has(code)) {
-      taken.add(code);
-      return code;
-    }
-  }
-  return "P" + Date.now().toString(36).toUpperCase();
-}
+// تولید کد یکتا در ماژول سبکِ جدا نگه‌داری می‌شود؛ اینجا فقط re-export می‌کنیم
+// تا importهای قدیمی از "@/lib/barcode" همچنان کار کنند.
+export { generateUniqueCode } from "@/lib/barcode-code";
 
 export type BarcodeFormat = "code128" | "ean13";
 

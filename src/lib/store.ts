@@ -282,8 +282,11 @@ function writeLocalOnly<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   const keyWithScope = scopedKey(key);
   localStorage.setItem(keyWithScope, JSON.stringify(value));
+  // مقدار تازه را داخل خود رویداد می‌فرستیم تا مشترک‌ها مجبور نباشند کل داده را
+  // دوباره از localStorage بخوانند و JSON.parse کنند — این باعث می‌شود ثبت هر
+  // تغییر (ثبت پرداخت، افزودن کالا، ...) و همچنین هیدریت اولیه‌ی ابری روان‌تر شود.
   window.dispatchEvent(
-    new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key } }),
+    new CustomEvent("store-change", { detail: { key: keyWithScope, baseKey: key, value } }),
   );
 }
 
@@ -516,10 +519,18 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
         }
         return;
       }
-      const detail = (e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean }>)
-        .detail;
-      if (detail?.scopeChanged || detail?.key === currentKey || detail?.baseKey === key) {
+      const detail = (
+        e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean; value?: unknown }>
+      ).detail;
+      if (detail?.scopeChanged) {
         setState(read(key, fallback));
+        return;
+      }
+      if (detail?.key === currentKey || detail?.baseKey === key) {
+        // اگر مقدار تازه همراه رویداد آمده، مستقیم استفاده کن (بدون JSON.parse دوباره).
+        // برای کامپوننتی که خودش نوشته، همان مرجع قبلی است و React رندر اضافه نمی‌کند.
+        if (detail && "value" in detail) setState(detail.value as T);
+        else setState(read(key, fallback));
       }
     };
     window.addEventListener("store-change", onChange);

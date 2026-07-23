@@ -6,7 +6,7 @@
 
 import { Printer, Share2, Receipt } from "lucide-react";
 import type { Invoice } from "@/lib/store";
-import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL } from "@/lib/store";
+import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, currencyLabel } from "@/lib/store";
 import { printHtml, OLD_APP_MESSAGE } from "@/lib/print";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
@@ -31,10 +31,10 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
         <td>${item.quantity.toLocaleString("fa-IR")}</td>
         <td>${
           item.originalPrice
-            ? `<span style="text-decoration:line-through;color:#999;margin-left:6px;">${new Intl.NumberFormat("fa-IR").format(item.originalPrice)}</span>`
+            ? `<span style="text-decoration:line-through;color:#999;margin-left:6px;">${formatAmount(item.originalPrice)}</span>`
             : ""
-        }${new Intl.NumberFormat("fa-IR").format(item.price)}</td>
-        <td>${new Intl.NumberFormat("fa-IR").format(item.price * item.quantity)}</td>
+        }${formatAmount(item.price)}</td>
+        <td>${formatAmount(item.price * item.quantity)}</td>
       </tr>`
     )
     .join("");
@@ -83,11 +83,11 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
   <tfoot>
     <tr class="total-row">
       <td colspan="4">جمع کل</td>
-      <td>${new Intl.NumberFormat("fa-IR").format(inv.total)} تومان</td>
+      <td>${formatAmount(inv.total)} ${currencyLabel()}</td>
     </tr>
-    ${inv.paidAmount ? `<tr><td colspan="4">پرداخت نقدی</td><td>${new Intl.NumberFormat("fa-IR").format(inv.paidAmount)} تومان</td></tr>` : ""}
-    ${inv.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${new Intl.NumberFormat("fa-IR").format(inv.checkAmount)} تومان</td></tr>` : ""}
-    ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<tr><td colspan="4">مانده نسیه</td><td>${new Intl.NumberFormat("fa-IR").format(Math.max(0, inv.total - (inv.paidAmount || 0)))} تومان</td></tr>` : ""}
+    ${inv.paidAmount ? `<tr><td colspan="4">پرداخت نقدی</td><td>${formatAmount(inv.paidAmount)} ${currencyLabel()}</td></tr>` : ""}
+    ${inv.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${formatAmount(inv.checkAmount)} ${currencyLabel()}</td></tr>` : ""}
+    ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<tr><td colspan="4">مانده نسیه</td><td>${formatAmount(Math.max(0, inv.total - (inv.paidAmount || 0)))} ${currencyLabel()}</td></tr>` : ""}
   </tfoot>
 </table>
 <div class="footer">با تشکر از خرید شما — ${shopName}</div>
@@ -103,7 +103,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
     ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
     : "";
   const shopName = inv.shopName || "فروشگاه";
-  const fmt = (n: number) => new Intl.NumberFormat("fa-IR").format(n);
+  const fmt = formatAmount;
   const rows = inv.items
     .map(
       (it) => `
@@ -148,7 +148,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
-<div class="total"><span>جمع کل</span><span>${fmt(inv.total)} تومان</span></div>
+<div class="total"><span>جمع کل</span><span>${fmt(inv.total)} ${currencyLabel()}</span></div>
 ${inv.paidAmount ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(inv.paidAmount)}</span></div>` : ""}
 ${inv.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(inv.checkAmount)}</span></div>` : ""}
 ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<div class="line"><span>مانده نسیه</span><span>${fmt(Math.max(0, inv.total - (inv.paidAmount || 0)))}</span></div>` : ""}
@@ -172,10 +172,10 @@ function buildShareText(inv: Invoice): string {
     `─────────────────`,
     ...inv.items.map(
       (item) =>
-        `• ${item.name}  ×${item.quantity}  =  ${new Intl.NumberFormat("fa-IR").format(item.price * item.quantity)} تومان`
+        `• ${item.name}  ×${item.quantity}  =  ${formatAmount(item.price * item.quantity)} ${currencyLabel()}`
     ),
     `─────────────────`,
-    `💰 جمع کل: ${new Intl.NumberFormat("fa-IR").format(inv.total)} تومان`,
+    `💰 جمع کل: ${formatAmount(inv.total)} ${currencyLabel()}`,
   ].filter(Boolean);
   return lines.join("\n");
 }

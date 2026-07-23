@@ -7,7 +7,7 @@
  * و دقیقاً همان چیدمان نسخه چاپی سایت را دارد.
  */
 import { jsPDF } from "jspdf";
-import { formatNumber, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
+import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
@@ -171,8 +171,8 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
     formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
     cols.qty.x - cols.qty.w / 2, cy,
   );
-  ctx.fillText(formatNumber(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText(formatNumber(Math.round(item.price * item.quantity)), cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText(formatAmount(Math.round(item.price * item.quantity)), cols.total.x - cols.total.w / 2, cy);
 
   ctx.textAlign = "right";
   ctx.fillText(fitText(ctx, item.name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);
@@ -193,7 +193,7 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   ctx.textAlign = "right";
   ctx.fillText("جمع کل", PAGE_W - MARGIN - 2 * SCALE, cy);
   ctx.textAlign = "center";
-  ctx.fillText(`${formatNumber(inv.total)} تومان`, cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(`${formatAmount(inv.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
 
   return y + HEAD_H;
 }

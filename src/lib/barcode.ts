@@ -8,7 +8,7 @@
  */
 import bwipjs from "bwip-js/browser";
 import { jsPDF } from "jspdf";
-import { products, formatNumber } from "@/lib/store";
+import { products, formatToman } from "@/lib/store";
 import { printHtml } from "@/lib/print";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -138,7 +138,7 @@ export async function renderLabelToCanvas(
   if (hasPrice) {
     y += priceFontPx;
     ctx.font = `700 ${priceFontPx}px ${LABEL_FONT}`;
-    ctx.fillText(`${formatNumber(item.price!)} تومان`, W / 2, y);
+    ctx.fillText(formatToman(item.price!), W / 2, y);
   }
 
   return canvas;

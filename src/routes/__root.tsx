@@ -70,7 +70,14 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 const BASE_URL = "https://kamixapp.ir";
-const OG_IMAGE = "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/d24b17c4-cf4d-4480-9c72-21d92987eeac/id-preview-cd8c23ad--6fd5b18e-fd9e-4418-ba82-813c8f9cfe32.lovable.app-1780049993579.png";
+// تصویر نتیجه‌ی جستجوی گوگل و پیش‌نمایش شبکه‌های اجتماعی — روی دامنه‌ی خودمان
+const OG_IMAGE = `${BASE_URL}/og-image.png`;
+
+// تشخیص «داخل اپ اندروید» پیش از هیدریشن ری‌اکت: این اسکریپت به‌صورت inline در
+// <head> اجرا می‌شود (قبل از رندر body) و با ست‌کردن data-app روی <html>، صفحه‌ی
+// معرفی (Landing) را که در HTML سمت سرور وجود دارد با CSS پنهان می‌کند تا حتی
+// یک لحظه هم داخل اپلیکیشن دیده نشود. همان منطق lib/isWebView.ts، به‌صورت خام.
+const APP_DETECT_JS = `try{var q=new URLSearchParams(location.search).get("app");if(q==="1"||q==="android"||q==="true"){try{localStorage.setItem("kamix_is_app","1")}catch(e){}}var s=null;try{s=localStorage.getItem("kamix_is_app")}catch(e){}if(window.Capacitor||s==="1"||/KAMIX(App)?/i.test(navigator.userAgent||""))document.documentElement.setAttribute("data-app","1")}catch(e){}`;
 
 const organizationLd = {
   "@context": "https://schema.org",
@@ -78,6 +85,7 @@ const organizationLd = {
   name: "KAMIX (کامیکس) — حسابداری فروشگاهی",
   url: BASE_URL,
   logo: `${BASE_URL}/icon-512.png`,
+  image: OG_IMAGE,
   sameAs: [],
   description: "سیستم حسابداری و صدور فاکتور فارسی با اسکن بارکد و QR روی موبایل.",
 };
@@ -107,13 +115,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل. ثبت‌نام، دانلود APK و شروع رایگان." },
       { name: "keywords", content: "کامیکس, حسابداری کامیکس, حسابداری فروشگاهی, فاکتور موبایل, صدور فاکتور, انبار موبایل, اسکن بارکد, QR, حسابداری اندروید" },
       { name: "author", content: "Kamali" },
-      { name: "robots", content: "index, follow" },
+      { name: "robots", content: "index, follow, max-image-preview:large" },
       { property: "og:site_name", content: "KAMIX (کامیکس)" },
       { property: "og:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
       { property: "og:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
       { property: "og:type", content: "website" },
       { property: "og:url", content: BASE_URL },
       { property: "og:image", content: OG_IMAGE },
+      { property: "og:image:width", content: "1920" },
+      { property: "og:image:height", content: "640" },
+      { property: "og:image:type", content: "image/png" },
       { property: "og:image:alt", content: "KAMIX — اپلیکیشن حسابداری موبایل" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
@@ -142,6 +153,8 @@ function RootShell({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fa" dir="rtl">
       <head>
+        {/* باید قبل از body اجرا شود تا صفحه‌ی معرفی در اپ حتی یک فریم هم دیده نشود */}
+        <script dangerouslySetInnerHTML={{ __html: APP_DETECT_JS }} />
         <HeadContent />
       </head>
       <body>

@@ -68,6 +68,7 @@ function InvoicePageInner() {
   const [checkAmount, setCheckAmount] = useState<number>(inv.checkAmount ?? 0);
   const [checkNumber, setCheckNumber] = useState<string>(inv.checkNumber ?? "");
   const [checkDueDate, setCheckDueDate] = useState<string>(inv.checkDueDate ?? "");
+  const [notes, setNotes] = useState<string>(inv.notes ?? "");
   const [showSearch, setShowSearch] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
@@ -82,6 +83,7 @@ function InvoicePageInner() {
     setCheckAmount(inv.checkAmount ?? 0);
     setCheckNumber(inv.checkNumber ?? "");
     setCheckDueDate(inv.checkDueDate ?? "");
+    setNotes(inv.notes ?? "");
     setShowCustomer(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inv.id]);
@@ -153,6 +155,7 @@ function InvoicePageInner() {
       checkAmount: paymentMethod === "check" ? chk : undefined,
       checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
       checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+      notes: notes.trim() ? notes.trim() : undefined,
     };
     invoice.archive(finalInv);
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
@@ -168,6 +171,7 @@ function InvoicePageInner() {
     setCheckAmount(0);
     setCheckNumber("");
     setCheckDueDate("");
+    setNotes("");
     setShowCustomer(false);
   };
 
@@ -348,7 +352,15 @@ function InvoicePageInner() {
           {inv.items.length > 0 && (
             <div className="flex gap-1.5 flex-1 justify-end">
               <InvoiceActions
-                inv={{ ...inv, customer, shopName: appSettings.shopName }}
+                inv={{
+                  ...inv,
+                  customer,
+                  shopName: appSettings.shopName,
+                  notes: notes.trim() ? notes.trim() : undefined,
+                  // فاکتور هنوز ثبت نهایی نشده — تاریخ/ساعت چاپ باید همین لحظه باشد،
+                  // نه لحظه‌ی باز شدن این تب (که ممکن است قدیمی‌تر باشد)
+                  createdAt: Date.now(),
+                }}
                 size="sm"
                 showLabels={false}
               />
@@ -507,6 +519,21 @@ function InvoicePageInner() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* توضیحات فاکتور (اختیاری) */}
+      <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
+        <label htmlFor="invoice-notes" className="mb-2 block text-xs font-semibold text-muted-foreground">
+          توضیحات فاکتور (اختیاری)
+        </label>
+        <textarea
+          id="invoice-notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="یادداشتی برای این فاکتور بنویسید..."
+          rows={2}
+          className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+        />
       </div>
 
       {/* Items list */}

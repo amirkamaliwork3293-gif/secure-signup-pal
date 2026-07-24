@@ -266,14 +266,22 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
           {/* حالت نمایش */}
           {!editing && (
-            <ul className="space-y-1">
-              {saved.items.map((item) => (
-                <li key={item.productId} className="flex justify-between text-xs text-muted-foreground">
-                  <span>{item.name} × {item.quantity.toLocaleString("fa-IR")}</span>
-                  <span>{formatToman(item.price * item.quantity)}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              {saved.notes && (
+                <div className="rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">توضیحات: </span>
+                  {saved.notes}
+                </div>
+              )}
+              <ul className="space-y-1">
+                {saved.items.map((item) => (
+                  <li key={item.productId} className="flex justify-between text-xs text-muted-foreground">
+                    <span>{item.name} × {item.quantity.toLocaleString("fa-IR")}</span>
+                    <span>{formatToman(item.price * item.quantity)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
 
           {/* حالت ویرایش */}
@@ -355,6 +363,15 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                   ))}
                 </div>
               </div>
+
+              {/* توضیحات */}
+              <textarea
+                value={draft.notes ?? ""}
+                onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+                placeholder="توضیحات فاکتور (اختیاری)"
+                rows={2}
+                className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
 
               {/* اقلام */}
               <ul className="space-y-2">

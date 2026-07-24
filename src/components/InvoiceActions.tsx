@@ -83,6 +83,7 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
   <div><span>تلفن: </span><strong>${customer?.phone || "—"}</strong></div>
   ${inv.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[inv.paymentMethod]}</strong></div>` : ""}
 </div>
+${inv.notes ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;background:#f7f7f7;border:1px solid #e2e2e2;font-size:${Math.round(fontSize * 0.9)}px;"><strong>توضیحات: </strong>${inv.notes}</div>` : ""}
 <table>
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
   <tbody>${rows}</tbody>
@@ -156,6 +157,7 @@ ${
   ${customer?.phone ? `<div><span>تلفن:</span><span>${customer.phone}</span></div>` : ""}
   ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
 </div>
+${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${inv.notes}</div>` : ""}
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
@@ -180,6 +182,7 @@ function buildShareText(inv: Invoice): string {
     `🧾 فاکتور ${inv.shopName || "فروشگاه"}`,
     `📅 تاریخ: ${date}`,
     customerName ? `👤 مشتری: ${customerName}` : "",
+    inv.notes ? `📝 توضیحات: ${inv.notes}` : "",
     `─────────────────`,
     ...inv.items.map(
       (item) =>

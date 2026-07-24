@@ -256,6 +256,16 @@ function parseClause(clause: string): ClauseParse {
         i++;
         continue;
       }
+      // اگر بلافاصله بعدش «کیلو» بیاید → مقدار کیلویی (مثلاً «یک کیلو»، «دو کیلو»)
+      // این حالت باید دقیقاً مثل حالت رقمی («2 کیلو») در fractionKg جمع شود، وگرنه
+      // وقتی با یک مقدار گرمی ترکیب شود (مثلاً «یک کیلو و 100 گرم») بخش کیلویی گم
+      // می‌شود چون در انتها فقط به‌عنوان count باقی می‌ماند و هرگز با وزن جمع نمی‌شود.
+      if (next && KILO_WORDS.has(next)) {
+        fractionKg = (fractionKg ?? 0) + n;
+        spokenUnit = "kg";
+        i++;
+        continue;
+      }
       count = count === undefined ? n : count * n;
       continue;
     }

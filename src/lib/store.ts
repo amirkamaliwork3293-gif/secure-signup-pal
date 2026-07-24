@@ -91,6 +91,8 @@ export type Invoice = {
   checkNumber?: string;
   /** تاریخ سررسید چک (ISO) — اختیاری */
   checkDueDate?: string;
+  /** توضیحات اختیاری فاکتور — در صورت وجود، روی فاکتور چاپی/PDF/اشتراک‌گذاری هم نمایش داده می‌شود */
+  notes?: string;
 };
 
 // ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────

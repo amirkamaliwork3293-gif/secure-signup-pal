@@ -122,6 +122,15 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number): number {
       ctx.fillText(fitText(ctx, meta[i][0], PAGE_W / 2 - MARGIN - 2 * SCALE), meta[i][2], rowY);
     }
     y += Math.ceil(meta.length / 2) * 6 * SCALE + 3 * SCALE;
+
+    if (inv.notes) {
+      ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
+      ctx.textAlign = "right";
+      ctx.fillStyle = MUTED;
+      const notesText = fitText(ctx, `توضیحات: ${inv.notes}`, PAGE_W - MARGIN * 2);
+      ctx.fillText(notesText, PAGE_W - MARGIN, y);
+      y += 5.5 * SCALE;
+    }
   }
 
   return y;

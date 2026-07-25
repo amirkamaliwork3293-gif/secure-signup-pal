@@ -16,23 +16,46 @@ export type ImportRow = {
 };
 
 const HEADERS: Record<string, keyof Omit<ImportRow, "rowIndex" | "errors">> = {
-  "نام": "name", "نام محصول": "name",
-  "بارکد": "code", "کد": "code", "کد بارکد": "code",
-  "قیمت": "price", "قیمت فروش": "price",
-  "قیمت خرید": "buyPrice",
-  "موجودی": "stock", "تعداد": "stock",
-  "دسته": "category", "دسته بندی": "category", "دسته‌بندی": "category",
-  "توضیحات": "description", "توضیح": "description",
-  "واحد": "unit",
-  "name": "name", "product": "name",
-  "barcode": "code", "code": "code", "sku": "code",
-  "price": "price", "sellprice": "price", "sell_price": "price",
-  "buyprice": "buyPrice", "buy_price": "buyPrice", "cost": "buyPrice",
-  "stock": "stock", "qty": "stock", "quantity": "stock",
-  "category": "category",
-  "description": "description", "desc": "description",
+  "نام": "name", "نام محصول": "name", "نام کالا": "name", "عنوان": "name", "عنوان کالا": "name",
+  "شرح کالا": "name", "شرح": "name", "نام جنس": "name",
+  "بارکد": "code", "کد": "code", "کد بارکد": "code", "کد کالا": "code", "کد جنس": "code", "شناسه": "code", "شماره": "code",
+  "قیمت": "price", "قیمت فروش": "price", "مبلغ": "price", "مبلغ فروش": "price", "بها": "price", "ارزش": "price", "فی": "price", "فی فروش": "price",
+  "قیمت خرید": "buyPrice", "مبلغ خرید": "buyPrice", "فی خرید": "buyPrice", "بهای خرید": "buyPrice",
+  "موجودی": "stock", "تعداد": "stock", "موجودی کالا": "stock", "موجودی انبار": "stock", "تعداد کالا": "stock", "انبار": "stock", "مقدار": "stock",
+  "دسته": "category", "دسته بندی": "category", "دسته‌بندی": "category", "گروه": "category", "گروه کالا": "category", "نوع": "category",
+  "توضیحات": "description", "توضیح": "description", "یادداشت": "description",
+  "واحد": "unit", "واحد کالا": "unit", "واحد شمارش": "unit",
+  "name": "name", "product": "name", "product name": "name", "title": "name", "item": "name",
+  "barcode": "code", "code": "code", "sku": "code", "id": "code",
+  "price": "price", "sellprice": "price", "sell_price": "price", "sell price": "price", "amount": "price",
+  "buyprice": "buyPrice", "buy_price": "buyPrice", "buy price": "buyPrice", "cost": "buyPrice",
+  "stock": "stock", "qty": "stock", "quantity": "stock", "inventory": "stock",
+  "category": "category", "group": "category",
+  "description": "description", "desc": "description", "note": "description",
   "unit": "unit",
 };
+
+// نگاشت انعطاف‌پذیر (fallback) برای عناوین ستونی که در جدول بالا دقیقاً نیامده‌اند؛
+// هر فایل اکسل با نام‌گذاری متفاوت ستون‌ها (خروجی نرم‌افزارهای مختلف فروشگاهی) را پوشش می‌دهد.
+// ترتیب کلیدها مهم است: مشخص‌ترین‌ها (کد/قیمت خرید) قبل از کلی‌ترین‌ها (نام) بررسی می‌شوند
+// تا مثلاً «قیمت خرید» به‌اشتباه به‌جای buyPrice روی price ننشیند.
+const FUZZY_RULES: Array<[keyof Omit<ImportRow, "rowIndex" | "errors">, string[]]> = [
+  ["code", ["بارکد", "کد", "شناسه", "barcode", "code", "sku"]],
+  ["buyPrice", ["خرید", "buy", "cost"]],
+  ["price", ["قیمت", "مبلغ", "بها", "ارزش", "فی", "price", "sell", "amount"]],
+  ["stock", ["موجودی", "انبار", "تعداد", "مقدار", "stock", "qty", "quantity", "inventory"]],
+  ["category", ["دسته", "گروه", "نوع", "category", "group"]],
+  ["unit", ["واحد", "unit"]],
+  ["description", ["توضیح", "شرح", "یادداشت", "desc", "note"]],
+  ["name", ["نام", "عنوان", "کالا", "جنس", "محصول", "name", "product", "title", "item"]],
+];
+
+function fuzzyMatchHeader(h: string): keyof Omit<ImportRow, "rowIndex" | "errors"> | null {
+  for (const [key, keywords] of FUZZY_RULES) {
+    if (keywords.some((kw) => h.includes(kw))) return key;
+  }
+  return null;
+}
 
 /**
  * نرمال‌سازی نام ستون: حذف هرچیز داخل پرانتز (مثل «(تومان)»)،
@@ -67,7 +90,7 @@ export async function parseFile(file: File): Promise<ImportRow[]> {
   if (json.length === 0) return [];
 
   const headerRow = json[0].map((h) => normalizeHeader(String(h ?? "")));
-  const colMap: (keyof Omit<ImportRow, "rowIndex" | "errors"> | null)[] = headerRow.map((h) => HEADERS[h] ?? null);
+  const colMap: (keyof Omit<ImportRow, "rowIndex" | "errors"> | null)[] = headerRow.map((h) => HEADERS[h] ?? fuzzyMatchHeader(h));
 
   const rows: ImportRow[] = [];
   for (let i = 1; i < json.length; i++) {

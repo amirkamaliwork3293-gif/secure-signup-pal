@@ -11,10 +11,14 @@ import {
   settings,
   products,
   customers,
+  customerFullName,
+  customerBalance,
+  cryptoId,
   addProductToInvoice,
   isWeightUnit,
   applyProductDiscount,
   PAYMENT_LABEL,
+  type Customer,
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
@@ -34,6 +38,8 @@ import {
   Pencil,
   Mic,
   Package,
+  UserCheck,
+  NotebookPen,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
@@ -57,7 +63,7 @@ export const Route = createFileRoute("/")({
   component: InvoicePage,
 });
 
-function InvoicePageInner() {
+export function InvoicePageInner() {
   const [inv, setInv] = invoice.useCurrent();
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
@@ -72,6 +78,12 @@ function InvoicePageInner() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
+  const [allCustomers] = customers.useAll();
+  const [customerQ, setCustomerQ] = useState("");
+  const [showManualItem, setShowManualItem] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPrice, setManualPrice] = useState("");
+  const [manualQty, setManualQty] = useState("1");
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
 
@@ -162,8 +174,13 @@ function InvoicePageInner() {
     if (paymentMethod === "credit") {
       const debt = Math.max(0, inv.total - paid);
       if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
+      else if (hasCustomer) customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
       if (chk > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: chk, note: "چک دریافتی" });
+      else if (hasCustomer) customers.findOrCreate(customer);
+    } else if (hasCustomer) {
+      // نقد/کارت با مشتری مشخص: هیچ بدهی‌ای ثبت نمی‌شود، اما مشتری در «مشتریان» ذخیره/به‌روز می‌شود
+      customers.findOrCreate(customer);
     }
     setCustomer({});
     setPaymentMethod("cash");
@@ -172,6 +189,7 @@ function InvoicePageInner() {
     setCheckNumber("");
     setCheckDueDate("");
     setNotes("");
+    setCustomerQ("");
     setShowCustomer(false);
   };
 
@@ -184,6 +202,46 @@ function InvoicePageInner() {
     if (!p) return;
     setInv((prev) => addProductToInvoice(prev, p));
     setSearchQ("");
+  };
+
+  // انتخاب یکی از مشتریان ذخیره‌شده برای این فاکتور
+  const selectCustomer = (c: Customer) => {
+    setCustomer({ firstName: c.firstName, lastName: c.lastName, phone: c.phone });
+    setCustomerQ("");
+  };
+
+  const customerMatches =
+    customerQ.trim().length > 0
+      ? filterAndRankSearch(allCustomers, customerQ, (c) => [customerFullName(c), c.phone]).slice(0, 6)
+      : [];
+
+  // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست
+  const addManualItem = () => {
+    const price = parseNumberInput(manualPrice);
+    const qty = parseNumberInput(manualQty) || 1;
+    if (!manualName.trim() || price <= 0 || qty <= 0) {
+      alert("نام کالا، قیمت و تعداد معتبر وارد کنید.");
+      return;
+    }
+    setInv((prev) =>
+      recalc({
+        ...prev,
+        items: [
+          ...prev.items,
+          {
+            productId: `manual-${cryptoId()}`,
+            name: manualName.trim(),
+            price,
+            quantity: qty,
+            unit: "عدد",
+          },
+        ],
+      }),
+    );
+    setManualName("");
+    setManualPrice("");
+    setManualQty("1");
+    setShowManualItem(false);
   };
 
   const filtered = searchQ.trim()
@@ -331,10 +389,69 @@ function InvoicePageInner() {
               </div>
             )}
             {searchQ.trim() && filtered.length === 0 && (
-              <div className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-border bg-card px-3 py-3 text-sm text-muted-foreground shadow-lg">
-                محصولی یافت نشد
+              <div className="absolute inset-x-0 top-full z-50 mt-1 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground shadow-lg">
+                <p>محصولی یافت نشد</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualName(searchQ);
+                    setShowManualItem(true);
+                    setShowSearch(false);
+                    setSearchQ("");
+                  }}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 py-2 text-xs font-medium text-primary hover:bg-primary/10"
+                >
+                  <NotebookPen className="h-3.5 w-3.5" />
+                  افزودن «{searchQ}» به‌عنوان کالای دستی
+                </button>
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => setShowManualItem((v) => !v)}
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-background/10 py-1.5 text-[11px] font-medium backdrop-blur hover:bg-background/20"
+            >
+              <NotebookPen className="h-3 w-3" />
+              افزودن کالای دستی (خارج از انبار)
+            </button>
+          </div>
+        )}
+
+        {/* فرم افزودن کالای دستی — کالایی که در انبار ثبت نیست، فقط نام و قیمت */}
+        {showManualItem && (
+          <div className="mt-2 space-y-2 rounded-xl bg-background/90 p-3 text-foreground">
+            <input
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              placeholder="نام کالا"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={manualPrice}
+                onChange={(e) => setManualPrice(e.target.value)}
+                placeholder="قیمت واحد (تومان)"
+                inputMode="numeric"
+                dir="ltr"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+              <input
+                value={manualQty}
+                onChange={(e) => setManualQty(e.target.value)}
+                placeholder="تعداد"
+                inputMode="decimal"
+                dir="ltr"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addManualItem}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+              افزودن به فاکتور
+            </button>
           </div>
         )}
 
@@ -385,6 +502,40 @@ function InvoicePageInner() {
             <User className="h-4 w-4 text-primary" />
             اطلاعات مشتری (اختیاری)
           </h3>
+
+          {/* انتخاب از مشتریان ذخیره‌شده */}
+          <div className="relative mb-2">
+            <UserCheck className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={customerQ}
+              onChange={(e) => setCustomerQ(e.target.value)}
+              placeholder="جستجو در مشتریان ذخیره‌شده..."
+              className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+            />
+            {customerMatches.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-40 mt-1 max-h-44 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                {customerMatches.map((c) => {
+                  const b = customerBalance(c);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => selectCustomer(c)}
+                      className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
+                    >
+                      <span className="truncate font-medium">{customerFullName(c)}</span>
+                      <span
+                        className={`shrink-0 ${b > 0 ? "text-destructive" : b < 0 ? "text-sky-600" : "text-muted-foreground"}`}
+                      >
+                        {b > 0 ? `بدهکار ${formatToman(b)}` : b < 0 ? `طلبکار ${formatToman(-b)}` : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input
               value={customer.firstName ?? ""}
@@ -573,6 +724,11 @@ function InvoicePageInner() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate font-medium">{item.name}</span>
+                    {!prod && (
+                      <span className="rounded-md bg-slate-500/15 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 dark:text-slate-400">
+                        دستی
+                      </span>
+                    )}
                     {isWholesale && (
                       <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-400">
                         عمده

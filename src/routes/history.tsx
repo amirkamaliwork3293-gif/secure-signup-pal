@@ -452,7 +452,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
 // ─── صفحه اصلی ────────────────────────────────────────────────────────────────
 
-function HistoryPageInner() {
+export function HistoryPageInner() {
   const { q: incomingQuery } = Route.useSearch();
   const [list] = invoice.useHistory();
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");

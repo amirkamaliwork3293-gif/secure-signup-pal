@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 
 const nav = [
   { to: "/",          label: "فاکتور",   icon: Receipt,  settingKey: null },
+  { to: "/invoices",  label: "فاکتورها", icon: ListChecks, settingKey: null },
   { to: "/scan",      label: "اسکن",     icon: ScanLine, settingKey: null },
   { to: "/products",  label: "محصولات",  icon: Package,  settingKey: null },
   { to: "/menu",      label: "منو",      icon: UtensilsCrossed, settingKey: "showMenuFeature" },

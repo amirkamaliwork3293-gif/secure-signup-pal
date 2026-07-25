@@ -34,7 +34,7 @@ export const Route = createFileRoute("/purchases")({
   component: PurchasesPage,
 });
 
-function PurchasesPageInner() {
+export function PurchasesPageInner() {
   const [allProducts] = products.useAll();
   const [catList] = categories.useAll();
   const [history] = purchases.useHistory();

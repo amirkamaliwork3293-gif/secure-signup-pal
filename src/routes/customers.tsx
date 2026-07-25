@@ -6,6 +6,7 @@ import {
   customers,
   customerBalance,
   customerFullName,
+  invoicesOfCustomer,
   formatToman,
   formatNumber,
   parseNumberInput,
@@ -13,12 +14,22 @@ import {
   settings,
   storePublicUrl,
   formatJalaliDateTime,
+  invoice,
+  products,
+  recalc,
+  emptyInvoice,
+  addProductToInvoice,
+  applyProductDiscount,
+  PAYMENT_LABEL,
   type Customer,
   type CustomerTx,
+  type Product,
+  type PaymentMethod,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
 import { filterAndRankSearch } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
+import { InvoiceActions } from "@/components/InvoiceActions";
 import {
   Users,
   Plus,
@@ -30,7 +41,6 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   ChevronDown,
-  ChevronUp,
   Wallet,
   Bell,
   MessageCircle,
@@ -39,6 +49,11 @@ import {
   Check,
   Link2,
   Share2,
+  Receipt,
+  Package,
+  NotebookPen,
+  Contact,
+  ShoppingCart,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -72,6 +87,9 @@ function CustomersPageInner() {
   );
   const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
   const [showCampaign, setShowCampaign] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<Customer | null>(null);
+  const [invoiceTarget, setInvoiceTarget] = useState<Customer | null>(null);
+  const [contactsBusy, setContactsBusy] = useState(false);
   // ثبت سریع: "debt" = مشتری به ما بدهکار شد (طلب ما)، "payment" = ما به مشتری بدهکاریم (طلب مشتری)
   const [quickEntry, setQuickEntry] = useState<"debt" | "payment" | null>(null);
 
@@ -132,12 +150,51 @@ function CustomersPageInner() {
     customers.remove(c.id);
   };
 
+  // افزودن مشتری از مخاطبین گوشی (در مرورگرهایی که از Contact Picker API پشتیبانی می‌کنند، عمدتاً کروم اندروید)
+  const importFromContacts = async () => {
+    const nav = navigator as Navigator & {
+      contacts?: {
+        select: (
+          props: string[],
+          opts?: { multiple?: boolean },
+        ) => Promise<Array<{ name?: string[]; tel?: string[] }>>;
+      };
+    };
+    if (!nav.contacts || typeof nav.contacts.select !== "function") {
+      alert("افزودن از مخاطبین در این دستگاه/مرورگر پشتیبانی نمی‌شود. لطفاً از برنامه‌ی موبایل یا مرورگر کروم اندروید استفاده کنید.");
+      return;
+    }
+    try {
+      setContactsBusy(true);
+      const picked = await nav.contacts.select(["name", "tel"], { multiple: true });
+      let added = 0;
+      for (const person of picked) {
+        const fullName = (person.name?.[0] ?? "").trim();
+        const phone = (person.tel?.[0] ?? "").trim();
+        if (!fullName && !phone) continue;
+        const [firstName, ...rest] = fullName ? fullName.split(/\s+/) : ["مخاطب"];
+        const existing = customers.findOrCreate({
+          firstName: firstName || "مخاطب",
+          lastName: rest.join(" ") || undefined,
+          phone: phone || undefined,
+        });
+        if (existing) added++;
+      }
+      if (added > 0) alert(`${added.toLocaleString("fa-IR")} مخاطب به مشتریان اضافه/همگام‌سازی شد.`);
+    } catch {
+      // کاربر انتخاب را لغو کرده یا دسترسی رد شده — نیازی به پیام خطا نیست
+    } finally {
+      setContactsBusy(false);
+    }
+  };
+
   const renderCards = (items: Customer[]) => (
     <ul className="space-y-2">
       {items.map((c) => (
         <CustomerCard
           key={c.id}
           customer={c}
+          onOpenDetail={() => setDetailTarget(c)}
           onDebt={() => setTxTarget({ customer: c, type: "debt" })}
           onPayment={() => setTxTarget({ customer: c, type: "payment" })}
           onEdit={() => setEditTarget(c)}
@@ -158,13 +215,23 @@ function CustomersPageInner() {
           </h1>
           <p className="text-xs text-muted-foreground">{formatNumber(list.length)} مشتری ثبت شده</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          مشتری جدید
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={importFromContacts}
+            disabled={contactsBusy}
+            className="inline-flex items-center gap-1 rounded-xl border border-dashed border-primary/50 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
+          >
+            <Contact className="h-3.5 w-3.5" />
+            {contactsBusy ? "در حال دریافت..." : "از مخاطبین"}
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            مشتری جدید
+          </button>
+        </div>
       </div>
 
       {/* پنل پیامکی — ارسال گروهی */}
@@ -368,6 +435,41 @@ function CustomersPageInner() {
       )}
 
       {showCampaign && <SmsCampaignModal customers={list} onClose={() => setShowCampaign(false)} />}
+
+      {detailTarget && (
+        <CustomerDetailModal
+          customer={list.find((c) => c.id === detailTarget.id) ?? detailTarget}
+          onClose={() => setDetailTarget(null)}
+          onDebt={() => {
+            setTxTarget({ customer: detailTarget, type: "debt" });
+            setDetailTarget(null);
+          }}
+          onPayment={() => {
+            setTxTarget({ customer: detailTarget, type: "payment" });
+            setDetailTarget(null);
+          }}
+          onEdit={() => {
+            setEditTarget(detailTarget);
+            setDetailTarget(null);
+          }}
+          onDelete={() => {
+            removeCustomer(detailTarget);
+            setDetailTarget(null);
+          }}
+          onRemind={() => {
+            setReminderTarget(detailTarget);
+            setDetailTarget(null);
+          }}
+          onNewInvoice={() => {
+            setInvoiceTarget(detailTarget);
+            setDetailTarget(null);
+          }}
+        />
+      )}
+
+      {invoiceTarget && (
+        <CustomerInvoiceModal customer={invoiceTarget} onClose={() => setInvoiceTarget(null)} />
+      )}
     </Layout>
   );
 }
@@ -376,28 +478,23 @@ function CustomersPageInner() {
 
 function CustomerCard({
   customer,
-  onDebt,
-  onPayment,
-  onEdit,
-  onDelete,
-  onRemind,
+  onOpenDetail,
 }: {
   customer: Customer;
+  onOpenDetail: () => void;
   onDebt: () => void;
   onPayment: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onRemind: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const balance = customerBalance(customer);
-  const canRemind = balance > 0 && !!customer.phone;
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right"
+        onClick={onOpenDetail}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right active:bg-accent"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -436,76 +533,8 @@ function CustomerCard({
             )}
           </div>
         </div>
-        {open ? (
-          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
+        <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-muted-foreground" />
       </button>
-
-      {open && (
-        <div className="border-t border-border px-4 pb-4 pt-3">
-          <div className="mb-3 grid grid-cols-2 gap-2">
-            <button
-              onClick={onDebt}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive"
-            >
-              <ArrowUpCircle className="h-3.5 w-3.5" />
-              ثبت بدهی
-            </button>
-            <button
-              onClick={onPayment}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-400"
-            >
-              <ArrowDownCircle className="h-3.5 w-3.5" />
-              ثبت پرداخت
-            </button>
-          </div>
-
-          {canRemind && (
-            <button
-              onClick={onRemind}
-              className="mb-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
-            >
-              <Bell className="h-3.5 w-3.5" />
-              ارسال یادآور بدهی
-            </button>
-          )}
-
-          {customer.txs.length === 0 ? (
-            <p className="py-2 text-center text-xs text-muted-foreground">تراکنشی ثبت نشده است.</p>
-          ) : (
-            <ul className="space-y-1.5 max-h-56 overflow-y-auto">
-              {customer.txs.map((t) => (
-                <TxRow key={t.id} tx={t} customer={customer} />
-              ))}
-            </ul>
-          )}
-
-          {customer.note && (
-            <div className="mt-2 rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
-              {customer.note}
-            </div>
-          )}
-
-          <div className="mt-3 flex justify-end gap-1">
-            <button
-              onClick={onEdit}
-              className="grid h-8 w-8 place-items-center rounded-lg text-primary hover:bg-primary/10"
-              title="ویرایش"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-            <button
-              onClick={onDelete}
-              className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
-              title="حذف"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </li>
   );
 }
@@ -1467,6 +1496,462 @@ function SmsCampaignModal({
               </div>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── پنجره‌ی کامل مشتری (نمایش، تراکنش‌ها، فاکتورهای فروش، اقدامات) ───────────
+
+function CustomerDetailModal({
+  customer,
+  onClose,
+  onDebt,
+  onPayment,
+  onEdit,
+  onDelete,
+  onRemind,
+  onNewInvoice,
+}: {
+  customer: Customer;
+  onClose: () => void;
+  onDebt: () => void;
+  onPayment: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRemind: () => void;
+  onNewInvoice: () => void;
+}) {
+  const [salesHistory] = invoice.useHistory();
+  const balance = customerBalance(customer);
+  const canRemind = balance > 0 && !!customer.phone;
+  const myInvoices = useMemo(
+    () => invoicesOfCustomer(customer, salesHistory),
+    [customer, salesHistory],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
+        {/* هدر */}
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-bold">{customerFullName(customer)}</h3>
+            {customer.phone && (
+              <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+                <Phone className="h-3 w-3" />
+                {customer.phone}
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* خلاصه‌ی مانده حساب */}
+          <div
+            className={`mb-4 rounded-2xl p-4 text-center ${
+              balance > 0
+                ? "bg-destructive/10 text-destructive"
+                : balance < 0
+                  ? "bg-sky-500/10 text-sky-700 dark:text-sky-400"
+                  : "bg-green-500/10 text-green-600"
+            }`}
+          >
+            <div className="text-[11px] opacity-80">
+              {balance > 0 ? "بدهکار به شما" : balance < 0 ? "طلبکار از شما" : "وضعیت حساب"}
+            </div>
+            <div className="mt-1 text-xl font-bold">
+              {balance === 0 ? "تسویه است" : formatToman(Math.abs(balance))}
+            </div>
+          </div>
+
+          {/* اقدامات سریع */}
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            <button
+              onClick={onNewInvoice}
+              className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground shadow-elegant"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              فاکتور فروش جدید برای این مشتری
+            </button>
+            <button
+              onClick={onDebt}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive"
+            >
+              <ArrowUpCircle className="h-3.5 w-3.5" />
+              ثبت بدهی
+            </button>
+            <button
+              onClick={onPayment}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-400"
+            >
+              <ArrowDownCircle className="h-3.5 w-3.5" />
+              ثبت پرداخت
+            </button>
+            {canRemind && (
+              <button
+                onClick={onRemind}
+                className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+              >
+                <Bell className="h-3.5 w-3.5" />
+                ارسال یادآور بدهی
+              </button>
+            )}
+          </div>
+
+          {customer.note && (
+            <div className="mb-4 rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
+              {customer.note}
+            </div>
+          )}
+
+          {/* فاکتورهای فروش این مشتری */}
+          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <Receipt className="h-3.5 w-3.5" />
+            فاکتورهای فروش ({formatNumber(myInvoices.length)})
+          </h4>
+          {myInvoices.length === 0 ? (
+            <p className="mb-4 py-2 text-center text-xs text-muted-foreground">
+              هنوز فاکتور فروشی برای این مشتری ثبت نشده است.
+            </p>
+          ) : (
+            <ul className="mb-4 space-y-1.5 max-h-52 overflow-y-auto">
+              {myInvoices.map((inv) => (
+                <li
+                  key={inv.id}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-primary">{formatToman(inv.total)}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {formatJalaliDateTime(inv.createdAt)}
+                      {inv.paymentMethod && ` · ${PAYMENT_LABEL[inv.paymentMethod]}`}
+                    </div>
+                  </div>
+                  <InvoiceActions inv={inv} size="sm" showLabels={false} />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* تراکنش‌های بدهی/پرداخت */}
+          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <Wallet className="h-3.5 w-3.5" />
+            تراکنش‌های بدهی/پرداخت ({formatNumber(customer.txs.length)})
+          </h4>
+          {customer.txs.length === 0 ? (
+            <p className="py-2 text-center text-xs text-muted-foreground">تراکنشی ثبت نشده است.</p>
+          ) : (
+            <ul className="space-y-1.5 max-h-52 overflow-y-auto">
+              {customer.txs.map((t) => (
+                <TxRow key={t.id} tx={t} customer={customer} />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* پایین: ویرایش/حذف */}
+        <div className="flex justify-end gap-1 border-t border-border p-3">
+          <button
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            ویرایش
+          </button>
+          <button
+            onClick={onDelete}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            حذف مشتری
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── فاکتور فروش سریع برای یک مشتری مشخص (از داخل صفحه مشتریان) ───────────────
+
+function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const [appSettings] = settings.useAll();
+  const [allProducts] = products.useAll();
+  const [cartInv, setCartInv] = useState(() => emptyInvoice());
+  const [searchQ, setSearchQ] = useState("");
+  const [showManualItem, setShowManualItem] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPrice, setManualPrice] = useState("");
+  const [manualQty, setManualQty] = useState("1");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paidAmount, setPaidAmount] = useState("");
+
+  const matches = searchQ.trim() ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code]).slice(0, 8) : [];
+
+  const addFromSearch = (p: Product) => {
+    setCartInv((prev) => addProductToInvoice(prev, p));
+    setSearchQ("");
+  };
+
+  const updateQty = (productId: string, delta: number) => {
+    setCartInv((prev) => {
+      const items = prev.items
+        .map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + delta } : i))
+        .filter((i) => i.quantity > 0);
+      return recalc({ ...prev, items });
+    });
+  };
+
+  const removeItem = (productId: string) => {
+    setCartInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+  };
+
+  const addManualItem = () => {
+    const price = parseNumberInput(manualPrice);
+    const qty = parseNumberInput(manualQty) || 1;
+    if (!manualName.trim() || price <= 0 || qty <= 0) {
+      alert("نام کالا، قیمت و تعداد معتبر وارد کنید.");
+      return;
+    }
+    setCartInv((prev) =>
+      recalc({
+        ...prev,
+        items: [
+          ...prev.items,
+          { productId: `manual-${cryptoId()}`, name: manualName.trim(), price, quantity: qty, unit: "عدد" },
+        ],
+      }),
+    );
+    setManualName("");
+    setManualPrice("");
+    setManualQty("1");
+    setShowManualItem(false);
+  };
+
+  const paid = paymentMethod === "credit" ? Math.min(parseNumberInput(paidAmount), cartInv.total) : cartInv.total;
+  const debt = paymentMethod === "credit" ? Math.max(0, cartInv.total - paid) : 0;
+
+  const submit = () => {
+    if (cartInv.items.length === 0) {
+      alert("حداقل یک کالا به فاکتور اضافه کنید.");
+      return;
+    }
+    const customerInfo = { firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone };
+    const finalInv = recalc({
+      ...cartInv,
+      customer: customerInfo,
+      shopName: appSettings.shopName,
+      paymentMethod,
+      paidAmount: paymentMethod === "credit" ? paid : undefined,
+    });
+    invoice.archive(finalInv);
+    if (paymentMethod === "credit" && debt > 0) {
+      customers.recordInvoiceDebt(customerInfo, finalInv, { amount: debt, note: "فاکتور نسیه" });
+    } else {
+      customers.findOrCreate(customerInfo);
+    }
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <h3 className="flex items-center gap-2 text-base font-bold">
+            <ShoppingCart className="h-4 w-4 text-primary" />
+            فاکتور فروش برای {customerFullName(customer)}
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* جستجوی کالا */}
+          <div className="relative mb-2">
+            <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="جستجوی محصول..."
+              className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+            />
+            {matches.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-40 mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                {matches.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => addFromSearch(p)}
+                    className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
+                  >
+                    <span className="truncate font-medium">{p.name}</span>
+                    <span className="shrink-0 text-muted-foreground">{formatToman(applyProductDiscount(p))}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {searchQ.trim() && matches.length === 0 && (
+              <div className="absolute inset-x-0 top-full z-40 mt-1 rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground shadow-lg">
+                محصولی یافت نشد
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowManualItem((v) => !v)}
+            className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/10"
+          >
+            <NotebookPen className="h-3 w-3" />
+            افزودن کالای دستی (خارج از انبار)
+          </button>
+
+          {showManualItem && (
+            <div className="mb-3 space-y-2 rounded-xl border border-border bg-background p-3">
+              <input
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                placeholder="نام کالا"
+                className={inputCls}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  value={manualPrice}
+                  onChange={(e) => setManualPrice(e.target.value)}
+                  placeholder="قیمت واحد"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className={inputCls}
+                />
+                <input
+                  value={manualQty}
+                  onChange={(e) => setManualQty(e.target.value)}
+                  placeholder="تعداد"
+                  inputMode="decimal"
+                  dir="ltr"
+                  className={inputCls}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={addManualItem}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                افزودن به فاکتور
+              </button>
+            </div>
+          )}
+
+          {/* اقلام فاکتور */}
+          {cartInv.items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+              <Package className="mx-auto mb-1 h-6 w-6" />
+              هنوز کالایی اضافه نشده
+            </div>
+          ) : (
+            <ul className="space-y-1.5">
+              {cartInv.items.map((item) => (
+                <li
+                  key={item.productId}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{item.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{formatToman(item.price)} × {formatNumber(item.quantity)}</div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => updateQty(item.productId, -1)}
+                      className="grid h-6 w-6 place-items-center rounded-md bg-secondary"
+                    >
+                      -
+                    </button>
+                    <span className="w-5 text-center">{formatNumber(item.quantity)}</span>
+                    <button
+                      onClick={() => updateQty(item.productId, 1)}
+                      className="grid h-6 w-6 place-items-center rounded-md bg-secondary"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => removeItem(item.productId)}
+                    className="grid h-7 w-7 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* روش پرداخت */}
+          <div className="mt-4">
+            <h4 className="mb-2 text-xs font-semibold text-muted-foreground">روش پرداخت</h4>
+            <div className="grid grid-cols-3 gap-2">
+              {(["cash", "card", "credit"] as PaymentMethod[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setPaymentMethod(m)}
+                  className={`rounded-xl py-2 text-xs font-semibold ${
+                    paymentMethod === m
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-muted-foreground"
+                  }`}
+                >
+                  {PAYMENT_LABEL[m]}
+                </button>
+              ))}
+            </div>
+            {paymentMethod === "credit" && (
+              <div className="mt-2">
+                <input
+                  value={paidAmount}
+                  onChange={(e) => setPaidAmount(e.target.value)}
+                  placeholder="مبلغ پرداخت نقدی (اختیاری)"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className={inputCls}
+                />
+                {debt > 0 && (
+                  <p className="mt-1 text-[11px] text-destructive">
+                    باقیمانده به‌عنوان بدهی مشتری ثبت می‌شود: {formatToman(debt)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t border-border p-4">
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">جمع فاکتور</span>
+            <span className="text-base font-bold text-primary">{formatToman(cartInv.total)}</span>
+          </div>
+          <button
+            onClick={submit}
+            disabled={cartInv.items.length === 0}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-elegant disabled:opacity-50"
+          >
+            <Check className="h-4 w-4" />
+            ثبت فاکتور
+          </button>
         </div>
       </div>
     </div>

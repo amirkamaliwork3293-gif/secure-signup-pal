@@ -24,6 +24,7 @@ import { Route as ProductsRouteImport } from './routes/products'
 import { Route as MenuQrRouteImport } from './routes/menu-qr'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -106,6 +107,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InvoicesRoute = InvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
   path: '/history',
@@ -142,6 +148,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
+  '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
@@ -165,6 +172,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
+  '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
@@ -189,6 +197,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/history': typeof HistoryRoute
+  '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/history'
+    | '/invoices'
     | '/login'
     | '/menu'
     | '/menu-qr'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/history'
+    | '/invoices'
     | '/login'
     | '/menu'
     | '/menu-qr'
@@ -260,6 +271,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/history'
+    | '/invoices'
     | '/login'
     | '/menu'
     | '/menu-qr'
@@ -284,6 +296,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   CustomersRoute: typeof CustomersRoute
   HistoryRoute: typeof HistoryRoute
+  InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
   MenuRoute: typeof MenuRoute
   MenuQrRoute: typeof MenuQrRoute
@@ -417,6 +430,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/invoices': {
+      id: '/invoices'
+      path: '/invoices'
+      fullPath: '/invoices'
+      preLoaderRoute: typeof InvoicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/customers': {
       id: '/customers'
       path: '/customers'
@@ -460,6 +480,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   CustomersRoute: CustomersRoute,
   HistoryRoute: HistoryRoute,
+  InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,
   MenuRoute: MenuRoute,
   MenuQrRoute: MenuQrRoute,

@@ -164,6 +164,19 @@ export function customerFullName(c: Customer): string {
   return [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
 }
 
+/** فاکتورهای فروشی که مشتری در آن‌ها (بر اساس تلفن یا نام) طرف حساب بوده */
+export function invoicesOfCustomer(customer: Customer, allInvoices: Invoice[]): Invoice[] {
+  const name = customerFullName(customer);
+  const phone = customer.phone?.trim();
+  return allInvoices.filter((inv) => {
+    const c = inv.customer;
+    if (!c) return false;
+    if (phone && c.phone?.trim() === phone) return true;
+    const invName = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
+    return !!name && invName === name;
+  });
+}
+
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
 const PRODUCTS_KEY = "acc.products.v2";
@@ -860,6 +873,44 @@ export const customers = {
           : c,
       ),
     );
+  },
+
+  /**
+   * یافتن مشتری بر اساس تلفن یا نام کامل؛ اگر پیدا نشد، مشتری جدید ساخته می‌شود
+   * (بدون ثبت هیچ تراکنش بدهی/پرداختی). برای این‌که هر فاکتوری — حتی نقدی —
+   * که اطلاعات مشتری دارد، مشتری را در «مشتریان» ثبت/به‌روز کند.
+   * اگر نه نام و نه تلفنی وجود نداشته باشد، null برمی‌گرداند.
+   */
+  findOrCreate: (info: CustomerInfo): Customer | null => {
+    const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
+    const phone = info.phone?.trim();
+    if (!name && !phone) return null;
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    const found = list.find(
+      (c) => (phone && c.phone === phone) || (name && customerFullName(c) === name),
+    );
+    if (found) {
+      // اگر مشتری قبلاً بدون شماره تلفن ثبت شده و الان شماره داده شده، تکمیلش می‌کنیم
+      if (phone && !found.phone) {
+        const updated = { ...found, phone };
+        write(
+          CUSTOMERS_KEY,
+          list.map((c) => (c.id === found.id ? updated : c)),
+        );
+        return updated;
+      }
+      return found;
+    }
+    const created: Customer = {
+      id: cryptoId(),
+      firstName: info.firstName?.trim() || name || "مشتری",
+      lastName: info.lastName?.trim() || undefined,
+      phone: phone || undefined,
+      createdAt: Date.now(),
+      txs: [],
+    };
+    write(CUSTOMERS_KEY, [created, ...list]);
+    return created;
   },
 
   /**

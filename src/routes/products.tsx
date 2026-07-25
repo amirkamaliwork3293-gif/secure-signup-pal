@@ -9,6 +9,7 @@ import {
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
+import { saveBase64File, OLD_APP_MESSAGE } from "@/lib/print";
 // مودال‌های سنگین فقط هنگام باز شدن بارگذاری می‌شوند (bwip-js/jsPDF/xlsx) تا
 // خودِ صفحه‌ی محصولات سریع باز شود.
 const BulkImportModal = lazy(() =>
@@ -66,6 +67,18 @@ function ProductsPageInner() {
   const remove = (id: string) => {
     if (!confirm("حذف این محصول؟")) return;
     setList(list.filter((p) => p.id !== id));
+  };
+
+  const removeAll = () => {
+    if (list.length === 0) return;
+    if (
+      !confirm(
+        `همه‌ی ${list.length.toLocaleString("fa-IR")} محصول حذف شود؟ این عمل غیرقابل بازگشت است.`,
+      )
+    )
+      return;
+    setList([]);
+    setSelected(new Set());
   };
 
   const onCreate = (p: Omit<Product, "id">) => {
@@ -150,7 +163,17 @@ function ProductsPageInner() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
-    XLSX.writeFile(wb, `products-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const filename = `products-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    // توجه: از XLSX.writeFile مستقیم استفاده نمی‌کنیم چون آن روش برای دانلود به
+    // <a download> + blob:URL مرورگر متکی است که داخل اپلیکیشن اندروید (WebView)
+    // اجرا نمی‌شود (همان‌طور که برای PDF/عکس بارکد هم این مشکل وجود داشت).
+    // saveBase64File هم مسیر وب (دانلود مستقیم) و هم مسیر اپ (نوشتن فایل +
+    // پنجره‌ی ذخیره/اشتراک‌گذاری با Capacitor Filesystem/Share) را پوشش می‌دهد.
+    const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+    const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const ok = await saveBase64File(base64, filename, mime);
+    if (!ok) alert(OLD_APP_MESSAGE);
   };
 
   const stockBadge = (p: Product) => {
@@ -177,6 +200,16 @@ function ProductsPageInner() {
             <FileSpreadsheet className="h-3.5 w-3.5 text-green-600" />
             Excel
           </button>
+          {list.length > 0 && (
+            <button
+              onClick={removeAll}
+              className="inline-flex items-center gap-1 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive"
+              title="حذف همه محصولات"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              حذف همه
+            </button>
+          )}
           <button
             onClick={() => { setEditTarget(null); setOpen(true); }}
             className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"

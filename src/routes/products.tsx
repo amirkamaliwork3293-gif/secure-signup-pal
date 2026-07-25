@@ -9,7 +9,7 @@ import {
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
-import { saveBase64File, OLD_APP_MESSAGE } from "@/lib/print";
+import { isWebView } from "@/lib/isWebView";
 // مودال‌های سنگین فقط هنگام باز شدن بارگذاری می‌شوند (bwip-js/jsPDF/xlsx) تا
 // خودِ صفحه‌ی محصولات سریع باز شود.
 const BulkImportModal = lazy(() =>
@@ -136,6 +136,18 @@ function ProductsPageInner() {
 
   const exportToExcel = async () => {
     if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
+
+    // داخل اپلیکیشن اندروید: دانلود فایل اکسل به‌طور قابل‌اعتماد در WebView کار
+    // نمی‌کند (چه با دانلود مستقیم مرورگر، چه با پلاگین‌های نیتیو که در تست
+    // واقعی باعث کرش می‌شدند). به‌جای ریسک کردن، کاربر را به نسخه‌ی وب/سایت
+    // ارجاع می‌دهیم؛ آنجا این قابلیت با مرورگر واقعی بدون مشکل کار می‌کند.
+    if (isWebView()) {
+      alert(
+        "خروجی گرفتن اکسل در نسخه‌ی اپلیکیشن در دسترس نیست. لطفاً از طریق مرورگر (سایت) وارد حساب‌تان شوید و از همان‌جا خروجی اکسل را دریافت کنید.",
+      );
+      return;
+    }
+
     const XLSX = await import("xlsx");
     const rows = list.map((p) => ({
       "نام محصول": p.name,
@@ -163,17 +175,7 @@ function ProductsPageInner() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
-    const filename = `products-${new Date().toISOString().slice(0, 10)}.xlsx`;
-
-    // توجه: از XLSX.writeFile مستقیم استفاده نمی‌کنیم چون آن روش برای دانلود به
-    // <a download> + blob:URL مرورگر متکی است که داخل اپلیکیشن اندروید (WebView)
-    // اجرا نمی‌شود (همان‌طور که برای PDF/عکس بارکد هم این مشکل وجود داشت).
-    // saveBase64File هم مسیر وب (دانلود مستقیم) و هم مسیر اپ (نوشتن فایل +
-    // پنجره‌ی ذخیره/اشتراک‌گذاری با Capacitor Filesystem/Share) را پوشش می‌دهد.
-    const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
-    const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    const ok = await saveBase64File(base64, filename, mime);
-    if (!ok) alert(OLD_APP_MESSAGE);
+    XLSX.writeFile(wb, `products-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const stockBadge = (p: Product) => {

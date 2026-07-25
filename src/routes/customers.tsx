@@ -29,6 +29,7 @@ import {
 import { useAuth } from "@/lib/AuthContext";
 import { filterAndRankSearch } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
+import { isWebView } from "@/lib/isWebView";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import {
   Users,
@@ -163,6 +164,18 @@ function CustomersPageInner() {
 
   const importFromContacts = async () => {
     setContactsMsg(null);
+
+    // داخل اپلیکیشن اندروید: چون هیچ‌کدام از مسیرهای مرورگری (Contact Picker
+    // API / انتخاب فایل VCF) به‌طور کاملاً قابل‌اعتماد در WebView کار نمی‌کنند،
+    // به‌جای تلاش و نمایش خطاهای گیج‌کننده، مستقیم کاربر را به نسخه‌ی وب/سایت
+    // ارجاع می‌دهیم؛ آنجا این قابلیت با مرورگر واقعی بدون مشکل کار می‌کند.
+    if (isWebView()) {
+      setContactsMsg(
+        "افزودن مستقیم از مخاطبین گوشی در نسخه‌ی اپلیکیشن در دسترس نیست. لطفاً از طریق مرورگر (سایت) وارد حساب‌تان شوید و از همان‌جا مخاطبین را اضافه کنید.",
+      );
+      return;
+    }
+
     const nav = navigator as Navigator & {
       contacts?: {
         select: (

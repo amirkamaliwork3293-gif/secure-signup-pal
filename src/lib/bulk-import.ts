@@ -50,8 +50,12 @@ const FUZZY_RULES: Array<[keyof Omit<ImportRow, "rowIndex" | "errors">, string[]
   ["name", ["نام", "عنوان", "کالا", "جنس", "محصول", "name", "product", "title", "item"]],
 ];
 
-function fuzzyMatchHeader(h: string): keyof Omit<ImportRow, "rowIndex" | "errors"> | null {
+function fuzzyMatchHeader(
+  h: string,
+  claimed: Set<keyof Omit<ImportRow, "rowIndex" | "errors">>,
+): keyof Omit<ImportRow, "rowIndex" | "errors"> | null {
   for (const [key, keywords] of FUZZY_RULES) {
+    if (claimed.has(key)) continue; // این ستون قبلاً (با تطبیق دقیق یا فازی) پر شده — رویش ننویس
     if (keywords.some((kw) => h.includes(kw))) return key;
   }
   return null;
@@ -90,7 +94,27 @@ export async function parseFile(file: File): Promise<ImportRow[]> {
   if (json.length === 0) return [];
 
   const headerRow = json[0].map((h) => normalizeHeader(String(h ?? "")));
-  const colMap: (keyof Omit<ImportRow, "rowIndex" | "errors"> | null)[] = headerRow.map((h) => HEADERS[h] ?? fuzzyMatchHeader(h));
+  type Key = keyof Omit<ImportRow, "rowIndex" | "errors">;
+  const colMap: (Key | null)[] = new Array(headerRow.length).fill(null);
+  const claimed = new Set<Key>();
+
+  // مرحله‌ی اول: فقط تطبیق دقیق (عنوان ستون دقیقاً در HEADERS باشد) — این‌ها
+  // همیشه اولویت دارند و کلید مربوطه را برای همیشه «رزرو» می‌کنند.
+  headerRow.forEach((h, i) => {
+    const key = HEADERS[h];
+    if (key) { colMap[i] = key; claimed.add(key); }
+  });
+
+  // مرحله‌ی دوم: برای ستون‌هایی که در مرحله‌ی اول تطبیق دقیق نداشتند، از حدس
+  // فازی استفاده می‌کنیم — اما فقط برای کلیدهایی که هنوز رزرو نشده‌اند. این‌طوری
+  // یک ستون اضافی/مشتق‌شده (مثل «ارزش موجودی» یا «قیمت مصرف‌کننده» در خروجی
+  // خودِ همین برنامه) هرگز نمی‌تواند مقدار ستون اصلی (مثلاً قیمت فروش واقعی) را
+  // که با تطبیق دقیق پیدا شده بود، رونویسی/خراب کند.
+  headerRow.forEach((h, i) => {
+    if (colMap[i]) return;
+    const key = fuzzyMatchHeader(h, claimed);
+    if (key) { colMap[i] = key; claimed.add(key); }
+  });
 
   const rows: ImportRow[] = [];
   for (let i = 1; i < json.length; i++) {

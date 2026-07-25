@@ -1,6 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   customers,
@@ -53,6 +53,7 @@ import {
   Package,
   NotebookPen,
   Contact,
+  FileUp,
   ShoppingCart,
 } from "lucide-react";
 import { z } from "zod";
@@ -153,9 +154,13 @@ function CustomersPageInner() {
 
   // افزودن مشتری از مخاطبین گوشی. توجه: Contact Picker API فقط در مرورگر (عمدتاً
   // کروم اندروید) پشتیبانی می‌شود و داخل اپلیکیشن اندروید (WebView) در دسترس
-  // نیست؛ برای همین در حالت اپ، پیام راهنما نشان داده می‌شود. همچنین به‌جای
-  // alert() از یک پیام داخل صفحه استفاده می‌کنیم چون در برخی WebViewها alert
-  // نمایش داده نمی‌شود و کاربر فکر می‌کند «هیچ اتفاقی نیفتاد».
+  // نیست چون آن یک قابلیت مرورگری است، نه یک API عمومی اندروید — برای در دسترس
+  // بودنش داخل اپ باید یک پلاگین Capacitor به پروژه‌ی native اضافه شود (خارج از
+  // این ریپوی وب). به‌جای آن، وقتی API مرورگری در دسترس نباشد، به‌طور خودکار به
+  // «وارد کردن فایل مخاطبین (VCF)» سوییچ می‌کنیم — راهی که همه‌جا (وب و اپ) کار
+  // می‌کند، چون فقط یک فایل معمولی می‌خواند.
+  const vcfInputRef = useRef<HTMLInputElement>(null);
+
   const importFromContacts = async () => {
     setContactsMsg(null);
     const nav = navigator as Navigator & {
@@ -168,8 +173,9 @@ function CustomersPageInner() {
     };
     if (!nav.contacts || typeof nav.contacts.select !== "function") {
       setContactsMsg(
-        "افزودن مستقیم از مخاطبین در این نسخه (اپلیکیشن/مرورگر) پشتیبانی نمی‌شود. لطفاً از دکمه‌ی «مشتری جدید» استفاده کنید یا در مرورگر کروم اندروید امتحان کنید.",
+        "انتخاب مستقیم مخاطبین در این نسخه پشتیبانی نمی‌شود — در عوض فایل مخاطبین (VCF) را انتخاب کنید. (در اپ مخاطبین گوشی: مخاطبین موردنظر ← اشتراک‌گذاری/Export ← ذخیره به‌عنوان VCF/vCard)",
       );
+      vcfInputRef.current?.click();
       return;
     }
     try {
@@ -202,6 +208,69 @@ function CustomersPageInner() {
       }
     } finally {
       setContactsBusy(false);
+    }
+  };
+
+  // پارس ساده‌ی فایل VCF/vCard (خروجی استاندارد اپ مخاطبین اندروید/آیفون/جیمیل)
+  const parseVCards = (text: string): Array<{ name: string; phone?: string }> => {
+    const cards = text.split(/BEGIN:VCARD/i).slice(1);
+    const results: Array<{ name: string; phone?: string }> = [];
+    for (const raw of cards) {
+      const block = raw.split(/END:VCARD/i)[0];
+      // خطوط تاشده (که با فاصله/تب شروع می‌شوند) را به خط قبلی می‌چسبانیم
+      const unfolded = block.replace(/\r\n[ \t]/g, "").replace(/\n[ \t]/g, "");
+      const lines = unfolded.split(/\r\n|\n/);
+      let fn = "";
+      let n = "";
+      let tel = "";
+      for (const line of lines) {
+        const idx = line.indexOf(":");
+        if (idx < 0) continue;
+        const key = line.slice(0, idx).split(";")[0].toUpperCase();
+        const value = line.slice(idx + 1).trim();
+        if (key === "FN" && !fn) fn = value;
+        else if (key === "N" && !n) n = value;
+        else if (key === "TEL" && !tel) tel = value.replace(/[^\d+]/g, "");
+      }
+      let name = fn;
+      if (!name && n) {
+        const parts = n.split(";").filter(Boolean);
+        name = [parts[1], parts[0]].filter(Boolean).join(" ");
+      }
+      if (name || tel) results.push({ name: name || "مخاطب", phone: tel || undefined });
+    }
+    return results;
+  };
+
+  const handleVcfFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setContactsMsg(null);
+    setContactsBusy(true);
+    try {
+      let added = 0;
+      for (const file of Array.from(files)) {
+        const text = await file.text();
+        const people = parseVCards(text);
+        for (const person of people) {
+          const [firstName, ...rest] = person.name.split(/\s+/);
+          const existing = customers.findOrCreate({
+            firstName: firstName || "مخاطب",
+            lastName: rest.join(" ") || undefined,
+            phone: person.phone || undefined,
+          });
+          if (existing) added++;
+        }
+      }
+      setContactsMsg(
+        added > 0
+          ? `${added.toLocaleString("fa-IR")} مخاطب از فایل VCF اضافه/همگام‌سازی شد.`
+          : "مخاطب معتبری در فایل انتخاب‌شده پیدا نشد.",
+      );
+    } catch {
+      setContactsMsg("خواندن فایل VCF ممکن نشد. مطمئن شوید فایل خروجی استاندارد vCard است.");
+    } finally {
+      setContactsBusy(false);
+      if (vcfInputRef.current) vcfInputRef.current.value = "";
     }
   };
 
@@ -241,6 +310,22 @@ function CustomersPageInner() {
             <Contact className="h-3.5 w-3.5" />
             {contactsBusy ? "در حال دریافت..." : "از مخاطبین"}
           </button>
+          <button
+            onClick={() => vcfInputRef.current?.click()}
+            disabled={contactsBusy}
+            title="وارد کردن فایل مخاطبین VCF/vCard"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-dashed border-primary/50 text-primary hover:bg-primary/10 disabled:opacity-60"
+          >
+            <FileUp className="h-3.5 w-3.5" />
+          </button>
+          <input
+            ref={vcfInputRef}
+            type="file"
+            accept=".vcf,text/vcard,text/x-vcard"
+            multiple
+            className="hidden"
+            onChange={(e) => handleVcfFiles(e.target.files)}
+          />
           <button
             onClick={() => setShowAdd(true)}
             className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"

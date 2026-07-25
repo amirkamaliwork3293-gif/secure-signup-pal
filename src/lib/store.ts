@@ -82,6 +82,8 @@ export type Invoice = {
   shopAddress?: string;
   /** شماره تماس فروشگاه — از تنظیمات، برای نمایش روی فاکتور */
   shopPhone?: string;
+  /** لوگوی فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی/PDF (اختیاری) */
+  shopLogoUrl?: string;
   paymentMethod?: PaymentMethod;
   /** مبلغ نقد پرداخت‌شده (برای نسیهٔ جزئی یا فاکتور چک با پیش‌پرداخت نقدی) */
   paidAmount?: number;
@@ -121,6 +123,10 @@ export type Purchase = {
   paymentMethod?: PaymentMethod;
   /** مبلغ نقد پرداخت‌شده از این فاکتور خرید (اگر نسیه/چک بود، باقی بدهی به تامین‌کننده است) */
   paidAmount?: number;
+  /** نام فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی */
+  shopName?: string;
+  /** لوگوی فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی/PDF (اختیاری) */
+  shopLogoUrl?: string;
 };
 
 export function emptyPurchase(): Purchase {
@@ -774,10 +780,11 @@ export const purchases = {
    *  - برای کالاهای موجود: موجودی را اضافه و قیمت خرید را به‌روزرسانی می‌کند.
    *  - برای اقلامی که productId ندارند (کالای جدید تایپ‌شده): یک کالای جدید در انبار می‌سازد.
    * سپس فاکتور را در تاریخچه‌ی خرید ذخیره می‌کند.
+   * اگر opts.keepCreatedAt=true باشد، تاریخ ورودی p.createdAt حفظ می‌شود (برای ثبت با تاریخ دلخواه)؛
+   * در غیر این صورت (پیش‌فرض قبلی) تاریخ لحظه‌ی ثبت است.
    */
-  archive: (p: Purchase) => {
-    const finalizedAt = Date.now();
-    const stamped: Purchase = { ...p, createdAt: finalizedAt };
+  archive: (p: Purchase, opts?: { keepCreatedAt?: boolean }) => {
+    const stamped: Purchase = { ...p, createdAt: opts?.keepCreatedAt ? p.createdAt : Date.now() };
 
     const list = read<Product[]>(PRODUCTS_KEY, []);
     const cats = read<Category[]>(CATEGORIES_KEY, DEFAULT_CATEGORIES);
@@ -818,6 +825,18 @@ export const purchases = {
   },
   useHistory: () => useStore<Purchase[]>(PURCHASES_KEY, []),
   getHistory: () => read<Purchase[]>(PURCHASES_KEY, []),
+  /**
+   * ویرایش فاکتور خرید از تاریخچه (تامین‌کننده، تاریخ، یادداشت، اقلام و...).
+   * مشابه invoice.updateHistory — فقط رکورد فاکتور را جایگزین می‌کند و موجودی
+   * انبار را دوباره تنظیم نمی‌کند (تغییرات موجودی فقط هنگام ثبت اولیه اعمال می‌شود).
+   */
+  updateHistory: (updated: Purchase) => {
+    const hist = read<Purchase[]>(PURCHASES_KEY, []);
+    write(
+      PURCHASES_KEY,
+      hist.map((p) => (p.id === updated.id ? updated : p)),
+    );
+  },
   deleteFromHistory: (id: string) => {
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
     write(

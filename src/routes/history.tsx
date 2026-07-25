@@ -117,6 +117,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       shopName: saved.shopName || appSettings.shopName,
       shopAddress: saved.shopAddress || appSettings.storeAddress,
       shopPhone: saved.shopPhone || appSettings.storePhones?.[0],
+      shopLogoUrl: saved.shopLogoUrl || appSettings.logoUrl,
     });
     setEditing(true);
     setIsOpen(true);
@@ -195,6 +196,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     shopName: saved.shopName || appSettings.shopName,
     shopAddress: saved.shopAddress || appSettings.storeAddress,
     shopPhone: saved.shopPhone || appSettings.storePhones?.[0],
+    shopLogoUrl: saved.shopLogoUrl || appSettings.logoUrl,
   };
 
   return (

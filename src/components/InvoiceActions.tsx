@@ -63,11 +63,13 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
   tr:nth-child(even) td{background:#fafafa}
   .total-row td{font-weight:700;background:#f0f0f0!important}
   .footer{text-align:center;font-size:${Math.round(fontSize * 0.85)}px;color:#888;margin-top:20px;border-top:1px solid #ddd;padding-top:10px}
+  .logo{display:block;margin:0 auto 8px;max-width:120px;max-height:120px;object-fit:contain}
   @media print{body{padding:12px}}
 </style>
 </head>
 <body>
 <div class="header">
+  ${inv.shopLogoUrl ? `<img class="logo" src="${inv.shopLogoUrl}" alt="لوگو" />` : ""}
   <h1>${shopName}</h1>
   <p>سیستم حسابداری کمالی | فاکتور فروش</p>
   ${
@@ -140,8 +142,10 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
   .line{display:flex;justify-content:space-between;font-size:11px;color:#222}
   .total{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-top:4px}
   .foot{font-size:10.5px;text-align:center;margin-top:6px}
+  .logo{display:block;margin:0 auto 4px;max-width:56mm;max-height:28mm;object-fit:contain}
   @media print { body { width: 80mm; } }
 </style></head><body>
+${inv.shopLogoUrl ? `<img class="logo" src="${inv.shopLogoUrl}" alt="لوگو" />` : ""}
 <div class="center shop">${shopName}</div>
 <div class="center muted">فاکتور فروش</div>
 ${

@@ -163,6 +163,7 @@ export function InvoicePageInner() {
       shopName: appSettings.shopName,
       shopAddress: appSettings.storeAddress || undefined,
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
+      shopLogoUrl: appSettings.logoUrl || undefined,
       paidAmount: paymentMethod === "credit" || paymentMethod === "check" ? paid : undefined,
       checkAmount: paymentMethod === "check" ? chk : undefined,
       checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
@@ -473,6 +474,7 @@ export function InvoicePageInner() {
                   ...inv,
                   customer,
                   shopName: appSettings.shopName,
+                  shopLogoUrl: appSettings.logoUrl || undefined,
                   notes: notes.trim() ? notes.trim() : undefined,
                   // فاکتور هنوز ثبت نهایی نشده — تاریخ/ساعت چاپ باید همین لحظه باشد،
                   // نه لحظه‌ی باز شدن این تب (که ممکن است قدیمی‌تر باشد)

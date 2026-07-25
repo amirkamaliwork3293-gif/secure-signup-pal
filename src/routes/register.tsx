@@ -123,11 +123,18 @@ function RegisterPage() {
 
   const onPickFile = (f: File | null) => {
     if (!f) return;
-    if (!f.type.startsWith("image/")) { setError("فقط فایل عکس مجاز است."); return; }
-    if (f.size > 5 * 1024 * 1024) { setError("حجم عکس نباید بیشتر از ۵ مگابایت باشد."); return; }
+    // عمداً هیچ محدودیتی روی فرمت یا حجم فایل رسید اعمال نمی‌شود — بعضی گوشی‌ها
+    // (خصوصاً آیفون با فرمت HEIC) نوع فایل را درست گزارش نمی‌کنند یا عکس‌هایشان
+    // حجم بالاتری دارد؛ محدودکردن این‌جا باعث می‌شد ثبت‌نام بعضی کاربران گیر کند.
     setError("");
     setReceiptFile(f);
-    setReceiptPreview(URL.createObjectURL(f));
+    try {
+      setReceiptPreview(URL.createObjectURL(f));
+    } catch {
+      // پیش‌نمایش برای بعضی فرمت‌ها (مثل HEIC در مرورگرهای غیر-Safari) ممکن است
+      // ساخته نشود — مشکلی نیست، خود فایل هنوز برای آپلود انتخاب‌شده باقی می‌ماند.
+      setReceiptPreview(null);
+    }
   };
 
   const handleTrial = async () => {
@@ -172,16 +179,17 @@ function RegisterPage() {
     setLoading(true);
     try {
       setUploading(true);
-      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
-      const ext = (/^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg") as
-        "jpg" | "jpeg" | "png" | "webp" | "heic" | "heif";
+      // پسوند واقعی فایل (هر چیزی، نه فقط چند فرمت خاص) — اگر نامعتبر/خالی بود، jpg پیش‌فرض است
+      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
       const { path, token } = await signReceiptUpload({
         data: { username: usernameField, ext, kind: "signup" },
       });
       const { error: upErr } = await supabase.storage
         .from("receipts")
         .uploadToSignedUrl(path, token, receiptFile, {
-          contentType: receiptFile.type,
+          // بعضی مرورگرها/فرمت‌ها نوع فایل را خالی گزارش می‌کنند — یک نوع پیش‌فرض امن جایگزین می‌شود
+          contentType: receiptFile.type || "application/octet-stream",
           upsert: false,
         });
       setUploading(false);
@@ -443,6 +451,18 @@ function RegisterPage() {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
+              ) : receiptFile ? (
+                // فایل انتخاب شده ولی مرورگر نتوانست پیش‌نمایش تصویری بسازد (مثلاً بعضی فرمت‌ها) — همچنان قابل ارسال است
+                <div className="relative flex items-center justify-between gap-2 rounded-xl border border-border bg-background p-3 text-xs">
+                  <span className="truncate text-muted-foreground">✅ فایل انتخاب شد: {receiptFile.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setReceiptFile(null); setReceiptPreview(null); if (fileRef.current) fileRef.current.value = ""; }}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -451,7 +471,7 @@ function RegisterPage() {
                 >
                   <Upload className="h-5 w-5" />
                   <span>برای انتخاب عکس رسید کلیک کنید</span>
-                  <span className="text-[10px] opacity-70">(JPG / PNG — حداکثر ۵ مگابایت)</span>
+                  <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
                 </button>
               )}
               <input

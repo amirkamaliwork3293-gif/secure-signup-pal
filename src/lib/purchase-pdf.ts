@@ -1,15 +1,9 @@
 /**
- * invoice-pdf.ts — ساخت PDF فاکتور با رندر روی canvas
- *
- * چرا canvas؟ jsPDF به‌تنهایی متن فارسی را درست رندر نمی‌کند. متن روی canvas
- * با موتور متن سیستم‌عامل (شکل‌دهی کامل حروف فارسی) کشیده می‌شود و سپس
- * به‌صورت تصویر در PDF قرار می‌گیرد — خروجی در وب و اپ اندروید یکسان است
- * و دقیقاً همان چیدمان نسخه چاپی سایت را دارد.
+ * purchase-pdf.ts — ساخت PDF فاکتور خرید با رندر روی canvas (همتای invoice-pdf.ts)
  */
 import { jsPDF } from "jspdf";
-import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
+import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Purchase } from "@/lib/store";
 
-// A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
 const PAGE_H = 297 * SCALE;
@@ -24,7 +18,6 @@ const ZEBRA_BG = "#fafafa";
 
 type Ctx = CanvasRenderingContext2D;
 
-/** بارگذاری تصویر لوگو برای رسم روی canvas — در صورت خطا/نبود، null برمی‌گرداند (هرگز throw نمی‌کند) */
 function loadLogoImage(url?: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!url) { resolve(null); return; }
@@ -37,7 +30,6 @@ function loadLogoImage(url?: string): Promise<HTMLImageElement | null> {
 }
 
 function newPage(): { canvas: HTMLCanvasElement; ctx: Ctx } {
-  // صفحه جدید A4 با پس‌زمینه سفید
   const canvas = document.createElement("canvas");
   canvas.width = PAGE_W;
   canvas.height = PAGE_H;
@@ -56,7 +48,6 @@ function fitText(ctx: Ctx, text: string, maxWidth: number): string {
   return t + "…";
 }
 
-// ستون‌های جدول از راست به چپ: ردیف | نام کالا | تعداد | قیمت واحد | جمع
 function columns() {
   const inner = PAGE_W - MARGIN * 2;
   const idx = 10 * SCALE;
@@ -64,7 +55,6 @@ function columns() {
   const unitPrice = 34 * SCALE;
   const total = 38 * SCALE;
   const name = inner - idx - qty - unitPrice - total;
-  // مرز راستِ هر ستون (RTL)
   const xRight = PAGE_W - MARGIN;
   return {
     idx:       { x: xRight,                          w: idx },
@@ -78,8 +68,8 @@ function columns() {
 const ROW_H = 9 * SCALE;
 const HEAD_H = 10 * SCALE;
 
-function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageElement | null): number {
-  const shopName = inv.shopName || "فروشگاه";
+function drawHeader(ctx: Ctx, p: Purchase, pageNo: number, logoImg?: HTMLImageElement | null): number {
+  const shopName = p.shopName || "فروشگاه";
   let y = MARGIN + 4 * SCALE;
 
   if (pageNo === 1 && logoImg) {
@@ -100,17 +90,8 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
 
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
   ctx.fillStyle = MUTED;
-  ctx.fillText(pageNo === 1 ? "KAMIX | فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
+  ctx.fillText(pageNo === 1 ? "KAMIX | فاکتور خرید" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
   y += 5 * SCALE;
-
-  // آدرس/تلفن فروشگاه — فقط در صفحه اول و در صورت وجود
-  if (pageNo === 1 && (inv.shopAddress || inv.shopPhone)) {
-    ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
-    ctx.fillStyle = MUTED;
-    const line = [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join("   |   ");
-    ctx.fillText(fitText(ctx, line, PAGE_W - MARGIN * 2), PAGE_W / 2, y);
-    y += 4.5 * SCALE;
-  }
 
   ctx.strokeStyle = INK;
   ctx.lineWidth = 0.5 * SCALE;
@@ -121,21 +102,17 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
   y += 6 * SCALE;
 
   if (pageNo === 1) {
-    const customer = inv.customer;
-    const customerName = customer
-      ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
-      : "—";
-    const date = formatJalaliDate(inv.createdAt);
-    const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—";
+    const date = formatJalaliDate(p.createdAt);
+    const payment = p.paymentMethod ? PAYMENT_LABEL[p.paymentMethod] : "—";
 
     ctx.font = `400 ${3.6 * SCALE}px ${FONT}`;
-    const colR = PAGE_W - MARGIN;            // ستون راست
-    const colL = PAGE_W / 2 - 2 * SCALE;     // ستون چپ
+    const colR = PAGE_W - MARGIN;
+    const colL = PAGE_W / 2 - 2 * SCALE;
     const meta: [string, string, number][] = [
-      [`شماره: ${inv.id.toUpperCase()}`, "", colR],
+      [`شماره: ${p.id.toUpperCase()}`, "", colR],
       [`تاریخ: ${date}`, "", colL],
-      [`مشتری: ${customerName}`, "", colR],
-      [`تلفن: ${customer?.phone || "—"} · پرداخت: ${payment}`, "", colL],
+      [`تامین‌کننده: ${p.supplierName || "—"}`, "", colR],
+      [`تلفن: ${p.supplierPhone || "—"} · پرداخت: ${payment}`, "", colL],
     ];
     ctx.textAlign = "right";
     ctx.fillStyle = INK;
@@ -145,12 +122,12 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
     }
     y += Math.ceil(meta.length / 2) * 6 * SCALE + 3 * SCALE;
 
-    if (inv.notes) {
+    if (p.note) {
       ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
       ctx.textAlign = "right";
       ctx.fillStyle = MUTED;
-      const notesText = fitText(ctx, `توضیحات: ${inv.notes}`, PAGE_W - MARGIN * 2);
-      ctx.fillText(notesText, PAGE_W - MARGIN, y);
+      const noteText = fitText(ctx, `یادداشت: ${p.note}`, PAGE_W - MARGIN * 2);
+      ctx.fillText(noteText, PAGE_W - MARGIN, y);
       y += 5.5 * SCALE;
     }
   }
@@ -173,10 +150,9 @@ function drawTableHead(ctx: Ctx, y: number): number {
   ctx.fillText("#", cols.idx.x - cols.idx.w / 2, cy);
   ctx.fillText("نام کالا", cols.name.x - cols.name.w / 2, cy);
   ctx.fillText("تعداد", cols.qty.x - cols.qty.w / 2, cy);
-  ctx.fillText("قیمت واحد", cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText("قیمت خرید", cols.unitPrice.x - cols.unitPrice.w / 2, cy);
   ctx.fillText("جمع", cols.total.x - cols.total.w / 2, cy);
 
-  // خطوط عمودی سرستون
   for (const c of Object.values(cols)) {
     ctx.beginPath();
     ctx.moveTo(c.x - c.w, y);
@@ -186,7 +162,7 @@ function drawTableHead(ctx: Ctx, y: number): number {
   return y + HEAD_H;
 }
 
-function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number]): number {
+function drawRow(ctx: Ctx, y: number, i: number, item: Purchase["items"][number]): number {
   const cols = columns();
   if (i % 2 === 1) {
     ctx.fillStyle = ZEBRA_BG;
@@ -211,8 +187,8 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
     formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
     cols.qty.x - cols.qty.w / 2, cy,
   );
-  ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText(formatAmount(Math.round(item.price * item.quantity)), cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(formatAmount(item.buyPrice), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText(formatAmount(Math.round(item.buyPrice * item.quantity)), cols.total.x - cols.total.w / 2, cy);
 
   ctx.textAlign = "right";
   ctx.fillText(fitText(ctx, item.name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);
@@ -220,7 +196,7 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
   return y + ROW_H;
 }
 
-function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
+function drawTotal(ctx: Ctx, y: number, p: Purchase): number {
   const cols = columns();
   ctx.fillStyle = HEAD_BG;
   ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, HEAD_H);
@@ -233,13 +209,13 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   ctx.textAlign = "right";
   ctx.fillText("جمع کل", PAGE_W - MARGIN - 2 * SCALE, cy);
   ctx.textAlign = "center";
-  ctx.fillText(`${formatAmount(inv.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(`${formatAmount(p.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
 
   return y + HEAD_H;
 }
 
-function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
-  const shopName = inv.shopName || "فروشگاه";
+function drawFooter(ctx: Ctx, y: number, p: Purchase) {
+  const shopName = p.shopName || "فروشگاه";
   ctx.strokeStyle = "#dddddd";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -249,26 +225,25 @@ function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
   ctx.fillStyle = "#888888";
   ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
-  ctx.fillText(`با تشکر از خرید شما — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);
+  ctx.fillText(`فاکتور خرید — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);
 }
 
-/** ساخت PDF چندصفحه‌ای فاکتور — خروجی آماده savePdf / save */
-export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
-  // اطمینان از آماده‌بودن فونت‌های وب پیش از رندر روی canvas
+/** ساخت PDF چندصفحه‌ای فاکتور خرید */
+export async function buildPurchasePdf(p: Purchase): Promise<jsPDF> {
   try { await (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready; } catch { /* ignore */ }
 
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
-  const logoImg = await loadLogoImage(inv.shopLogoUrl);
-  const items = inv.items;
+  const logoImg = await loadLogoImage(p.shopLogoUrl);
+  const items = p.items;
   let pageNo = 1;
   let i = 0;
 
   while (i < items.length || pageNo === 1) {
     const { canvas, ctx } = newPage();
-    let y = drawHeader(ctx, inv, pageNo, logoImg);
+    let y = drawHeader(ctx, p, pageNo, logoImg);
     y = drawTableHead(ctx, y);
 
-    const reservedBottom = MARGIN + 14 * SCALE; // جا برای پانویس
+    const reservedBottom = MARGIN + 14 * SCALE;
     while (i < items.length && y + ROW_H + HEAD_H <= PAGE_H - reservedBottom) {
       y = drawRow(ctx, y, i, items[i]);
       i++;
@@ -276,8 +251,8 @@ export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
 
     const isLast = i >= items.length;
     if (isLast) {
-      y = drawTotal(ctx, y, inv);
-      drawFooter(ctx, y, inv);
+      y = drawTotal(ctx, y, p);
+      drawFooter(ctx, y, p);
     }
 
     if (pageNo > 1) pdf.addPage();

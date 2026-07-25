@@ -3,9 +3,12 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { PurchaseActions } from "@/components/PurchaseActions";
+import { filterAndRankSearch } from "@/lib/search";
 import {
   invoice,
   purchases,
+  settings,
   formatToman,
   formatNumber,
   formatJalaliDateTime,
@@ -21,6 +24,8 @@ import {
   TrendingUp,
   TrendingDown,
   ListChecks,
+  Search,
+  X,
 } from "lucide-react";
 
 export const Route = createFileRoute("/invoices")({
@@ -39,6 +44,8 @@ function InvoicesPageInner() {
   const [tab, setTab] = useState<Tab>("sales");
   const [salesHistory] = invoice.useHistory();
   const [purchaseHistory] = purchases.useHistory();
+  const [appSettings] = settings.useAll();
+  const [searchQ, setSearchQ] = useState("");
 
   const salesTotal = useMemo(() => salesHistory.reduce((s, i) => s + i.total, 0), [salesHistory]);
   const purchasesTotal = useMemo(
@@ -46,8 +53,30 @@ function InvoicesPageInner() {
     [purchaseHistory],
   );
 
-  const recentSales = salesHistory.slice(0, 15);
-  const recentPurchases = purchaseHistory.slice(0, 15);
+  const filteredSales = useMemo(() => {
+    const q = searchQ.trim();
+    if (!q) return salesHistory;
+    return filterAndRankSearch(salesHistory, q, (inv) => [
+      inv.id,
+      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+      inv.customer?.phone,
+      ...inv.items.map((i) => i.name),
+    ]);
+  }, [salesHistory, searchQ]);
+
+  const filteredPurchases = useMemo(() => {
+    const q = searchQ.trim();
+    if (!q) return purchaseHistory;
+    return filterAndRankSearch(purchaseHistory, q, (p) => [
+      p.id,
+      p.supplierName,
+      p.supplierPhone,
+      ...p.items.map((i) => i.name),
+    ]);
+  }, [purchaseHistory, searchQ]);
+
+  const recentSales = filteredSales.slice(0, 15);
+  const recentPurchases = filteredPurchases.slice(0, 15);
 
   return (
     <Layout>
@@ -89,6 +118,22 @@ function InvoicesPageInner() {
         </button>
       </div>
 
+      {/* جستجو: نام/تلفن مشتری یا تامین‌کننده، یا نام کالا */}
+      <div className="relative mb-4">
+        <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          placeholder={tab === "sales" ? "جستجو: نام یا تلفن مشتری، کالا..." : "جستجو: نام یا تلفن تامین‌کننده، کالا..."}
+          className="w-full rounded-xl border border-input bg-background py-2.5 pr-9 pl-3 text-sm outline-none focus:border-primary"
+        />
+        {searchQ && (
+          <button onClick={() => setSearchQ("")} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       {tab === "sales" ? (
         <>
           {/* آمار فروش */}
@@ -128,7 +173,9 @@ function InvoicesPageInner() {
           {recentSales.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
               <Receipt className="mx-auto h-10 w-10 text-muted-foreground" />
-              <p className="mt-3 text-sm text-muted-foreground">هنوز فاکتور فروشی ثبت نشده است.</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {searchQ.trim() ? "فاکتوری با این مشخصات یافت نشد." : "هنوز فاکتور فروشی ثبت نشده است."}
+              </p>
             </div>
           ) : (
             <ul className="space-y-2">
@@ -162,7 +209,10 @@ function InvoicesPageInner() {
                         {formatJalaliDateTime(inv.createdAt)} · {inv.items.length.toLocaleString("fa-IR")} قلم
                       </div>
                     </div>
-                    <InvoiceActions inv={inv} size="sm" />
+                    <InvoiceActions
+                      inv={{ ...inv, shopLogoUrl: inv.shopLogoUrl || appSettings.logoUrl }}
+                      size="sm"
+                    />
                   </li>
                 );
               })}
@@ -208,27 +258,35 @@ function InvoicesPageInner() {
           {recentPurchases.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
               <ShoppingBag className="mx-auto h-10 w-10 text-muted-foreground" />
-              <p className="mt-3 text-sm text-muted-foreground">هنوز فاکتور خریدی ثبت نشده است.</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {searchQ.trim() ? "فاکتوری با این مشخصات یافت نشد." : "هنوز فاکتور خریدی ثبت نشده است."}
+              </p>
             </div>
           ) : (
             <ul className="space-y-2">
               {recentPurchases.map((p) => (
-                <li key={p.id} className="rounded-xl border border-border bg-card p-3 shadow-card">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 text-sm font-semibold">
-                      <Truck className="h-3.5 w-3.5 text-muted-foreground" />
-                      {p.supplierName || "بدون نام تامین‌کننده"}
-                    </span>
-                    {p.paymentMethod && (
-                      <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {PAYMENT_LABEL[p.paymentMethod]}
+                <li key={p.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+                        {p.supplierName || "بدون نام تامین‌کننده"}
                       </span>
-                    )}
+                      {p.paymentMethod && (
+                        <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {PAYMENT_LABEL[p.paymentMethod]}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {formatJalaliDateTime(p.createdAt)} · {p.items.length.toLocaleString("fa-IR")} قلم
+                    </div>
+                    <div className="mt-0.5 text-sm font-bold text-primary">{formatToman(p.total)}</div>
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {formatJalaliDateTime(p.createdAt)} · {p.items.length.toLocaleString("fa-IR")} قلم
-                  </div>
-                  <div className="mt-1 text-sm font-bold text-primary">{formatToman(p.total)}</div>
+                  <PurchaseActions
+                    p={{ ...p, shopName: p.shopName || appSettings.shopName, shopLogoUrl: p.shopLogoUrl || appSettings.logoUrl }}
+                    size="sm"
+                  />
                 </li>
               ))}
             </ul>

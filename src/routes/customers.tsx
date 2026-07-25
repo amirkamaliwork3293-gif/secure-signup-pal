@@ -90,6 +90,7 @@ function CustomersPageInner() {
   const [detailTarget, setDetailTarget] = useState<Customer | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<Customer | null>(null);
   const [contactsBusy, setContactsBusy] = useState(false);
+  const [contactsMsg, setContactsMsg] = useState<string | null>(null);
   // ثبت سریع: "debt" = مشتری به ما بدهکار شد (طلب ما)، "payment" = ما به مشتری بدهکاریم (طلب مشتری)
   const [quickEntry, setQuickEntry] = useState<"debt" | "payment" | null>(null);
 
@@ -150,8 +151,13 @@ function CustomersPageInner() {
     customers.remove(c.id);
   };
 
-  // افزودن مشتری از مخاطبین گوشی (در مرورگرهایی که از Contact Picker API پشتیبانی می‌کنند، عمدتاً کروم اندروید)
+  // افزودن مشتری از مخاطبین گوشی. توجه: Contact Picker API فقط در مرورگر (عمدتاً
+  // کروم اندروید) پشتیبانی می‌شود و داخل اپلیکیشن اندروید (WebView) در دسترس
+  // نیست؛ برای همین در حالت اپ، پیام راهنما نشان داده می‌شود. همچنین به‌جای
+  // alert() از یک پیام داخل صفحه استفاده می‌کنیم چون در برخی WebViewها alert
+  // نمایش داده نمی‌شود و کاربر فکر می‌کند «هیچ اتفاقی نیفتاد».
   const importFromContacts = async () => {
+    setContactsMsg(null);
     const nav = navigator as Navigator & {
       contacts?: {
         select: (
@@ -161,7 +167,9 @@ function CustomersPageInner() {
       };
     };
     if (!nav.contacts || typeof nav.contacts.select !== "function") {
-      alert("افزودن از مخاطبین در این دستگاه/مرورگر پشتیبانی نمی‌شود. لطفاً از برنامه‌ی موبایل یا مرورگر کروم اندروید استفاده کنید.");
+      setContactsMsg(
+        "افزودن مستقیم از مخاطبین در این نسخه (اپلیکیشن/مرورگر) پشتیبانی نمی‌شود. لطفاً از دکمه‌ی «مشتری جدید» استفاده کنید یا در مرورگر کروم اندروید امتحان کنید.",
+      );
       return;
     }
     try {
@@ -180,9 +188,18 @@ function CustomersPageInner() {
         });
         if (existing) added++;
       }
-      if (added > 0) alert(`${added.toLocaleString("fa-IR")} مخاطب به مشتریان اضافه/همگام‌سازی شد.`);
-    } catch {
-      // کاربر انتخاب را لغو کرده یا دسترسی رد شده — نیازی به پیام خطا نیست
+      setContactsMsg(
+        added > 0
+          ? `${added.toLocaleString("fa-IR")} مخاطب به مشتریان اضافه/همگام‌سازی شد.`
+          : "مخاطبی انتخاب نشد.",
+      );
+    } catch (e) {
+      // کاربر انتخاب را لغو کرده — نیازی به پیام خطا نیست
+      if (e instanceof DOMException && e.name === "AbortError") {
+        // silent
+      } else {
+        setContactsMsg("دسترسی به مخاطبین ممکن نشد. لطفاً اجازه دسترسی به مخاطبین را بررسی کنید.");
+      }
     } finally {
       setContactsBusy(false);
     }
@@ -233,6 +250,15 @@ function CustomersPageInner() {
           </button>
         </div>
       </div>
+
+      {contactsMsg && (
+        <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+          <span>{contactsMsg}</span>
+          <button onClick={() => setContactsMsg(null)} className="shrink-0 text-primary/70 hover:text-primary">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* پنل پیامکی — ارسال گروهی */}
       <button
@@ -1524,6 +1550,7 @@ function CustomerDetailModal({
   onNewInvoice: () => void;
 }) {
   const [salesHistory] = invoice.useHistory();
+  const [appSettings] = settings.useAll();
   const balance = customerBalance(customer);
   const canRemind = balance > 0 && !!customer.phone;
   const myInvoices = useMemo(
@@ -1637,7 +1664,11 @@ function CustomerDetailModal({
                       {inv.paymentMethod && ` · ${PAYMENT_LABEL[inv.paymentMethod]}`}
                     </div>
                   </div>
-                  <InvoiceActions inv={inv} size="sm" showLabels={false} />
+                  <InvoiceActions
+                    inv={{ ...inv, shopLogoUrl: inv.shopLogoUrl || appSettings.logoUrl }}
+                    size="sm"
+                    showLabels={false}
+                  />
                 </li>
               ))}
             </ul>
@@ -1750,6 +1781,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
       ...cartInv,
       customer: customerInfo,
       shopName: appSettings.shopName,
+      shopLogoUrl: appSettings.logoUrl || undefined,
       paymentMethod,
       paidAmount: paymentMethod === "credit" ? paid : undefined,
     });

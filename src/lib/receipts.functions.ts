@@ -16,7 +16,16 @@ export const createReceiptUploadUrl = createServerFn({ method: "POST" })
     z
       .object({
         username: z.string().min(1).max(64),
-        ext: z.enum(["jpg", "jpeg", "png", "webp", "heic", "heif"]),
+        // هر پسوند فایل واقع‌بینانه‌ای (حروف/عدد، حداکثر ۸ کاراکتر) پذیرفته می‌شود —
+        // قبلاً فقط چند فرمت خاص مجاز بود که باعث می‌شد رسید بعضی کاربران (خصوصاً
+        // عکس‌های HEIC آیفون یا فرمت‌های غیرمعمول) رد شود. اعتبارسنجی امنیتی
+        // (بدون کاراکتر خطرناک/path traversal) هنوز برقرار است.
+        ext: z
+          .string()
+          .min(1)
+          .max(8)
+          .regex(/^[a-zA-Z0-9]+$/, "پسوند فایل نامعتبر است.")
+          .transform((s) => s.toLowerCase()),
         kind: z.enum(["signup", "renew"]).default("signup"),
       })
       .parse(d),

@@ -83,11 +83,16 @@ function RenewPage() {
 
   const onPickFile = (f: File | null) => {
     if (!f) return;
-    if (!f.type.startsWith("image/")) { setError("فقط فایل عکس مجاز است."); return; }
-    if (f.size > 5 * 1024 * 1024) { setError("حجم عکس نباید بیشتر از ۵ مگابایت باشد."); return; }
+    // عمداً هیچ محدودیتی روی فرمت یا حجم فایل رسید اعمال نمی‌شود — بعضی گوشی‌ها
+    // (خصوصاً آیفون با فرمت HEIC) نوع فایل را درست گزارش نمی‌کنند یا عکس‌هایشان
+    // حجم بالاتری دارد؛ محدودکردن این‌جا باعث می‌شد ثبت درخواست بعضی کاربران گیر کند.
     setError("");
     setReceiptFile(f);
-    setReceiptPreview(URL.createObjectURL(f));
+    try {
+      setReceiptPreview(URL.createObjectURL(f));
+    } catch {
+      setReceiptPreview(null);
+    }
   };
 
   const handleSubmit = async () => {
@@ -98,16 +103,15 @@ function RenewPage() {
 
     setLoading(true);
     try {
-      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase();
-      const ext = (/^(jpg|jpeg|png|webp|heic|heif)$/.test(rawExt) ? rawExt : "jpg") as
-        "jpg" | "jpeg" | "png" | "webp" | "heic" | "heif";
+      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
       const { path, token } = await signReceiptUpload({
         data: { username: String(username || "user"), ext, kind: "renew" },
       });
       const { error: upErr } = await supabase.storage
         .from("receipts")
         .uploadToSignedUrl(path, token, receiptFile, {
-          contentType: receiptFile.type,
+          contentType: receiptFile.type || "application/octet-stream",
           upsert: false,
         });
       if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
@@ -226,11 +230,20 @@ function RenewPage() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+          ) : receiptFile ? (
+            <div className="relative flex items-center justify-between gap-2 rounded-xl border border-border bg-background p-3 text-xs">
+              <span className="truncate text-muted-foreground">✅ فایل انتخاب شد: {receiptFile.name}</span>
+              <button type="button" onClick={() => { setReceiptFile(null); setReceiptPreview(null); if (fileRef.current) fileRef.current.value = ""; }}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           ) : (
             <button type="button" onClick={() => fileRef.current?.click()}
               className="flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border bg-background py-6 text-xs text-muted-foreground hover:border-primary hover:text-primary">
               <Upload className="h-5 w-5" />
               <span>برای انتخاب عکس رسید کلیک کنید</span>
+              <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
             </button>
           )}
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />

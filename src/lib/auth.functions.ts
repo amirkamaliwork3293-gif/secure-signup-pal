@@ -146,8 +146,8 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
 
-    // Try inserting with phone; if the column doesn't exist yet (migration pending),
-    // fall back to inserting without it so registration never fails.
+    // Try inserting with the optional columns; if one doesn't exist yet (migration
+    // pending), fall back to inserting without them so registration never fails.
     const requestBase = {
       first_name: data.first_name.trim(),
       last_name: data.last_name.trim(),
@@ -158,14 +158,19 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       password_set: true,
     };
 
+    // رمز انتخابی کاربر موقتاً نگه داشته می‌شود تا در پیامک خوش‌آمدگویی (لحظه‌ی
+    // تایید مدیر) فرستاده شود؛ بلافاصله بعد از تایید/رد پاک می‌شود.
+    const optional: Record<string, unknown> = { temp_password: data.password };
+    if (phone) optional.phone = phone;
+
     let result = await supabaseAdmin
       .from("signup_requests")
-      .insert((phone ? { ...requestBase, phone } : requestBase) as any)
+      .insert({ ...requestBase, ...optional } as any)
       .select("id")
       .single();
 
-    if (result.error?.message?.toLowerCase().includes("phone")) {
-      // Column not yet migrated — retry without phone
+    if (/phone|temp_password/i.test(result.error?.message || "")) {
+      // Column not yet migrated — retry with the base columns only
       result = await supabaseAdmin
         .from("signup_requests")
         .insert(requestBase)
@@ -355,6 +360,46 @@ async function purgeReceipt(supabaseAdmin: any, requestId: string) {
   }
 }
 
+// رمز موقت (که فقط برای پیامک خوش‌آمدگویی نگه داشته شده) پاک می‌شود.
+// اگر مهاجرت هنوز اعمال نشده باشد، بی‌صدا رد می‌شود.
+async function clearTempPassword(supabaseAdmin: any, requestId: string) {
+  try {
+    await supabaseAdmin.from("signup_requests").update({ temp_password: null }).eq("id", requestId);
+  } catch {
+    /* ستون هنوز وجود ندارد — مهم نیست */
+  }
+}
+
+/**
+ * پیامک خوش‌آمدگویی بعد از تایید مدیر.
+ * هرگز throw نمی‌کند: شکست پیامک نباید تایید کاربر را برگرداند.
+ */
+async function sendWelcomeSms(supabaseAdmin: any, requestId: string, username: string) {
+  try {
+    const { data: row } = await supabaseAdmin
+      .from("signup_requests")
+      .select("temp_password, phone")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    const password = (row as any)?.temp_password as string | null | undefined;
+    const { sendSms, smsTemplates, normalizePhone, phoneMapByUsername } = await import("@/lib/sms.server");
+
+    // شماره از ستون phone، وگرنه از user_metadata کاربر Auth
+    const phone =
+      normalizePhone((row as any)?.phone) ?? (await phoneMapByUsername(supabaseAdmin))[username.toLowerCase()] ?? null;
+    if (!phone || !password) {
+      console.warn("[sms] پیامک خوش‌آمدگویی ارسال نشد", { username, hasPhone: !!phone, hasPassword: !!password });
+      return;
+    }
+
+    const res = await sendSms([phone], smsTemplates.welcome(username, password));
+    if (!res.ok) console.error("[sms] پیامک خوش‌آمدگویی ناموفق", { username, error: res.error });
+  } catch (e: any) {
+    console.error("[sms] خطا در پیامک خوش‌آمدگویی", { username, error: e?.message });
+  }
+}
+
 export const approveSignupRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { id: string }) => {
@@ -391,6 +436,7 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
         .update({ plan, status: "active", start_date: start.toISOString(), end_date: end.toISOString() })
         .eq("id", targetId);
       if (renErr) throw new Error(renErr.message);
+      await clearTempPassword(supabaseAdmin, data.id);
       await purgeReceipt(supabaseAdmin, data.id);
       return { success: true };
     }
@@ -420,6 +466,10 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
         .eq("id", profile.id);
       if (actErr) throw new Error(actErr.message);
     }
+
+    // پیامک خوش‌آمدگویی (یوزرنیم + رمز) — قبل از پاک‌کردن رمز موقت
+    await sendWelcomeSms(supabaseAdmin, data.id, req.username);
+    await clearTempPassword(supabaseAdmin, data.id);
 
     // رسید پس از تایید دیگر لازم نیست — از استوریج حذف شود
     await purgeReceipt(supabaseAdmin, data.id);
@@ -458,7 +508,8 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
         .eq("status", "pending");
     }
 
-    // رسید پس از رد هم لازم نیست
+    // رسید و رمز موقت پس از رد هم لازم نیستند
+    await clearTempPassword(supabaseAdmin, data.id);
     await purgeReceipt(supabaseAdmin, data.id);
 
     return { success: true };

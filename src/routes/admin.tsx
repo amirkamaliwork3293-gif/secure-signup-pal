@@ -5,6 +5,7 @@ import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type Subscr
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
+import { SmsPanel } from "@/components/admin/SmsPanel";
 import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
@@ -29,7 +30,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "renewals" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "sms" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -162,6 +163,7 @@ function AdminPage() {
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
             { id: "users" as Tab, label: "کاربران", icon: Users },
+            { id: "sms" as Tab, label: "پیامک", icon: MessageSquare },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
             { id: "landing" as Tab, label: "معرفی", icon: ImageIcon },
@@ -206,6 +208,7 @@ function AdminPage() {
             {tab === "renewals" && (
               <RenewalsTab users={users} phones={phones} />
             )}
+            {tab === "sms" && <SmsPanel users={users} phones={phones} />}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
             {tab === "landing" && <LandingEditor />}

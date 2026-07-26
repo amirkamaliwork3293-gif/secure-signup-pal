@@ -26,11 +26,13 @@ import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as HistoryRouteImport } from './routes/history'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StoreStoreIdRouteImport } from './routes/store.$storeId'
 import { Route as MUserIdRouteImport } from './routes/m.$userId'
+import { Route as ApiSmsRemindersRouteImport } from './routes/api.sms-reminders'
 
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
@@ -117,6 +119,11 @@ const HistoryRoute = HistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CustomersRoute = CustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
@@ -142,11 +149,17 @@ const MUserIdRoute = MUserIdRouteImport.update({
   path: '/m/$userId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSmsRemindersRoute = ApiSmsRemindersRouteImport.update({
+  id: '/api/sms-reminders',
+  path: '/api/sms-reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -164,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/api/sms-reminders': typeof ApiSmsRemindersRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -171,6 +185,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -188,6 +203,7 @@ export interface FileRoutesByTo {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/api/sms-reminders': typeof ApiSmsRemindersRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -196,6 +212,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -213,6 +230,7 @@ export interface FileRoutesById {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/api/sms-reminders': typeof ApiSmsRemindersRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -222,6 +240,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/forgot-password'
     | '/history'
     | '/invoices'
     | '/login'
@@ -239,6 +258,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/students'
     | '/voice'
+    | '/api/sms-reminders'
     | '/m/$userId'
     | '/store/$storeId'
   fileRoutesByTo: FileRoutesByTo
@@ -246,6 +266,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/forgot-password'
     | '/history'
     | '/invoices'
     | '/login'
@@ -263,6 +284,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/students'
     | '/voice'
+    | '/api/sms-reminders'
     | '/m/$userId'
     | '/store/$storeId'
   id:
@@ -270,6 +292,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/forgot-password'
     | '/history'
     | '/invoices'
     | '/login'
@@ -287,6 +310,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/students'
     | '/voice'
+    | '/api/sms-reminders'
     | '/m/$userId'
     | '/store/$storeId'
   fileRoutesById: FileRoutesById
@@ -295,6 +319,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   CustomersRoute: typeof CustomersRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   HistoryRoute: typeof HistoryRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
@@ -312,6 +337,7 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StudentsRoute: typeof StudentsRoute
   VoiceRoute: typeof VoiceRoute
+  ApiSmsRemindersRoute: typeof ApiSmsRemindersRoute
   MUserIdRoute: typeof MUserIdRoute
   StoreStoreIdRoute: typeof StoreStoreIdRoute
 }
@@ -423,6 +449,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/invoices': {
+      id: '/invoices'
+      path: '/invoices'
+      fullPath: '/invoices'
+      preLoaderRoute: typeof InvoicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/history': {
       id: '/history'
       path: '/history'
@@ -430,11 +463,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/invoices': {
-      id: '/invoices'
-      path: '/invoices'
-      fullPath: '/invoices'
-      preLoaderRoute: typeof InvoicesRouteImport
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/customers': {
@@ -472,6 +505,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/sms-reminders': {
+      id: '/api/sms-reminders'
+      path: '/api/sms-reminders'
+      fullPath: '/api/sms-reminders'
+      preLoaderRoute: typeof ApiSmsRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -479,6 +519,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   CustomersRoute: CustomersRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   HistoryRoute: HistoryRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,
@@ -496,6 +537,7 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   StudentsRoute: StudentsRoute,
   VoiceRoute: VoiceRoute,
+  ApiSmsRemindersRoute: ApiSmsRemindersRoute,
   MUserIdRoute: MUserIdRoute,
   StoreStoreIdRoute: StoreStoreIdRoute,
 }

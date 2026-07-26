@@ -1,0 +1,21 @@
+name: SMS expiry reminders
+
+# روزی یک بار ساعت ۹:۳۰ صبح تهران (۰۶:۰۰ UTC) کاربران رو به انقضا را یادآوری می‌کند.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder run
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS -X POST "${SITE_URL:-https://kamixapp.ir}/api/sms-reminders" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP %{http_code}\n"

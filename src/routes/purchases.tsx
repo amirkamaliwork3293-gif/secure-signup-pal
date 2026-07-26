@@ -115,7 +115,7 @@ function EditablePurchaseItem({
 
 // ─── کارت یک فاکتور خرید در تاریخچه (نمایش/ویرایش/پرینت/حذف) ─────────────────
 
-function PurchaseCard({ p: initialP }: { p: Purchase }) {
+export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const [appSettings] = settings.useAll();
   const [allProducts] = products.useAll();
   const [catList] = categories.useAll();

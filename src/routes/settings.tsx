@@ -1,5 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
@@ -33,6 +33,7 @@ import {
   EyeOff,
   UtensilsCrossed,
   GraduationCap,
+  QrCode,
   Coins,
 } from "lucide-react";
 
@@ -815,7 +816,17 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
                   <ExternalLink className="h-3.5 w-3.5" />
                   مشاهده
                 </button>
+                <Link
+                  to="/store-qr"
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/5"
+                >
+                  <QrCode className="h-3.5 w-3.5" />
+                  QR کد
+                </Link>
               </div>
+              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                QR کد این صفحه را می‌توانید پرینت و در مغازه بچسبانید — دقیقاً مثل QR کد منوی دیجیتال.
+              </p>
             </div>
           )}
         </div>

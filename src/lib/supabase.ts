@@ -37,6 +37,8 @@ export type SignupRequest = {
   receipt_url?: string | null;
   request_type?: "signup" | "renewal";
   target_user_id?: string | null;
+  /** رمز انتخابی کاربر — فقط تا زمانی که ادمین پیام خوش‌آمدگویی را ارسال کند نگه داشته می‌شود. */
+  temp_password?: string | null;
 };
 
 // Duration in milliseconds — trial is 1 hour, others map to days

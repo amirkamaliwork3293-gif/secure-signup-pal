@@ -5,15 +5,18 @@ import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type Subscr
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
+import { SmsPanel } from "@/components/admin/SmsPanel";
 import { useAuth } from "@/lib/AuthContext";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
   updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
+  adminClearSignupTempPassword,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
 } from "@/lib/plans";
+import { MESSAGE_TEMPLATES, type MessageTemplateId } from "@/lib/sms-templates";
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
@@ -29,7 +32,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "renewals" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "sms" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -162,6 +165,7 @@ function AdminPage() {
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
             { id: "users" as Tab, label: "کاربران", icon: Users },
+            { id: "sms" as Tab, label: "پیامک", icon: MessageSquare },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
             { id: "landing" as Tab, label: "معرفی", icon: ImageIcon },
@@ -191,6 +195,7 @@ function AdminPage() {
                 acting={acting}
                 onApprove={handleApprove}
                 onReject={handleReject}
+                phones={phones}
               />
             )}
             {tab === "users" && (
@@ -206,6 +211,7 @@ function AdminPage() {
             {tab === "renewals" && (
               <RenewalsTab users={users} phones={phones} />
             )}
+            {tab === "sms" && <SmsPanel users={users} phones={phones} />}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
             {tab === "landing" && <LandingEditor />}
@@ -226,13 +232,17 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 }
 
 function RequestsTab({
-  requests, acting, onApprove, onReject,
+  requests, acting, onApprove, onReject, phones,
 }: {
   requests: SignupRequest[];
   acting: string | null;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  phones: Record<string, string | null>;
 }) {
+  const [messageTarget, setMessageTarget] = useState<SignupRequest | null>(null);
+  const clearTempPwd = useServerFn(adminClearSignupTempPassword);
+
   if (requests.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
@@ -242,6 +252,7 @@ function RequestsTab({
     );
   }
   return (
+    <>
     <ul className="space-y-2">
       {requests.map((r) => {
         const isActing = acting === r.id;
@@ -305,10 +316,37 @@ function RequestsTab({
                 ✅ حساب فعال است — کاربر می‌تواند وارد شود
               </div>
             )}
+            {r.status === "approved" && (
+              <div className="mt-3">
+                <button
+                  onClick={() => setMessageTarget(r)}
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/5"
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  پیام خوش‌آمدگویی به کاربر
+                </button>
+              </div>
+            )}
           </li>
         );
       })}
     </ul>
+
+    {messageTarget && (
+      <MessageUserModal
+        user={messageTarget}
+        phone={(messageTarget as any).phone || phones[messageTarget.username?.toLowerCase()] || null}
+        password={messageTarget.temp_password || null}
+        defaultTemplate={messageTarget.temp_password ? "welcome" : "thanks"}
+        onSent={() => {
+          if (messageTarget.temp_password) {
+            void clearTempPwd({ data: { id: messageTarget.id } }).catch(() => {});
+          }
+        }}
+        onClose={() => setMessageTarget(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -549,17 +587,36 @@ function UsersTab({
 function MessageUserModal({
   user,
   phone,
+  password,
+  defaultTemplate = "thanks",
+  onSent,
   onClose,
 }: {
-  user: UserProfile;
+  user: { username: string; first_name?: string | null; last_name?: string | null };
   phone: string | null;
+  /** رمز عبور کاربر — فقط برای قالب «خوش‌آمدگویی» لازم است (مثلاً بعد از تایید ثبت‌نام) */
+  password?: string | null;
+  defaultTemplate?: MessageTemplateId;
+  /** بعد از باز کردن لینک پیامک/واتساپ فراخوانی می‌شود (مثلاً برای پاک کردن رمز موقت از دیتابیس) */
+  onSent?: () => void;
   onClose: () => void;
 }) {
   const name = `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username;
-  const [text, setText] = useState(`سلام ${name} عزیز،\nاز اینکه KAMIX (کامیکس) را انتخاب کرده‌اید سپاسگزاریم.\nبا تشکر 🌹`);
+  const availableTemplates = MESSAGE_TEMPLATES.filter((t) => !t.needsPassword || !!password);
+  const [templateId, setTemplateId] = useState<MessageTemplateId>(defaultTemplate);
+  const buildText = (id: MessageTemplateId) =>
+    (MESSAGE_TEMPLATES.find((t) => t.id === id) ?? MESSAGE_TEMPLATES[0]).build({
+      name, username: user.username, password,
+    });
+  const [text, setText] = useState(() => buildText(defaultTemplate));
   const normalizePhone = (p: string) => p.replace(/[^\d+]/g, "");
   const localPhone = phone ? normalizePhone(phone) : "";
   const encoded = encodeURIComponent(text);
+
+  const applyTemplate = (id: MessageTemplateId) => {
+    setTemplateId(id);
+    setText(buildText(id));
+  };
 
   return (
     <div
@@ -583,7 +640,18 @@ function MessageUserModal({
           <p className="mb-3 text-xs text-muted-foreground">شماره تماسی برای این کاربر ثبت نشده است.</p>
         )}
 
-        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">متن پیام</label>
+        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">دسته پیام آماده</label>
+        <select
+          value={templateId}
+          onChange={(e) => applyTemplate(e.target.value as MessageTemplateId)}
+          className="mb-3 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+        >
+          {availableTemplates.map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
+        </select>
+
+        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">متن پیام (قابل ویرایش)</label>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -602,6 +670,7 @@ function MessageUserModal({
             </a>
             <a
               href={`sms:${localPhone}?body=${encoded}`}
+              onClick={() => onSent?.()}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 py-2 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-500/20"
             >
               <MessageSquare className="h-3.5 w-3.5" />
@@ -610,12 +679,18 @@ function MessageUserModal({
             <a
               href={`https://wa.me/${localPhone.replace(/^0/, "98").replace(/^\+/, "")}?text=${encoded}`}
               target="_blank" rel="noopener noreferrer"
+              onClick={() => onSent?.()}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-green-500/10 py-2 text-xs font-semibold text-green-700 dark:text-green-400 hover:bg-green-500/20"
             >
               <MessageSquare className="h-3.5 w-3.5" />
               واتساپ
             </a>
           </div>
+        )}
+        {!localPhone && password && (
+          <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+            چون شماره‌ای ثبت نشده، متن بالا را کپی کنید و از راه دیگری (مثلاً تلگرام) برای کاربر بفرستید.
+          </p>
         )}
       </div>
     </div>

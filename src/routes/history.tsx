@@ -3,11 +3,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { PurchaseCard } from "@/routes/purchases";
 import {
-  invoice, products, formatToman, formatNumber, formatJalaliDateTime, settings,
+  invoice, products, purchases, formatToman, formatNumber, formatJalaliDateTime, settings,
   PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
   toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp,
-  type Invoice, type InvoiceItem, type Product, type PaymentMethod,
+  type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
 } from "@/lib/store";
 import { filterAndRankSearch } from "@/lib/search";
 import {
@@ -15,6 +16,7 @@ import {
   ChevronDown, ChevronUp,
   User, Pencil, Trash2, Check, X, Calendar,
   Minus, Plus, Search, PlusCircle, Wallet,
+  Receipt, ShoppingBag,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -454,9 +456,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
 // ─── صفحه اصلی ────────────────────────────────────────────────────────────────
 
+type InvoiceCategory = "sale" | "purchase";
+
 export function HistoryPageInner() {
   const { q: incomingQuery } = Route.useSearch();
   const [list] = invoice.useHistory();
+  const [purchaseList] = purchases.useHistory();
+  const [category, setCategory] = useState<InvoiceCategory>("sale");
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
 
   useEffect(() => {
@@ -474,17 +480,56 @@ export function HistoryPageInner() {
     ]);
   }, [list, searchQ]);
 
+  const filteredPurchases = useMemo(() => {
+    const q = searchQ.trim();
+    if (!q) return purchaseList;
+    return filterAndRankSearch(purchaseList, q, (p) => [
+      p.id,
+      p.supplierName,
+      ...p.items.map((i) => i.name),
+    ]);
+  }, [purchaseList, searchQ]);
+
+  const activeList = category === "sale" ? list : purchaseList;
+  const activeFiltered = category === "sale" ? filtered : filteredPurchases;
+  const searchPlaceholder =
+    category === "sale"
+      ? "جستجو: نام مشتری، محصول، شماره فاکتور..."
+      : "جستجو: تامین‌کننده، محصول، شماره فاکتور...";
+
   return (
     <Layout>
       <h1 className="mb-3 text-lg font-bold">تاریخچه فاکتورها</h1>
 
-      {list.length > 0 && (
+      {/* دسته‌بندی: فاکتور فروش / فاکتور خرید */}
+      <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">
+        <button
+          onClick={() => setCategory("sale")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
+            category === "sale" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Receipt className="h-3.5 w-3.5" />
+          فاکتور فروش ({formatNumber(list.length)})
+        </button>
+        <button
+          onClick={() => setCategory("purchase")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
+            category === "purchase" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <ShoppingBag className="h-3.5 w-3.5" />
+          فاکتور خرید ({formatNumber(purchaseList.length)})
+        </button>
+      </div>
+
+      {activeList.length > 0 && (
         <div className="relative mb-3">
           <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="جستجو: نام مشتری، محصول، شماره فاکتور..."
+            placeholder={searchPlaceholder}
             className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
           />
           {searchQ && (
@@ -495,12 +540,14 @@ export function HistoryPageInner() {
         </div>
       )}
 
-      {list.length === 0 ? (
+      {activeList.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <HistoryIcon className="mx-auto h-10 w-10 text-muted-foreground" />
-          <p className="mt-3 text-sm text-muted-foreground">هنوز فاکتوری ثبت نشده است.</p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {category === "sale" ? "هنوز فاکتور فروشی ثبت نشده است." : "هنوز فاکتور خریدی ثبت نشده است."}
+          </p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : activeFiltered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <Search className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">فاکتوری با این مشخصات یافت نشد.</p>
@@ -508,13 +555,21 @@ export function HistoryPageInner() {
       ) : (
         <>
           {searchQ.trim() && (
-            <p className="mb-2 text-xs text-muted-foreground">{formatNumber(filtered.length)} فاکتور یافت شد</p>
+            <p className="mb-2 text-xs text-muted-foreground">{formatNumber(activeFiltered.length)} فاکتور یافت شد</p>
           )}
-          <ul className="space-y-2">
-            {filtered.map((inv) => (
-              <InvoiceCard key={inv.id} inv={inv} />
-            ))}
-          </ul>
+          {category === "sale" ? (
+            <ul className="space-y-2">
+              {(activeFiltered as Invoice[]).map((inv) => (
+                <InvoiceCard key={inv.id} inv={inv} />
+              ))}
+            </ul>
+          ) : (
+            <ul className="space-y-2">
+              {(activeFiltered as Purchase[]).map((p) => (
+                <PurchaseCard key={p.id} p={p} />
+              ))}
+            </ul>
+          )}
         </>
       )}
     </Layout>

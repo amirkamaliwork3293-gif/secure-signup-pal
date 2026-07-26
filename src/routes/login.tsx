@@ -161,6 +161,11 @@ export function LoginPage() {
 
         {tab === "user" && (
           <div className="mt-5 space-y-2 text-center text-xs">
+            <div>
+              <Link to="/forgot-password" className="font-medium text-muted-foreground hover:text-primary hover:underline">
+                رمز عبور خود را فراموش کرده‌اید؟
+              </Link>
+            </div>
             <div className="text-muted-foreground">
               حساب ندارید؟{" "}
               <Link to="/register" className="font-semibold text-primary hover:underline">

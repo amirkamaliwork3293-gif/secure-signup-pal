@@ -38,7 +38,7 @@ export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
       `${name} عزیز، ثبت‌نام شما در KAMIX (کامیکس) تایید شد. ✅\n` +
       `یوزرنیم: ${username || "—"}\n` +
       `رمز عبور: ${password || "همان رمزی که هنگام ثبت‌نام انتخاب کردید"}\n` +
-      `اپلیکیشن را نصب و با همین مشخصات وارد شوید.\nkamixapp.ir`,
+      `علاوه بر اپلیکیشن، از نسخه‌ی وب هم می‌توانید با همین مشخصات وارد شوید.\nkamixapp.ir`,
   },
   {
     id: "renewal_reminder",

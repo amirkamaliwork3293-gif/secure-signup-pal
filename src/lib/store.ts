@@ -31,8 +31,50 @@ export type Product = {
 export const COUNT_UNIT = "عدد";
 export const WEIGHT_UNITS = ["کیلوگرم", "گرم"] as const;
 
+/**
+ * تعریف یک واحد فروش دلخواه (کیلوگرم، متر، متر مربع، متر مکعب، لیتر، بسته و...).
+ * کاربر می‌تواند از میان واحدهای پیش‌فرض انتخاب کند یا واحد جدید تعریف کند.
+ */
+export type UnitDef = {
+  /** نام یکتای واحد، مثلاً «کیلوگرم» یا «متر مربع» */
+  name: string;
+  /** آیا برای این واحد مقدار اعشاری مجاز است؟ (وزن/مساحت/حجم: بله — عدد/بسته: خیر) */
+  allowDecimal: boolean;
+};
+
+export const DEFAULT_UNITS: UnitDef[] = [
+  { name: COUNT_UNIT, allowDecimal: false },
+  { name: "کیلوگرم", allowDecimal: true },
+  { name: "گرم", allowDecimal: true },
+];
+
+/** فهرست واحدهای فعلی فروشگاه (پیش‌فرض‌ها + واحدهای سفارشی که کاربر اضافه کرده) */
+export function getUnitDefs(): UnitDef[] {
+  const custom = settings.get().units;
+  if (!custom || custom.length === 0) return DEFAULT_UNITS;
+  return custom.some((u) => u.name === COUNT_UNIT) ? custom : [DEFAULT_UNITS[0], ...custom];
+}
+
+/** ذخیره‌ی فهرست کامل واحدها (جایگزین می‌کند، نه اضافه) */
+export function saveUnitDefs(list: UnitDef[]) {
+  settings.save({ ...settings.get(), units: list });
+}
+
+/** افزودن یک واحد جدید (اگر نام تکراری نباشد) */
+export function addUnitDef(u: UnitDef): UnitDef[] {
+  const list = getUnitDefs();
+  if (list.some((x) => x.name === u.name)) return list;
+  const next = [...list, u];
+  saveUnitDefs(next);
+  return next;
+}
+
 export function isWeightUnit(unit?: string): boolean {
-  return !!unit && (WEIGHT_UNITS as readonly string[]).includes(unit);
+  if (!unit || unit === COUNT_UNIT) return false;
+  const def = getUnitDefs().find((u) => u.name === unit);
+  if (def) return def.allowDecimal;
+  // واحد سفارشیِ ناشناس (مثلاً داده‌ی قدیمی) — برای اطمینان، اعشار مجاز فرض می‌شود
+  return true;
 }
 
 export type Category = {
@@ -221,8 +263,12 @@ const FIELD_TO_LOCAL_KEY: Record<string, string> = Object.fromEntries(
 export type AppSettings = {
   invoiceFontSize: number;
   shopName: string;
-  /** فعال‌سازی فروش وزنی (کیلوگرم/گرم) — پیش‌فرض غیرفعال */
+  /** منسوخ‌شده — قبلاً برای فعال/غیرفعال کردن سراسری واحدهای وزنی استفاده می‌شد.
+   *  حالا واحدها همیشه در فرم هر محصول در دسترس‌اند (به فیلد «units» زیر نگاه کنید).
+   *  این فیلد فقط برای سازگاری با داده‌های قدیمی نگه داشته شده و در UI استفاده نمی‌شود. */
   weightUnits?: boolean;
+  /** فهرست واحدهای فروش تعریف‌شده توسط کاربر (عدد/کیلوگرم/گرم/متر/... به‌همراه مجاز بودن اعشار) */
+  units?: UnitDef[];
   // ─── پروفایل عمومی فروشگاه (اختیاری) — برای صفحه عمومی /store/[id] ───
   /** آدرس فروشگاه */
   storeAddress?: string;
@@ -660,6 +706,37 @@ function useBoard(): [
   return [board, set];
 }
 
+/**
+ * وقتی یک فاکتور فروشِ ثبت‌شده در «تاریخچه» ویرایش می‌شود (مثلاً تعداد یک قلم از
+ * ۴ به ۳ تغییر می‌کند، یا قلمی حذف/اضافه می‌شود)، موجودی انبار باید با این تغییر
+ * هماهنگ شود؛ چون موجودی هنگام ثبت اولیه‌ی فاکتور یک‌بار کسر شده بود. اینجا فقط
+ * اختلاف تعداد (جدید − قدیم) برای هر کالا محاسبه و از انبار کم/به انبار اضافه
+ * می‌شود — نه کل مقدار از نو.
+ */
+function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: InvoiceItem[]) {
+  const deltaByProduct = new Map<string, number>();
+  for (const it of oldItems) {
+    if (!it.productId) continue;
+    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) - it.quantity);
+  }
+  for (const it of newItems) {
+    if (!it.productId) continue;
+    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) + it.quantity);
+  }
+  if (deltaByProduct.size === 0) return;
+  const list = read<Product[]>(PRODUCTS_KEY, []);
+  let changed = false;
+  const next = list.map((p) => {
+    const delta = deltaByProduct.get(p.id);
+    if (!delta) return p;
+    changed = true;
+    // delta مثبت یعنی تعداد فروخته‌شده بیشتر شده → از انبار کم می‌شود
+    // delta منفی یعنی تعداد کم شده → به انبار برمی‌گردد
+    return { ...p, stock: Math.max(0, (p.stock || 0) - delta) };
+  });
+  if (changed) products.save(next);
+}
+
 export const invoice = {
   // Active (current) invoice — keeps legacy API surface
   useCurrent: (): [Invoice, (v: Invoice | ((p: Invoice) => Invoice)) => void] => {
@@ -755,6 +832,8 @@ export const invoice = {
   },
   updateHistory: (updated: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
+    const prev = hist.find((inv) => inv.id === updated.id);
+    if (prev) reconcileStockForInvoiceEdit(prev.items, updated.items);
     write(
       HISTORY_KEY,
       hist.map((inv) => (inv.id === updated.id ? updated : inv)),

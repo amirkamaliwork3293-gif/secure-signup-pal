@@ -4,8 +4,8 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
 import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
-  parseNumberInput, COUNT_UNIT, WEIGHT_UNITS,
-  type Product, type Category,
+  parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef,
+  type Product, type Category, type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
@@ -458,7 +458,11 @@ function ProductModal({
   isEdit?: boolean;
 }) {
   const [appSettings] = settings.useAll();
-  const weightEnabled = !!appSettings.weightUnits;
+  const [unitDefs, setUnitDefs] = useState<UnitDef[]>(() => getUnitDefs());
+  useEffect(() => { setUnitDefs(getUnitDefs()); }, [appSettings.units]);
+  const [showAddUnit, setShowAddUnit] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+  const [newUnitDecimal, setNewUnitDecimal] = useState(true);
 
   const [name, setName]       = useState(initial?.name ?? "");
   const [price, setPrice]     = useState(initial ? String(initial.price) : "");
@@ -492,7 +496,7 @@ function ProductModal({
       stock: parseNumberInput(stock) || 0,
       description: desc.trim() || undefined,
       lowStockThreshold: parseNumberInput(lowThreshold) || 5,
-      unit: weightEnabled && unit !== COUNT_UNIT ? unit : undefined,
+      unit,
       buyPrice: parseNumberInput(buyPrice) || undefined,
       consumerPrice: parseNumberInput(consumerPrice) || undefined,
       sellerPrice: parseNumberInput(sellerPrice) || undefined,
@@ -506,6 +510,16 @@ function ProductModal({
 
   const genCode = () => {
     setCode("P" + Math.random().toString(36).slice(2, 10).toUpperCase());
+  };
+
+  const confirmAddUnit = () => {
+    const trimmed = newUnitName.trim();
+    if (!trimmed) return;
+    const next = addUnitDef({ name: trimmed, allowDecimal: newUnitDecimal });
+    setUnitDefs(next);
+    setUnit(trimmed);
+    setNewUnitName("");
+    setShowAddUnit(false);
   };
 
   return (
@@ -523,32 +537,55 @@ function ProductModal({
               className={inputCls} />
           </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label={weightEnabled && unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
+            <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
               <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
             </Field>
-            <Field label={weightEnabled && unit !== COUNT_UNIT ? `موجودی (${unit})` : "موجودی انبار"}>
+            <Field label={unit !== COUNT_UNIT ? `موجودی (${unit})` : "موجودی انبار"}>
               <input value={stock} onChange={(e) => setStock(e.target.value)} inputMode="decimal" placeholder="۰"
                 className={inputCls} />
             </Field>
           </div>
-          {weightEnabled && (
-            <Field label="واحد فروش">
-              <div className="grid grid-cols-3 gap-2">
-                {[COUNT_UNIT, ...WEIGHT_UNITS].map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    onClick={() => setUnit(u)}
-                    className={`rounded-xl border px-2 py-2 text-xs font-medium transition ${
-                      unit === u ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"
-                    }`}
-                  >
-                    {u}
-                  </button>
-                ))}
+          <Field label="واحد فروش">
+            <div className="flex flex-wrap gap-2">
+              {unitDefs.map((u) => (
+                <button
+                  key={u.name}
+                  type="button"
+                  onClick={() => setUnit(u.name)}
+                  className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                    unit === u.name ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  {u.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setShowAddUnit((v) => !v)}
+                className="rounded-xl border border-dashed border-primary/50 px-3 py-2 text-xs font-medium text-primary"
+              >
+                + واحد جدید
+              </button>
+            </div>
+            {showAddUnit && (
+              <div className="mt-2 flex items-center gap-2 rounded-xl border border-border bg-secondary/40 p-2">
+                <input
+                  value={newUnitName}
+                  onChange={(e) => setNewUnitName(e.target.value)}
+                  placeholder="مثلاً: متر مربع، بسته، لیتر"
+                  className="flex-1 rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                <label className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                  <input type="checkbox" checked={newUnitDecimal} onChange={(e) => setNewUnitDecimal(e.target.checked)} />
+                  اعشاری
+                </label>
+                <button type="button" onClick={confirmAddUnit}
+                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground">
+                  افزودن
+                </button>
               </div>
-            </Field>
-          )}
+            )}
+          </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="دسته‌بندی">
               <select value={category} onChange={(e) => setCat(e.target.value)}

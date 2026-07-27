@@ -48,7 +48,6 @@ function SettingsPageInner() {
   const [appSettings, setSettings] = settings.useAll();
   const [shopName, setShopName] = useState(appSettings.shopName);
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
-  const [weightUnits, setWeightUnits] = useState(!!appSettings.weightUnits);
   const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
@@ -62,7 +61,6 @@ function SettingsPageInner() {
       ...appSettings,
       shopName: nextName,
       invoiceFontSize,
-      weightUnits,
       showMenuFeature,
       showStudentsFeature,
       currencyUnit,
@@ -173,24 +171,16 @@ function SettingsPageInner() {
           </p>
         </div>
 
-        {/* فروش وزنی — قابلیت پیشرفته اختیاری؛ برای فروشگاه‌های عادی مخفی می‌ماند */}
+        {/* واحد فروش/فروش وزنی حالا مستقیماً در فرم هر محصول تعریف می‌شود، نه اینجا */}
         <div className="rounded-xl border border-border bg-background p-3">
-          <label className="flex cursor-pointer items-center justify-between gap-3">
-            <span className="flex items-center gap-2 text-sm font-medium">
-              <Scale className="h-4 w-4 text-primary" />
-              فروش وزنی (کیلوگرم / گرم)
-            </span>
-            <input
-              type="checkbox"
-              checked={weightUnits}
-              onChange={(e) => setWeightUnits(e.target.checked)}
-              className="h-5 w-5 accent-primary"
-            />
-          </label>
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <Scale className="h-4 w-4 text-primary" />
+            واحد فروش و فروش وزنی
+          </span>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            مخصوص فروشگاه‌های عمده و وزنی. با فعال‌شدن، در فرم محصول واحد فروش (عدد/کیلوگرم/گرم)
-            اضافه می‌شود و در فاکتور می‌توانید مقدار اعشاری (مثلاً ۲٫۵ کیلوگرم) وارد کنید. در حالت
-            غیرفعال هیچ چیز اضافه‌ای نمایش داده نمی‌شود.
+            دیگر نیازی به فعال‌سازی از این‌جا نیست — از صفحه‌ی «محصولات»، هنگام افزودن یا
+            ویرایش هر کالا، واحد فروش آن (عدد، کیلوگرم، گرم یا هر واحد دلخواه دیگری که
+            تعریف کنید) را مستقیماً انتخاب می‌کنید.
           </p>
         </div>
 

@@ -24,6 +24,7 @@ const PER_PART = 70;
 export function SmsPanel({ users, phones }: { users: UserProfile[]; phones: Record<string, string | null> }) {
   const [text, setText] = useState("");
   const [templateId, setTemplateId] = useState<MessageTemplateId | "">("");
+  const [includeLink, setIncludeLink] = useState(true);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
@@ -120,7 +121,7 @@ export function SmsPanel({ users, phones }: { users: UserProfile[]; phones: Reco
             setTemplateId(id);
             if (id) {
               const tpl = BULK_TEMPLATES.find((t) => t.id === id);
-              if (tpl) setText(tpl.build({ name: "مشتری گرامی" }));
+              if (tpl) setText(tpl.build({ name: "مشتری گرامی", includeLink }));
             }
           }}
           className="mb-2 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
@@ -130,6 +131,22 @@ export function SmsPanel({ users, phones }: { users: UserProfile[]; phones: Reco
             <option key={t.id} value={t.id}>{t.label}</option>
           ))}
         </select>
+
+        {templateId && BULK_TEMPLATES.find((t) => t.id === templateId)?.hasLink && (
+          <label className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeLink}
+              onChange={(e) => {
+                setIncludeLink(e.target.checked);
+                const tpl = BULK_TEMPLATES.find((t) => t.id === templateId);
+                if (tpl) setText(tpl.build({ name: "مشتری گرامی", includeLink: e.target.checked }));
+              }}
+              className="h-4 w-4 rounded border-input"
+            />
+            لینک در متن پیام درج شود
+          </label>
+        )}
 
         <textarea
           value={text}

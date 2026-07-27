@@ -69,6 +69,14 @@ export function addUnitDef(u: UnitDef): UnitDef[] {
   return next;
 }
 
+/** حذف یک واحد از فهرست تعریف‌شده‌ها (واحد پایه‌ی «عدد» قابل حذف نیست) */
+export function removeUnitDef(name: string): UnitDef[] {
+  if (name === COUNT_UNIT) return getUnitDefs();
+  const next = getUnitDefs().filter((u) => u.name !== name);
+  saveUnitDefs(next);
+  return next;
+}
+
 export function isWeightUnit(unit?: string): boolean {
   if (!unit || unit === COUNT_UNIT) return false;
   const def = getUnitDefs().find((u) => u.name === unit);
@@ -1437,7 +1445,7 @@ const JMONTHS_LONG = ["فروردین", "اردیبهشت", "خرداد", "تی�
 const JMONTHS_SHORT = JMONTHS_LONG; // Persian months don't have a distinct short form
 const WEEKDAYS_FA = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
 
-function toJalali(ts: number | string | Date): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
+export function toJalali(ts: number | string | Date): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return null;
   const g = tehranParts(d);
@@ -1503,18 +1511,30 @@ export function parseJalaliInput(s: string): { jy: number; jm: number; jd: numbe
   return { jy, jm, jd };
 }
 
-/** Parse `HH:MM` (Persian digits OK). Returns null on invalid input. */
+/** Parse `HH:MM` (Persian digits OK). Also accepts `HHMM`/`HMM` without a colon
+ *  (useful on mobile numeric keypads that don't have a ':' key). Returns null on invalid input. */
 export function parseTimeInput(s: string): { h: number; min: number } | null {
   if (!s) return null;
   const en = s
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
     .trim();
-  const m = en.match(/^(\d{1,2}):(\d{1,2})$/);
-  if (!m) return null;
-  const h = +m[1], min = +m[2];
-  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
-  return { h, min };
+  const withColon = en.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (withColon) {
+    const h = +withColon[1], min = +withColon[2];
+    if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+    return { h, min };
+  }
+  // بدون «:» — مثلاً «1430» یا «930» (کیبورد عددی موبایل معمولاً کلید «:» ندارد)
+  const digitsOnly = en.match(/^\d{3,4}$/);
+  if (digitsOnly) {
+    const raw = digitsOnly[0];
+    const h = +raw.slice(0, raw.length - 2);
+    const min = +raw.slice(-2);
+    if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+    return { h, min };
+  }
+  return null;
 }
 
 /** Get Jalali parts formatted as `YYYY/MM/DD` in Latin digits (for editing inputs). */

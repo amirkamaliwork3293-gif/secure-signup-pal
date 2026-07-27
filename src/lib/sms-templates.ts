@@ -17,6 +17,8 @@ export type MessageTemplateCtx = {
   password?: string | null;
   /** لینک تمدید اشتراک */
   renewLink?: string;
+  /** آیا لینک درون متن این قالب اضافه شود؟ پیش‌فرض true (کاربر می‌تواند از طریق تیک آن را خاموش کند) */
+  includeLink?: boolean;
 };
 
 export type MessageTemplateDef = {
@@ -24,43 +26,53 @@ export type MessageTemplateDef = {
   label: string;
   /** آیا این قالب برای معنا داشتن به رمز عبور کاربر نیاز دارد؟ (فقط برای ارسال تکی کاربرد دارد) */
   needsPassword?: boolean;
+  /** آیا این قالب اصلاً لینکی دارد؟ (برای نمایش/عدم‌نمایش تیک «ارسال لینک») */
+  hasLink?: boolean;
   build: (ctx: MessageTemplateCtx) => string;
 };
 
 const DEFAULT_RENEW_LINK = "https://kamixapp.ir/renew";
+const WEB_LINK = "kamixapp.ir";
 
 export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
   {
     id: "welcome",
     label: "خوش‌آمدگویی (تایید ثبت‌نام + یوزرنیم/رمز)",
     needsPassword: true,
-    build: ({ name, username, password }) =>
+    hasLink: true,
+    build: ({ name, username, password, includeLink = true }) =>
       `${name} عزیز، ثبت‌نام شما در KAMIX (کامیکس) تایید شد. ✅\n` +
       `یوزرنیم: ${username || "—"}\n` +
       `رمز عبور: ${password || "همان رمزی که هنگام ثبت‌نام انتخاب کردید"}\n` +
-      `علاوه بر اپلیکیشن، از نسخه‌ی وب هم می‌توانید با همین مشخصات وارد شوید.\nkamixapp.ir`,
+      `علاوه بر اپلیکیشن، از نسخه‌ی وب هم می‌توانید با همین مشخصات وارد شوید.` +
+      (includeLink ? `\n${WEB_LINK}` : ""),
   },
   {
     id: "renewal_reminder",
     label: "یادآوری تمدید اشتراک",
-    build: ({ name, renewLink }) =>
-      `${name} عزیز، اشتراک شما در KAMIX رو به پایان است. برای جلوگیری از قطع دسترسی، از لینک زیر تمدید کنید:\n${renewLink || DEFAULT_RENEW_LINK}`,
+    hasLink: true,
+    build: ({ name, renewLink, includeLink = true }) =>
+      `${name} عزیز، اشتراک شما در KAMIX رو به پایان است. برای جلوگیری از قطع دسترسی` +
+      (includeLink ? `، از لینک زیر تمدید کنید:\n${renewLink || DEFAULT_RENEW_LINK}` : " تمدید کنید."),
   },
   {
     id: "payment_received",
     label: "تایید دریافت پرداخت",
+    hasLink: false,
     build: ({ name }) =>
       `${name} عزیز، پرداخت شما با موفقیت دریافت و ثبت شد. از اعتماد شما سپاسگزاریم. 🌹\nKAMIX`,
   },
   {
     id: "thanks",
     label: "تشکر از همکاری/خرید",
+    hasLink: false,
     build: ({ name }) =>
       `سلام ${name} عزیز،\nاز اینکه KAMIX (کامیکس) را انتخاب کرده‌اید سپاسگزاریم.\nبا تشکر 🌹`,
   },
   {
     id: "custom",
     label: "متن دلخواه (خالی)",
+    hasLink: false,
     build: () => "",
   },
 ];

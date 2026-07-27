@@ -1,10 +1,10 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
 import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
-  parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef,
+  parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef, removeUnitDef,
   type Product, type Category, type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
@@ -48,6 +48,13 @@ function ProductsPageInner() {
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Product | null>(null);
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+  // فیلتر/جستجو با کمی تاخیر (debounce) اجرا می‌شود تا با انبارهای بزرگ (چند هزار
+  // محصول)، تایپ کردن در جستجو کند یا لگ‌دار نشود.
+  const [debouncedSearchQ, setDebouncedSearchQ] = useState(searchQ);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQ(searchQ), 150);
+    return () => clearTimeout(t);
+  }, [searchQ]);
   const [filterCat, setFilterCat] = useState<string>("all");
   const [showCatManager, setShowCatManager] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -96,10 +103,14 @@ function ProductsPageInner() {
     setEditTarget(null);
   };
 
-  const filtered = filterAndRankSearch(
-    list.filter((p) => filterCat === "all" || p.category === filterCat),
-    searchQ,
-    (p) => [p.name, p.code],
+  const filtered = useMemo(
+    () =>
+      filterAndRankSearch(
+        list.filter((p) => filterCat === "all" || p.category === filterCat),
+        debouncedSearchQ,
+        (p) => [p.name, p.code],
+      ),
+    [list, filterCat, debouncedSearchQ],
   );
 
   const toggleSelect = (id: string) => {
@@ -131,8 +142,18 @@ function ProductsPageInner() {
     setPrintTargets(list.filter((p) => selected.has(p.id)));
   };
 
-  const totalInventoryValue = list.reduce((sum, p) => sum + p.price * p.stock, 0);
-  const totalBuyValue = list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0);
+  const totalInventoryValue = useMemo(() => list.reduce((sum, p) => sum + p.price * p.stock, 0), [list]);
+  const totalBuyValue = useMemo(() => list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0), [list]);
+
+  // نمایش پنجره‌ای (windowed) لیست محصولات — با انبارهای بزرگ (چند هزار محصول)،
+  // رندر کردن همه‌ی ردیف‌ها هم‌زمان کند و لگ‌دار می‌شود؛ به‌جای آن فقط بخشی از
+  // نتایج فیلترشده رندر می‌شود و با اسکرول/دکمه «بارگذاری بیشتر» ادامه می‌آید.
+  const PRODUCT_PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PRODUCT_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(PRODUCT_PAGE_SIZE);
+  }, [filtered]);
+  const visibleItems = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   const exportToExcel = async () => {
     if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
@@ -309,7 +330,7 @@ function ProductsPageInner() {
         </div>
       ) : (
         <ul className="space-y-2">
-          {filtered.map((p) => {
+          {visibleItems.map((p) => {
             const isSel = selected.has(p.id);
             return (
               <li key={p.id} className={`flex items-center gap-3 rounded-xl border bg-card p-3 shadow-card ${isSel ? "border-primary" : "border-border"}`}>
@@ -381,6 +402,18 @@ function ProductsPageInner() {
             );
           })}
         </ul>
+      )}
+
+      {filtered.length > visibleItems.length && (
+        <div className="mt-3 flex flex-col items-center gap-1.5">
+          <button
+            onClick={() => setVisibleCount((c) => c + PRODUCT_PAGE_SIZE)}
+            className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-semibold text-foreground hover:bg-secondary"
+          >
+            نمایش {formatNumber(Math.min(PRODUCT_PAGE_SIZE, filtered.length - visibleItems.length))} محصول بعدی
+            ({formatNumber(visibleItems.length)} از {formatNumber(filtered.length)})
+          </button>
+        </div>
       )}
 
       {open && (
@@ -522,6 +555,15 @@ function ProductModal({
     setShowAddUnit(false);
   };
 
+  const handleRemoveUnit = (e: React.MouseEvent, u: UnitDef) => {
+    e.stopPropagation();
+    if (u.name === COUNT_UNIT) return;
+    if (!confirm(`واحد «${u.name}» حذف شود؟ محصولاتی که قبلاً با این واحد ثبت شده‌اند تغییری نمی‌کنند.`)) return;
+    const next = removeUnitDef(u.name);
+    setUnitDefs(next);
+    if (unit === u.name) setUnit(COUNT_UNIT);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl max-h-[90vh] overflow-y-auto">
@@ -548,16 +590,26 @@ function ProductModal({
           <Field label="واحد فروش">
             <div className="flex flex-wrap gap-2">
               {unitDefs.map((u) => (
-                <button
+                <span
                   key={u.name}
-                  type="button"
-                  onClick={() => setUnit(u.name)}
-                  className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                  className={`inline-flex items-center overflow-hidden rounded-xl border text-xs font-medium transition ${
                     unit === u.name ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"
                   }`}
                 >
-                  {u.name}
-                </button>
+                  <button type="button" onClick={() => setUnit(u.name)} className="px-3 py-2">
+                    {u.name}
+                  </button>
+                  {u.name !== COUNT_UNIT && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveUnit(e, u)}
+                      className="grid h-full place-items-center border-r border-current/10 px-1.5 py-2 text-current/70 hover:bg-destructive/10 hover:text-destructive"
+                      title={`حذف واحد ${u.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
               ))}
               <button
                 type="button"

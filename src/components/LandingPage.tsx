@@ -200,7 +200,6 @@ export function LandingPage() {
                 <video
                     src={m.url}
                     poster={m.coverUrl}
-                    autoPlay
                     muted
                     loop
                     playsInline

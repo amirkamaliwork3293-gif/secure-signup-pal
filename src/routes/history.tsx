@@ -7,7 +7,7 @@ import { PurchaseCard } from "@/routes/purchases";
 import {
   invoice, products, purchases, formatToman, formatNumber, formatJalaliDateTime, settings,
   PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
-  toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp,
+  toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp, toJalali,
   type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
 } from "@/lib/store";
 import { filterAndRankSearch } from "@/lib/search";
@@ -141,8 +141,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     const total = draft.items.reduce((s, i) => s + i.price * i.quantity, 0);
     // پارس تاریخ/ساعت شمسی
     const jd = parseJalaliInput(dateStr);
-    const tm = parseTimeInput(timeStr) ?? { h: 0, min: 0 };
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
+    // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
+    const prevTime = toJalali(saved.createdAt);
+    const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
     const updated = { ...draft, total, createdAt: newCreatedAt };
     invoice.updateHistory(updated);

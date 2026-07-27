@@ -20,6 +20,7 @@ import {
   parseJalaliInput,
   parseTimeInput,
   jalaliToTimestamp,
+  toJalali,
   type Product,
   type PurchaseItem,
   type Purchase,
@@ -153,8 +154,10 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const saveEdit = () => {
     const total = draft.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
     const jd = parseJalaliInput(dateStr);
-    const tm = parseTimeInput(timeStr) ?? { h: 0, min: 0 };
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
+    // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
+    const prevTime = toJalali(saved.createdAt);
+    const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
     const updated = { ...draft, total, createdAt: newCreatedAt };
     purchases.updateHistory(updated);

@@ -604,18 +604,24 @@ function MessageUserModal({
   const name = `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username;
   const availableTemplates = MESSAGE_TEMPLATES.filter((t) => !t.needsPassword || !!password);
   const [templateId, setTemplateId] = useState<MessageTemplateId>(defaultTemplate);
-  const buildText = (id: MessageTemplateId) =>
+  const [includeLink, setIncludeLink] = useState(true);
+  const buildText = (id: MessageTemplateId, withLink: boolean) =>
     (MESSAGE_TEMPLATES.find((t) => t.id === id) ?? MESSAGE_TEMPLATES[0]).build({
-      name, username: user.username, password,
+      name, username: user.username, password, includeLink: withLink,
     });
-  const [text, setText] = useState(() => buildText(defaultTemplate));
+  const [text, setText] = useState(() => buildText(defaultTemplate, true));
   const normalizePhone = (p: string) => p.replace(/[^\d+]/g, "");
   const localPhone = phone ? normalizePhone(phone) : "";
   const encoded = encodeURIComponent(text);
+  const currentTemplate = MESSAGE_TEMPLATES.find((t) => t.id === templateId);
 
   const applyTemplate = (id: MessageTemplateId) => {
     setTemplateId(id);
-    setText(buildText(id));
+    setText(buildText(id, includeLink));
+  };
+  const toggleIncludeLink = (checked: boolean) => {
+    setIncludeLink(checked);
+    setText(buildText(templateId, checked));
   };
 
   return (
@@ -650,6 +656,18 @@ function MessageUserModal({
             <option key={t.id} value={t.id}>{t.label}</option>
           ))}
         </select>
+
+        {currentTemplate?.hasLink && (
+          <label className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeLink}
+              onChange={(e) => toggleIncludeLink(e.target.checked)}
+              className="h-4 w-4 rounded border-input"
+            />
+            لینک در متن پیام درج شود
+          </label>
+        )}
 
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground">متن پیام (قابل ویرایش)</label>
         <textarea

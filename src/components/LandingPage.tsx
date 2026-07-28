@@ -138,7 +138,11 @@ export function LandingPage() {
     socials.length > 0 && { id: "contact", label: "ارتباط با ما" },
   ].filter(Boolean) as { id: string; label: string }[];
 
-  const whatsappHref = c.whatsapp ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}` : null;
+  const supportHref = c.phone
+    ? `tel:${c.phone.replace(/\s+/g, "")}`
+    : c.whatsapp
+      ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`
+      : null;
 
   return (
     <div dir="rtl" className="landing-page min-h-screen bg-background text-foreground">

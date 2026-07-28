@@ -14,10 +14,11 @@ import { Link } from "@tanstack/react-router";
 import {
   Sparkles, ArrowRight, ArrowLeft, CheckCircle2, TrendingUp, XCircle,
   Package, Users, FileText, BarChart3, ShieldCheck, Rocket, Clock,
+  Mic, Globe,
 } from "lucide-react";
 
 type Benefit = {
-  icon: "package" | "users" | "file" | "chart" | "shield" | "rocket" | "trend" | "check";
+  icon: "package" | "users" | "file" | "chart" | "shield" | "rocket" | "trend" | "check" | "mic" | "globe";
   title: string;
   detail: string;
 };
@@ -42,6 +43,8 @@ const iconMap = {
   rocket: Rocket,
   trend: TrendingUp,
   check: CheckCircle2,
+  mic: Mic,
+  globe: Globe,
 } as const;
 
 const GUIDES: Guide[] = [
@@ -284,6 +287,8 @@ const GUIDES: Guide[] = [
 const GENERIC: Benefit[] = [
   { icon: "package", title: "بارکد اختصاصی برای هر محصول",
     detail: "چاپ بارکد و اسکن با دوربین موبایل، بدون خرید دستگاه گران." },
+  { icon: "mic", title: "ثبت فاکتور با صدا",
+    detail: "کافیه حرف بزنی؛ فاکتور خودش با صدای تو ثبت می‌شود، بدون تایپ." },
   { icon: "check", title: "کنترل دقیق موجودی انبار",
     detail: "هشدار کمبود کالا و جلوگیری از فروش ناموجود." },
   { icon: "file", title: "فاکتور رسمی PDF با لوگو",
@@ -292,6 +297,8 @@ const GENERIC: Benefit[] = [
     detail: "لیست بدهی هر مشتری در یک صفحه." },
   { icon: "chart", title: "گزارش سود روزانه و ماهانه",
     detail: "پرفروش‌ترین محصولات و سود واقعی هر دسته." },
+  { icon: "globe", title: "سایت تک‌صفحه‌ای معرفی فروشگاه",
+    detail: "یک صفحه‌ی آنلاین حرفه‌ای برای معرفی فروشگاهت، آماده و رایگان." },
   { icon: "rocket", title: "کاملاً موبایل‌محور با اپ اندروید",
     detail: "همه چیز از روی گوشی، حتی بدون اینترنت." },
 ];

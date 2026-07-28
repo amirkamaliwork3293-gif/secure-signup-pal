@@ -169,8 +169,8 @@ export function LandingPage() {
           </div>
         </div>
         {quickLinks.length > 0 && (
-          <div className="border-t border-border/40">
-            <div className="mx-auto flex max-w-5xl gap-1.5 overflow-x-auto px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="border-t border-primary/15 bg-gradient-to-l from-primary/10 via-primary/5 to-transparent">
+            <div className="mx-auto flex max-w-5xl gap-2 overflow-x-auto px-4 py-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {quickLinks.map((l) => (
                 <a
                   key={l.id}
@@ -179,7 +179,7 @@ export function LandingPage() {
                     e.preventDefault();
                     scrollToSection(l.id);
                   }}
-                  className="shrink-0 whitespace-nowrap rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-primary hover:bg-primary/5 hover:text-primary"
+                  className="shrink-0 whitespace-nowrap rounded-full bg-primary/10 px-3.5 py-1.5 text-xs font-bold text-primary shadow-sm transition hover:bg-primary hover:text-primary-foreground hover:shadow-elegant"
                 >
                   {l.label}
                 </a>
@@ -312,19 +312,19 @@ export function LandingPage() {
         <p className="mx-auto mt-2 max-w-xl text-center text-sm text-muted-foreground">
           همه‌ی ابزارهای فروشگاه‌داری در یک برنامه‌ی ساده و فارسی.
         </p>
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {content.features.map((f, i) => {
             const Icon = FEATURE_ICONS[i % FEATURE_ICONS.length];
             return (
               <div
                 key={i}
-                className="rounded-2xl border border-border bg-card p-5 shadow-card transition hover:border-primary/40 hover:shadow-elegant"
+                className="rounded-2xl border border-border bg-card p-3.5 shadow-card transition hover:border-primary/40 hover:shadow-elegant sm:p-5"
               >
-                <div className="mb-3 grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <Icon className="h-5 w-5" />
+                <div className="mb-2.5 grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary sm:mb-3 sm:h-11 sm:w-11">
+                  <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
                 </div>
-                <div className="text-base font-bold">{f.title}</div>
-                <p className="mt-1.5 text-sm leading-7 text-muted-foreground">{f.description}</p>
+                <div className="text-sm font-bold sm:text-base">{f.title}</div>
+                <p className="mt-1 text-xs leading-6 text-muted-foreground sm:mt-1.5 sm:text-sm sm:leading-7">{f.description}</p>
               </div>
             );
           })}
@@ -421,22 +421,17 @@ export function LandingPage() {
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
 
-      {/* دکمه‌ی شناور پشتیبانی — اتصال مستقیم به واتساپ */}
+      {/* دکمه‌ی شناور پشتیبانی — جمع‌وجور، بدون چشمک، فقط یک آیکن شیک */}
       {whatsappHref && (
         <a
           href={whatsappHref}
           target="_blank"
           rel="noopener noreferrer"
           aria-label="پشتیبانی رایگان در واتساپ"
-          className="fixed bottom-5 left-4 z-40 flex items-center gap-2 sm:bottom-6 sm:left-6"
+          title="پشتیبانی رایگان"
+          className="fixed bottom-5 left-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white shadow-elegant ring-1 ring-white/20 transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-6 sm:left-6"
         >
-          <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[#25D366] text-white shadow-elegant transition-transform hover:scale-105 active:scale-95">
-            <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-[#25D366]/50" />
-            <MessageCircle className="h-7 w-7" />
-          </span>
-          <span className="whitespace-nowrap rounded-2xl rounded-bl-sm border border-border bg-card px-3 py-2 text-xs font-bold text-foreground shadow-card">
-            پشتیبانی رایگان 💬
-          </span>
+          <MessageCircle className="h-5 w-5" strokeWidth={2.25} />
         </a>
       )}
     </div>
@@ -461,6 +456,9 @@ function PlanCard({
   const remainingMs = cfg.discount_until ? new Date(cfg.discount_until).getTime() - now : Infinity;
   const perks = [
     "ثبت فاکتور نامحدود",
+    "ثبت فاکتور با صدا 🎙️",
+    "اسکن کالا با دوربین موبایل",
+    "ساخت سایت تک‌صفحه‌ای فروشگاه",
     "مدیریت انبار و محصولات",
     "گزارش‌های فروش و سود",
     "پشتیبانی رایگان",

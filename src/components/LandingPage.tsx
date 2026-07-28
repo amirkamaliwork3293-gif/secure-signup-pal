@@ -426,9 +426,11 @@ export function LandingPage() {
       </footer>
 
       {/* دکمه‌ی شناور پشتیبانی — فقط ایکن دایره‌ای کوچک، تماس مستقیم با تلفن */}
-      {c.phone && (
+      {supportHref && (
         <a
-          href={`tel:${c.phone.replace(/\s+/g, "")}`}
+          href={supportHref}
+          target={supportHref.startsWith("http") ? "_blank" : undefined}
+          rel={supportHref.startsWith("http") ? "noopener noreferrer" : undefined}
           aria-label="پشتیبانی رایگان"
           title="پشتیبانی رایگان"
           className="fixed bottom-4 left-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-primary text-lg shadow-elegant ring-2 ring-primary-foreground/30 transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-5 sm:left-5"

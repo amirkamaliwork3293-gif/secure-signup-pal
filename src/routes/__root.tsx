@@ -134,9 +134,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "stylesheet", href: appCss },
       // نسخه PWA حذف شده — نصب از طریق APK اندروید انجام می‌شود
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon.png" },
       { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
       { rel: "icon", type: "image/png", sizes: "512x512", href: "/icon-512.png" },
-      { rel: "apple-touch-icon", href: "/icon-192.png" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
     scripts: [
       { type: "application/ld+json", children: JSON.stringify(organizationLd) },

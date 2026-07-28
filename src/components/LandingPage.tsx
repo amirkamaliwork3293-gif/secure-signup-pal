@@ -426,7 +426,7 @@ export function LandingPage() {
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
 
-      {/* دکمه‌ی شناور پشتیبانی — فقط ایکن دایره‌ای کوچک، تماس مستقیم با تلفن */}
+      {/* دکمه‌ی شناور پشتیبانی — آیکون 3D تماس مستقیم با تلفن */}
       {supportHref && (
         <a
           href={supportHref}
@@ -434,12 +434,14 @@ export function LandingPage() {
           rel={supportHref.startsWith("http") ? "noopener noreferrer" : undefined}
           aria-label="پشتیبانی رایگان"
           title="پشتیبانی رایگان"
-          className="fixed bottom-4 left-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-primary text-lg shadow-elegant ring-2 ring-primary-foreground/30 transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-5 sm:left-5"
+          className="fixed bottom-4 left-4 z-40 h-14 w-14 overflow-hidden rounded-full shadow-elegant transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-5 sm:left-5"
         >
-          <span className="relative flex items-center justify-center">
-            <span className="absolute -inset-3 animate-ping rounded-full bg-primary/30" />
-            <span className="relative">🎧</span>
-          </span>
+          <img
+            src={supportIconAsset.url}
+            alt="پشتیبانی رایگان"
+            className="h-full w-full object-cover"
+            loading="eager"
+          />
         </a>
       )}
     </div>

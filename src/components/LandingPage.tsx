@@ -34,6 +34,7 @@ import {
   Mail,
 } from "lucide-react";
 import heroBannerUrl from "@/assets/kamix-hero-banner.png";
+import supportIconAsset from "@/assets/support-icon.png.asset.json";
 import { SmartBusinessGuide } from "@/components/SmartBusinessGuide";
 import { StoriesBar } from "@/components/StoriesBar";
 

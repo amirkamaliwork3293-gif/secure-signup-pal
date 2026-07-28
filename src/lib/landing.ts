@@ -56,7 +56,7 @@ export const DEFAULT_LANDING: LandingContent = {
     { title: "انبار و مشتریان", description: "موجودی کالا، بدهکاران و حساب مشتریان همیشه دقیق و به‌روز." },
     { title: "گزارش سود", description: "درآمد، سود و عملکرد فروشگاه را لحظه‌ای ببینید." },
   ],
-  contact: { phone: "09121234567" },
+  contact: {},
   stories: [],
 };
 

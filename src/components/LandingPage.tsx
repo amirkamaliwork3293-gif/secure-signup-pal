@@ -421,7 +421,7 @@ export function LandingPage() {
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
 
-      {/* دکمه‌ی شناور پشتیبانی — جمع‌وجور، بدون چشمک، فقط یک آیکن شیک */}
+      {/* دکمه‌ی شناور پشتیبانی — پیل زیبا با آیکن و متن «پشتیبانی رایگان» */}
       {whatsappHref && (
         <a
           href={whatsappHref}
@@ -429,9 +429,12 @@ export function LandingPage() {
           rel="noopener noreferrer"
           aria-label="پشتیبانی رایگان در واتساپ"
           title="پشتیبانی رایگان"
-          className="fixed bottom-5 left-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white shadow-elegant ring-1 ring-white/20 transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-6 sm:left-6"
+          className="fixed bottom-5 left-4 z-40 inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] pl-3 pr-4 py-2.5 text-sm font-bold text-white shadow-elegant ring-1 ring-white/20 transition-all duration-300 hover:scale-105 hover:shadow-2xl active:scale-95 sm:bottom-6 sm:left-6"
         >
-          <MessageCircle className="h-5 w-5" strokeWidth={2.25} />
+          <div className="grid h-8 w-8 place-items-center rounded-full bg-white/15">
+            <MessageCircle className="h-4 w-4" strokeWidth={2.25} />
+          </div>
+          <span className="tracking-tight">پشتیبانی رایگان</span>
         </a>
       )}
     </div>

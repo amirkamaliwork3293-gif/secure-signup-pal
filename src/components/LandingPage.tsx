@@ -5,6 +5,10 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { getPublicSettings } from "@/lib/auth.functions";
+import { DEFAULT_PLANS, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig } from "@/lib/plans";
+import { PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
+import { formatToman } from "@/lib/store";
 import {
   DEFAULT_LANDING,
   loadLandingContent,
@@ -21,6 +25,8 @@ import {
   Users,
   Package,
   CheckCircle2,
+  Check,
+  Star,
   Phone,
   Instagram,
   Send,
@@ -32,9 +38,27 @@ import { SmartBusinessGuide } from "@/components/SmartBusinessGuide";
 import { StoriesBar } from "@/components/StoriesBar";
 
 const FEATURE_ICONS = [Receipt, ScanLine, Package, BarChart3, Users, ShieldCheck];
+const PAID_PLANS: SubscriptionPlan[] = ["1month", "3month", "6month", "12month"];
+
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return "";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d} روز و ${h} ساعت`;
+  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")} دقیقه`;
+}
+
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 export function LandingPage() {
   const [content, setContent] = useState<LandingContent>(DEFAULT_LANDING);
+  const [plansCfg, setPlansCfg] = useState<PlansConfig>(DEFAULT_PLANS);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     let alive = true;
@@ -44,6 +68,26 @@ export function LandingPage() {
     return () => {
       alive = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getPublicSettings()
+      .then((data) => {
+        if (alive) setPlansCfg(data.plans);
+      })
+      .catch(() => {
+        /* پلن‌های پیش‌فرض نمایش داده می‌شوند */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // شمارش‌معکوس تخفیف — هر دقیقه به‌روزرسانی می‌شود (نیازی به هر ثانیه نیست، سبک‌تر است)
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
   }, []);
 
   const c = content.contact || {};
@@ -73,6 +117,29 @@ export function LandingPage() {
     });
   if (c.email) socials.push({ href: `mailto:${c.email}`, label: c.email, icon: Mail });
 
+  const hasVideos = content.media.filter((m) => m.type === "video").length > 0;
+  const visiblePaidPlans = PAID_PLANS.filter((p) => plansCfg[p]?.enabled);
+  const hasPricing = visiblePaidPlans.length > 0;
+  // پلنی که بیشترین تخفیف فعال را دارد به‌عنوان «پیشنهاد ویژه» برجسته می‌شود؛
+  // اگر هیچ تخفیفی فعال نبود، پلن سه‌ماهه (رایج‌ترین انتخاب) پیشنهاد می‌شود.
+  const recommendedPlan: SubscriptionPlan | null =
+    visiblePaidPlans.length === 0
+      ? null
+      : visiblePaidPlans.reduce((best, p) => {
+          const bd = isDiscountActive(plansCfg[best], now) ? plansCfg[best].discount_percent : 0;
+          const pd = isDiscountActive(plansCfg[p], now) ? plansCfg[p].discount_percent : 0;
+          return pd > bd ? p : best;
+        }, visiblePaidPlans.includes("3month") ? "3month" : visiblePaidPlans[0]);
+
+  const quickLinks = [
+    hasPricing && { id: "pricing", label: "قیمت‌ها" },
+    hasVideos && { id: "videos", label: "ویدیوهای معرفی" },
+    { id: "why-kamix", label: "چرا KAMIX؟" },
+    socials.length > 0 && { id: "contact", label: "ارتباط با ما" },
+  ].filter(Boolean) as { id: string; label: string }[];
+
+  const whatsappHref = c.whatsapp ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}` : null;
+
   return (
     <div dir="rtl" className="landing-page min-h-screen bg-background text-foreground">
       {/* Nav */}
@@ -101,6 +168,25 @@ export function LandingPage() {
             </Link>
           </div>
         </div>
+        {quickLinks.length > 0 && (
+          <div className="border-t border-border/40">
+            <div className="mx-auto flex max-w-5xl gap-1.5 overflow-x-auto px-4 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {quickLinks.map((l) => (
+                <a
+                  key={l.id}
+                  href={`#${l.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    scrollToSection(l.id);
+                  }}
+                  className="shrink-0 whitespace-nowrap rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-primary hover:bg-primary/5 hover:text-primary"
+                >
+                  {l.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Hero banner — edge-to-edge, standard 15:4 ratio, entire image visible */}
@@ -184,7 +270,7 @@ export function LandingPage() {
 
       {/* Video introduction — videos only (images are shown as stories above) */}
       {content.media.filter((m) => m.type === "video").length > 0 && (
-        <section className="mx-auto max-w-6xl px-4 py-10">
+        <section id="videos" className="mx-auto max-w-6xl scroll-mt-28 px-4 py-10">
           <h2 className="mb-6 text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
             معرفی برنامه در چند ویدیو
           </h2>
@@ -219,7 +305,7 @@ export function LandingPage() {
       )}
 
       {/* Features */}
-      <section className="mx-auto max-w-5xl px-4 py-10">
+      <section id="why-kamix" className="mx-auto max-w-5xl scroll-mt-28 px-4 py-10">
         <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
           چرا KAMIX؟
         </h2>
@@ -247,6 +333,24 @@ export function LandingPage() {
 
       {/* Smart business guide — persuasive, category-specific breakdown */}
       <SmartBusinessGuide />
+
+      {/* Pricing — کارت‌های «سه‌بعدی»، کلیک روی هرکدام کاربر را به ثبت‌نام می‌برد */}
+      {hasPricing && (
+        <section id="pricing" className="mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
+          <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
+            قیمت‌گذاری شفاف، بدون هزینه‌ی پنهان
+          </h2>
+          <p className="mx-auto mt-2 max-w-xl text-center text-sm text-muted-foreground">
+            پلن مناسب فروشگاه خودتان را انتخاب کنید و همین امروز شروع کنید.
+          </p>
+
+          <div className="mt-10 grid grid-cols-1 gap-6 pt-3 sm:grid-cols-2 lg:grid-cols-4">
+            {visiblePaidPlans.map((p) => (
+              <PlanCard key={p} plan={p} cfg={plansCfg[p]} recommended={p === recommendedPlan} now={now} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Bottom CTA */}
       <section className="mx-auto max-w-5xl px-4 pb-16">
@@ -278,7 +382,7 @@ export function LandingPage() {
 
       {/* Contact / Socials */}
       {socials.length > 0 && (
-        <section className="mx-auto max-w-5xl px-4 pb-14">
+        <section id="contact" className="mx-auto max-w-5xl scroll-mt-28 px-4 pb-14">
           <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
             <h3 className="text-center text-xl font-extrabold sm:text-2xl">
               ارتباط با ما
@@ -316,7 +420,112 @@ export function LandingPage() {
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
+
+      {/* دکمه‌ی شناور پشتیبانی — اتصال مستقیم به واتساپ */}
+      {whatsappHref && (
+        <a
+          href={whatsappHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="پشتیبانی رایگان در واتساپ"
+          className="fixed bottom-5 left-4 z-40 flex items-center gap-2 sm:bottom-6 sm:left-6"
+        >
+          <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[#25D366] text-white shadow-elegant transition-transform hover:scale-105 active:scale-95">
+            <span className="absolute inset-0 -z-10 animate-ping rounded-full bg-[#25D366]/50" />
+            <MessageCircle className="h-7 w-7" />
+          </span>
+          <span className="whitespace-nowrap rounded-2xl rounded-bl-sm border border-border bg-card px-3 py-2 text-xs font-bold text-foreground shadow-card">
+            پشتیبانی رایگان 💬
+          </span>
+        </a>
+      )}
     </div>
+  );
+}
+
+/**
+ * کارت هر پلن اشتراک — با افکت «بلندشدن + سایه‌ی سه‌بعدی» روی هاور، و برجسته‌سازی
+ * پلن پیشنهادی با نوار «پیشنهاد ویژه». کلیک روی هر جای کارت کاربر را به صفحه‌ی
+ * ثبت‌نام می‌برد.
+ */
+function PlanCard({
+  plan, cfg, recommended, now,
+}: {
+  plan: SubscriptionPlan;
+  cfg: PlanConfig;
+  recommended: boolean;
+  now: number;
+}) {
+  const discounted = isDiscountActive(cfg, now);
+  const final = effectivePrice(cfg, now);
+  const remainingMs = cfg.discount_until ? new Date(cfg.discount_until).getTime() - now : Infinity;
+  const perks = [
+    "ثبت فاکتور نامحدود",
+    "مدیریت انبار و محصولات",
+    "گزارش‌های فروش و سود",
+    "پشتیبانی رایگان",
+  ];
+
+  return (
+    <Link
+      to="/register"
+      className={`group relative flex flex-col rounded-3xl border p-6 pt-8 text-center shadow-card transition-all duration-300 hover:-translate-y-3 hover:shadow-2xl ${
+        recommended
+          ? "z-10 border-primary bg-gradient-primary text-primary-foreground shadow-elegant sm:scale-105"
+          : "border-border bg-card"
+      }`}
+    >
+      {recommended && (
+        <span className="absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-extrabold text-amber-950 shadow">
+          <Star className="h-3 w-3 fill-amber-950" />
+          پیشنهاد ویژه
+        </span>
+      )}
+      {discounted && (
+        <span className="absolute -top-3 -right-3 rounded-full bg-rose-500 px-2 py-1 text-[11px] font-extrabold text-white shadow">
+          {cfg.discount_percent.toLocaleString("fa-IR")}٪ تخفیف
+        </span>
+      )}
+
+      <div className="text-lg font-extrabold">{PLAN_LABEL[plan]}</div>
+      <div className={`mt-1 text-xs ${recommended ? "opacity-90" : "text-muted-foreground"}`}>
+        {PLAN_DURATION_LABEL[plan]} اعتبار
+      </div>
+
+      <div className="my-5">
+        {discounted && (
+          <div className={`text-xs line-through ${recommended ? "opacity-70" : "text-muted-foreground"}`}>
+            {formatToman(cfg.price)}
+          </div>
+        )}
+        <div className="text-2xl font-black">{formatToman(final)}</div>
+        {discounted && isFinite(remainingMs) && remainingMs > 0 && (
+          <div dir="ltr" className={`mt-1 text-[10px] ${recommended ? "opacity-80" : "text-rose-600"}`}>
+            ⏳ {formatRemaining(remainingMs)} تا پایان تخفیف
+          </div>
+        )}
+      </div>
+
+      <ul className="mb-6 flex-1 space-y-2 text-right text-xs">
+        {perks.map((perk) => (
+          <li key={perk} className="flex items-center gap-2">
+            <Check className={`h-3.5 w-3.5 shrink-0 ${recommended ? "" : "text-primary"}`} />
+            <span>{perk}</span>
+          </li>
+        ))}
+      </ul>
+
+      <span
+        className={`mt-auto flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition ${
+          recommended
+            ? "bg-background text-primary group-hover:opacity-90"
+            : "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground"
+        }`}
+      >
+        شروع کنید
+        <ArrowLeft className="h-4 w-4" />
+      </span>
+    </Link>
   );
 }
 

@@ -845,7 +845,6 @@ function SettingsTab() {
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary" />
           </div>
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">نسخه تست رایگان و ۱ ساعت اعتبار دارد — قیمت ندارد.</p>
         <button
           onClick={handleSavePrices}
           disabled={savingPrices}
@@ -861,7 +860,7 @@ function SettingsTab() {
 
 // ─── Plans management tab ──────────────────────────────────────────────────
 
-const PLAN_KEYS: SubscriptionPlan[] = ["trial", "1month", "3month", "6month", "12month"];
+const PLAN_KEYS: SubscriptionPlan[] = ["1month", "3month", "6month", "12month"];
 const PLAN_TITLE: Record<SubscriptionPlan, string> = {
   trial: "نسخه تست",
   "1month": "یک ماهه",

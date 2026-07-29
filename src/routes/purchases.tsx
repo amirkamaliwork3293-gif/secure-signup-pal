@@ -450,10 +450,13 @@ export function PurchasesPageInner() {
   const [catList] = categories.useAll();
   const [history] = purchases.useHistory();
   const [appSettings] = settings.useAll();
+  const [customerList] = customers.useAll();
 
   const [draft, setDraft] = useState<Purchase>(emptyPurchase());
   const [supplierName, setSupplierName] = useState("");
   const [supplierPhone, setSupplierPhone] = useState("");
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerQuery, setCustomerQuery] = useState("");
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(Date.now()));
@@ -483,6 +486,12 @@ export function PurchasesPageInner() {
       ...p.items.map((i) => i.name),
     ]);
   }, [history, searchQ]);
+
+  const matchingCustomers = useMemo(() => {
+    const q = customerQuery.trim();
+    if (!q) return customerList.slice(0, 8);
+    return filterAndRankSearch(customerList, q, (c) => [customerFullName(c), c.phone ?? ""]).slice(0, 8);
+  }, [customerList, customerQuery]);
 
   const total = draft.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
 

@@ -49,49 +49,105 @@ function mapRows(rows: BrsRow[] | undefined, group: GoldQuote["group"]): GoldQuo
     .filter((q) => q.price > 0);
 }
 
+async function fetchJson(url: string, ms = 10_000): Promise<unknown> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        accept: "application/json,text/plain,*/*",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** منبع ۱: BrsApi.ir (نیازمند کلید) */
+async function fromBrsApi(key: string): Promise<GoldQuote[]> {
+  const json = (await fetchJson(
+    `https://BrsApi.ir/Api/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
+  )) as { gold?: BrsRow[]; currency?: BrsRow[]; error?: string };
+  if (json?.error) throw new Error(String(json.error));
+  const goldRows = mapRows(json.gold, "gold");
+  return [
+    ...goldRows.map((g) => (g.name.includes("سکه") ? { ...g, group: "coin" as const } : g)),
+    ...mapRows(json.currency, "currency").filter((c) =>
+      ["USD", "EUR", "AED"].includes(c.key.toUpperCase()),
+    ),
+  ];
+}
+
+type TgjuCell = { p?: string; dp?: number | string; d?: number | string };
+
+const TGJU_MAP: Array<{ id: string; name: string; group: GoldQuote["group"] }> = [
+  { id: "geram18", name: "طلای ۱۸ عیار (هر گرم)", group: "gold" },
+  { id: "geram24", name: "طلای ۲۴ عیار (هر گرم)", group: "gold" },
+  { id: "mesghal", name: "مثقال طلا", group: "gold" },
+  { id: "sekee", name: "سکه امامی", group: "coin" },
+  { id: "sekeb", name: "سکه بهار آزادی", group: "coin" },
+  { id: "nim", name: "نیم سکه", group: "coin" },
+  { id: "rob", name: "ربع سکه", group: "coin" },
+  { id: "gerami", name: "سکه گرمی", group: "coin" },
+  { id: "price_dollar_rl", name: "دلار آمریکا", group: "currency" },
+  { id: "price_eur", name: "یورو", group: "currency" },
+  { id: "price_aed_dubai", name: "درهم امارات", group: "currency" },
+];
+
+/** منبع ۲ و ۳: TGJU (رایگان و بدون کلید) — قیمت‌ها به ریال هستند */
+async function fromTgju(url: string): Promise<GoldQuote[]> {
+  const json = (await fetchJson(url)) as { current?: Record<string, TgjuCell> };
+  const cur = json?.current;
+  if (!cur) throw new Error("ساختار پاسخ نامعتبر است");
+  return TGJU_MAP.map(({ id, name, group }) => {
+    const cell = cur[id];
+    if (!cell) return null;
+    const rial = num(cell.p);
+    if (!rial) return null;
+    return {
+      key: id,
+      name,
+      price: Math.round(rial / 10), // ریال → تومان
+      unit: "تومان",
+      changePercent: cell.dp === undefined ? null : num(cell.dp),
+      group,
+    } satisfies GoldQuote;
+  }).filter((q): q is GoldQuote => q !== null);
+}
+
 export const getGoldPrices = createServerFn({ method: "GET" }).handler(
   async (): Promise<GoldPricesResult> => {
     const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;
-    if (!key) {
-      return {
-        ok: false,
-        error:
-          "کلید سرویس نرخ طلا تنظیم نشده است. در تنظیمات هاست (Vercel ← Environment Variables) متغیری با نام GOLD_API_KEY بسازید و مقدار کلید BrsApi.ir را در آن بگذارید، سپس پروژه را دوباره Deploy کنید.",
-      };
-    }
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 12_000);
-      const res = await fetch(
-        `https://BrsApi.ir/Api/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
-        { signal: ctrl.signal, headers: { accept: "application/json" } },
-      ).finally(() => clearTimeout(timer));
+    const errors: string[] = [];
 
-      if (!res.ok) {
-        return { ok: false, error: `سرویس نرخ پاسخ نداد (کد ${res.status}).` };
+    const sources: Array<{ label: string; run: () => Promise<GoldQuote[]> }> = [
+      { label: "tgju", run: () => fromTgju("https://call3.tgju.org/ajax.json") },
+      { label: "tgju2", run: () => fromTgju("https://call1.tgju.org/ajax.json") },
+    ];
+    if (key) sources.unshift({ label: "brsapi", run: () => fromBrsApi(key) });
+
+    for (const s of sources) {
+      try {
+        const items = await s.run();
+        if (items.length > 0) {
+          return { ok: true, items, updatedAt: new Date().toISOString() };
+        }
+        errors.push(`${s.label}: داده‌ای برنگشت`);
+      } catch (e) {
+        errors.push(`${s.label}: ${String((e as Error)?.message ?? e)}`);
       }
-      const json = (await res.json()) as {
-        gold?: BrsRow[];
-        currency?: BrsRow[];
-        error?: string;
-      };
-      if (json?.error) return { ok: false, error: String(json.error) };
-
-      const goldRows = mapRows(json.gold, "gold");
-      // سکه‌ها در همان آرایه‌ی gold با نام «سکه ...» می‌آیند
-      const items = [
-        ...goldRows.map((g) => (g.name.includes("سکه") ? { ...g, group: "coin" as const } : g)),
-        ...mapRows(json.currency, "currency").filter((c) =>
-          ["USD", "EUR", "AED"].includes(c.key.toUpperCase()),
-        ),
-      ];
-      if (items.length === 0) return { ok: false, error: "داده‌ای از سرویس نرخ دریافت نشد." };
-      return { ok: true, items, updatedAt: new Date().toISOString() };
-    } catch (e) {
-      return {
-        ok: false,
-        error: `ارتباط با سرویس نرخ برقرار نشد: ${String((e as Error)?.message ?? e)}`,
-      };
     }
+
+    return {
+      ok: false,
+      error:
+        "دریافت نرخ لحظه‌ای از هیچ‌کدام از سرویس‌ها ممکن نشد. می‌توانید نرخ هر گرم طلای ۱۸ را دستی وارد کنید و ماشین‌حساب فاکتور را استفاده کنید.\n" +
+        `جزئیات: ${errors.join(" | ")}`,
+    };
   },
 );

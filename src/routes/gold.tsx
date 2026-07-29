@@ -146,7 +146,9 @@ function GoldInner() {
         </div>
 
         {error && (
-          <div className="rounded-xl bg-destructive/10 p-3 text-xs leading-6 text-destructive">{error}</div>
+          <div className="whitespace-pre-line rounded-xl bg-destructive/10 p-3 text-xs leading-6 text-destructive">
+            {error}
+          </div>
         )}
 
         {!error && (

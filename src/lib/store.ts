@@ -243,6 +243,7 @@ const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
 const STUDENTS_KEY = "acc.students.v1";
 const PURCHASES_KEY = "acc.purchases.v1";
+const EXPENSES_KEY = "acc.expenses.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -251,7 +252,8 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
   string,
-  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers" | "students" | "purchases"
+  | "products" | "categories" | "invoices" | "current_invoice" | "settings"
+  | "customers" | "students" | "purchases" | "expenses"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -261,6 +263,7 @@ const CLOUD_FIELDS: Record<
   [CUSTOMERS_KEY]: "customers",
   [STUDENTS_KEY]: "students",
   [PURCHASES_KEY]: "purchases",
+  [EXPENSES_KEY]: "expenses",
 };
 
 // Reverse map: cloud column name -> local storage key

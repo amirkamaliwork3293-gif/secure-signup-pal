@@ -355,7 +355,7 @@ export function detectEngine(): SpeechEngine {
   if (
     isIOS() &&
     typeof navigator !== "undefined" &&
-    navigator.mediaDevices?.getUserMedia &&
+    !!navigator.mediaDevices?.getUserMedia &&
     typeof (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined"
   ) {
     return "record";
@@ -364,7 +364,7 @@ export function detectEngine(): SpeechEngine {
   // مرورگرهای بدون Web Speech (مثل فایرفاکس) هم می‌توانند ضبط کنند
   if (
     typeof navigator !== "undefined" &&
-    navigator.mediaDevices?.getUserMedia &&
+    !!navigator.mediaDevices?.getUserMedia &&
     typeof (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined"
   ) {
     return "record";

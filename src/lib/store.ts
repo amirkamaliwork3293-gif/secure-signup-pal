@@ -307,8 +307,6 @@ export type AppSettings = {
   showMenuFeature?: boolean;
   /** نمایش گزینه «هنرجویان/شهریه‌پرداز» در نوار پایین — پیش‌فرض غیرفعال */
   showStudentsFeature?: boolean;
-  /** نمایش گزینه «طلا» (محاسبه‌گر قیمت طلا/سکه) در نوار پایین — پیش‌فرض غیرفعال، مخصوص طلافروشی‌ها */
-  showGoldFeature?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
 };
@@ -319,7 +317,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   weightUnits: false,
   showMenuFeature: false,
   showStudentsFeature: false,
-  showGoldFeature: false,
 };
 
 function getStorageScope() {

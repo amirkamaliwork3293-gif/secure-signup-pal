@@ -14,7 +14,7 @@ import {
   type Invoice,
 } from "@/lib/store";
 import { parseVoiceText, type ParsedItem, type ParsedCandidate } from "@/lib/voice/persian-nlu";
-import { createRecognizer, type Recognizer } from "@/lib/voice/speech";
+import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseVoiceInvoiceLLM } from "@/lib/api/voice.functions";
 import {
   Mic,
@@ -56,7 +56,7 @@ function vibrate(ms: number) {
 function VoicePageInner() {
   const [allProducts] = products.useAll();
   const recognizerRef = useRef<Recognizer | null>(null);
-  const [engine, setEngine] = useState<"native" | "web" | "none">("none");
+  const [engine, setEngine] = useState<SpeechEngine>("none");
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);

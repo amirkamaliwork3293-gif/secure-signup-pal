@@ -243,6 +243,7 @@ const SETTINGS_KEY = "acc.settings.v1";
 const CUSTOMERS_KEY = "acc.customers.v1";
 const STUDENTS_KEY = "acc.students.v1";
 const PURCHASES_KEY = "acc.purchases.v1";
+const EXPENSES_KEY = "acc.expenses.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -251,7 +252,8 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
   string,
-  "products" | "categories" | "invoices" | "current_invoice" | "settings" | "customers" | "students" | "purchases"
+  | "products" | "categories" | "invoices" | "current_invoice" | "settings"
+  | "customers" | "students" | "purchases" | "expenses"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -261,6 +263,7 @@ const CLOUD_FIELDS: Record<
   [CUSTOMERS_KEY]: "customers",
   [STUDENTS_KEY]: "students",
   [PURCHASES_KEY]: "purchases",
+  [EXPENSES_KEY]: "expenses",
 };
 
 // Reverse map: cloud column name -> local storage key
@@ -304,6 +307,8 @@ export type AppSettings = {
   showMenuFeature?: boolean;
   /** نمایش گزینه «هنرجویان/شهریه‌پرداز» در نوار پایین — پیش‌فرض غیرفعال */
   showStudentsFeature?: boolean;
+  /** نمایش گزینه «طلا» (محاسبه‌گر قیمت طلا/سکه) در نوار پایین — پیش‌فرض غیرفعال، مخصوص طلافروشی‌ها */
+  showGoldFeature?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
 };
@@ -314,6 +319,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   weightUnits: false,
   showMenuFeature: false,
   showStudentsFeature: false,
+  showGoldFeature: false,
 };
 
 function getStorageScope() {
@@ -475,6 +481,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /expenses/.test(error.message) && "expenses" in payload) {
+      delete payload.expenses;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -547,6 +560,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
     overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
     overwrite("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
+    overwrite("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {
@@ -930,6 +944,94 @@ export const purchases = {
       PURCHASES_KEY,
       hist.filter((p) => p.id !== id),
     );
+  },
+};
+
+// ─── Expenses (هزینه‌ها) ─────────────────────────────────────────────────────
+
+export type Expense = {
+  id: string;
+  /** عنوان هزینه، مثلاً «اجاره مغازه» */
+  title: string;
+  amount: number;
+  /** دسته‌بندی هزینه — از EXPENSE_CATEGORIES یا هر متن دلخواه */
+  category: string;
+  /** تاریخ ثبت/پرداخت هزینه (timestamp) */
+  at: number;
+  paymentMethod?: PaymentMethod;
+  note?: string;
+  /** هزینه‌ی تکرارشونده (مثل اجاره ماهانه) — تعداد روز دوره؛ خالی یعنی یک‌بار */
+  recurringDays?: number;
+  createdAt: number;
+};
+
+export const EXPENSE_CATEGORIES = [
+  "اجاره",
+  "حقوق و دستمزد",
+  "قبوض (برق، آب، گاز)",
+  "اینترنت و تلفن",
+  "حمل و نقل",
+  "تبلیغات",
+  "تعمیر و نگهداری",
+  "مالیات و عوارض",
+  "ملزومات مصرفی",
+  "متفرقه",
+] as const;
+
+export function emptyExpense(): Expense {
+  return {
+    id: cryptoId(),
+    title: "",
+    amount: 0,
+    category: EXPENSE_CATEGORIES[0],
+    at: Date.now(),
+    paymentMethod: "cash",
+    createdAt: Date.now(),
+  };
+}
+
+/** سررسید بعدی یک هزینه‌ی تکرارشونده (اگر تکرارشونده نباشد null) */
+export function expenseNextDue(e: Expense): number | null {
+  if (!e.recurringDays || e.recurringDays <= 0) return null;
+  const period = e.recurringDays * 86_400_000;
+  let next = e.at + period;
+  const now = Date.now();
+  while (next < now - period) next += period;
+  return next;
+}
+
+export function expensesInRange(list: Expense[], from: number, to: number): Expense[] {
+  return list.filter((e) => e.at >= from && e.at <= to);
+}
+
+export function expensesTotal(list: Expense[]): number {
+  return list.reduce((s, e) => s + (e.amount || 0), 0);
+}
+
+/** جمع هزینه‌ها به تفکیک دسته، مرتب‌شده از بیشترین به کمترین */
+export function expensesByCategory(list: Expense[]): { category: string; total: number }[] {
+  const map = new Map<string, number>();
+  for (const e of list) map.set(e.category || "متفرقه", (map.get(e.category || "متفرقه") || 0) + (e.amount || 0));
+  return [...map.entries()]
+    .map(([category, total]) => ({ category, total }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export const expenses = {
+  useAll: () => useStore<Expense[]>(EXPENSES_KEY, []),
+  getAll: () => read<Expense[]>(EXPENSES_KEY, []),
+  save: (list: Expense[]) => write(EXPENSES_KEY, list),
+  add: (e: Expense) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, [{ ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() }, ...list]);
+  },
+  update: (updated: Expense) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, list.map((e) => (e.id === updated.id ? updated : e)));
+  },
+  remove: (id: string) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, list.filter((e) => e.id !== id));
   },
 };
 

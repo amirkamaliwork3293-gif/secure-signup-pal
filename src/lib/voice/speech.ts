@@ -15,7 +15,7 @@
  * متن در صفحه‌ی ثبت صوتی همیشه به‌عنوان جایگزین در دسترس است.
  */
 
-export type SpeechEngine = "native" | "web" | "none";
+export type SpeechEngine = "native" | "web" | "record" | "none";
 
 export type StartHandlers = {
   onPartial?: (text: string) => void;
@@ -218,15 +218,164 @@ function createWebSpeechRecognizer(): Recognizer {
 
 // ─── انتخاب موتور ─────────────────────────────────────────────────────────────
 
+// ─── ضبط + رونویسی سروری (مخصوص iOS / سافاری) ────────────────────────────────
+
+/** آیا دستگاه iOS/iPadOS است؟ (سافاری، کروم iOS، وب‌ویو iOS همگی WebKit هستند) */
+export function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const iOSClassic = /iPad|iPhone|iPod/.test(ua);
+  const iPadOS13Plus = /Macintosh/.test(ua) && (navigator.maxTouchPoints ?? 0) > 1;
+  return iOSClassic || iPadOS13Plus;
+}
+
+function pickMimeType(): string {
+  const candidates = ["audio/mp4", "audio/aac", "audio/webm;codecs=opus", "audio/webm"];
+  const MR = (globalThis as unknown as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
+  if (!MR || typeof MR.isTypeSupported !== "function") return "";
+  for (const t of candidates) if (MR.isTypeSupported(t)) return t;
+  return "";
+}
+
+function extFromMime(mime: string): string {
+  if (mime.includes("mp4") || mime.includes("aac") || mime.includes("m4a")) return "m4a";
+  if (mime.includes("webm")) return "webm";
+  if (mime.includes("mpeg")) return "mp3";
+  if (mime.includes("wav")) return "wav";
+  return "m4a";
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  const CH = 0x8000;
+  for (let i = 0; i < buf.length; i += CH) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+
+/**
+ * موتور «ضبط و رونویسی» — برای iPhone/iPad که Web Speech API در آن‌ها یا وجود
+ * ندارد یا عملاً کار نمی‌کند. صدا با MediaRecorder ضبط و برای رونویسی به سرور
+ * (Lovable AI) فرستاده می‌شود. این مسیر کاملاً مستقل از مسیر اندروید/نیتیو است.
+ */
+function createRecordingRecognizer(): Recognizer {
+  let recorder: MediaRecorder | null = null;
+  let stream: MediaStream | null = null;
+  let chunks: Blob[] = [];
+  let handlers: StartHandlers | null = null;
+  let mime = "";
+
+  const cleanup = () => {
+    try {
+      stream?.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    stream = null;
+    recorder = null;
+  };
+
+  const finish = async () => {
+    const h = handlers;
+    handlers = null;
+    if (!h) return;
+    const blob = new Blob(chunks, { type: mime || "audio/mp4" });
+    chunks = [];
+    cleanup();
+    if (blob.size < 1500) {
+      h.onError(NO_SPEECH_MSG);
+      h.onEnd?.();
+      return;
+    }
+    try {
+      const { transcribeAudio } = await import("./stt.functions");
+      const b64 = await blobToBase64(blob);
+      const res = await transcribeAudio({
+        data: { audioBase64: b64, format: extFromMime(mime), language: "fa" },
+      });
+      if (res.ok && res.text.trim()) h.onResult(res.text.trim());
+      else h.onError(res.ok ? NO_SPEECH_MSG : res.error);
+    } catch (e) {
+      h.onError("ارتباط با سرویس تشخیص گفتار برقرار نشد: " + String((e as Error)?.message ?? e));
+    }
+    h.onEnd?.();
+  };
+
+  return {
+    engine: "record",
+    isSupported: true,
+    start: async (h) => {
+      handlers = h;
+      chunks = [];
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        handlers = null;
+        const name = (e as Error)?.name ?? "";
+        if (name === "NotAllowedError" || name === "SecurityError") notifyUnavailable(h, MIC_DENIED_MSG);
+        else notifyUnavailable(h, MIC_MISSING_MSG);
+        h.onEnd?.();
+        return;
+      }
+      try {
+        mime = pickMimeType();
+        recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+        if (!mime) mime = recorder.mimeType || "audio/mp4";
+        recorder.ondataavailable = (ev) => {
+          if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+        };
+        recorder.onstop = () => {
+          void finish();
+        };
+        // بدون timeslice → یک فایل کامل و قابل‌پخش تولید می‌شود (لازمِ iOS)
+        recorder.start();
+      } catch (e) {
+        handlers = null;
+        cleanup();
+        notifyUnavailable(h, MIC_MISSING_MSG + " (" + String((e as Error)?.message ?? e) + ")");
+        h.onEnd?.();
+      }
+    },
+    stop: async () => {
+      try {
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+        else cleanup();
+      } catch {
+        cleanup();
+      }
+    },
+  };
+}
+
 export function detectEngine(): SpeechEngine {
   if (nativeBridge()) return "native";
+  // iOS: Web Speech API یا نیست یا ناپایدار است → مسیر ضبط + رونویسی سروری
+  if (
+    isIOS() &&
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined"
+  ) {
+    return "record";
+  }
   if (webSpeechCtor()) return "web";
+  // مرورگرهای بدون Web Speech (مثل فایرفاکس) هم می‌توانند ضبط کنند
+  if (
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof (globalThis as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined"
+  ) {
+    return "record";
+  }
   return "none";
 }
 
 export function createRecognizer(): Recognizer {
   const engine = detectEngine();
   if (engine === "native") return createNativeRecognizer();
+  if (engine === "record") return createRecordingRecognizer();
   if (engine === "web") return createWebSpeechRecognizer();
   return {
     engine: "none",

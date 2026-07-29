@@ -138,7 +138,11 @@ export function LandingPage() {
     socials.length > 0 && { id: "contact", label: "ارتباط با ما" },
   ].filter(Boolean) as { id: string; label: string }[];
 
-  const whatsappHref = c.whatsapp ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}` : null;
+  const supportHref = c.phone
+    ? `tel:${c.phone.replace(/\s+/g, "")}`
+    : c.whatsapp
+      ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`
+      : null;
 
   return (
     <div dir="rtl" className="landing-page min-h-screen bg-background text-foreground">
@@ -421,17 +425,55 @@ export function LandingPage() {
         © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
       </footer>
 
-      {/* دکمه‌ی شناور پشتیبانی — جمع‌وجور، بدون چشمک، فقط یک آیکن شیک */}
-      {whatsappHref && (
+      {/* دکمه‌ی شناور پشتیبانی — آیکون 3D تماس مستقیم با تلفن */}
+      {supportHref && (
         <a
-          href={whatsappHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="پشتیبانی رایگان در واتساپ"
+          href={supportHref}
+          target={supportHref.startsWith("http") ? "_blank" : undefined}
+          rel={supportHref.startsWith("http") ? "noopener noreferrer" : undefined}
+          aria-label="پشتیبانی رایگان"
           title="پشتیبانی رایگان"
-          className="fixed bottom-5 left-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white shadow-elegant ring-1 ring-white/20 transition-all duration-300 hover:scale-110 hover:shadow-2xl active:scale-95 sm:bottom-6 sm:left-6"
+          className="fixed bottom-4 left-4 z-40 h-14 w-14 rounded-full transition-all duration-300 hover:scale-110 active:scale-95 sm:bottom-5 sm:left-5"
         >
-          <MessageCircle className="h-5 w-5" strokeWidth={2.25} />
+          <svg viewBox="0 0 64 64" className="h-full w-full drop-shadow-xl" role="img" aria-hidden="true">
+            <defs>
+              <linearGradient id="kx-sup-bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#4f8cff" />
+                <stop offset="55%" stopColor="#6a5cff" />
+                <stop offset="100%" stopColor="#a855f7" />
+              </linearGradient>
+              <radialGradient id="kx-sup-shine" cx="0.3" cy="0.22" r="0.7">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="32" cy="32" r="31" fill="url(#kx-sup-bg)" />
+            <circle cx="32" cy="32" r="31" fill="url(#kx-sup-shine)" />
+            <circle cx="32" cy="32" r="30" fill="none" stroke="#ffffff" strokeOpacity="0.45" strokeWidth="1.5" />
+            {/* هدست */}
+            <path
+              d="M18 34v-3a14 14 0 0 1 28 0v3"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="4"
+              strokeLinecap="round"
+            />
+            <rect x="13.5" y="32" width="8" height="13" rx="4" fill="#ffffff" />
+            <rect x="42.5" y="32" width="8" height="13" rx="4" fill="#ffffff" />
+            <path
+              d="M46.5 45v2.5a5 5 0 0 1-5 5H36"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            <circle cx="33" cy="52.5" r="3.2" fill="#ffffff" />
+            {/* حباب گفتگو */}
+            <rect x="24" y="21" width="16" height="11" rx="5.5" fill="#ffffff" />
+            <circle cx="29" cy="26.5" r="1.4" fill="#6a5cff" />
+            <circle cx="32" cy="26.5" r="1.4" fill="#6a5cff" />
+            <circle cx="35" cy="26.5" r="1.4" fill="#6a5cff" />
+          </svg>
         </a>
       )}
     </div>

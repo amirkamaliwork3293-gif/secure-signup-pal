@@ -5,11 +5,12 @@ import { Layout } from "@/components/Layout";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
   formatJalaliDate, parseJalaliInput, jalaliToTimestamp,
+  expenses as expensesStore, expensesTotal, expensesByCategory,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
-  TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch,
+  TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
 } from "lucide-react";
 
 export const Route = createFileRoute("/reports")({
@@ -125,6 +126,7 @@ const RANGE_LABEL: Record<Range, string> = {
 
 function ReportsPageInner() {
   const [history] = invoice.useHistory();
+  const [expenseList] = expensesStore.useAll();
   const [range, setRange] = useState<Range>("today");
   const [fromStr, setFromStr] = useState<string>("");
   const [toStr, setToStr] = useState<string>("");
@@ -152,6 +154,20 @@ function ReportsPageInner() {
 
   const summary = summarize(filtered);
   const profitSummary = useMemo(() => computeProfit(filtered), [filtered]);
+
+  const filteredExpenses = useMemo(() => {
+    if (range === "all") return expenseList;
+    if (range === "custom") {
+      if (!customRange) return [];
+      return expenseList.filter((e) => e.at >= customRange.fromTs && e.at <= customRange.toTs);
+    }
+    const from = range === "today" ? startOfDay() : range === "month" ? startOfMonth() : startOfYear();
+    return expenseList.filter((e) => e.at >= from);
+  }, [expenseList, range, customRange]);
+
+  const expensesSum = useMemo(() => expensesTotal(filteredExpenses), [filteredExpenses]);
+  const expenseCats = useMemo(() => expensesByCategory(filteredExpenses), [filteredExpenses]);
+  const netProfit = profitSummary.profit - expensesSum;
 
   const daily = useMemo(() => {
     const from = startOfMonth();
@@ -268,6 +284,50 @@ function ReportsPageInner() {
           )}
         </section>
       </div>
+
+      {/* هزینه‌ها و سود خالص */}
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <section className="rounded-2xl border border-border bg-card p-4 shadow-card">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Wallet className="h-3.5 w-3.5 text-primary" />
+            هزینه‌ها ({RANGE_LABEL[range]})
+          </div>
+          <div className="mt-1 text-lg font-bold text-destructive">{formatToman(expensesSum)}</div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">{formatNumber(filteredExpenses.length)} مورد</div>
+        </section>
+        <section className={`rounded-2xl border p-4 shadow-card ${netProfit >= 0 ? "border-green-500/30 bg-green-500/5" : "border-destructive/30 bg-destructive/5"}`}>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            {netProfit >= 0 ? <TrendingUp className="h-3.5 w-3.5 text-green-600" /> : <TrendingDown className="h-3.5 w-3.5 text-destructive" />}
+            سود خالص (پس از هزینه‌ها)
+          </div>
+          <div className={`mt-1 text-lg font-bold ${netProfit >= 0 ? "text-green-600" : "text-destructive"}`}>
+            {formatToman(netProfit)}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">سود فروش − هزینه‌ها</div>
+        </section>
+      </div>
+
+      {expenseCats.length > 0 && (
+        <section className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold">
+            <PieChart className="h-4 w-4 text-primary" />
+            هزینه به تفکیک دسته ({RANGE_LABEL[range]})
+          </h2>
+          <ul className="space-y-2">
+            {expenseCats.map(({ category, total: t }) => (
+              <li key={category} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{category}</span>
+                  <span className="font-semibold text-destructive">{formatToman(t)}</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-destructive/70" style={{ width: `${(t / Math.max(1, expensesSum)) * 100}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <SummaryCard

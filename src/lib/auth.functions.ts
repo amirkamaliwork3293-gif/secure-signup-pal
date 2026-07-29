@@ -370,36 +370,6 @@ async function clearTempPassword(supabaseAdmin: any, requestId: string) {
   }
 }
 
-/**
- * پیامک خوش‌آمدگویی بعد از تایید مدیر.
- * هرگز throw نمی‌کند: شکست پیامک نباید تایید کاربر را برگرداند.
- */
-async function sendWelcomeSms(supabaseAdmin: any, requestId: string, username: string) {
-  try {
-    const { data: row } = await supabaseAdmin
-      .from("signup_requests")
-      .select("temp_password, phone")
-      .eq("id", requestId)
-      .maybeSingle();
-
-    const password = (row as any)?.temp_password as string | null | undefined;
-    const { sendSms, smsTemplates, normalizePhone, phoneMapByUsername } = await import("@/lib/sms.server");
-
-    // شماره از ستون phone، وگرنه از user_metadata کاربر Auth
-    const phone =
-      normalizePhone((row as any)?.phone) ?? (await phoneMapByUsername(supabaseAdmin))[username.toLowerCase()] ?? null;
-    if (!phone || !password) {
-      console.warn("[sms] پیامک خوش‌آمدگویی ارسال نشد", { username, hasPhone: !!phone, hasPassword: !!password });
-      return;
-    }
-
-    const res = await sendSms([phone], smsTemplates.welcome(username, password));
-    if (!res.ok) console.error("[sms] پیامک خوش‌آمدگویی ناموفق", { username, error: res.error });
-  } catch (e: any) {
-    console.error("[sms] خطا در پیامک خوش‌آمدگویی", { username, error: e?.message });
-  }
-}
-
 export const approveSignupRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { id: string }) => {
@@ -467,8 +437,6 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       if (actErr) throw new Error(actErr.message);
     }
 
-    // پیامک خوش‌آمدگویی خودکار (یوزرنیم + رمز)
-    await sendWelcomeSms(supabaseAdmin, data.id, req.username);
     // نکته: رمز موقت اینجا پاک نمی‌شود — تا ادمین بتواند از تب «درخواست‌ها» پیام
     // خوش‌آمدگویی را هم به‌صورت نیمه‌دستی (پیامک/واتساپ) بفرستد. با فراخوانی
     // adminClearSignupTempPassword (بعد از ارسال دستی) یا با رد یک درخواست پاک می‌شود.

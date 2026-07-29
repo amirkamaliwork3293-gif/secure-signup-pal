@@ -35,6 +35,7 @@ import {
   GraduationCap,
   QrCode,
   Coins,
+  Gem,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -50,6 +51,7 @@ function SettingsPageInner() {
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
   const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
+  const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
     appSettings.currencyUnit === "rial" ? "rial" : "toman",
   );
@@ -63,6 +65,7 @@ function SettingsPageInner() {
       invoiceFontSize,
       showMenuFeature,
       showStudentsFeature,
+      showGoldFeature,
       currencyUnit,
     });
     // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
@@ -219,6 +222,26 @@ function SettingsPageInner() {
           </label>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
             مخصوص آموزشگاه‌ها. با فعال‌شدن، گزینه‌ی «هنرجویان» برای مدیریت شهریه در نوار پایین اضافه می‌شود.
+          </p>
+        </div>
+
+        {/* طلا — قابلیت اختیاری طلافروشی؛ پیش‌فرض غیرفعال */}
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Gem className="h-4 w-4 text-primary" />
+              نمایش گزینه «طلا» در نوار پایین
+            </span>
+            <input
+              type="checkbox"
+              checked={showGoldFeature}
+              onChange={(e) => setShowGoldFeature(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            مخصوص طلافروشی‌ها. با فعال‌شدن، گزینه‌ی «طلا» برای محاسبه قیمت طلای وزنی و سکه
+            (با تایپ یا گفتار) در نوار پایین اضافه می‌شود.
           </p>
         </div>
 

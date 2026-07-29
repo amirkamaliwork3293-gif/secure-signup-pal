@@ -302,8 +302,11 @@ export type Database = {
         Row: {
           categories: Json
           current_invoice: Json | null
+          customers: Json
+          expenses: Json
           invoices: Json
           products: Json
+          purchases: Json
           settings: Json
           students: Json
           updated_at: string
@@ -312,8 +315,11 @@ export type Database = {
         Insert: {
           categories?: Json
           current_invoice?: Json | null
+          customers?: Json
+          expenses?: Json
           invoices?: Json
           products?: Json
+          purchases?: Json
           settings?: Json
           students?: Json
           updated_at?: string
@@ -322,8 +328,11 @@ export type Database = {
         Update: {
           categories?: Json
           current_invoice?: Json | null
+          customers?: Json
+          expenses?: Json
           invoices?: Json
           products?: Json
+          purchases?: Json
           settings?: Json
           students?: Json
           updated_at?: string

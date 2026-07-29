@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Gem } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -13,7 +13,9 @@ const nav = [
   { to: "/products",  label: "محصولات",  icon: Package,  settingKey: null },
   { to: "/menu",      label: "منو",      icon: UtensilsCrossed, settingKey: "showMenuFeature" },
   { to: "/customers", label: "مشتریان",  icon: Users,    settingKey: null },
+  { to: "/expenses",  label: "هزینه‌ها", icon: Wallet,   settingKey: null },
   { to: "/students",  label: "هنرجویان", icon: GraduationCap, settingKey: "showStudentsFeature" },
+  { to: "/gold",      label: "طلا",      icon: Gem,      settingKey: "showGoldFeature" },
   { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },

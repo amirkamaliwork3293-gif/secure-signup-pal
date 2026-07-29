@@ -47,6 +47,7 @@ function GoldPageInner() {
   const [coinPrices, setCoinPrices] = useState<Partial<Record<CoinTypeId, number>>>({});
 
   const [liveAvailable, setLiveAvailable] = useState(false);
+  const [liveReason, setLiveReason] = useState<string | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
 
@@ -78,12 +79,15 @@ function GoldPageInner() {
         saveGoldPrefs({ pricePerGram18: res.pricePerGram18 });
         setCoinPrices(res.coinPrices ?? {});
         setLiveAvailable(true);
+        setLiveReason(null);
         setLiveUpdatedAt(res.updatedAt ?? null);
       } else {
         setLiveAvailable(false);
+        setLiveReason(res.reason ?? null);
       }
-    } catch {
+    } catch (e) {
       setLiveAvailable(false);
+      setLiveReason(e instanceof Error ? e.message : null);
     } finally {
       setLiveLoading(false);
     }
@@ -250,8 +254,19 @@ function GoldPageInner() {
           </p>
         ) : (
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            سرویس نرخ لحظه‌ای هنوز روی این سایت فعال نشده — نرخ روز را خودتان اینجا وارد کنید؛
-            دفعه‌ی بعد همین عدد پیش‌فرض می‌ماند.
+            {liveLoading
+              ? "در حال دریافت نرخ لحظه‌ای…"
+              : "نرخ لحظه‌ای در دسترس نیست — نرخ روز را خودتان اینجا وارد کنید؛ دفعه‌ی بعد همین عدد پیش‌فرض می‌ماند."}
+            {liveReason && !liveLoading ? <span className="block text-[11px] opacity-70">({liveReason})</span> : null}
+            {!liveLoading && (
+              <button
+                type="button"
+                onClick={() => void loadLivePrice()}
+                className="mt-1 block text-[11px] font-medium text-primary underline"
+              >
+                تلاش مجدد برای دریافت نرخ لحظه‌ای
+              </button>
+            )}
           </p>
         )}
       </div>

@@ -711,6 +711,60 @@ export function PurchasesPageInner() {
         </MiniField>
       </div>
 
+      {/* انتخاب از لیست مشتریان — برای وقتی طرف حساب خرید، یکی از مشتریان ثبت‌شده است */}
+      <div className="mb-3 rounded-2xl border border-border bg-card p-3">
+        <button
+          type="button"
+          onClick={() => setShowCustomerPicker((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 text-xs font-medium"
+        >
+          <span className="flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5 text-primary" />
+            انتخاب از مشتریان ثبت‌شده
+          </span>
+          {showCustomerPicker ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+        {showCustomerPicker && (
+          <div className="mt-2">
+            <input
+              value={customerQuery}
+              onChange={(e) => setCustomerQuery(e.target.value)}
+              placeholder="نام یا شماره مشتری..."
+              className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+            />
+            {matchingCustomers.length === 0 ? (
+              <div className="mt-2 text-center text-[11px] text-muted-foreground">مشتری‌ای پیدا نشد.</div>
+            ) : (
+              <ul className="mt-1.5 max-h-44 space-y-1 overflow-y-auto">
+                {matchingCustomers.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupplierName(customerFullName(c));
+                        setSupplierPhone(c.phone ?? "");
+                        setShowCustomerPicker(false);
+                        setCustomerQuery("");
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
+                    >
+                      <span className="truncate">{customerFullName(c)}</span>
+                      {c.phone && <span dir="ltr" className="shrink-0 text-muted-foreground">{c.phone}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link
+              to="/customers"
+              className="mt-2 block text-center text-[11px] font-medium text-primary hover:underline"
+            >
+              مدیریت مشتریان
+            </Link>
+          </div>
+        )}
+      </div>
+
       <div className="mb-3">
         <MiniField label="یادداشت (اختیاری)">
           <input

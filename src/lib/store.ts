@@ -944,6 +944,94 @@ export const purchases = {
   },
 };
 
+// ─── Expenses (هزینه‌ها) ─────────────────────────────────────────────────────
+
+export type Expense = {
+  id: string;
+  /** عنوان هزینه، مثلاً «اجاره مغازه» */
+  title: string;
+  amount: number;
+  /** دسته‌بندی هزینه — از EXPENSE_CATEGORIES یا هر متن دلخواه */
+  category: string;
+  /** تاریخ ثبت/پرداخت هزینه (timestamp) */
+  at: number;
+  paymentMethod?: PaymentMethod;
+  note?: string;
+  /** هزینه‌ی تکرارشونده (مثل اجاره ماهانه) — تعداد روز دوره؛ خالی یعنی یک‌بار */
+  recurringDays?: number;
+  createdAt: number;
+};
+
+export const EXPENSE_CATEGORIES = [
+  "اجاره",
+  "حقوق و دستمزد",
+  "قبوض (برق، آب، گاز)",
+  "اینترنت و تلفن",
+  "حمل و نقل",
+  "تبلیغات",
+  "تعمیر و نگهداری",
+  "مالیات و عوارض",
+  "ملزومات مصرفی",
+  "متفرقه",
+] as const;
+
+export function emptyExpense(): Expense {
+  return {
+    id: cryptoId(),
+    title: "",
+    amount: 0,
+    category: EXPENSE_CATEGORIES[0],
+    at: Date.now(),
+    paymentMethod: "cash",
+    createdAt: Date.now(),
+  };
+}
+
+/** سررسید بعدی یک هزینه‌ی تکرارشونده (اگر تکرارشونده نباشد null) */
+export function expenseNextDue(e: Expense): number | null {
+  if (!e.recurringDays || e.recurringDays <= 0) return null;
+  const period = e.recurringDays * 86_400_000;
+  let next = e.at + period;
+  const now = Date.now();
+  while (next < now - period) next += period;
+  return next;
+}
+
+export function expensesInRange(list: Expense[], from: number, to: number): Expense[] {
+  return list.filter((e) => e.at >= from && e.at <= to);
+}
+
+export function expensesTotal(list: Expense[]): number {
+  return list.reduce((s, e) => s + (e.amount || 0), 0);
+}
+
+/** جمع هزینه‌ها به تفکیک دسته، مرتب‌شده از بیشترین به کمترین */
+export function expensesByCategory(list: Expense[]): { category: string; total: number }[] {
+  const map = new Map<string, number>();
+  for (const e of list) map.set(e.category || "متفرقه", (map.get(e.category || "متفرقه") || 0) + (e.amount || 0));
+  return [...map.entries()]
+    .map(([category, total]) => ({ category, total }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export const expenses = {
+  useAll: () => useStore<Expense[]>(EXPENSES_KEY, []),
+  getAll: () => read<Expense[]>(EXPENSES_KEY, []),
+  save: (list: Expense[]) => write(EXPENSES_KEY, list),
+  add: (e: Expense) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, [{ ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() }, ...list]);
+  },
+  update: (updated: Expense) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, list.map((e) => (e.id === updated.id ? updated : e)));
+  },
+  remove: (id: string) => {
+    const list = read<Expense[]>(EXPENSES_KEY, []);
+    write(EXPENSES_KEY, list.filter((e) => e.id !== id));
+  },
+};
+
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 export const settings = {

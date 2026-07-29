@@ -437,8 +437,6 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       if (actErr) throw new Error(actErr.message);
     }
 
-    // پیامک خوش‌آمدگویی خودکار (یوزرنیم + رمز)
-    await sendWelcomeSms(supabaseAdmin, data.id, req.username);
     // نکته: رمز موقت اینجا پاک نمی‌شود — تا ادمین بتواند از تب «درخواست‌ها» پیام
     // خوش‌آمدگویی را هم به‌صورت نیمه‌دستی (پیامک/واتساپ) بفرستد. با فراخوانی
     // adminClearSignupTempPassword (بعد از ارسال دستی) یا با رد یک درخواست پاک می‌شود.

@@ -27,6 +27,7 @@ import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as HistoryRouteImport } from './routes/history'
+import { Route as GoldRouteImport } from './routes/gold'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -124,6 +125,11 @@ const HistoryRoute = HistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoldRoute = GoldRouteImport.update({
+  id: '/gold',
+  path: '/gold',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
@@ -160,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -186,6 +193,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -213,6 +221,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -241,6 +250,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/expenses'
+    | '/gold'
     | '/history'
     | '/invoices'
     | '/login'
@@ -267,6 +277,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/expenses'
+    | '/gold'
     | '/history'
     | '/invoices'
     | '/login'
@@ -293,6 +304,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/customers'
     | '/expenses'
+    | '/gold'
     | '/history'
     | '/invoices'
     | '/login'
@@ -320,6 +332,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   CustomersRoute: typeof CustomersRoute
   ExpensesRoute: typeof ExpensesRoute
+  GoldRoute: typeof GoldRoute
   HistoryRoute: typeof HistoryRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
@@ -470,6 +483,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/gold': {
+      id: '/gold'
+      path: '/gold'
+      fullPath: '/gold'
+      preLoaderRoute: typeof GoldRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/expenses': {
       id: '/expenses'
       path: '/expenses'
@@ -520,6 +540,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   CustomersRoute: CustomersRoute,
   ExpensesRoute: ExpensesRoute,
+  GoldRoute: GoldRoute,
   HistoryRoute: HistoryRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,
@@ -544,3 +565,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

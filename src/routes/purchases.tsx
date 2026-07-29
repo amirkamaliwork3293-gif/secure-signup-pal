@@ -7,6 +7,8 @@ import {
   products,
   categories,
   purchases,
+  customers,
+  customerFullName,
   settings,
   emptyPurchase,
   recalcPurchase,
@@ -30,7 +32,7 @@ import { filterAndRankSearch } from "@/lib/search";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
   ChevronDown, ChevronUp, Truck, History as HistoryIcon,
-  Pencil, Calendar, PlusCircle, Minus,
+  Pencil, Calendar, PlusCircle, Minus, Users,
 } from "lucide-react";
 import { z } from "zod";
 

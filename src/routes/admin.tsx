@@ -19,7 +19,7 @@ import { MESSAGE_TEMPLATES, type MessageTemplateId } from "@/lib/sms-templates";
 import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
-  Package, Power, Percent, Timer, Search, KeyRound, BellRing, Phone,
+  Package, Power, Percent, Timer, Search, KeyRound, BellRing, Phone, MessageSquare,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({

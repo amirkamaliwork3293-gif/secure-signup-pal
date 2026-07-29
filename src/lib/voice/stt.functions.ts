@@ -45,8 +45,19 @@ export const transcribeAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) => InputSchema.parse(data))
   .handler(async ({ data }): Promise<TranscribeResult> => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) return { ok: false, error: "سرویس تشخیص گفتار فعال نشده است." };
+    // روی هاست لاوابل، LOVABLE_API_KEY خودکار تزریق می‌شود. روی Vercel یا هر
+    // هاست دیگری باید یکی از این دو متغیر محیطی تنظیم شود.
+    const lovableKey = process.env.LOVABLE_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const useOpenAI = !lovableKey && !!openaiKey;
+    const apiKey = lovableKey || openaiKey;
+    if (!apiKey) {
+      return {
+        ok: false,
+        error:
+          "سرویس تشخیص گفتار روی سرور تنظیم نشده است. در تنظیمات هاست (Vercel ← Environment Variables) یکی از کلیدهای LOVABLE_API_KEY یا OPENAI_API_KEY را اضافه کنید و پروژه را دوباره Deploy کنید.",
+      };
+    }
 
     const ext = (data.format || "webm").toLowerCase();
     const mime = MIME_BY_EXT[ext] ?? "audio/webm";
@@ -55,7 +66,7 @@ export const transcribeAudio = createServerFn({ method: "POST" })
 
     const fd = new FormData();
     fd.append("file", new Blob([bytes as BlobPart], { type: mime }), `recording.${ext}`);
-    fd.append("model", "openai/gpt-4o-mini-transcribe");
+    fd.append("model", useOpenAI ? "gpt-4o-mini-transcribe" : "openai/gpt-4o-mini-transcribe");
     // همیشه فارسی — کاربر فارسی صحبت می‌کند و نباید خروجی انگلیسی/فینگلیش شود.
     fd.append("language", data.language || "fa");
     fd.append(
@@ -66,7 +77,10 @@ export const transcribeAudio = createServerFn({ method: "POST" })
     fd.append("temperature", "0");
 
     try {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
+      const endpoint = useOpenAI
+        ? "https://api.openai.com/v1/audio/transcriptions"
+        : "https://ai.gateway.lovable.dev/v1/audio/transcriptions";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: fd,

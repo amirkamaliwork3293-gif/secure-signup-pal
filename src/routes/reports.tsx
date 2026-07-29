@@ -5,11 +5,12 @@ import { Layout } from "@/components/Layout";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
   formatJalaliDate, parseJalaliInput, jalaliToTimestamp,
+  expenses as expensesStore, expensesTotal, expensesByCategory,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
-  TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch,
+  TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
 } from "lucide-react";
 
 export const Route = createFileRoute("/reports")({
@@ -125,6 +126,7 @@ const RANGE_LABEL: Record<Range, string> = {
 
 function ReportsPageInner() {
   const [history] = invoice.useHistory();
+  const [expenseList] = expensesStore.useAll();
   const [range, setRange] = useState<Range>("today");
   const [fromStr, setFromStr] = useState<string>("");
   const [toStr, setToStr] = useState<string>("");
@@ -152,6 +154,20 @@ function ReportsPageInner() {
 
   const summary = summarize(filtered);
   const profitSummary = useMemo(() => computeProfit(filtered), [filtered]);
+
+  const filteredExpenses = useMemo(() => {
+    if (range === "all") return expenseList;
+    if (range === "custom") {
+      if (!customRange) return [];
+      return expenseList.filter((e) => e.at >= customRange.fromTs && e.at <= customRange.toTs);
+    }
+    const from = range === "today" ? startOfDay() : range === "month" ? startOfMonth() : startOfYear();
+    return expenseList.filter((e) => e.at >= from);
+  }, [expenseList, range, customRange]);
+
+  const expensesSum = useMemo(() => expensesTotal(filteredExpenses), [filteredExpenses]);
+  const expenseCats = useMemo(() => expensesByCategory(filteredExpenses), [filteredExpenses]);
+  const netProfit = profitSummary.profit - expensesSum;
 
   const daily = useMemo(() => {
     const from = startOfMonth();
@@ -270,6 +286,7 @@ function ReportsPageInner() {
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SummaryCard
         <SummaryCard
           icon={<Wallet className="h-4 w-4" />}
           label={PAYMENT_LABEL.cash}

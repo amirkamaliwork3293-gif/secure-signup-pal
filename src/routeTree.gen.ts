@@ -27,6 +27,7 @@ import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as HistoryRouteImport } from './routes/history'
+import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -123,6 +124,11 @@ const HistoryRoute = HistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExpensesRoute = ExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CustomersRoute = CustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
@@ -153,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/expenses': typeof ExpensesRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -178,6 +185,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/expenses': typeof ExpensesRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -204,6 +212,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/customers': typeof CustomersRoute
+  '/expenses': typeof ExpensesRoute
   '/history': typeof HistoryRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/expenses'
     | '/history'
     | '/invoices'
     | '/login'
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/expenses'
     | '/history'
     | '/invoices'
     | '/login'
@@ -281,6 +292,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/customers'
+    | '/expenses'
     | '/history'
     | '/invoices'
     | '/login'
@@ -307,6 +319,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   CustomersRoute: typeof CustomersRoute
+  ExpensesRoute: typeof ExpensesRoute
   HistoryRoute: typeof HistoryRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
@@ -457,6 +470,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/expenses': {
+      id: '/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof ExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/customers': {
       id: '/customers'
       path: '/customers'
@@ -499,6 +519,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   CustomersRoute: CustomersRoute,
+  ExpensesRoute: ExpensesRoute,
   HistoryRoute: HistoryRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,

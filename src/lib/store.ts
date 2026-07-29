@@ -557,6 +557,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
     overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
     overwrite("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
+    overwrite("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {

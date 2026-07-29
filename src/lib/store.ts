@@ -478,6 +478,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /expenses/.test(error.message) && "expenses" in payload) {
+      delete payload.expenses;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in

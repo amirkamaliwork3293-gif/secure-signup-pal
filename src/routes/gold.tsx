@@ -57,11 +57,11 @@ function GoldInner() {
   const [heard, setHeard] = useState("");
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getGoldPrices();
+      const res = await getGoldPrices({ data: { force } });
       if (res.ok) {
         setItems(res.items);
         setUpdatedAt(res.updatedAt);

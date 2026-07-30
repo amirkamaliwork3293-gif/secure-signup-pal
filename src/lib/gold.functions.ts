@@ -154,7 +154,7 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
         if (items.length > 0) {
           const updatedAt = new Date().toISOString();
           cache = { items, updatedAt, expiresAt: Date.now() + CACHE_TTL_MS };
-          return { ok: true, items, updatedAt };
+          return { ok: true, items, updatedAt, source: s.label };
         }
         errors.push(`${s.label}: داده‌ای برنگشت`);
       } catch (e) {

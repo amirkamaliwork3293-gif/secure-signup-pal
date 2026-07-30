@@ -126,8 +126,15 @@ async function fromTgju(url: string): Promise<GoldQuote[]> {
   }).filter((q): q is GoldQuote => q !== null);
 }
 
+let cache: { items: GoldQuote[]; updatedAt: string; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // ۵ دقیقه
+
 export const getGoldPrices = createServerFn({ method: "GET" }).handler(
   async (): Promise<GoldPricesResult> => {
+    if (cache && cache.expiresAt > Date.now()) {
+      return { ok: true, items: cache.items, updatedAt: cache.updatedAt };
+    }
+
     const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;
     const errors: string[] = [];
 
@@ -135,13 +142,19 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
       { label: "tgju", run: () => fromTgju("https://call3.tgju.org/ajax.json") },
       { label: "tgju2", run: () => fromTgju("https://call1.tgju.org/ajax.json") },
     ];
-    if (key) sources.unshift({ label: "brsapi", run: () => fromBrsApi(key) });
+    if (key) {
+      sources.unshift({ label: "brsapi", run: () => fromBrsApi(key) });
+    } else {
+      errors.push("brsapi: کلید API تنظیم نشده (GOLD_API_KEY یا BRSAPI_KEY)");
+    }
 
     for (const s of sources) {
       try {
         const items = await s.run();
         if (items.length > 0) {
-          return { ok: true, items, updatedAt: new Date().toISOString() };
+          const updatedAt = new Date().toISOString();
+          cache = { items, updatedAt, expiresAt: Date.now() + CACHE_TTL_MS };
+          return { ok: true, items, updatedAt };
         }
         errors.push(`${s.label}: داده‌ای برنگشت`);
       } catch (e) {

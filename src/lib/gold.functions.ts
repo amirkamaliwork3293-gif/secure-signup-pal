@@ -111,15 +111,22 @@ async function writeSharedCache(items: GoldQuote[], source: string, updatedAt: s
   }
 }
 
-export const getGoldPrices = createServerFn({ method: "GET" }).handler(
-  async (): Promise<GoldPricesResult> => {
-    if (cache && cache.expiresAt > Date.now()) {
+/** حداقل فاصله بین دو بروزرسانی دستی کاربر */
+const FORCE_MIN_AGE_MS = 30 * 1000;
+
+export const getGoldPrices = createServerFn({ method: "GET" })
+  .inputValidator((data: { force?: boolean } | undefined) => ({ force: !!data?.force }))
+  .handler(async ({ data }): Promise<GoldPricesResult> => {
+    const force = data.force;
+    const ttl = force ? FORCE_MIN_AGE_MS : CACHE_TTL_MS;
+
+    if (cache && Date.now() < cache.expiresAt - (CACHE_TTL_MS - ttl)) {
       return { ok: true, items: cache.items, updatedAt: cache.updatedAt, source: "cache" };
     }
 
     // کش مشترک دیتابیس (بین همه‌ی سرورها و کاربران)
     const shared = await readSharedCache();
-    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < CACHE_TTL_MS) {
+    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < ttl) {
       cache = {
         items: shared.items,
         updatedAt: shared.updatedAt,
@@ -128,18 +135,12 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
       return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: shared.source };
     }
 
-    const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;
     const errors: string[] = [];
 
     const sources: Array<{ label: string; run: () => Promise<GoldQuote[]> }> = [
       { label: "tgju", run: () => fromTgju("https://call3.tgju.org/ajax.json") },
       { label: "tgju2", run: () => fromTgju("https://call1.tgju.org/ajax.json") },
     ];
-    if (key) {
-      sources.unshift({ label: "brsapi", run: () => fromBrsApi(key) });
-    } else {
-      errors.push("brsapi: کلید API تنظیم نشده (GOLD_API_KEY یا BRSAPI_KEY)");
-    }
 
     for (const s of sources) {
       try {
@@ -167,5 +168,4 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
         "دریافت نرخ لحظه‌ای از هیچ‌کدام از سرویس‌ها ممکن نشد. می‌توانید نرخ هر گرم طلای ۱۸ را دستی وارد کنید و ماشین‌حساب فاکتور را استفاده کنید.\n" +
         `جزئیات: ${errors.join(" | ")}`,
     };
-  },
-);
+  });

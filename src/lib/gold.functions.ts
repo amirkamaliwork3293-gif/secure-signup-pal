@@ -132,7 +132,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // ۵ دقیقه
 export const getGoldPrices = createServerFn({ method: "GET" }).handler(
   async (): Promise<GoldPricesResult> => {
     if (cache && cache.expiresAt > Date.now()) {
-      return { ok: true, items: cache.items, updatedAt: cache.updatedAt };
+      return { ok: true, items: cache.items, updatedAt: cache.updatedAt, source: "cache" };
     }
 
     const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;

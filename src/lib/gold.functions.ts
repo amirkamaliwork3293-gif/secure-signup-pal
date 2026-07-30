@@ -1,9 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 /**
- * نرخ لحظه‌ای طلا/سکه/ارز از سرویس BrsApi.ir
- * کلید باید در متغیرهای محیطی سرور با نام GOLD_API_KEY تنظیم شود
- * (در Vercel: Project → Settings → Environment Variables).
+ * نرخ لحظه‌ای طلا/سکه/ارز از سرویس TGJU (رایگان و بدون کلید)
+ * نتیجه در کش مشترک دیتابیس ذخیره می‌شود تا همه‌ی کاربران از یک درخواست استفاده کنند.
  */
 
 export type GoldQuote = {
@@ -19,34 +18,9 @@ export type GoldPricesResult =
   | { ok: true; items: GoldQuote[]; updatedAt: string; source: string }
   | { ok: false; error: string };
 
-type BrsRow = {
-  symbol?: string;
-  name?: string;
-  name_en?: string;
-  price?: number | string;
-  unit?: string;
-  change_percent?: number | string;
-  date?: string;
-  time?: string;
-};
-
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : 0;
-}
-
-function mapRows(rows: BrsRow[] | undefined, group: GoldQuote["group"]): GoldQuote[] {
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((r, i) => ({
-      key: String(r.symbol ?? r.name_en ?? `${group}-${i}`),
-      name: String(r.name ?? r.symbol ?? "—"),
-      price: num(r.price),
-      unit: String(r.unit ?? "تومان"),
-      changePercent: r.change_percent === undefined ? null : num(r.change_percent),
-      group,
-    }))
-    .filter((q) => q.price > 0);
 }
 
 async function fetchJson(url: string, ms = 10_000): Promise<unknown> {

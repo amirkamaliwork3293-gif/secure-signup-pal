@@ -139,7 +139,7 @@ function GoldInner() {
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold">نرخ لحظه‌ای بازار</div>
           <button
-            onClick={() => void load()}
+            onClick={() => void load(true)}
             className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}

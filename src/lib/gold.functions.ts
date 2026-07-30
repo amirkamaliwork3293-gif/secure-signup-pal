@@ -68,27 +68,6 @@ async function fetchJson(url: string, ms = 10_000): Promise<unknown> {
   }
 }
 
-/** منبع ۱: BrsApi.ir (نیازمند کلید) — آدرس صحیح: https://Api.BrsApi.ir/Market/ */
-async function fromBrsApi(key: string): Promise<GoldQuote[]> {
-  const json = (await fetchJson(
-    `https://Api.BrsApi.ir/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
-  )) as { gold?: BrsRow[]; currency?: BrsRow[]; error?: string };
-  if (json?.error) throw new Error(String(json.error));
-  const goldRows = mapRows(json.gold, "gold");
-  const coinRows = mapRows(json.gold, "coin").filter((r) =>
-    /سکه|coin|نیم|ربع|گرمی|امامی|آزادی/i.test(r.name),
-  );
-  return [
-    ...goldRows.filter((r) => !coinRows.includes(r)),
-    ...coinRows,
-    ...mapRows(json.currency, "currency").filter((c) =>
-      ["USD", "EUR", "AED", "GBP", "TRY", "CHF", "CAD", "AUD", "CNY"].includes(
-        c.key.toUpperCase(),
-      ),
-    ),
-  ];
-}
-
 type TgjuCell = { p?: string; dp?: number | string; d?: number | string };
 
 const TGJU_MAP: Array<{ id: string; name: string; group: GoldQuote["group"] }> = [

@@ -1,10 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-<<<<<<< HEAD
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Gem } from "lucide-react";
-=======
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet } from "lucide-react";
->>>>>>> 10a0fc7a1b1cfacdc3b3fff7e6817b2f46ce64b5
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -19,7 +15,7 @@ const nav = [
   { to: "/customers", label: "مشتریان",  icon: Users,    settingKey: null },
   { to: "/expenses",  label: "هزینه‌ها", icon: Wallet,   settingKey: null },
   { to: "/students",  label: "هنرجویان", icon: GraduationCap, settingKey: "showStudentsFeature" },
-  { to: "/gold",      label: "طلا",      icon: Gem,      settingKey: "showGoldFeature" },
+  { to: "/gold",      label: "طلا",      icon: Coins,    settingKey: "showGoldFeature" },
   { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle2 } from "lucide-react";
 import { parseFile, downloadSample, mergeImported, type ImportRow } from "@/lib/bulk-import";
 import { products, cryptoId } from "@/lib/store";
@@ -7,6 +7,10 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ added: number; updated: number } | null>(null);
+  // واحد پول مبالغ داخل فایل اکسل/CSV — برنامه همیشه داخلی به «تومان» ذخیره می‌کند،
+  // پس اگر فایل به ریال باشد باید قبل از ثبت بر ۱۰ تقسیم شود، وگرنه قیمت‌ها ۱۰ برابر
+  // وارد انبار می‌شوند (فارغ از اینکه واحد نمایشیِ تنظیمات چه باشد).
+  const [fileCurrency, setFileCurrency] = useState<"toman" | "rial">("toman");
 
   const handleFile = async (file: File) => {
     setLoading(true);
@@ -14,6 +18,11 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
       const parsed = await parseFile(file);
       setRows(parsed);
       setResult(null);
+      // حدس اولیه: اگر میانگین قیمت‌ها خیلی بزرگ باشد (بالای ۳۰۰٬۰۰۰)، احتمال دارد
+      // فایل به ریال باشد — فقط به‌عنوان پیش‌فرضِ قابل‌تغییر، نه تصمیم قطعی.
+      const prices = parsed.map((r) => r.price).filter((p) => p > 0);
+      const avg = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+      setFileCurrency(avg >= 300000 ? "rial" : "toman");
     } catch (e: any) {
       alert("خطا در خواندن فایل: " + (e?.message ?? e));
     } finally {
@@ -21,8 +30,18 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const validRows = rows.filter((r) => r.errors.length === 0);
-  const errorRows = rows.filter((r) => r.errors.length > 0);
+  // ردیف‌ها با اعمال تبدیل ریال→تومان (در صورت انتخاب ریال)، برای نمایش و ثبت
+  const convertedRows = useMemo<ImportRow[]>(() => {
+    if (fileCurrency !== "rial") return rows;
+    return rows.map((r) => ({
+      ...r,
+      price: r.price ? Math.round(r.price / 10) : r.price,
+      buyPrice: r.buyPrice ? Math.round(r.buyPrice / 10) : r.buyPrice,
+    }));
+  }, [rows, fileCurrency]);
+
+  const validRows = convertedRows.filter((r) => r.errors.length === 0);
+  const errorRows = convertedRows.filter((r) => r.errors.length > 0);
 
   const submit = () => {
     if (validRows.length === 0) return;
@@ -79,6 +98,35 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
               <span className="rounded-md bg-secondary px-2 py-1 text-muted-foreground">کل: {rows.length.toLocaleString("fa-IR")}</span>
             </div>
 
+            <div className="rounded-xl border border-border bg-background p-3">
+              <p className="mb-2 text-xs font-medium">قیمت‌های داخل فایل به چه واحدی است؟</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFileCurrency("toman")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium ${
+                    fileCurrency === "toman" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                  }`}
+                >
+                  تومان
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFileCurrency("rial")}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium ${
+                    fileCurrency === "rial" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                  }`}
+                >
+                  ریال
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                برنامه همیشه قیمت‌ها را داخلی به تومان نگه می‌دارد. اگر فایل شما به ریال است،
+                «ریال» را انتخاب کنید تا قیمت‌ها هنگام ثبت خودکار به تومان تبدیل شوند (تقسیم بر
+                ۱۰) — جدول زیر پیش‌نمایشِ قیمتِ نهایی به تومان را نشان می‌دهد.
+              </p>
+            </div>
+
             <div className="max-h-80 overflow-auto rounded-xl border border-border">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-secondary/60">
@@ -86,14 +134,14 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
                     <th className="px-2 py-1.5 text-right">#</th>
                     <th className="px-2 py-1.5 text-right">نام</th>
                     <th className="px-2 py-1.5 text-right">بارکد</th>
-                    <th className="px-2 py-1.5 text-right">قیمت</th>
+                    <th className="px-2 py-1.5 text-right">قیمت (تومان)</th>
                     <th className="px-2 py-1.5 text-right">موجودی</th>
                     <th className="px-2 py-1.5 text-right">دسته</th>
                     <th className="px-2 py-1.5 text-right">وضعیت</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 200).map((r) => (
+                  {convertedRows.slice(0, 200).map((r) => (
                     <tr key={r.rowIndex} className={`border-t border-border ${r.errors.length ? "bg-destructive/5" : ""}`}>
                       <td className="px-2 py-1.5 text-muted-foreground">{r.rowIndex}</td>
                       <td className="px-2 py-1.5">{r.name || "—"}</td>

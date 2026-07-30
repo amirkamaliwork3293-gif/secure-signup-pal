@@ -35,7 +35,6 @@ import {
   GraduationCap,
   QrCode,
   Coins,
-  Gem,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -225,12 +224,12 @@ function SettingsPageInner() {
           </p>
         </div>
 
-        {/* طلا — قابلیت اختیاری طلافروشی؛ پیش‌فرض غیرفعال */}
+        {/* طلا — نرخ لحظه‌ای و فاکتور طلافروشی؛ پیش‌فرض غیرفعال */}
         <div className="rounded-xl border border-border bg-background p-3">
           <label className="flex cursor-pointer items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-sm font-medium">
-              <Gem className="h-4 w-4 text-primary" />
-              نمایش گزینه «طلا» در نوار پایین
+              <Coins className="h-4 w-4 text-primary" />
+              نمایش بخش «طلا» در نوار پایین
             </span>
             <input
               type="checkbox"
@@ -240,8 +239,7 @@ function SettingsPageInner() {
             />
           </label>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            مخصوص طلافروشی‌ها. با فعال‌شدن، گزینه‌ی «طلا» برای محاسبه قیمت طلای وزنی و سکه
-            (با تایپ یا گفتار) در نوار پایین اضافه می‌شود.
+            مخصوص طلافروشی‌ها. نرخ لحظه‌ای طلا، سکه و ارز + محاسبه فاکتور (وزن، سوت، عیار، اجرت، سود و مالیات) با ثبت صوتی.
           </p>
         </div>
 

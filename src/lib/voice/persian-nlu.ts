@@ -241,6 +241,15 @@ function parseClause(clause: string): ClauseParse {
         i++;
         continue;
       }
+      // اگر این رقم بعد از حداقل یک کلمه‌ی محصول آمده (مثلاً «روژلب شماره ۱۷» یا
+      // «شلوار سایز ۴۲») و بلافاصله بعدش هیچ واحد شمارشی (تا/عدد/بسته/...) نیامده،
+      // این عدد به‌احتمال زیاد بخشی از نام/کد/سایز محصول است، نه یک مقدار تازه —
+      // پس آن را به عبارت محصول اضافه می‌کنیم تا محصول درست (با همان شماره) تشخیص
+      // داده شود، نه یک قلم جدید با تعداد اشتباه.
+      if (productTokens.length > 0 && !(next && COUNT_WORDS.has(next))) {
+        productTokens.push(t);
+        continue;
+      }
       count = (count ?? 1) * n;
       continue;
     }
@@ -326,22 +335,45 @@ function parseClause(clause: string): ClauseParse {
 
 // ─── تطبیق محصول با انبار ─────────────────────────────────────────────────────
 
+/** استخراج توالی ارقام از یک متن نرمال‌شده (برای مقایسه‌ی شماره/سایز/کد) */
+function extractNumbers(s: string): string[] {
+  return s.match(/\d+/g) || [];
+}
+
 function scoreProduct(phrase: string, productName: string): number {
   const a = normalizeFa(phrase);
   const b = normalizeFa(productName);
   if (!a || !b) return 0;
-  if (a === b) return 1;
-  if (b.includes(a) || a.includes(b)) return 0.85;
 
-  const at = a.split(" ").filter(Boolean);
-  const bt = b.split(" ").filter(Boolean);
-  if (at.length === 0 || bt.length === 0) return 0;
-  let hits = 0;
-  for (const tok of at) {
-    if (bt.some((x) => x === tok || x.includes(tok) || tok.includes(x))) hits++;
+  let score: number;
+  if (a === b) {
+    score = 1;
+  } else if (b.includes(a) || a.includes(b)) {
+    score = 0.85;
+  } else {
+    const at = a.split(" ").filter(Boolean);
+    const bt = b.split(" ").filter(Boolean);
+    if (at.length === 0 || bt.length === 0) return 0;
+    let hits = 0;
+    for (const tok of at) {
+      if (bt.some((x) => x === tok || x.includes(tok) || tok.includes(x))) hits++;
+    }
+    const overlap = hits / Math.max(at.length, bt.length);
+    score = overlap >= 0.5 ? 0.5 + overlap * 0.3 : overlap * 0.6;
   }
-  const overlap = hits / Math.max(at.length, bt.length);
-  return overlap >= 0.5 ? 0.5 + overlap * 0.3 : overlap * 0.6;
+
+  // اگر عبارتِ گفته‌شده شامل عدد باشد (مثلاً «شماره ۱۷» یا «سایز ۴۲»)، همان عدد
+  // باید دقیقاً در نام محصول هم باشد؛ وگرنه حتی تطبیق نسبی/زیررشته‌ای هم به‌شدت
+  // کم‌امتیاز می‌شود — تا بین محصولات مشابه با شماره‌ی متفاوت (مثلاً «سایز ۱» و
+  // «سایز ۱۷») با اطمینان بالا اشتباه انتخاب نشود.
+  const aNums = extractNumbers(a);
+  if (aNums.length > 0 && a !== b) {
+    const bNums = extractNumbers(b);
+    const allNumsMatch = aNums.every((n) => bNums.includes(n));
+    if (!allNumsMatch) score *= 0.2;
+  }
+
+  return score;
 }
 
 function matchProducts(phrase: string, products: Product[]): ParsedCandidate[] {
@@ -394,8 +426,18 @@ function reconcile(
  * برای تشخیص مرز بین دو قلم کالا وقتی فروشنده بدون «و» پشت سر هم می‌گوید
  * (مثلاً «۲ تا شیر ۳ تا پنیر صبا ۴ تا دستمال»).
  */
-function isQuantityStarter(t: string): boolean {
-  return /^\d+(\.\d+)?$/.test(t) || t in NUMBER_WORDS || t in FRACTION_KG;
+function isQuantityStarter(tokens: string[], idx: number): boolean {
+  const t = tokens[idx];
+  if (t in NUMBER_WORDS || t in FRACTION_KG) return true;
+  if (/^\d+(\.\d+)?$/.test(t)) {
+    // یک رقم فقط وقتی «شروع مقدار قلم بعدی» تلقی می‌شود که بلافاصله یک واحد
+    // شمارشی/وزنی (تا/عدد/کیلو/گرم/...) بعدش بیاید (مثل «۳ تا پنیر»)؛ وگرنه رقمی
+    // مثل «۱۷» در «روژلب شماره ۱۷ شامپو» بخشی از نام/سایز کالای قبلی است، نه
+    // شروع یک قلم جدید.
+    const next = tokens[idx + 1];
+    return !!(next && isUnitOrCountWord(next));
+  }
+  return false;
 }
 
 function isUnitOrCountWord(t: string): boolean {
@@ -413,14 +455,15 @@ function splitByQuantityBoundaries(segment: string): string[] {
   let current: string[] = [];
   let sawProductToken = false;
 
-  for (const t of tokens) {
-    if (isQuantityStarter(t) && sawProductToken && current.length > 0) {
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const t = tokens[idx];
+    if (isQuantityStarter(tokens, idx) && sawProductToken && current.length > 0) {
       clauses.push(current.join(" "));
       current = [];
       sawProductToken = false;
     }
     current.push(t);
-    if (!isQuantityStarter(t) && !isUnitOrCountWord(t) && t !== "و" && !STOPWORDS.has(t)) {
+    if (!isQuantityStarter(tokens, idx) && !isUnitOrCountWord(t) && t !== "و" && !STOPWORDS.has(t)) {
       sawProductToken = true;
     }
   }

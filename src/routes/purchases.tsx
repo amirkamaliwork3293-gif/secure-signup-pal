@@ -23,10 +23,13 @@ import {
   parseTimeInput,
   jalaliToTimestamp,
   toJalali,
+  getUnitDefs,
+  COUNT_UNIT,
   type Product,
   type PurchaseItem,
   type Purchase,
   type PaymentMethod,
+  type UnitDef,
 } from "@/lib/store";
 import { filterAndRankSearch } from "@/lib/search";
 import {
@@ -55,10 +58,12 @@ function EditablePurchaseItem({
   item,
   onChange,
   onRemove,
+  unitDefs,
 }: {
   item: PurchaseItem;
   onChange: (updated: PurchaseItem) => void;
   onRemove: () => void;
+  unitDefs: UnitDef[];
 }) {
   return (
     <li className="space-y-2 rounded-xl border border-border bg-background px-3 py-2">
@@ -112,6 +117,20 @@ function EditablePurchaseItem({
         />
         <span className="text-[11px] text-muted-foreground">تومان</span>
       </div>
+      {!item.productId && (
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] text-muted-foreground shrink-0">واحد:</label>
+          <select
+            value={item.unit || COUNT_UNIT}
+            onChange={(e) => onChange({ ...item, unit: e.target.value })}
+            className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
+          >
+            {unitDefs.map((u) => (
+              <option key={u.name} value={u.name}>{u.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </li>
   );
 }
@@ -122,6 +141,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const [appSettings] = settings.useAll();
   const [allProducts] = products.useAll();
   const [catList] = categories.useAll();
+  const unitDefs = useMemo<UnitDef[]>(() => getUnitDefs(), [appSettings.units]);
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Purchase>(initialP);
@@ -199,7 +219,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const addManualItem = () => {
     setDraft((d) => ({
       ...d,
-      items: [...d.items, { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: "عدد", category: catList[0]?.name || "" }],
+      items: [...d.items, { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: COUNT_UNIT, category: catList[0]?.name || "" }],
     }));
   };
 
@@ -370,6 +390,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                     item={item}
                     onChange={(u) => updateItem(idx, u)}
                     onRemove={() => removeItem(idx)}
+                    unitDefs={unitDefs}
                   />
                 ))}
               </ul>
@@ -451,6 +472,9 @@ export function PurchasesPageInner() {
   const [history] = purchases.useHistory();
   const [appSettings] = settings.useAll();
   const [customerList] = customers.useAll();
+  // واحدهای فروش تعریف‌شده توسط کاربر (پیش‌فرض‌ها + واحدهای سفارشی مثل «متر مربع»)
+  // تا در فاکتور خرید هم برای کالاهای جدید قابل انتخاب باشند، نه فقط در فرم محصول.
+  const unitDefs = useMemo<UnitDef[]>(() => getUnitDefs(), [appSettings.units]);
 
   const [draft, setDraft] = useState<Purchase>(emptyPurchase());
   const [supplierName, setSupplierName] = useState("");
@@ -515,7 +539,7 @@ export function PurchasesPageInner() {
         ...prev,
         items: [
           ...prev.items,
-          { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: "عدد", category: catList[0]?.name || "" } as PurchaseItem,
+          { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: COUNT_UNIT, category: catList[0]?.name || "" } as PurchaseItem,
         ],
       }),
     );
@@ -657,7 +681,7 @@ export function PurchasesPageInner() {
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              <div className={`mt-2 grid gap-2 ${it.productId ? "grid-cols-2" : "grid-cols-3"}`}>
+              <div className={`mt-2 grid gap-2 ${it.productId ? "grid-cols-2" : "grid-cols-2"}`}>
                 <MiniField label="تعداد">
                   <input
                     inputMode="decimal"
@@ -675,14 +699,27 @@ export function PurchasesPageInner() {
                   />
                 </MiniField>
                 {!it.productId && (
-                  <MiniField label="قیمت فروش پیشنهادی">
-                    <input
-                      inputMode="decimal"
-                      value={formatNumber(it.sellPrice || 0)}
-                      onChange={(e) => updateItem(idx, { sellPrice: parseNumberInput(e.target.value) })}
-                      className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                    />
-                  </MiniField>
+                  <>
+                    <MiniField label="قیمت فروش پیشنهادی">
+                      <input
+                        inputMode="decimal"
+                        value={formatNumber(it.sellPrice || 0)}
+                        onChange={(e) => updateItem(idx, { sellPrice: parseNumberInput(e.target.value) })}
+                        className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+                      />
+                    </MiniField>
+                    <MiniField label="واحد">
+                      <select
+                        value={it.unit || COUNT_UNIT}
+                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
+                        className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+                      >
+                        {unitDefs.map((u) => (
+                          <option key={u.name} value={u.name}>{u.name}</option>
+                        ))}
+                      </select>
+                    </MiniField>
+                  </>
                 )}
               </div>
               <div className="mt-1.5 text-left text-xs text-muted-foreground">

@@ -185,7 +185,7 @@ function GoldInner() {
                 <span>آخرین بروزرسانی: {new Date(updatedAt).toLocaleTimeString("fa-IR")}</span>
                 {source && (
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-                    منبع: {source === "tgju" ? "TGJU" : source === "tgju2" ? "TGJU (backup)" : source === "cache" ? "کش" : source}
+                    منبع: {source === "cache" ? "کش" : source === "cache-stale" ? "کش (قدیمی)" : source.startsWith("tgju") ? `TGJU${source === "tgju" ? "" : " (پشتیبان)"}` : source}
                   </span>
                 )}
               </div>

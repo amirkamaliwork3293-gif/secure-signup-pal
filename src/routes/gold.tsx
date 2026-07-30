@@ -37,6 +37,7 @@ function GoldInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
 
   // ماشین‌حساب
   const [rate, setRate] = useState<number>(0);

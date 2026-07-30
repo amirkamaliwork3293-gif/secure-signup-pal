@@ -65,6 +65,7 @@ function GoldInner() {
       if (res.ok) {
         setItems(res.items);
         setUpdatedAt(res.updatedAt);
+        setSource(res.source);
         const g = pickGram18(res.items);
         if (g && !rateTouched) setRate(g.price);
       } else {

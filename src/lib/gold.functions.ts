@@ -68,17 +68,23 @@ async function fetchJson(url: string, ms = 10_000): Promise<unknown> {
   }
 }
 
-/** منبع ۱: BrsApi.ir (نیازمند کلید) */
+/** منبع ۱: BrsApi.ir (نیازمند کلید) — آدرس صحیح: https://Api.BrsApi.ir/Market/ */
 async function fromBrsApi(key: string): Promise<GoldQuote[]> {
   const json = (await fetchJson(
-    `https://BrsApi.ir/Api/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
+    `https://Api.BrsApi.ir/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
   )) as { gold?: BrsRow[]; currency?: BrsRow[]; error?: string };
   if (json?.error) throw new Error(String(json.error));
   const goldRows = mapRows(json.gold, "gold");
+  const coinRows = mapRows(json.gold, "coin").filter((r) =>
+    /سکه|coin|نیم|ربع|گرمی|امامی|آزادی/i.test(r.name),
+  );
   return [
-    ...goldRows.map((g) => (g.name.includes("سکه") ? { ...g, group: "coin" as const } : g)),
+    ...goldRows.filter((r) => !coinRows.includes(r)),
+    ...coinRows,
     ...mapRows(json.currency, "currency").filter((c) =>
-      ["USD", "EUR", "AED"].includes(c.key.toUpperCase()),
+      ["USD", "EUR", "AED", "GBP", "TRY", "CHF", "CAD", "AUD", "CNY"].includes(
+        c.key.toUpperCase(),
+      ),
     ),
   ];
 }

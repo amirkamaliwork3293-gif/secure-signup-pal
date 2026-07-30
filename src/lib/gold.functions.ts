@@ -16,7 +16,7 @@ export type GoldQuote = {
 };
 
 export type GoldPricesResult =
-  | { ok: true; items: GoldQuote[]; updatedAt: string }
+  | { ok: true; items: GoldQuote[]; updatedAt: string; source: string }
   | { ok: false; error: string };
 
 type BrsRow = {

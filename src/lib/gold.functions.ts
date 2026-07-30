@@ -129,10 +129,50 @@ async function fromTgju(url: string): Promise<GoldQuote[]> {
 let cache: { items: GoldQuote[]; updatedAt: string; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // ۵ دقیقه
 
+/** کش مشترک در دیتابیس تا همه‌ی کاربران فقط از یک درخواست استفاده کنند */
+async function readSharedCache(): Promise<{ items: GoldQuote[]; updatedAt: string; source: string } | null> {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data } = await supabaseAdmin
+      .from("gold_rate_cache")
+      .select("payload, source, updated_at")
+      .eq("id", "latest")
+      .maybeSingle();
+    if (!data) return null;
+    const items = (data.payload as unknown as GoldQuote[]) ?? [];
+    if (!Array.isArray(items) || items.length === 0) return null;
+    return { items, updatedAt: String(data.updated_at), source: String(data.source) };
+  } catch {
+    return null;
+  }
+}
+
+async function writeSharedCache(items: GoldQuote[], source: string, updatedAt: string) {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin
+      .from("gold_rate_cache")
+      .upsert({ id: "latest", payload: items as unknown as never, source, updated_at: updatedAt });
+  } catch {
+    /* کش اختیاری است */
+  }
+}
+
 export const getGoldPrices = createServerFn({ method: "GET" }).handler(
   async (): Promise<GoldPricesResult> => {
     if (cache && cache.expiresAt > Date.now()) {
       return { ok: true, items: cache.items, updatedAt: cache.updatedAt, source: "cache" };
+    }
+
+    // کش مشترک دیتابیس (بین همه‌ی سرورها و کاربران)
+    const shared = await readSharedCache();
+    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < CACHE_TTL_MS) {
+      cache = {
+        items: shared.items,
+        updatedAt: shared.updatedAt,
+        expiresAt: new Date(shared.updatedAt).getTime() + CACHE_TTL_MS,
+      };
+      return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: shared.source };
     }
 
     const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;
@@ -154,12 +194,18 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
         if (items.length > 0) {
           const updatedAt = new Date().toISOString();
           cache = { items, updatedAt, expiresAt: Date.now() + CACHE_TTL_MS };
+          await writeSharedCache(items, s.label, updatedAt);
           return { ok: true, items, updatedAt, source: s.label };
         }
         errors.push(`${s.label}: داده‌ای برنگشت`);
       } catch (e) {
         errors.push(`${s.label}: ${String((e as Error)?.message ?? e)}`);
       }
+    }
+
+    // اگر همه‌ی منابع خطا دادند، آخرین نرخ ذخیره‌شده را نشان بده
+    if (shared) {
+      return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: "cache" };
     }
 
     return {

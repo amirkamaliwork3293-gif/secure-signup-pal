@@ -53,6 +53,27 @@ export type Database = {
         }
         Relationships: []
       }
+      gold_rate_cache: {
+        Row: {
+          id: string
+          payload: Json
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          payload: Json
+          source: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          payload?: Json
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       landing_content: {
         Row: {
           brand_name: string

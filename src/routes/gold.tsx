@@ -181,8 +181,13 @@ function GoldInner() {
               ) : null,
             )}
             {updatedAt && (
-              <div className="text-[10px] text-muted-foreground">
-                آخرین بروزرسانی: {new Date(updatedAt).toLocaleTimeString("fa-IR")}
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>آخرین بروزرسانی: {new Date(updatedAt).toLocaleTimeString("fa-IR")}</span>
+                {source && (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                    منبع: {source === "brsapi" ? "BrsApi.ir" : source === "tgju" ? "TGJU" : source === "tgju2" ? "TGJU (backup)" : source === "cache" ? "کش" : source}
+                  </span>
+                )}
               </div>
             )}
           </div>

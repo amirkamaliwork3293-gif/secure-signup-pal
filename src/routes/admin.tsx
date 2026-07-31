@@ -369,7 +369,13 @@ function RequestsTab({
         user={messageTarget}
         phone={(messageTarget as any).phone || phones[messageTarget.username?.toLowerCase()] || null}
         password={messageTarget.temp_password || null}
-        defaultTemplate={messageTarget.temp_password ? "welcome" : "thanks"}
+        defaultTemplate={
+          (messageTarget as any).request_type === "renewal"
+            ? "renewal_done"
+            : messageTarget.temp_password
+              ? "welcome"
+              : "thanks"
+        }
         onSent={() => {
           if (messageTarget.temp_password) {
             void clearTempPwd({ data: { id: messageTarget.id } }).catch(() => {});

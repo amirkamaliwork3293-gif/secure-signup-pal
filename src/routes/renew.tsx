@@ -261,7 +261,8 @@ function RenewPage() {
               <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
             </button>
           )}
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
+          {/* هیچ محدودیتی روی نوع یا حجم فایل نیست — دقیقاً مثل صفحهٔ ثبت‌نام */}
+          <input ref={fileRef} type="file" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">

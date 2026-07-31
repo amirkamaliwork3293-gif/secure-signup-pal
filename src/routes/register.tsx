@@ -418,7 +418,6 @@ function RegisterPage() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
             className="hidden"
             onChange={(e) => onPickFile(e.target.files?.[0] || null)}
           />

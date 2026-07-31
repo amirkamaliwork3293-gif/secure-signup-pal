@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
+import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
@@ -13,7 +13,7 @@ import {
   adminClearSignupTempPassword,
 } from "@/lib/auth.functions";
 import {
-  DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
+  DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
 } from "@/lib/plans";
 import { MESSAGE_TEMPLATES, type MessageTemplateId } from "@/lib/sms-templates";
 import {
@@ -239,6 +239,16 @@ function RequestsTab({
 }) {
   const [messageTarget, setMessageTarget] = useState<SignupRequest | null>(null);
   const clearTempPwd = useServerFn(adminClearSignupTempPassword);
+  const [plansCfg, setPlansCfg] = useState<PlansConfig>(DEFAULT_PLANS);
+
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("plans")
+      .eq("id", 1)
+      .maybeSingle()
+      .then(({ data }) => setPlansCfg(normalizePlans((data as any)?.plans)));
+  }, []);
 
   if (requests.length === 0) {
     return (
@@ -253,6 +263,9 @@ function RequestsTab({
     <ul className="space-y-2">
       {requests.map((r) => {
         const isActing = acting === r.id;
+        const cfg = plansCfg[r.plan];
+        const price = cfg ? effectivePrice(cfg, Date.now()) : 0;
+        const isRenewal = (r as any).request_type === "renewal";
         return (
           <li key={r.id} className="rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-3">
@@ -262,6 +275,11 @@ function RequestsTab({
                   <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{r.username}</span>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  {isRenewal && (
+                    <span className="rounded bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                      تمدید اشتراک
+                    </span>
+                  )}
                   <span className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary">
                     {PLAN_LABEL[r.plan]}
                   </span>
@@ -274,6 +292,23 @@ function RequestsTab({
                     <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{(r as any).phone}</span>
                   )}
                   <span>{formatJalaliDateTime(r.created_at)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-secondary/60 px-2.5 py-1.5 text-[11px]">
+                  <span className="text-muted-foreground">مدت اشتراک:</span>
+                  <strong>{PLAN_DURATION_LABEL[r.plan]}</strong>
+                  <span className="text-muted-foreground">— مبلغ قابل پرداخت:</span>
+                  <strong className="text-primary">
+                    {new Intl.NumberFormat("fa-IR").format(price)} تومان
+                  </strong>
+                  {cfg && isDiscountActive(cfg, Date.now()) && (
+                    <span className="text-rose-600">
+                      (با {cfg.discount_percent.toLocaleString("fa-IR")}٪ تخفیف — قیمت اصلی{" "}
+                      {new Intl.NumberFormat("fa-IR").format(cfg.price)})
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  ⚠️ قبل از تایید، مبلغ رسید را با مبلغ پلن انتخابی مقایسه کنید.
                 </div>
               </div>
               <StatusBadge status={r.status} />
@@ -320,7 +355,7 @@ function RequestsTab({
                   className="flex items-center gap-1.5 rounded-lg border border-primary/40 px-2.5 py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/5"
                 >
                   <MessageSquare className="h-3 w-3" />
-                  پیام خوش‌آمدگویی به کاربر
+                  {isRenewal ? "پیام تایید تمدید به کاربر" : "پیام خوش‌آمدگویی به کاربر"}
                 </button>
               </div>
             )}
@@ -334,7 +369,13 @@ function RequestsTab({
         user={messageTarget}
         phone={(messageTarget as any).phone || phones[messageTarget.username?.toLowerCase()] || null}
         password={messageTarget.temp_password || null}
-        defaultTemplate={messageTarget.temp_password ? "welcome" : "thanks"}
+        defaultTemplate={
+          (messageTarget as any).request_type === "renewal"
+            ? "renewal_done"
+            : messageTarget.temp_password
+              ? "welcome"
+              : "thanks"
+        }
         onSent={() => {
           if (messageTarget.temp_password) {
             void clearTempPwd({ data: { id: messageTarget.id } }).catch(() => {});

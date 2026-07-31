@@ -237,3 +237,41 @@ html[data-app="1"] .landing-page {
   border: none;
   cursor: pointer;
 }
+
+/* ─── iOS / Safari responsiveness ─────────────────────────────────────────── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* در iOS اگر فونت ورودی کوچک‌تر از 16px باشد صفحه هنگام تایپ زوم می‌کند */
+@supports (-webkit-touch-callout: none) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* اسکرول نرم و بدون نوار برای نوارهای افقی (منوی پایین در آیفون) */
+.no-scrollbar {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* جلوگیری از سرریز افقی جدول‌ها و تصاویر روی صفحه‌های باریک */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}

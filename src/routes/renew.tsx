@@ -62,17 +62,12 @@ function RenewPage() {
       </div>
     );
   }
-  // اگر کاربر فعال است نیازی به تمدید نیست
-  if (state.status === "authenticated") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6 text-center">
-        <p className="mb-4 text-sm text-muted-foreground">اشتراک شما فعال است. نیازی به تمدید نیست.</p>
-        <Link to="/" className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">بازگشت به برنامه</Link>
-      </div>
-    );
-  }
-
-  const username = (state as any).username ?? "—";
+  const profile: any =
+    state.status === "authenticated" ? state.profile : (state as any).profile ?? null;
+  const username = profile?.username ?? (state as any).username ?? "—";
+  const endMs = profile?.end_date ? new Date(profile.end_date).getTime() : 0;
+  const daysLeft = endMs ? Math.ceil((endMs - Date.now()) / 86_400_000) : 0;
+  const isActive = state.status === "authenticated";
   const visiblePlans = PAID.filter((p) => plansCfg[p]?.enabled);
 
   const copyCard = async () => {
@@ -166,6 +161,18 @@ function RenewPage() {
         <div className="rounded-xl border border-dashed border-primary/30 bg-primary/5 p-3 text-xs leading-6 text-muted-foreground">
           ✅ نیازی به وارد کردن مجدد یوزرنیم یا رمز نیست. فقط پلن را انتخاب و رسید پرداخت را آپلود کنید — تمام داده‌های قبلی شما محفوظ است.
         </div>
+        {isActive && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs leading-6 text-emerald-700 dark:text-emerald-400">
+            {daysLeft > 0 ? (
+              <>
+                اشتراک فعلی شما <strong>{daysLeft.toLocaleString("fa-IR")} روز</strong> دیگر اعتبار دارد. مدت پلن جدید
+                <strong> به همین باقی‌مانده اضافه</strong> می‌شود.
+              </>
+            ) : (
+              <>اشتراک شما فعال است؛ با تمدید، مدت جدید به اعتبار فعلی اضافه می‌شود.</>
+            )}
+          </div>
+        )}
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">انتخاب پلن جدید</label>

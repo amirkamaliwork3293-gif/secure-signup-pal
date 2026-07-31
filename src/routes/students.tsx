@@ -6,6 +6,10 @@ import {
   students as studentsStore,
   studentStatus,
   studentDaysToDue,
+  studentDueAt,
+  studentInstallments,
+  studentRemainingInstallments,
+  buildInstallmentPlan,
   formatToman,
   formatNumber,
   parseNumberInput,
@@ -33,6 +37,9 @@ import {
   Power,
   MessageCircle,
   Share2,
+  Layers,
+  CheckCircle,
+  RotateCcw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/students")({
@@ -101,7 +108,7 @@ function StudentsInner() {
     const sorted = items.sort((a, b) => {
       const w = weight(a) - weight(b);
       if (w !== 0) return w;
-      return a.nextDueAt - b.nextDueAt;
+      return studentDueAt(a) - studentDueAt(b);
     });
     if (!query) return sorted;
     return filterAndRankSearch(sorted, query, (s) => [
@@ -221,7 +228,15 @@ function StudentsInner() {
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span>شهریه: {formatToman(s.fee)}</span>
-                      <span>دوره: {formatNumber(s.periodDays)} روز</span>
+                      {s.installmentMode ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          <Layers className="h-3 w-3" />
+                          اقساطی ({formatNumber(studentInstallments(s).filter((i) => i.paidAt).length)}/
+                          {formatNumber(studentInstallments(s).length)})
+                        </span>
+                      ) : (
+                        <span>دوره: {formatNumber(s.periodDays)} روز</span>
+                      )}
                       <span className={
                         st === "overdue" ? "font-semibold text-red-500" :
                         st === "due-today" ? "font-semibold text-red-500" :
@@ -231,7 +246,12 @@ function StudentsInner() {
                          st === "due-today" ? "امروز سررسید!" :
                          `${formatNumber(days)} روز مانده`}
                       </span>
-                      <span>سررسید: {formatJalaliDate(s.nextDueAt)}</span>
+                      <span>سررسید: {formatJalaliDate(studentDueAt(s))}</span>
+                      {s.installmentMode && studentRemainingInstallments(s) > 0 && (
+                        <span className="font-semibold text-amber-600">
+                          مانده: {formatToman(studentRemainingInstallments(s))}
+                        </span>
+                      )}
                     </div>
                   </button>
                   <div className="flex flex-col gap-1">
@@ -279,6 +299,80 @@ function StudentsInner() {
                         </div>
                       )}
                     </div>
+
+                    {s.installmentMode && studentInstallments(s).length > 0 && (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Layers className="h-3.5 w-3.5" />
+                            اقساط شهریه
+                          </span>
+                          <span>
+                            مانده: <span className="text-amber-600">{formatToman(studentRemainingInstallments(s))}</span>
+                          </span>
+                        </div>
+                        <ul className="space-y-1">
+                          {studentInstallments(s)
+                            .slice()
+                            .sort((a, b) => a.dueAt - b.dueAt)
+                            .map((ins, idx) => {
+                              const overdue = !ins.paidAt && ins.dueAt < Date.now();
+                              return (
+                                <li
+                                  key={ins.id}
+                                  className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs ${
+                                    ins.paidAt
+                                      ? "bg-emerald-500/10"
+                                      : overdue
+                                        ? "bg-red-500/10"
+                                        : "bg-muted/40"
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-semibold">
+                                      قسط {formatNumber(idx + 1)} — {formatToman(ins.amount)}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground">
+                                      سررسید {formatJalaliDate(ins.dueAt)}
+                                      {ins.paidAt ? ` — پرداخت ${formatJalaliDate(ins.paidAt)}` : ""}
+                                    </div>
+                                  </div>
+                                  {ins.paidAt ? (
+                                    <button
+                                      onClick={() => {
+                                        if (confirm("لغو پرداخت این قسط؟")) {
+                                          studentsStore.unpayInstallment(s.id, ins.id);
+                                        }
+                                      }}
+                                      className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-muted-foreground"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      لغو
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        studentsStore.payInstallment(s.id, ins.id, { amount: ins.amount });
+                                        const updated = studentsStore.getAll().find((x) => x.id === s.id);
+                                        if (updated) {
+                                          setSmsFor({
+                                            student: updated,
+                                            payment: { amount: ins.amount, nextDueAt: studentDueAt(updated) },
+                                          });
+                                        }
+                                      }}
+                                      className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-500 px-2 py-1 text-[10px] font-semibold text-white"
+                                    >
+                                      <CheckCircle className="h-3 w-3" />
+                                      پرداخت شد
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                        </ul>
+                      </div>
+                    )}
 
                     {s.payments.length > 0 && (
                       <div>
@@ -412,6 +506,11 @@ function StudentForm({ initial, onClose, onSave }: {
     return d.toISOString().slice(0, 10);
   });
   const [note, setNote] = useState(initial?.note ?? "");
+  const [installmentMode, setInstallmentMode] = useState(initial?.installmentMode ?? false);
+  const [countStr, setCountStr] = useState(String(initial?.installments?.length || 3));
+  const [gapStr, setGapStr] = useState(String(initial?.periodDays ?? 30));
+  const hasPaidInstallment = !!initial?.installments?.some((i) => i.paidAt);
+  const [regenerate, setRegenerate] = useState(false);
 
   const submit = () => {
     const fee = parseNumberInput(feeStr);
@@ -419,7 +518,19 @@ function StudentForm({ initial, onClose, onSave }: {
     if (!firstName.trim()) { alert("نام هنرجو را وارد کنید."); return; }
     if (fee <= 0) { alert("مبلغ شهریه را وارد کنید."); return; }
     const startTs = new Date(startDate + "T00:00:00+03:30").getTime();
+    const count = Math.max(1, Math.round(parseNumberInput(countStr)));
+    const gap = Math.max(1, Math.round(parseNumberInput(gapStr)));
+    const makePlan = () =>
+      buildInstallmentPlan({ total: fee, count, firstDueAt: startTs + gap * 86_400_000, intervalDays: gap });
+
     if (initial) {
+      // اگر اقساط پرداخت‌شده وجود دارد، زمان‌بندی قبلی حفظ می‌شود مگر کاربر
+      // صریحاً «بازسازی» را انتخاب کند.
+      const keepOld = installmentMode && initial.installmentMode && !!initial.installments?.length && !regenerate;
+      const installments = installmentMode ? (keepOld ? initial.installments : makePlan()) : initial.installments;
+      const firstOpen = installmentMode
+        ? (installments ?? []).filter((i) => !i.paidAt).sort((a, b) => a.dueAt - b.dueAt)[0]
+        : undefined;
       onSave({
         ...initial,
         firstName: firstName.trim(),
@@ -430,20 +541,31 @@ function StudentForm({ initial, onClose, onSave }: {
         periodDays,
         startDate: startTs,
         note: note.trim() || undefined,
+        installmentMode,
+        installments,
+        nextDueAt: firstOpen ? firstOpen.dueAt : initial.nextDueAt,
       });
     } else {
+      const installments = installmentMode ? makePlan() : undefined;
       // add returns a Student in the store; here we just build the shape passed to onSave via store.add
       onSave({
-        id: "", createdAt: 0, active: true, nextDueAt: startTs + periodDays * 86_400_000, payments: [],
+        id: "", createdAt: 0, active: true,
+        nextDueAt: installments?.[0]?.dueAt ?? startTs + periodDays * 86_400_000,
+        payments: [],
         firstName: firstName.trim(),
         lastName: lastName.trim() || undefined,
         phone: phone.trim() || undefined,
         discipline: discipline.trim() || undefined,
         fee, periodDays, startDate: startTs,
         note: note.trim() || undefined,
+        installmentMode,
+        installments,
       });
     }
   };
+
+  const previewCount = Math.max(1, Math.round(parseNumberInput(countStr) || 1));
+  const previewEach = Math.floor((parseNumberInput(feeStr) || 0) / previewCount);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-2 sm:items-center" onClick={onClose}>
@@ -473,7 +595,9 @@ function StudentForm({ initial, onClose, onSave }: {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">شهریهٔ هر دوره (تومان)</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                {installmentMode ? "کل شهریه (تومان)" : "شهریهٔ هر دوره (تومان)"}
+              </label>
               <input className={inputCls} inputMode="numeric" value={feeStr} onChange={(e) => setFeeStr(e.target.value)} />
             </div>
             <div>
@@ -485,6 +609,49 @@ function StudentForm({ initial, onClose, onSave }: {
             <label className="mb-1 block text-xs text-muted-foreground">تاریخ شروع (ثبت‌نام)</label>
             <input className={inputCls} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-primary"
+                checked={installmentMode}
+                onChange={(e) => setInstallmentMode(e.target.checked)}
+              />
+              <Layers className="h-4 w-4 text-primary" />
+              شهریهٔ اقساطی
+            </label>
+            {installmentMode && (
+              <div className="mt-2 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">تعداد اقساط</label>
+                    <input className={inputCls} inputMode="numeric" value={countStr} onChange={(e) => setCountStr(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">فاصلهٔ اقساط (روز)</label>
+                    <input className={inputCls} inputMode="numeric" value={gapStr} onChange={(e) => setGapStr(e.target.value)} />
+                  </div>
+                </div>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  هر قسط حدود <span className="font-semibold text-foreground">{formatToman(previewEach)}</span> — اولین
+                  قسط {formatNumber(Math.max(1, Math.round(parseNumberInput(gapStr) || 1)))} روز پس از تاریخ شروع.
+                </p>
+                {initial?.installmentMode && !!initial.installments?.length && (
+                  <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-primary"
+                      checked={regenerate}
+                      onChange={(e) => setRegenerate(e.target.checked)}
+                    />
+                    بازسازی زمان‌بندی اقساط{hasPaidInstallment ? " (پرداخت‌های ثبت‌شدهٔ اقساط پاک می‌شود)" : ""}
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">یادداشت (اختیاری)</label>
             <textarea className={inputCls} rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
@@ -508,7 +675,10 @@ function PaymentDialog({ student, onClose, onDone }: {
   onClose: () => void;
   onDone: (amount: number, nextDueAt: number) => void;
 }) {
-  const [amountStr, setAmountStr] = useState(String(student.fee));
+  const openIns = studentInstallments(student)
+    .filter((i) => !i.paidAt)
+    .sort((a, b) => a.dueAt - b.dueAt)[0];
+  const [amountStr, setAmountStr] = useState(String(openIns ? openIns.amount : student.fee));
   const [daysStr, setDaysStr] = useState(String(student.periodDays));
   const [note, setNote] = useState("");
 
@@ -516,9 +686,13 @@ function PaymentDialog({ student, onClose, onDone }: {
     const amount = parseNumberInput(amountStr);
     const days = Math.max(1, Math.round(parseNumberInput(daysStr)));
     if (amount <= 0) { alert("مبلغ نامعتبر"); return; }
-    studentsStore.recordPayment(student.id, { amount, days, note: note.trim() || undefined });
+    if (openIns) {
+      studentsStore.payInstallment(student.id, openIns.id, { amount, note: note.trim() || undefined });
+    } else {
+      studentsStore.recordPayment(student.id, { amount, days, note: note.trim() || undefined });
+    }
     const updated = studentsStore.getAll().find((s) => s.id === student.id)!;
-    onDone(amount, updated.nextDueAt);
+    onDone(amount, studentDueAt(updated));
   };
 
   return (
@@ -534,15 +708,23 @@ function PaymentDialog({ student, onClose, onDone }: {
         <p className="mb-3 text-xs text-muted-foreground">
           هنرجو: <span className="font-semibold text-foreground">{student.firstName} {student.lastName ?? ""}</span>
         </p>
+        {openIns && (
+          <div className="mb-3 rounded-xl border border-primary/30 bg-primary/5 p-2.5 text-[11px] leading-5 text-muted-foreground">
+            <Layers className="ml-1 inline h-3.5 w-3.5 text-primary" />
+            این پرداخت به‌عنوان <span className="font-semibold text-foreground">قسط با سررسید {formatJalaliDate(openIns.dueAt)}</span> ثبت می‌شود.
+          </div>
+        )}
         <div className="space-y-2">
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">مبلغ (تومان)</label>
             <input className={inputCls} inputMode="numeric" value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">تمدید دوره برای (روز)</label>
-            <input className={inputCls} inputMode="numeric" value={daysStr} onChange={(e) => setDaysStr(e.target.value)} />
-          </div>
+          {!openIns && (
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">تمدید دوره برای (روز)</label>
+              <input className={inputCls} inputMode="numeric" value={daysStr} onChange={(e) => setDaysStr(e.target.value)} />
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">یادداشت (اختیاری)</label>
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />

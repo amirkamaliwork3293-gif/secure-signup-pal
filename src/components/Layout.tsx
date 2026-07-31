@@ -4,6 +4,7 @@ import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { UserMenu } from "@/components/UserMenu";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -46,8 +47,11 @@ export function Layout({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background pb-24">
-      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur">
+    <div className="min-h-[100svh] bg-background pb-28">
+      <header
+        className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
           <Link to="/" className="flex items-center gap-2">
@@ -62,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-1.5">
             <GlobalSearch />
+            <UserMenu />
             {state.status === "authenticated" && state.isAdmin && (
               <Link
                 to="/admin"
@@ -91,17 +96,15 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
+      <main className="mx-auto w-full max-w-3xl overflow-x-hidden px-4 py-5">{children}</main>
 
       {/* pb-safe: فاصله امن برای نوار ژست اندروید/آیفون در نسخه APK */}
       <nav
         className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        <div
-          className="mx-auto grid max-w-3xl"
-          style={{ gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))` }}
-        >
+        {/* روی صفحه‌های باریک (آیفون) نوار پایین به‌جای فشرده‌شدن، اسکرول افقی می‌شود */}
+        <div className="mx-auto flex max-w-3xl overflow-x-auto no-scrollbar sm:grid" style={{ gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))` }}>
           {visibleNav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to;
             const showBadge = to === "/students" && dueCount > 0;
@@ -109,7 +112,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <Link
                 key={to}
                 to={to}
-                className={`relative flex flex-col items-center gap-1 py-2 text-[10px] transition-colors ${
+                className={`relative flex min-w-[58px] flex-1 shrink-0 flex-col items-center gap-1 py-2 text-[10px] transition-colors sm:min-w-0 ${
                   active ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
               >

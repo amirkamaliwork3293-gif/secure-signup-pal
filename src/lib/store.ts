@@ -1175,6 +1175,20 @@ export type StudentPayment = {
   note?: string;
 };
 
+/** یک قسط از شهریهٔ اقساطی */
+export type StudentInstallment = {
+  id: string;
+  /** مبلغ قسط (تومان) */
+  amount: number;
+  /** تاریخ سررسید قسط */
+  dueAt: number;
+  /** اگر پرداخت شده باشد، زمان پرداخت */
+  paidAt?: number;
+  /** مبلغ واقعاً پرداخت‌شده (ممکن است با amount فرق کند) */
+  paidAmount?: number;
+  note?: string;
+};
+
 export type Student = {
   id: string;
   firstName: string;
@@ -1194,6 +1208,10 @@ export type Student = {
   note?: string;
   createdAt: number;
   payments: StudentPayment[];
+  /** حالت اقساطی: اگر true باشد سررسید از روی اقساط محاسبه می‌شود */
+  installmentMode?: boolean;
+  /** لیست اقساط (فقط وقتی installmentMode فعال است معنا دارد) */
+  installments?: StudentInstallment[];
 };
 
 function todayStartTs(): number {
@@ -1208,7 +1226,52 @@ function todayStartTs(): number {
 /** روزهای باقی‌مانده تا سررسید (منفی = گذشته) */
 export function studentDaysToDue(s: Student): number {
   const today = todayStartTs();
-  return Math.round((s.nextDueAt - today) / 86_400_000);
+  return Math.round((studentDueAt(s) - today) / 86_400_000);
+}
+
+/** لیست اقساط (همیشه آرایه) */
+export function studentInstallments(s: Student): StudentInstallment[] {
+  return s.installmentMode ? (s.installments ?? []) : [];
+}
+
+/** نزدیک‌ترین قسط پرداخت‌نشده */
+export function nextUnpaidInstallment(s: Student): StudentInstallment | null {
+  const open = studentInstallments(s)
+    .filter((i) => !i.paidAt)
+    .sort((a, b) => a.dueAt - b.dueAt);
+  return open[0] ?? null;
+}
+
+/** سررسید مؤثر: در حالت اقساطی، سررسید نزدیک‌ترین قسط باز */
+export function studentDueAt(s: Student): number {
+  const next = nextUnpaidInstallment(s);
+  return next ? next.dueAt : s.nextDueAt;
+}
+
+/** جمع مبلغ باقی‌ماندهٔ اقساط پرداخت‌نشده */
+export function studentRemainingInstallments(s: Student): number {
+  return studentInstallments(s)
+    .filter((i) => !i.paidAt)
+    .reduce((a, i) => a + i.amount, 0);
+}
+
+/** ساخت زمان‌بندی خودکار اقساط */
+export function buildInstallmentPlan(opts: {
+  total: number;
+  count: number;
+  firstDueAt: number;
+  intervalDays: number;
+}): StudentInstallment[] {
+  const count = Math.max(1, Math.round(opts.count));
+  const total = Math.max(0, Math.round(opts.total));
+  const base = Math.floor(total / count);
+  // باقی‌ماندهٔ تقسیم به قسط آخر اضافه می‌شود تا جمع دقیقاً برابر کل شود
+  const rest = total - base * count;
+  return Array.from({ length: count }, (_, i) => ({
+    id: cryptoId(),
+    amount: i === count - 1 ? base + rest : base,
+    dueAt: opts.firstDueAt + i * opts.intervalDays * 86_400_000,
+  }));
 }
 
 export type StudentStatus = "overdue" | "due-today" | "soon" | "ok";
@@ -1272,6 +1335,53 @@ export const students = {
       return { ...s, nextDueAt, payments: [payment, ...s.payments] };
     });
     write(STUDENTS_KEY, next);
+  },
+
+  /** پرداخت یک قسط مشخص */
+  payInstallment: (studentId: string, installmentId: string, opts?: { amount?: number; note?: string }) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    const next = list.map((s) => {
+      if (s.id !== studentId) return s;
+      const installments = (s.installments ?? []).map((i) =>
+        i.id === installmentId && !i.paidAt
+          ? { ...i, paidAt: Date.now(), paidAmount: opts?.amount ?? i.amount, note: opts?.note ?? i.note }
+          : i,
+      );
+      const target = installments.find((i) => i.id === installmentId);
+      const updated: Student = { ...s, installments };
+      const upcoming = nextUnpaidInstallment(updated);
+      const payment: StudentPayment = {
+        id: cryptoId(),
+        amount: target?.paidAmount ?? 0,
+        at: Date.now(),
+        periodStart: target?.dueAt ?? Date.now(),
+        nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt,
+        note: opts?.note ?? "پرداخت قسط",
+      };
+      return {
+        ...updated,
+        nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt,
+        payments: [payment, ...s.payments],
+      };
+    });
+    write(STUDENTS_KEY, next);
+  },
+
+  /** لغو پرداخت یک قسط (اگر اشتباه ثبت شده باشد) */
+  unpayInstallment: (studentId: string, installmentId: string) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    write(
+      STUDENTS_KEY,
+      list.map((s) => {
+        if (s.id !== studentId) return s;
+        const installments = (s.installments ?? []).map((i) =>
+          i.id === installmentId ? { ...i, paidAt: undefined, paidAmount: undefined } : i,
+        );
+        const updated: Student = { ...s, installments };
+        const upcoming = nextUnpaidInstallment(updated);
+        return { ...updated, nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt };
+      }),
+    );
   },
 };
 

@@ -130,16 +130,24 @@ function RenewPage() {
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             پس از تایید مدیر، اشتراک شما با همین حساب فعال خواهد شد. تمام اطلاعات (محصولات، مشتری‌ها، فاکتورها و تنظیمات) شما حفظ شده است.
           </p>
-          <div className="mt-5 flex gap-2">
+          <div className="mt-5 grid grid-cols-2 gap-2">
             <button
               onClick={() => void refreshProfile()}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
             >
               <RefreshCw className="h-4 w-4" />
               بررسی مجدد
             </button>
-            <button onClick={signOut} className="rounded-xl border border-border px-4 py-2.5 text-sm">خروج</button>
+            <Link
+              to="/invoices"
+              className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-accent"
+            >
+              بازگشت به برنامه
+            </Link>
           </div>
+          <button type="button" onClick={signOut} className="mt-3 w-full text-center text-xs text-muted-foreground hover:underline">
+            خروج از حساب
+          </button>
         </div>
       </div>
     );

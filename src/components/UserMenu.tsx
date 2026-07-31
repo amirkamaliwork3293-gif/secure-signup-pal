@@ -43,19 +43,21 @@ export function UserMenu() {
 
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-2 sm:items-center"
+          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-t-3xl bg-background p-4 shadow-2xl sm:rounded-3xl"
-            style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom, 0px))" }}
+            className="relative my-auto w-full max-w-[22rem] max-h-[85svh] overflow-y-auto rounded-3xl border border-border bg-background p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-between gap-2">
               <h2 className="text-base font-bold">حساب کاربری</h2>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-1 text-muted-foreground hover:bg-accent"
+                aria-label="بستن"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </button>

@@ -506,6 +506,11 @@ function StudentForm({ initial, onClose, onSave }: {
     return d.toISOString().slice(0, 10);
   });
   const [note, setNote] = useState(initial?.note ?? "");
+  const [installmentMode, setInstallmentMode] = useState(initial?.installmentMode ?? false);
+  const [countStr, setCountStr] = useState(String(initial?.installments?.length || 3));
+  const [gapStr, setGapStr] = useState(String(initial?.periodDays ?? 30));
+  const hasPaidInstallment = !!initial?.installments?.some((i) => i.paidAt);
+  const [regenerate, setRegenerate] = useState(false);
 
   const submit = () => {
     const fee = parseNumberInput(feeStr);
@@ -513,7 +518,19 @@ function StudentForm({ initial, onClose, onSave }: {
     if (!firstName.trim()) { alert("نام هنرجو را وارد کنید."); return; }
     if (fee <= 0) { alert("مبلغ شهریه را وارد کنید."); return; }
     const startTs = new Date(startDate + "T00:00:00+03:30").getTime();
+    const count = Math.max(1, Math.round(parseNumberInput(countStr)));
+    const gap = Math.max(1, Math.round(parseNumberInput(gapStr)));
+    const makePlan = () =>
+      buildInstallmentPlan({ total: fee, count, firstDueAt: startTs + gap * 86_400_000, intervalDays: gap });
+
     if (initial) {
+      // اگر اقساط پرداخت‌شده وجود دارد، زمان‌بندی قبلی حفظ می‌شود مگر کاربر
+      // صریحاً «بازسازی» را انتخاب کند.
+      const keepOld = installmentMode && initial.installmentMode && !!initial.installments?.length && !regenerate;
+      const installments = installmentMode ? (keepOld ? initial.installments : makePlan()) : initial.installments;
+      const firstOpen = installmentMode
+        ? (installments ?? []).filter((i) => !i.paidAt).sort((a, b) => a.dueAt - b.dueAt)[0]
+        : undefined;
       onSave({
         ...initial,
         firstName: firstName.trim(),
@@ -524,20 +541,31 @@ function StudentForm({ initial, onClose, onSave }: {
         periodDays,
         startDate: startTs,
         note: note.trim() || undefined,
+        installmentMode,
+        installments,
+        nextDueAt: firstOpen ? firstOpen.dueAt : initial.nextDueAt,
       });
     } else {
+      const installments = installmentMode ? makePlan() : undefined;
       // add returns a Student in the store; here we just build the shape passed to onSave via store.add
       onSave({
-        id: "", createdAt: 0, active: true, nextDueAt: startTs + periodDays * 86_400_000, payments: [],
+        id: "", createdAt: 0, active: true,
+        nextDueAt: installments?.[0]?.dueAt ?? startTs + periodDays * 86_400_000,
+        payments: [],
         firstName: firstName.trim(),
         lastName: lastName.trim() || undefined,
         phone: phone.trim() || undefined,
         discipline: discipline.trim() || undefined,
         fee, periodDays, startDate: startTs,
         note: note.trim() || undefined,
+        installmentMode,
+        installments,
       });
     }
   };
+
+  const previewCount = Math.max(1, Math.round(parseNumberInput(countStr) || 1));
+  const previewEach = Math.floor((parseNumberInput(feeStr) || 0) / previewCount);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-2 sm:items-center" onClick={onClose}>
@@ -567,7 +595,9 @@ function StudentForm({ initial, onClose, onSave }: {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">شهریهٔ هر دوره (تومان)</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                {installmentMode ? "کل شهریه (تومان)" : "شهریهٔ هر دوره (تومان)"}
+              </label>
               <input className={inputCls} inputMode="numeric" value={feeStr} onChange={(e) => setFeeStr(e.target.value)} />
             </div>
             <div>
@@ -579,6 +609,49 @@ function StudentForm({ initial, onClose, onSave }: {
             <label className="mb-1 block text-xs text-muted-foreground">تاریخ شروع (ثبت‌نام)</label>
             <input className={inputCls} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
+
+          <div className="rounded-xl border border-border bg-muted/30 p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-primary"
+                checked={installmentMode}
+                onChange={(e) => setInstallmentMode(e.target.checked)}
+              />
+              <Layers className="h-4 w-4 text-primary" />
+              شهریهٔ اقساطی
+            </label>
+            {installmentMode && (
+              <div className="mt-2 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">تعداد اقساط</label>
+                    <input className={inputCls} inputMode="numeric" value={countStr} onChange={(e) => setCountStr(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-muted-foreground">فاصلهٔ اقساط (روز)</label>
+                    <input className={inputCls} inputMode="numeric" value={gapStr} onChange={(e) => setGapStr(e.target.value)} />
+                  </div>
+                </div>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  هر قسط حدود <span className="font-semibold text-foreground">{formatToman(previewEach)}</span> — اولین
+                  قسط {formatNumber(Math.max(1, Math.round(parseNumberInput(gapStr) || 1)))} روز پس از تاریخ شروع.
+                </p>
+                {initial?.installmentMode && !!initial.installments?.length && (
+                  <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-primary"
+                      checked={regenerate}
+                      onChange={(e) => setRegenerate(e.target.checked)}
+                    />
+                    بازسازی زمان‌بندی اقساط{hasPaidInstallment ? " (پرداخت‌های ثبت‌شدهٔ اقساط پاک می‌شود)" : ""}
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">یادداشت (اختیاری)</label>
             <textarea className={inputCls} rows={2} value={note} onChange={(e) => setNote(e.target.value)} />

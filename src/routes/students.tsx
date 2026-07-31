@@ -6,6 +6,10 @@ import {
   students as studentsStore,
   studentStatus,
   studentDaysToDue,
+  studentDueAt,
+  studentInstallments,
+  studentRemainingInstallments,
+  buildInstallmentPlan,
   formatToman,
   formatNumber,
   parseNumberInput,
@@ -33,6 +37,9 @@ import {
   Power,
   MessageCircle,
   Share2,
+  Layers,
+  CheckCircle,
+  RotateCcw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/students")({

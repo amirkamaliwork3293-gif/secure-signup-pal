@@ -675,7 +675,10 @@ function PaymentDialog({ student, onClose, onDone }: {
   onClose: () => void;
   onDone: (amount: number, nextDueAt: number) => void;
 }) {
-  const [amountStr, setAmountStr] = useState(String(student.fee));
+  const openIns = studentInstallments(student)
+    .filter((i) => !i.paidAt)
+    .sort((a, b) => a.dueAt - b.dueAt)[0];
+  const [amountStr, setAmountStr] = useState(String(openIns ? openIns.amount : student.fee));
   const [daysStr, setDaysStr] = useState(String(student.periodDays));
   const [note, setNote] = useState("");
 
@@ -683,9 +686,13 @@ function PaymentDialog({ student, onClose, onDone }: {
     const amount = parseNumberInput(amountStr);
     const days = Math.max(1, Math.round(parseNumberInput(daysStr)));
     if (amount <= 0) { alert("مبلغ نامعتبر"); return; }
-    studentsStore.recordPayment(student.id, { amount, days, note: note.trim() || undefined });
+    if (openIns) {
+      studentsStore.payInstallment(student.id, openIns.id, { amount, note: note.trim() || undefined });
+    } else {
+      studentsStore.recordPayment(student.id, { amount, days, note: note.trim() || undefined });
+    }
     const updated = studentsStore.getAll().find((s) => s.id === student.id)!;
-    onDone(amount, updated.nextDueAt);
+    onDone(amount, studentDueAt(updated));
   };
 
   return (
@@ -701,15 +708,23 @@ function PaymentDialog({ student, onClose, onDone }: {
         <p className="mb-3 text-xs text-muted-foreground">
           هنرجو: <span className="font-semibold text-foreground">{student.firstName} {student.lastName ?? ""}</span>
         </p>
+        {openIns && (
+          <div className="mb-3 rounded-xl border border-primary/30 bg-primary/5 p-2.5 text-[11px] leading-5 text-muted-foreground">
+            <Layers className="ml-1 inline h-3.5 w-3.5 text-primary" />
+            این پرداخت به‌عنوان <span className="font-semibold text-foreground">قسط با سررسید {formatJalaliDate(openIns.dueAt)}</span> ثبت می‌شود.
+          </div>
+        )}
         <div className="space-y-2">
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">مبلغ (تومان)</label>
             <input className={inputCls} inputMode="numeric" value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">تمدید دوره برای (روز)</label>
-            <input className={inputCls} inputMode="numeric" value={daysStr} onChange={(e) => setDaysStr(e.target.value)} />
-          </div>
+          {!openIns && (
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">تمدید دوره برای (روز)</label>
+              <input className={inputCls} inputMode="numeric" value={daysStr} onChange={(e) => setDaysStr(e.target.value)} />
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">یادداشت (اختیاری)</label>
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />

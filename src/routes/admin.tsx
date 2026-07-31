@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase, PLAN_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
+import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
@@ -13,7 +13,7 @@ import {
   adminClearSignupTempPassword,
 } from "@/lib/auth.functions";
 import {
-  DEFAULT_PLANS, normalizePlans, type PlansConfig, type PlanConfig,
+  DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
 } from "@/lib/plans";
 import { MESSAGE_TEMPLATES, type MessageTemplateId } from "@/lib/sms-templates";
 import {

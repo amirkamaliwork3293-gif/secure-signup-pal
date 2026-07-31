@@ -7,7 +7,13 @@
  * به هیچ‌کدام وابسته نیست و کاملاً سمت کلاینت است.
  */
 
-export type MessageTemplateId = "welcome" | "renewal_reminder" | "thanks" | "payment_received" | "custom";
+export type MessageTemplateId =
+  | "welcome"
+  | "renewal_done"
+  | "renewal_reminder"
+  | "thanks"
+  | "payment_received"
+  | "custom";
 
 export type MessageTemplateCtx = {
   /** نام نمایشی گیرنده (نام + نام‌خانوادگی، یا یوزرنیم اگر نام موجود نبود) */
@@ -49,6 +55,24 @@ export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
   },
   {
     id: "renewal_reminder",
+    label: "یادآوری تمدید اشتراک",
+    hasLink: true,
+    build: ({ name, renewLink, includeLink = true }) =>
+      `${name} عزیز، اشتراک شما در KAMIX رو به پایان است. برای جلوگیری از قطع دسترسی` +
+      (includeLink ? `، از لینک زیر تمدید کنید:\n${renewLink || DEFAULT_RENEW_LINK}` : " تمدید کنید."),
+  },
+  {
+    id: "renewal_done",
+    label: "تایید تمدید اشتراک",
+    hasLink: true,
+    build: ({ name, includeLink = true }) =>
+      `${name} عزیز، تمدید اشتراک شما در KAMIX با موفقیت انجام شد. ✅\n` +
+      `مدت پلن جدید به اعتبار قبلی شما اضافه شد و تمام اطلاعات (محصولات، مشتری‌ها و فاکتورها) محفوظ است.\n` +
+      `با همان یوزرنیم و رمز قبلی وارد شوید. از همراهی شما سپاسگزاریم 🌹` +
+      (includeLink ? `\n${WEB_LINK}` : ""),
+  },
+  {
+    id: "renewal_reminder_legacy" as MessageTemplateId,
     label: "یادآوری تمدید اشتراک",
     hasLink: true,
     build: ({ name, renewLink, includeLink = true }) =>

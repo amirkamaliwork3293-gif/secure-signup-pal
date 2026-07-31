@@ -72,14 +72,6 @@ export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
       (includeLink ? `\n${WEB_LINK}` : ""),
   },
   {
-    id: "renewal_reminder_legacy" as MessageTemplateId,
-    label: "یادآوری تمدید اشتراک",
-    hasLink: true,
-    build: ({ name, renewLink, includeLink = true }) =>
-      `${name} عزیز، اشتراک شما در KAMIX رو به پایان است. برای جلوگیری از قطع دسترسی` +
-      (includeLink ? `، از لینک زیر تمدید کنید:\n${renewLink || DEFAULT_RENEW_LINK}` : " تمدید کنید."),
-  },
-  {
     id: "payment_received",
     label: "تایید دریافت پرداخت",
     hasLink: false,

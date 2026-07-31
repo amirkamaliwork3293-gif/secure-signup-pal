@@ -108,7 +108,7 @@ function StudentsInner() {
     const sorted = items.sort((a, b) => {
       const w = weight(a) - weight(b);
       if (w !== 0) return w;
-      return a.nextDueAt - b.nextDueAt;
+      return studentDueAt(a) - studentDueAt(b);
     });
     if (!query) return sorted;
     return filterAndRankSearch(sorted, query, (s) => [
@@ -228,7 +228,15 @@ function StudentsInner() {
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span>شهریه: {formatToman(s.fee)}</span>
-                      <span>دوره: {formatNumber(s.periodDays)} روز</span>
+                      {s.installmentMode ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                          <Layers className="h-3 w-3" />
+                          اقساطی ({formatNumber(studentInstallments(s).filter((i) => i.paidAt).length)}/
+                          {formatNumber(studentInstallments(s).length)})
+                        </span>
+                      ) : (
+                        <span>دوره: {formatNumber(s.periodDays)} روز</span>
+                      )}
                       <span className={
                         st === "overdue" ? "font-semibold text-red-500" :
                         st === "due-today" ? "font-semibold text-red-500" :
@@ -238,7 +246,12 @@ function StudentsInner() {
                          st === "due-today" ? "امروز سررسید!" :
                          `${formatNumber(days)} روز مانده`}
                       </span>
-                      <span>سررسید: {formatJalaliDate(s.nextDueAt)}</span>
+                      <span>سررسید: {formatJalaliDate(studentDueAt(s))}</span>
+                      {s.installmentMode && studentRemainingInstallments(s) > 0 && (
+                        <span className="font-semibold text-amber-600">
+                          مانده: {formatToman(studentRemainingInstallments(s))}
+                        </span>
+                      )}
                     </div>
                   </button>
                   <div className="flex flex-col gap-1">
@@ -286,6 +299,80 @@ function StudentsInner() {
                         </div>
                       )}
                     </div>
+
+                    {s.installmentMode && studentInstallments(s).length > 0 && (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Layers className="h-3.5 w-3.5" />
+                            اقساط شهریه
+                          </span>
+                          <span>
+                            مانده: <span className="text-amber-600">{formatToman(studentRemainingInstallments(s))}</span>
+                          </span>
+                        </div>
+                        <ul className="space-y-1">
+                          {studentInstallments(s)
+                            .slice()
+                            .sort((a, b) => a.dueAt - b.dueAt)
+                            .map((ins, idx) => {
+                              const overdue = !ins.paidAt && ins.dueAt < Date.now();
+                              return (
+                                <li
+                                  key={ins.id}
+                                  className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs ${
+                                    ins.paidAt
+                                      ? "bg-emerald-500/10"
+                                      : overdue
+                                        ? "bg-red-500/10"
+                                        : "bg-muted/40"
+                                  }`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="font-semibold">
+                                      قسط {formatNumber(idx + 1)} — {formatToman(ins.amount)}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground">
+                                      سررسید {formatJalaliDate(ins.dueAt)}
+                                      {ins.paidAt ? ` — پرداخت ${formatJalaliDate(ins.paidAt)}` : ""}
+                                    </div>
+                                  </div>
+                                  {ins.paidAt ? (
+                                    <button
+                                      onClick={() => {
+                                        if (confirm("لغو پرداخت این قسط؟")) {
+                                          studentsStore.unpayInstallment(s.id, ins.id);
+                                        }
+                                      }}
+                                      className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-muted-foreground"
+                                    >
+                                      <RotateCcw className="h-3 w-3" />
+                                      لغو
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        studentsStore.payInstallment(s.id, ins.id, { amount: ins.amount });
+                                        const updated = studentsStore.getAll().find((x) => x.id === s.id);
+                                        if (updated) {
+                                          setSmsFor({
+                                            student: updated,
+                                            payment: { amount: ins.amount, nextDueAt: studentDueAt(updated) },
+                                          });
+                                        }
+                                      }}
+                                      className="flex shrink-0 items-center gap-1 rounded-lg bg-emerald-500 px-2 py-1 text-[10px] font-semibold text-white"
+                                    >
+                                      <CheckCircle className="h-3 w-3" />
+                                      پرداخت شد
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })}
+                        </ul>
+                      </div>
+                    )}
 
                     {s.payments.length > 0 && (
                       <div>

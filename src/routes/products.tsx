@@ -591,6 +591,16 @@ function ProductModal({
   const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
   const [wholesalePrice, setWholesalePrice] = useState(initial?.wholesalePrice ? String(initial.wholesalePrice) : "");
   const [wholesaleMinQty, setWholesaleMinQty] = useState(initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "");
+  // تاریخ انقضا — فقط در صورت فعال کردن کاربر نمایش داده و ذخیره می‌شود
+  const nowJ = toJalali(Date.now()) ?? { jy: 1404, jm: 1, jd: 1, h: 0, min: 0 };
+  const initExpJ = initial?.expiryAt ? toJalali(initial.expiryAt) ?? nowJ : nowJ;
+  const [hasExpiry, setHasExpiry] = useState(!!initial?.expiryAt);
+  const [ejy, setEjy] = useState(initExpJ.jy);
+  const [ejm, setEjm] = useState(initExpJ.jm);
+  const [ejd, setEjd] = useState(initExpJ.jd);
+  const expDaysInMonth = jalaliMonthLength(ejy, ejm);
+  useEffect(() => { if (ejd > expDaysInMonth) setEjd(expDaysInMonth); }, [expDaysInMonth, ejd]);
+  const EXP_YEARS = Array.from({ length: 8 }, (_, i) => nowJ.jy + i);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -612,6 +622,7 @@ function ProductModal({
       discountPercent: discountNum || undefined,
       wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
       wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
+      expiryAt: hasExpiry ? jalaliToTimestamp(ejy, ejm, ejd, 23, 59) : undefined,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);

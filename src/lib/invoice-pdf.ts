@@ -100,7 +100,7 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
 
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
   ctx.fillStyle = MUTED;
-  ctx.fillText(pageNo === 1 ? "KAMIX | فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
+  ctx.fillText(pageNo === 1 ? "فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
   y += 5 * SCALE;
 
   // آدرس/تلفن فروشگاه — فقط در صفحه اول و در صورت وجود

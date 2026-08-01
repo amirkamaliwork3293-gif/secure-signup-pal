@@ -62,17 +62,12 @@ function RenewPage() {
       </div>
     );
   }
-  // اگر کاربر فعال است نیازی به تمدید نیست
-  if (state.status === "authenticated") {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6 text-center">
-        <p className="mb-4 text-sm text-muted-foreground">اشتراک شما فعال است. نیازی به تمدید نیست.</p>
-        <Link to="/" className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">بازگشت به برنامه</Link>
-      </div>
-    );
-  }
-
-  const username = (state as any).username ?? "—";
+  const profile: any =
+    state.status === "authenticated" ? state.profile : (state as any).profile ?? null;
+  const username = profile?.username ?? (state as any).username ?? "—";
+  const endMs = profile?.end_date ? new Date(profile.end_date).getTime() : 0;
+  const daysLeft = endMs ? Math.ceil((endMs - Date.now()) / 86_400_000) : 0;
+  const isActive = state.status === "authenticated";
   const visiblePlans = PAID.filter((p) => plansCfg[p]?.enabled);
 
   const copyCard = async () => {
@@ -135,16 +130,24 @@ function RenewPage() {
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             پس از تایید مدیر، اشتراک شما با همین حساب فعال خواهد شد. تمام اطلاعات (محصولات، مشتری‌ها، فاکتورها و تنظیمات) شما حفظ شده است.
           </p>
-          <div className="mt-5 flex gap-2">
+          <div className="mt-5 grid grid-cols-2 gap-2">
             <button
               onClick={() => void refreshProfile()}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
             >
               <RefreshCw className="h-4 w-4" />
               بررسی مجدد
             </button>
-            <button onClick={signOut} className="rounded-xl border border-border px-4 py-2.5 text-sm">خروج</button>
+            <Link
+              to="/invoices"
+              className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-accent"
+            >
+              بازگشت به برنامه
+            </Link>
           </div>
+          <button type="button" onClick={signOut} className="mt-3 w-full text-center text-xs text-muted-foreground hover:underline">
+            خروج از حساب
+          </button>
         </div>
       </div>
     );
@@ -166,6 +169,18 @@ function RenewPage() {
         <div className="rounded-xl border border-dashed border-primary/30 bg-primary/5 p-3 text-xs leading-6 text-muted-foreground">
           ✅ نیازی به وارد کردن مجدد یوزرنیم یا رمز نیست. فقط پلن را انتخاب و رسید پرداخت را آپلود کنید — تمام داده‌های قبلی شما محفوظ است.
         </div>
+        {isActive && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs leading-6 text-emerald-700 dark:text-emerald-400">
+            {daysLeft > 0 ? (
+              <>
+                اشتراک فعلی شما <strong>{daysLeft.toLocaleString("fa-IR")} روز</strong> دیگر اعتبار دارد. مدت پلن جدید
+                <strong> به همین باقی‌مانده اضافه</strong> می‌شود.
+              </>
+            ) : (
+              <>اشتراک شما فعال است؛ با تمدید، مدت جدید به اعتبار فعلی اضافه می‌شود.</>
+            )}
+          </div>
+        )}
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">انتخاب پلن جدید</label>
@@ -246,7 +261,8 @@ function RenewPage() {
               <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
             </button>
           )}
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
+          {/* هیچ محدودیتی روی نوع یا حجم فایل نیست — دقیقاً مثل صفحهٔ ثبت‌نام */}
+          <input ref={fileRef} type="file" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">

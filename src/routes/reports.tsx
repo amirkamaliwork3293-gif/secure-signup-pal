@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice, products, formatToman, formatNumber, PAYMENT_LABEL,
-  formatJalaliDate, parseJalaliInput, jalaliToTimestamp,
+  formatJalaliDate, parseJalaliInput, jalaliToTimestamp, toJalali,
   expenses as expensesStore, expensesTotal, expensesByCategory,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
@@ -30,17 +30,17 @@ function startOfDay(d = new Date()) {
   x.setHours(0, 0, 0, 0);
   return x.getTime();
 }
+// بازه‌ی ماه/سال بر اساس تقویم شمسی محاسبه می‌شود (نه میلادی) چون تاریخ‌ها در کل
+// برنامه شمسی نمایش داده و ذخیره می‌شوند.
 function startOfMonth(d = new Date()) {
-  const x = new Date(d);
-  x.setDate(1);
-  x.setHours(0, 0, 0, 0);
-  return x.getTime();
+  const j = toJalali(d.getTime());
+  if (!j) return 0;
+  return jalaliToTimestamp(j.jy, j.jm, 1, 0, 0);
 }
 function startOfYear(d = new Date()) {
-  const x = new Date(d);
-  x.setMonth(0, 1);
-  x.setHours(0, 0, 0, 0);
-  return x.getTime();
+  const j = toJalali(d.getTime());
+  if (!j) return 0;
+  return jalaliToTimestamp(j.jy, 1, 1, 0, 0);
 }
 
 function summarize(list: Invoice[]) {

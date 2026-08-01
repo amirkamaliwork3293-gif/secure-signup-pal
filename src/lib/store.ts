@@ -244,6 +244,9 @@ const CUSTOMERS_KEY = "acc.customers.v1";
 const STUDENTS_KEY = "acc.students.v1";
 const PURCHASES_KEY = "acc.purchases.v1";
 const EXPENSES_KEY = "acc.expenses.v1";
+const REMINDERS_KEY = "acc.reminders.v1";
+const ACCOUNTS_KEY = "acc.accounts.v1";
+const ACCOUNT_TXS_KEY = "acc.account_txs.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -253,7 +256,8 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 const CLOUD_FIELDS: Record<
   string,
   | "products" | "categories" | "invoices" | "current_invoice" | "settings"
-  | "customers" | "students" | "purchases" | "expenses"
+  | "customers" | "students" | "purchases" | "expenses" | "reminders"
+  | "accounts" | "account_txs"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -264,6 +268,9 @@ const CLOUD_FIELDS: Record<
   [STUDENTS_KEY]: "students",
   [PURCHASES_KEY]: "purchases",
   [EXPENSES_KEY]: "expenses",
+  [REMINDERS_KEY]: "reminders",
+  [ACCOUNTS_KEY]: "accounts",
+  [ACCOUNT_TXS_KEY]: "account_txs",
 };
 
 // Reverse map: cloud column name -> local storage key
@@ -309,6 +316,8 @@ export type AppSettings = {
   showStudentsFeature?: boolean;
   /** نمایش بخش «طلا» (نرخ لحظه‌ای + فاکتور طلا) در نوار پایین — پیش‌فرض غیرفعال */
   showGoldFeature?: boolean;
+  /** نمایش بخش «یادآوری‌ها» (پیگیری مشتریان و وظایف) در نوار پایین — پیش‌فرض فعال */
+  showRemindersFeature?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
 };
@@ -320,6 +329,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showMenuFeature: false,
   showStudentsFeature: false,
   showGoldFeature: false,
+  showRemindersFeature: true,
 };
 
 function getStorageScope() {
@@ -488,6 +498,27 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /reminders/.test(error.message) && "reminders" in payload) {
+      delete payload.reminders;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
+    if (error && /accounts/.test(error.message) && "accounts" in payload) {
+      delete payload.accounts;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
+    if (error && /account_txs/.test(error.message) && "account_txs" in payload) {
+      delete payload.account_txs;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -561,6 +592,9 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
     overwrite("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
     overwrite("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
+    overwrite("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
+    overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
+    overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {
@@ -1035,6 +1069,177 @@ export const expenses = {
   },
 };
 
+// ─── Reminders (یادآوری‌ها — پیگیری وظایف و مشتریان) ─────────────────────────
+
+export type Reminder = {
+  id: string;
+  /** عنوان یادآوری، مثلاً «تماس با آقای رضایی» */
+  title: string;
+  note?: string;
+  /** زمان سررسید یادآوری (timestamp) */
+  dueAt: number;
+  /** اتصال اختیاری به یک مشتری از لیست مشتریان */
+  customerId?: string;
+  /** نام مشتری در لحظه‌ی ثبت — حتی اگر بعداً مشتری حذف/ویرایش شود، عنوان یادآوری معتبر می‌ماند */
+  customerName?: string;
+  /** یادآوری تکرارشونده (مثل پیگیری هفتگی) — تعداد روز دوره؛ خالی یعنی یک‌بار */
+  recurringDays?: number;
+  done: boolean;
+  doneAt?: number;
+  createdAt: number;
+};
+
+export type ReminderStatus = "done" | "overdue" | "due-today" | "soon" | "upcoming";
+
+/** وضعیت یک یادآوری بر اساس سررسید (نسبت به «امروز» به وقت تهران) */
+export function reminderStatus(r: Reminder): ReminderStatus {
+  if (r.done) return "done";
+  const today = todayStartTs();
+  const days = Math.floor((r.dueAt - today) / 86_400_000);
+  if (days < 0) return "overdue";
+  if (days === 0) return "due-today";
+  if (days <= 3) return "soon";
+  return "upcoming";
+}
+
+/** لیست یادآوری‌های فعال (انجام‌نشده)، مرتب‌شده بر اساس فوریت سررسید */
+export function activeReminders(list: Reminder[]): Reminder[] {
+  return list
+    .filter((r) => !r.done)
+    .sort((a, b) => a.dueAt - b.dueAt);
+}
+
+/** تعداد یادآوری‌های امروز یا عقب‌افتاده — برای نشان (badge) در نوار پایین */
+export function dueReminderCount(list: Reminder[]): number {
+  return list.filter((r) => !r.done && (reminderStatus(r) === "overdue" || reminderStatus(r) === "due-today")).length;
+}
+
+export const reminders = {
+  useAll: () => useStore<Reminder[]>(REMINDERS_KEY, []),
+  getAll: () => read<Reminder[]>(REMINDERS_KEY, []),
+  save: (list: Reminder[]) => write(REMINDERS_KEY, list),
+
+  add: (r: Omit<Reminder, "id" | "createdAt" | "done" | "doneAt">) => {
+    const created: Reminder = { ...r, id: cryptoId(), createdAt: Date.now(), done: false };
+    write(REMINDERS_KEY, [created, ...read<Reminder[]>(REMINDERS_KEY, [])]);
+    return created;
+  },
+
+  update: (updated: Reminder) => {
+    const list = read<Reminder[]>(REMINDERS_KEY, []);
+    write(REMINDERS_KEY, list.map((r) => (r.id === updated.id ? updated : r)));
+  },
+
+  remove: (id: string) => {
+    const list = read<Reminder[]>(REMINDERS_KEY, []);
+    write(REMINDERS_KEY, list.filter((r) => r.id !== id));
+  },
+
+  /** انجام‌شده علامت بزن؛ اگر تکرارشونده باشد، یادآوری بعدی خودکار ساخته می‌شود */
+  markDone: (id: string) => {
+    const list = read<Reminder[]>(REMINDERS_KEY, []);
+    const target = list.find((r) => r.id === id);
+    if (!target) return;
+    const next = list.map((r) => (r.id === id ? { ...r, done: true, doneAt: Date.now() } : r));
+    if (target.recurringDays && target.recurringDays > 0) {
+      const period = target.recurringDays * 86_400_000;
+      let nextDue = target.dueAt + period;
+      const now = Date.now();
+      while (nextDue < now) nextDue += period;
+      next.unshift({
+        ...target,
+        id: cryptoId(),
+        dueAt: nextDue,
+        done: false,
+        doneAt: undefined,
+        createdAt: Date.now(),
+      });
+    }
+    write(REMINDERS_KEY, next);
+  },
+
+  /** برگرداندن یک یادآوری انجام‌شده به حالت فعال */
+  markUndone: (id: string) => {
+    const list = read<Reminder[]>(REMINDERS_KEY, []);
+    write(REMINDERS_KEY, list.map((r) => (r.id === id ? { ...r, done: false, doneAt: undefined } : r)));
+  },
+};
+
+// ─── Accounts (حساب‌ها و کارت‌ها — صندوق، بانک، واریز/برداشت) ────────────────
+
+export type Account = {
+  id: string;
+  /** نام حساب/کارت، مثلاً «کارت ملی بانک» یا «صندوق فروشگاه» */
+  name: string;
+  /** شماره کارت (اختیاری) — فقط برای مرجع؛ در نمایش، پوشیده می‌شود */
+  cardNumber?: string;
+  /** موجودی اولیه هنگام تعریف حساب */
+  openingBalance: number;
+  createdAt: number;
+};
+
+export type AccountTx = {
+  id: string;
+  accountId: string;
+  type: "deposit" | "withdraw";
+  amount: number;
+  note?: string;
+  at: number;
+  createdAt: number;
+};
+
+/** موجودی فعلی یک حساب = موجودی اولیه + واریزها − برداشت‌ها */
+export function accountBalance(account: Account, txs: AccountTx[]): number {
+  return txs
+    .filter((t) => t.accountId === account.id)
+    .reduce((sum, t) => sum + (t.type === "deposit" ? t.amount : -t.amount), account.openingBalance);
+}
+
+/** نمایش پوشیده‌ی شماره کارت، مثلاً «•••• •••• •••• ۱۲۳۴» */
+export function maskCardNumber(cardNumber: string): string {
+  const digits = cardNumber.replace(/\D/g, "");
+  if (digits.length < 4) return cardNumber;
+  const last4 = digits.slice(-4);
+  return `•••• •••• •••• ${formatNumber(last4)}`;
+}
+
+export const accounts = {
+  useAll: () => useStore<Account[]>(ACCOUNTS_KEY, []),
+  getAll: () => read<Account[]>(ACCOUNTS_KEY, []),
+
+  add: (a: Omit<Account, "id" | "createdAt">): Account => {
+    const created: Account = { ...a, id: cryptoId(), createdAt: Date.now() };
+    write(ACCOUNTS_KEY, [created, ...read<Account[]>(ACCOUNTS_KEY, [])]);
+    return created;
+  },
+
+  update: (updated: Account) => {
+    const list = read<Account[]>(ACCOUNTS_KEY, []);
+    write(ACCOUNTS_KEY, list.map((a) => (a.id === updated.id ? updated : a)));
+  },
+
+  /** حذف حساب همراه با تمام تراکنش‌های مربوط به آن */
+  remove: (id: string) => {
+    write(ACCOUNTS_KEY, read<Account[]>(ACCOUNTS_KEY, []).filter((a) => a.id !== id));
+    write(ACCOUNT_TXS_KEY, read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.accountId !== id));
+  },
+};
+
+export const accountTxs = {
+  useAll: () => useStore<AccountTx[]>(ACCOUNT_TXS_KEY, []),
+  getAll: () => read<AccountTx[]>(ACCOUNT_TXS_KEY, []),
+
+  add: (t: Omit<AccountTx, "id" | "createdAt">): AccountTx => {
+    const created: AccountTx = { ...t, id: cryptoId(), createdAt: Date.now() };
+    write(ACCOUNT_TXS_KEY, [created, ...read<AccountTx[]>(ACCOUNT_TXS_KEY, [])]);
+    return created;
+  },
+
+  remove: (id: string) => {
+    write(ACCOUNT_TXS_KEY, read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.id !== id));
+  },
+};
+
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 export const settings = {
@@ -1175,6 +1380,20 @@ export type StudentPayment = {
   note?: string;
 };
 
+/** یک قسط از شهریهٔ اقساطی */
+export type StudentInstallment = {
+  id: string;
+  /** مبلغ قسط (تومان) */
+  amount: number;
+  /** تاریخ سررسید قسط */
+  dueAt: number;
+  /** اگر پرداخت شده باشد، زمان پرداخت */
+  paidAt?: number;
+  /** مبلغ واقعاً پرداخت‌شده (ممکن است با amount فرق کند) */
+  paidAmount?: number;
+  note?: string;
+};
+
 export type Student = {
   id: string;
   firstName: string;
@@ -1194,6 +1413,10 @@ export type Student = {
   note?: string;
   createdAt: number;
   payments: StudentPayment[];
+  /** حالت اقساطی: اگر true باشد سررسید از روی اقساط محاسبه می‌شود */
+  installmentMode?: boolean;
+  /** لیست اقساط (فقط وقتی installmentMode فعال است معنا دارد) */
+  installments?: StudentInstallment[];
 };
 
 function todayStartTs(): number {
@@ -1208,7 +1431,52 @@ function todayStartTs(): number {
 /** روزهای باقی‌مانده تا سررسید (منفی = گذشته) */
 export function studentDaysToDue(s: Student): number {
   const today = todayStartTs();
-  return Math.round((s.nextDueAt - today) / 86_400_000);
+  return Math.round((studentDueAt(s) - today) / 86_400_000);
+}
+
+/** لیست اقساط (همیشه آرایه) */
+export function studentInstallments(s: Student): StudentInstallment[] {
+  return s.installmentMode ? (s.installments ?? []) : [];
+}
+
+/** نزدیک‌ترین قسط پرداخت‌نشده */
+export function nextUnpaidInstallment(s: Student): StudentInstallment | null {
+  const open = studentInstallments(s)
+    .filter((i) => !i.paidAt)
+    .sort((a, b) => a.dueAt - b.dueAt);
+  return open[0] ?? null;
+}
+
+/** سررسید مؤثر: در حالت اقساطی، سررسید نزدیک‌ترین قسط باز */
+export function studentDueAt(s: Student): number {
+  const next = nextUnpaidInstallment(s);
+  return next ? next.dueAt : s.nextDueAt;
+}
+
+/** جمع مبلغ باقی‌ماندهٔ اقساط پرداخت‌نشده */
+export function studentRemainingInstallments(s: Student): number {
+  return studentInstallments(s)
+    .filter((i) => !i.paidAt)
+    .reduce((a, i) => a + i.amount, 0);
+}
+
+/** ساخت زمان‌بندی خودکار اقساط */
+export function buildInstallmentPlan(opts: {
+  total: number;
+  count: number;
+  firstDueAt: number;
+  intervalDays: number;
+}): StudentInstallment[] {
+  const count = Math.max(1, Math.round(opts.count));
+  const total = Math.max(0, Math.round(opts.total));
+  const base = Math.floor(total / count);
+  // باقی‌ماندهٔ تقسیم به قسط آخر اضافه می‌شود تا جمع دقیقاً برابر کل شود
+  const rest = total - base * count;
+  return Array.from({ length: count }, (_, i) => ({
+    id: cryptoId(),
+    amount: i === count - 1 ? base + rest : base,
+    dueAt: opts.firstDueAt + i * opts.intervalDays * 86_400_000,
+  }));
 }
 
 export type StudentStatus = "overdue" | "due-today" | "soon" | "ok";
@@ -1272,6 +1540,53 @@ export const students = {
       return { ...s, nextDueAt, payments: [payment, ...s.payments] };
     });
     write(STUDENTS_KEY, next);
+  },
+
+  /** پرداخت یک قسط مشخص */
+  payInstallment: (studentId: string, installmentId: string, opts?: { amount?: number; note?: string }) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    const next = list.map((s) => {
+      if (s.id !== studentId) return s;
+      const installments = (s.installments ?? []).map((i) =>
+        i.id === installmentId && !i.paidAt
+          ? { ...i, paidAt: Date.now(), paidAmount: opts?.amount ?? i.amount, note: opts?.note ?? i.note }
+          : i,
+      );
+      const target = installments.find((i) => i.id === installmentId);
+      const updated: Student = { ...s, installments };
+      const upcoming = nextUnpaidInstallment(updated);
+      const payment: StudentPayment = {
+        id: cryptoId(),
+        amount: target?.paidAmount ?? 0,
+        at: Date.now(),
+        periodStart: target?.dueAt ?? Date.now(),
+        nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt,
+        note: opts?.note ?? "پرداخت قسط",
+      };
+      return {
+        ...updated,
+        nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt,
+        payments: [payment, ...s.payments],
+      };
+    });
+    write(STUDENTS_KEY, next);
+  },
+
+  /** لغو پرداخت یک قسط (اگر اشتباه ثبت شده باشد) */
+  unpayInstallment: (studentId: string, installmentId: string) => {
+    const list = read<Student[]>(STUDENTS_KEY, []);
+    write(
+      STUDENTS_KEY,
+      list.map((s) => {
+        if (s.id !== studentId) return s;
+        const installments = (s.installments ?? []).map((i) =>
+          i.id === installmentId ? { ...i, paidAt: undefined, paidAmount: undefined } : i,
+        );
+        const updated: Student = { ...s, installments };
+        const upcoming = nextUnpaidInstallment(updated);
+        return { ...updated, nextDueAt: upcoming ? upcoming.dueAt : s.nextDueAt };
+      }),
+    );
   },
 };
 
@@ -1542,7 +1857,7 @@ function toFa(s: string | number): string {
 }
 function pad2(n: number): string { return n < 10 ? "0" + n : String(n); }
 
-const JMONTHS_LONG = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+export const JMONTHS_LONG = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
   "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const JMONTHS_SHORT = JMONTHS_LONG; // Persian months don't have a distinct short form
 const WEEKDAYS_FA = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
@@ -1584,6 +1899,13 @@ function j2d(jy: number, jm: number, jd: number): number {
     + (jm - 1) * 31
     - div(jm, 7) * (jm - 7)
     + jd - 1;
+}
+
+/** تعداد روزهای یک ماه شمسی (برای ساخت لیست انتخابی روز در فرم‌ها) */
+export function jalaliMonthLength(jy: number, jm: number): number {
+  const nextJy = jm === 12 ? jy + 1 : jy;
+  const nextJm = jm === 12 ? 1 : jm + 1;
+  return j2d(nextJy, nextJm, 1) - j2d(jy, jm, 1);
 }
 
 /** Convert a Jalali date (interpreted in Asia/Tehran) to a UTC timestamp (ms). */

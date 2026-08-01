@@ -399,8 +399,20 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       if (!targetId) throw new Error("شناسه کاربر مقصد در درخواست تمدید یافت نشد.");
       const plansCfg = await loadPlansConfig(supabaseAdmin);
       const plan = req.plan as Plan;
-      const start = new Date();
-      const end = new Date(start.getTime() + planDurationMs(plansCfg, plan));
+      // اگر هنوز از اشتراک قبلی زمان باقی مانده، مدت جدید روی همان باقی‌مانده
+      // اضافه می‌شود (مثلاً ۱۵ روز مانده + ۱ ماه = ۴۵ روز).
+      const { data: targetProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("end_date, start_date")
+        .eq("id", targetId)
+        .maybeSingle();
+      const now = Date.now();
+      const prevEnd = (targetProfile as any)?.end_date
+        ? new Date((targetProfile as any).end_date).getTime()
+        : 0;
+      const base = new Date(Math.max(now, isFinite(prevEnd) ? prevEnd : 0));
+      const start = new Date(now);
+      const end = new Date(base.getTime() + planDurationMs(plansCfg, plan));
       const { error: renErr } = await supabaseAdmin
         .from("profiles")
         .update({ plan, status: "active", start_date: start.toISOString(), end_date: end.toISOString() })

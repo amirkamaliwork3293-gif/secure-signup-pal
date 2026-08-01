@@ -1,9 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 /**
- * نرخ لحظه‌ای طلا/سکه/ارز از سرویس BrsApi.ir
- * کلید باید در متغیرهای محیطی سرور با نام GOLD_API_KEY تنظیم شود
- * (در Vercel: Project → Settings → Environment Variables).
+ * نرخ لحظه‌ای طلا/سکه/ارز از سرویس TGJU (رایگان و بدون کلید)
+ * نتیجه در کش مشترک دیتابیس ذخیره می‌شود تا همه‌ی کاربران از یک درخواست استفاده کنند.
  */
 
 export type GoldQuote = {
@@ -19,34 +18,20 @@ export type GoldPricesResult =
   | { ok: true; items: GoldQuote[]; updatedAt: string; source: string }
   | { ok: false; error: string };
 
-type BrsRow = {
-  symbol?: string;
-  name?: string;
-  name_en?: string;
-  price?: number | string;
-  unit?: string;
-  change_percent?: number | string;
-  date?: string;
-  time?: string;
-};
-
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
-function mapRows(rows: BrsRow[] | undefined, group: GoldQuote["group"]): GoldQuote[] {
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((r, i) => ({
-      key: String(r.symbol ?? r.name_en ?? `${group}-${i}`),
-      name: String(r.name ?? r.symbol ?? "—"),
-      price: num(r.price),
-      unit: String(r.unit ?? "تومان"),
-      changePercent: r.change_percent === undefined ? null : num(r.change_percent),
-      group,
-    }))
-    .filter((q) => q.price > 0);
+const UA_POOL = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+];
+
+function pickUA() {
+  return UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
 }
 
 async function fetchJson(url: string, ms = 10_000): Promise<unknown> {
@@ -57,36 +42,18 @@ async function fetchJson(url: string, ms = 10_000): Promise<unknown> {
       signal: ctrl.signal,
       headers: {
         accept: "application/json,text/plain,*/*",
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        "accept-language": "fa-IR,fa;q=0.9,en;q=0.8",
+        referer: "https://www.tgju.org/",
+        "user-agent": pickUA(),
+        "cache-control": "no-cache",
       },
     });
+    if (res.status === 403 || res.status === 429) throw new Error(`BLOCKED_${res.status}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** منبع ۱: BrsApi.ir (نیازمند کلید) — آدرس صحیح: https://Api.BrsApi.ir/Market/ */
-async function fromBrsApi(key: string): Promise<GoldQuote[]> {
-  const json = (await fetchJson(
-    `https://Api.BrsApi.ir/Market/Gold_Currency.php?key=${encodeURIComponent(key)}`,
-  )) as { gold?: BrsRow[]; currency?: BrsRow[]; error?: string };
-  if (json?.error) throw new Error(String(json.error));
-  const goldRows = mapRows(json.gold, "gold");
-  const coinRows = mapRows(json.gold, "coin").filter((r) =>
-    /سکه|coin|نیم|ربع|گرمی|امامی|آزادی/i.test(r.name),
-  );
-  return [
-    ...goldRows.filter((r) => !coinRows.includes(r)),
-    ...coinRows,
-    ...mapRows(json.currency, "currency").filter((c) =>
-      ["USD", "EUR", "AED", "GBP", "TRY", "CHF", "CAD", "AUD", "CNY"].includes(
-        c.key.toUpperCase(),
-      ),
-    ),
-  ];
 }
 
 type TgjuCell = { p?: string; dp?: number | string; d?: number | string };
@@ -158,15 +125,29 @@ async function writeSharedCache(items: GoldQuote[], source: string, updatedAt: s
   }
 }
 
-export const getGoldPrices = createServerFn({ method: "GET" }).handler(
-  async (): Promise<GoldPricesResult> => {
-    if (cache && cache.expiresAt > Date.now()) {
+/** حداقل فاصله بین دو بروزرسانی دستی کاربر */
+const FORCE_MIN_AGE_MS = 30 * 1000;
+
+/** وقتی منبعی بلاک/خطا بدهد، مدتی کنار گذاشته می‌شود (circuit breaker) */
+const cooldown: Record<string, number> = {};
+const COOLDOWN_MS = 10 * 60 * 1000;
+
+/** حداکثر عمر کش اضطراری وقتی همه‌ی منابع از کار افتاده‌اند (۱۲ ساعت) */
+const STALE_MAX_MS = 12 * 60 * 60 * 1000;
+
+export const getGoldPrices = createServerFn({ method: "GET" })
+  .inputValidator((data: { force?: boolean } | undefined) => ({ force: !!data?.force }))
+  .handler(async ({ data }): Promise<GoldPricesResult> => {
+    const force = data.force;
+    const ttl = force ? FORCE_MIN_AGE_MS : CACHE_TTL_MS;
+
+    if (cache && Date.now() < cache.expiresAt - (CACHE_TTL_MS - ttl)) {
       return { ok: true, items: cache.items, updatedAt: cache.updatedAt, source: "cache" };
     }
 
     // کش مشترک دیتابیس (بین همه‌ی سرورها و کاربران)
     const shared = await readSharedCache();
-    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < CACHE_TTL_MS) {
+    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < ttl) {
       cache = {
         items: shared.items,
         updatedAt: shared.updatedAt,
@@ -175,18 +156,20 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
       return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: shared.source };
     }
 
-    const key = process.env.GOLD_API_KEY || process.env.BRSAPI_KEY;
     const errors: string[] = [];
 
-    const sources: Array<{ label: string; run: () => Promise<GoldQuote[]> }> = [
+    const allSources: Array<{ label: string; run: () => Promise<GoldQuote[]> }> = [
       { label: "tgju", run: () => fromTgju("https://call3.tgju.org/ajax.json") },
       { label: "tgju2", run: () => fromTgju("https://call1.tgju.org/ajax.json") },
+      { label: "tgju4", run: () => fromTgju("https://call4.tgju.org/ajax.json") },
+      { label: "tgju5", run: () => fromTgju("https://call5.tgju.org/ajax.json") },
+      { label: "tgju-api", run: () => fromTgju("https://api.tgju.online/v1/data/sana/json") },
     ];
-    if (key) {
-      sources.unshift({ label: "brsapi", run: () => fromBrsApi(key) });
-    } else {
-      errors.push("brsapi: کلید API تنظیم نشده (GOLD_API_KEY یا BRSAPI_KEY)");
-    }
+
+    const now = Date.now();
+    // منابعی که اخیراً بلاک شده‌اند را فعلاً کنار بگذار (اما اگر همه در cooldown بودند، همه را امتحان کن)
+    const ready = allSources.filter((s) => !cooldown[s.label] || cooldown[s.label] < now);
+    const sources = ready.length ? ready : allSources;
 
     for (const s of sources) {
       try {
@@ -194,18 +177,26 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
         if (items.length > 0) {
           const updatedAt = new Date().toISOString();
           cache = { items, updatedAt, expiresAt: Date.now() + CACHE_TTL_MS };
+          delete cooldown[s.label];
           await writeSharedCache(items, s.label, updatedAt);
           return { ok: true, items, updatedAt, source: s.label };
         }
         errors.push(`${s.label}: داده‌ای برنگشت`);
       } catch (e) {
-        errors.push(`${s.label}: ${String((e as Error)?.message ?? e)}`);
+        const msg = String((e as Error)?.message ?? e);
+        if (msg.startsWith("BLOCKED_")) cooldown[s.label] = Date.now() + COOLDOWN_MS;
+        errors.push(`${s.label}: ${msg}`);
+        // مکث کوتاه تصادفی تا الگوی درخواست‌ها شبیه ربات نباشد
+        await new Promise((r) => setTimeout(r, 300 + Math.random() * 400));
       }
     }
 
     // اگر همه‌ی منابع خطا دادند، آخرین نرخ ذخیره‌شده را نشان بده
-    if (shared) {
+    if (shared && Date.now() - new Date(shared.updatedAt).getTime() < STALE_MAX_MS) {
       return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: "cache" };
+    }
+    if (shared) {
+      return { ok: true, items: shared.items, updatedAt: shared.updatedAt, source: "cache-stale" };
     }
 
     return {
@@ -214,5 +205,4 @@ export const getGoldPrices = createServerFn({ method: "GET" }).handler(
         "دریافت نرخ لحظه‌ای از هیچ‌کدام از سرویس‌ها ممکن نشد. می‌توانید نرخ هر گرم طلای ۱۸ را دستی وارد کنید و ماشین‌حساب فاکتور را استفاده کنید.\n" +
         `جزئیات: ${errors.join(" | ")}`,
     };
-  },
-);
+  });

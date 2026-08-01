@@ -57,11 +57,11 @@ function GoldInner() {
   const [heard, setHeard] = useState("");
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getGoldPrices();
+      const res = await getGoldPrices({ data: { force } });
       if (res.ok) {
         setItems(res.items);
         setUpdatedAt(res.updatedAt);
@@ -139,7 +139,7 @@ function GoldInner() {
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm font-semibold">نرخ لحظه‌ای بازار</div>
           <button
-            onClick={() => void load()}
+            onClick={() => void load(true)}
             className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -185,7 +185,7 @@ function GoldInner() {
                 <span>آخرین بروزرسانی: {new Date(updatedAt).toLocaleTimeString("fa-IR")}</span>
                 {source && (
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-                    منبع: {source === "brsapi" ? "BrsApi.ir" : source === "tgju" ? "TGJU" : source === "tgju2" ? "TGJU (backup)" : source === "cache" ? "کش" : source}
+                    منبع: {source === "cache" ? "کش" : source === "cache-stale" ? "کش (قدیمی)" : source.startsWith("tgju") ? `TGJU${source === "tgju" ? "" : " (پشتیبان)"}` : source}
                   </span>
                 )}
               </div>

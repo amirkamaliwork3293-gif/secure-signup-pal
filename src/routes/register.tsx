@@ -228,6 +228,10 @@ function RegisterPage() {
       </div>
 
       <div className="w-full max-w-md space-y-3 rounded-2xl border border-border bg-card p-5 shadow-card">
+        <div className="rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3 text-center text-xs font-semibold leading-6 text-primary">
+          📱 پس از ثبت‌نام، لینک دانلود برنامه برای شما ارسال می‌شود.
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="نام" value={firstName} onChange={setFirstName} placeholder="مثال: علی" />
           <Field label="نام خانوادگی" value={lastName} onChange={setLastName} placeholder="مثال: محمدی" />
@@ -414,7 +418,6 @@ function RegisterPage() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
             className="hidden"
             onChange={(e) => onPickFile(e.target.files?.[0] || null)}
           />

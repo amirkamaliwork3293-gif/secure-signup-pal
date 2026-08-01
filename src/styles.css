@@ -100,19 +100,42 @@ html[data-app="1"] .landing-page {
   font-family: "Estedad", "Vazirmatn", system-ui, sans-serif;
 }
 
+/* ─── Safe-area (notch / status-bar / gesture-bar) ──────────────────────────
+   روی iOS و بعضی گوشی‌های اندروید که نوار پایین صفحه (Home Indicator یا نوار
+   ژست) یا بریدگی بالای صفحه دارند، این متغیرها فاصله‌ی امن واقعی دستگاه را
+   می‌دهند. مقدار صفر برای دستگاه‌هایی که safe-area ندارند، یعنی هیچ تغییری در
+   جانمایی آن‌ها ایجاد نمی‌شود. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
   }
   html {
     direction: rtl;
+    height: 100%;
   }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-feature-settings: "ss01";
+    min-height: 100svh;
+    /* از رفتن محتوا زیر بریدگی/نوار وضعیت در حالت landscape جلوگیری می‌کند */
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
+}
+
+@layer utilities {
+  .pt-safe { padding-top: var(--safe-top); }
+  .pb-safe { padding-bottom: var(--safe-bottom); }
+  .h-safe-bottom { height: var(--safe-bottom); }
 }
 
 @layer utilities {
@@ -237,3 +260,4 @@ html[data-app="1"] .landing-page {
   border: none;
   cursor: pointer;
 }
+

@@ -6,7 +6,7 @@ import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
   parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef, removeUnitDef,
   expiryStatus, daysToExpiry, formatJalaliDate, toJalali, jalaliToTimestamp,
-  jalaliMonthLength,
+  jalaliMonthLength, JMONTHS_LONG,
   type Product, type Category, type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";

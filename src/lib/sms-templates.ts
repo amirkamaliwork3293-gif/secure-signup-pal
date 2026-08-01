@@ -11,6 +11,7 @@ export type MessageTemplateId =
   | "welcome"
   | "renewal_done"
   | "renewal_reminder"
+  | "renewal_offer"
   | "thanks"
   | "payment_received"
   | "custom";
@@ -60,6 +61,14 @@ export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
     build: ({ name, renewLink, includeLink = true }) =>
       `${name} عزیز، اشتراک شما در KAMIX رو به پایان است. برای جلوگیری از قطع دسترسی` +
       (includeLink ? `، از لینک زیر تمدید کنید:\n${renewLink || DEFAULT_RENEW_LINK}` : " تمدید کنید."),
+  },
+  {
+    id: "renewal_offer",
+    label: "پیشنهاد ویژه تمدید (تخفیف/یادآوری دوستانه)",
+    hasLink: true,
+    build: ({ name, renewLink, includeLink = true }) =>
+      `${name} عزیز، برای قدردانی از همراهی شما، تمدید اشتراک KAMIX این‌بار با شرایط ویژه امکان‌پذیر است. 🎁` +
+      (includeLink ? `\nجهت تمدید از لینک زیر استفاده کنید:\n${renewLink || DEFAULT_RENEW_LINK}` : ""),
   },
   {
     id: "renewal_done",

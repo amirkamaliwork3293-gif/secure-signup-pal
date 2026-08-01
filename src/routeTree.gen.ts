@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VoiceRouteImport } from './routes/voice'
+import { Route as TplpreviewTempRouteImport } from './routes/tplpreview-temp'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as StoreQrRouteImport } from './routes/store-qr'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
@@ -40,6 +41,11 @@ import { Route as MUserIdRouteImport } from './routes/m.$userId'
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TplpreviewTempRoute = TplpreviewTempRouteImport.update({
+  id: '/tplpreview-temp',
+  path: '/tplpreview-temp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StudentsRoute = StudentsRouteImport.update({
@@ -198,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tplpreview-temp': typeof TplpreviewTempRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -227,6 +234,7 @@ export interface FileRoutesByTo {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tplpreview-temp': typeof TplpreviewTempRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -257,6 +265,7 @@ export interface FileRoutesById {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tplpreview-temp': typeof TplpreviewTempRoute
   '/voice': typeof VoiceRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
@@ -288,6 +297,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tplpreview-temp'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -317,6 +327,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tplpreview-temp'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -346,6 +357,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tplpreview-temp'
     | '/voice'
     | '/m/$userId'
     | '/store/$storeId'
@@ -376,6 +388,7 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StoreQrRoute: typeof StoreQrRoute
   StudentsRoute: typeof StudentsRoute
+  TplpreviewTempRoute: typeof TplpreviewTempRoute
   VoiceRoute: typeof VoiceRoute
   MUserIdRoute: typeof MUserIdRoute
   StoreStoreIdRoute: typeof StoreStoreIdRoute
@@ -388,6 +401,13 @@ declare module '@tanstack/react-router' {
       path: '/voice'
       fullPath: '/voice'
       preLoaderRoute: typeof VoiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tplpreview-temp': {
+      id: '/tplpreview-temp'
+      path: '/tplpreview-temp'
+      fullPath: '/tplpreview-temp'
+      preLoaderRoute: typeof TplpreviewTempRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/students': {
@@ -600,6 +620,7 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   StoreQrRoute: StoreQrRoute,
   StudentsRoute: StudentsRoute,
+  TplpreviewTempRoute: TplpreviewTempRoute,
   VoiceRoute: VoiceRoute,
   MUserIdRoute: MUserIdRoute,
   StoreStoreIdRoute: StoreStoreIdRoute,

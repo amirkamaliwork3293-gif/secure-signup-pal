@@ -9,10 +9,30 @@ import { Printer, Share2, Receipt, FileDown } from "lucide-react";
 import type { Invoice } from "@/lib/store";
 import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, currencyLabel } from "@/lib/store";
 import { printHtml, OLD_APP_MESSAGE, isNativeApp, saveBase64File, downloadBlob } from "@/lib/print";
+import {
+  normalizeTemplate,
+  buildTemplatedInvoiceHTML,
+  itemUnitLabel,
+  type InvoiceTemplate,
+} from "@/lib/invoice-template";
+import { COUNT_UNIT } from "@/lib/store";
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
-export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
+/** واحد نمایشی کنار تعداد — فقط وقتی واحد غیر از «عدد» باشد */
+function qtyWithUnit(item: Invoice["items"][number]): string {
+  const unit = itemUnitLabel(item.unit);
+  const q = item.quantity.toLocaleString("fa-IR");
+  return unit && unit !== COUNT_UNIT ? `${q} ${unit}` : q;
+}
+
+export function buildInvoiceHTML(
+  inv: Invoice,
+  fontSize: number = 13,
+  template?: Partial<InvoiceTemplate> | null,
+): string {
+  const tpl = normalizeTemplate(template);
+  if (tpl.enabled) return buildTemplatedInvoiceHTML(inv, tpl, fontSize);
   const date = formatJalaliDateTime(inv.createdAt);
   const customer = inv.customer;
   const customerName =
@@ -29,7 +49,7 @@ export function buildInvoiceHTML(inv: Invoice, fontSize: number = 13): string {
             ? ` <span style="color:#16a34a;font-size:0.85em;font-weight:700;">(٪${item.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>`
             : ""
         }</td>
-        <td>${item.quantity.toLocaleString("fa-IR")}</td>
+        <td>${qtyWithUnit(item)}</td>
         <td>${
           item.originalPrice
             ? `<span style="text-decoration:line-through;color:#999;margin-left:6px;">${formatAmount(item.originalPrice)}</span>`
@@ -118,7 +138,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
       (it) => `
       <div class="row">
         <div class="name">${it.name}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
-        <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
+        <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
       </div>`
     )
     .join("");
@@ -190,7 +210,7 @@ function buildShareText(inv: Invoice): string {
     `─────────────────`,
     ...inv.items.map(
       (item) =>
-        `• ${item.name}  ×${item.quantity}  =  ${formatAmount(item.price * item.quantity)} ${currencyLabel()}`
+        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(item.price * item.quantity)} ${currencyLabel()}`
     ),
     `─────────────────`,
     `💰 جمع کل: ${formatAmount(inv.total)} ${currencyLabel()}`,
@@ -213,11 +233,12 @@ type Props = {
 export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) {
   const [appSettings] = settings.useAll();
   const fontSize = appSettings.invoiceFontSize ?? 13;
+  const template = appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined;
   const [sharingPdf, setSharingPdf] = useState(false);
 
   // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
   const handlePrint = async () => {
-    const html = buildInvoiceHTML(inv, fontSize);
+    const html = buildInvoiceHTML(inv, fontSize, template);
     const ok = await printHtml(html, `فاکتور ${inv.id.toUpperCase()}`);
     if (!ok) alert(OLD_APP_MESSAGE);
   };

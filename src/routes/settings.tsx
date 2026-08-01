@@ -144,6 +144,23 @@ function SettingsPageInner() {
           </div>
         </div>
 
+        {/* طراح فاکتور */}
+        <Link
+          to="/invoice-design"
+          className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 transition hover:bg-primary/10"
+        >
+          <span className="min-w-0">
+            <span className="flex items-center gap-2 text-sm font-medium text-primary">
+              <Settings className="h-4 w-4" />
+              طراح فاکتور (چیدمان دلخواه)
+            </span>
+            <span className="mt-1 block text-[11px] leading-5 text-muted-foreground">
+              فیلدهایی مثل کد ملی، شماره اقتصادی، نشانی، مهر و امضا و ستون‌های جدول را خودتان بچینید.
+            </span>
+          </span>
+          <ExternalLink className="h-4 w-4 shrink-0 text-primary" />
+        </Link>
+
         {/* واحد نمایش مبالغ — تومان / ریال */}
         <div className="rounded-xl border border-border bg-background p-3">
           <span className="flex items-center gap-2 text-sm font-medium">

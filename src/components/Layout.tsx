@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, X } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -20,6 +20,7 @@ const nav = [
   { to: "/gold",      label: "طلا",      icon: Coins,    settingKey: "showGoldFeature" },
   { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
+  { to: "/invoice-design", label: "طراح فاکتور", icon: LayoutTemplate, settingKey: null },
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },
 ] as const;
 

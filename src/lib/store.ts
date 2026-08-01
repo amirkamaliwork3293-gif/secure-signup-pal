@@ -322,7 +322,12 @@ export type AppSettings = {
   showRemindersFeature?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
+  /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
+  invoiceTemplate?: { [key: string]: JsonValue };
 };
+
+/** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 const DEFAULT_SETTINGS: AppSettings = {
   shopName: "فروشگاه من",

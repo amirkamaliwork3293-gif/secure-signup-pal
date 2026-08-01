@@ -778,7 +778,7 @@ export function InvoicePageInner() {
                     )}
                     <span>
                       × {formatNumber(item.quantity)}
-                      {weight ? ` ${item.unit}` : ""}
+                      {item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}
                     </span>
                     <span className="font-semibold text-primary">
                       = {formatToman(Math.round(item.price * item.quantity))}

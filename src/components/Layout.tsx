@@ -20,6 +20,7 @@ const nav = [
   { to: "/gold",      label: "طلا",      icon: Coins,    settingKey: "showGoldFeature" },
   { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
+  { to: "/invoice-design", label: "طراح فاکتور", icon: LayoutTemplate, settingKey: null },
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },
 ] as const;
 

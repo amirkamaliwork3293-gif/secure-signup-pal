@@ -881,9 +881,24 @@ export function InvoicePageInner() {
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="min-w-7 text-center text-sm font-semibold">
-                      {formatNumber(item.quantity)}
-                    </span>
+                    <input
+                      key={`${item.productId}-q-${item.quantity}`}
+                      defaultValue={item.quantity}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onBlur={(e) => {
+                        const q = Math.floor(parseNumberInput(e.target.value));
+                        if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
+                        else e.target.value = String(item.quantity);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      }}
+                      inputMode="numeric"
+                      dir="ltr"
+                      aria-label="تعداد"
+                      title="برای ثبت تعداد دلخواه، عدد را تایپ کنید"
+                      className="h-9 w-12 bg-transparent text-center text-sm font-semibold outline-none focus:rounded-md focus:bg-secondary"
+                    />
                     <button
                       onClick={() => update(item.productId, 1)}
                       className="grid h-9 w-9 place-items-center text-muted-foreground hover:text-foreground"

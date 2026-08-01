@@ -31,7 +31,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "renewals" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "customers" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -163,6 +163,7 @@ function AdminPage() {
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
+            { id: "customers" as Tab, label: "مشتریان", icon: CalendarClock },
             { id: "users" as Tab, label: "کاربران", icon: Users },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
@@ -207,7 +208,10 @@ function AdminPage() {
               />
             )}
             {tab === "renewals" && (
-              <RenewalsTab users={users} phones={phones} />
+              <RenewalsTab users={users} phones={phones} requests={requests} />
+            )}
+            {tab === "customers" && (
+              <CustomersTab requests={requests} users={users} phones={phones} />
             )}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}

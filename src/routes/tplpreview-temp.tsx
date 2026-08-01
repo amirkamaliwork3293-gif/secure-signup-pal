@@ -1,5 +1,0 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { buildTemplatedInvoiceHTML, corporateTemplate } from "@/lib/invoice-template";
-import type { Invoice } from "@/lib/store";
-const inv: Invoice = { id: "kx1024", createdAt: Date.now(), total: 2872500, shopName: "فروشگاه کمالی", shopAddress: "تهران، خیابان ولیعصر، پلاک ۱۲", shopPhone: "۰۲۱۱۲۳۴۵۶۷۸", paymentMethod: "card", notes: "تحویل درب مغازه", customer: { firstName: "علی", lastName: "محمدی", phone: "09120000000" }, items: [ { productId: "1", name: "پنیر محلی", price: 185000, quantity: 2.5, unit: "کیلوگرم" }, { productId: "2", name: "روغن زیتون", price: 420000, quantity: 3, unit: "بطری", discountPercent: 10, originalPrice: 466000 }, { productId: "3", name: "بسته هدیه", price: 950000, quantity: 1, unit: "بسته" } ] };
-export const Route = createFileRoute("/tplpreview-temp")({ component: () => <iframe title="p" srcDoc={buildTemplatedInvoiceHTML(inv, corporateTemplate(), 13)} style={{ width: "100%", height: "1150px", border: 0 }} /> });

@@ -336,6 +336,33 @@ function ProductsPageInner() {
         </button>
       </div>
 
+      {/* نماها: همه / رو به اتمام / نزدیک انقضا */}
+      <div className="mb-3 flex gap-1.5 overflow-x-auto">
+        {([
+          { key: "all",    label: "همه محصولات", count: list.length,  icon: Package },
+          { key: "low",    label: "رو به اتمام",  count: lowCount,     icon: AlertTriangle },
+          ...(expiryCount > 0 || list.some((p) => p.expiryAt)
+            ? [{ key: "expiry" as const, label: "نزدیک انقضا", count: expiryCount, icon: CalendarClock }]
+            : []),
+        ] as const).map(({ key, label, count, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setView(key as typeof view)}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-medium transition ${
+              view === key
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-card text-muted-foreground"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+            <span className="rounded-md bg-secondary px-1 text-[10px] text-secondary-foreground">
+              {formatNumber(count)}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Selection bar */}
       {selectMode && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-2 text-xs">

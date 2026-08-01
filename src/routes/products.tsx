@@ -415,6 +415,24 @@ function ProductsPageInner() {
                       <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">٪{formatNumber(p.discountPercent)} تخفیف</span>
                     )}
                     {stockBadge(p)}
+                    {(() => {
+                      const st = expiryStatus(p);
+                      if (st === "none" || st === "ok") return null;
+                      const d = daysToExpiry(p) ?? 0;
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                            st === "expired"
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-amber-500/10 text-amber-600"
+                          }`}
+                          title={p.expiryAt ? formatJalaliDate(p.expiryAt) : ""}
+                        >
+                          <CalendarClock className="h-2.5 w-2.5" />
+                          {st === "expired" ? "منقضی شده" : `${formatNumber(d)} روز تا انقضا`}
+                        </span>
+                      );
+                    })()}
                     {p.stock > 0 && (
                       <span className="text-[10px] text-muted-foreground">
                         ارزش: {formatToman(p.price * p.stock)}

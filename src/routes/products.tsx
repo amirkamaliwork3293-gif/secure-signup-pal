@@ -748,6 +748,41 @@ function ProductModal({
             </div>
           </Field>
 
+          {/* تاریخ انقضا — اختیاری؛ تا زمانی که فعال نشود هیچ فیلدی اضافه نمی‌شود */}
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={hasExpiry}
+              onChange={(e) => setHasExpiry(e.target.checked)}
+              className="h-4 w-4 accent-[var(--primary)]"
+            />
+            این محصول تاریخ انقضا دارد (اختیاری)
+          </label>
+          {hasExpiry && (
+            <Field label="تاریخ انقضا (شمسی)">
+              <div className="grid grid-cols-3 gap-1.5">
+                <select value={ejd} onChange={(e) => setEjd(+e.target.value)} className={inputCls}>
+                  {Array.from({ length: expDaysInMonth }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>{formatNumber(d)}</option>
+                  ))}
+                </select>
+                <select value={ejm} onChange={(e) => setEjm(+e.target.value)} className={inputCls}>
+                  {JMONTHS_LONG.map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+                <select value={ejy} onChange={(e) => setEjy(+e.target.value)} className={inputCls}>
+                  {EXP_YEARS.map((y) => (
+                    <option key={y} value={y}>{formatNumber(y)}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                محصولاتی که کمتر از ۳۰ روز تا انقضایشان مانده، در تب «نزدیک انقضا» نمایش داده می‌شوند.
+              </p>
+            </Field>
+          )}
+
           {/* بخش اختیاری: قیمت خرید، قیمت مصرف‌کننده، قیمت همکار، تخفیف */}
           <button
             type="button"

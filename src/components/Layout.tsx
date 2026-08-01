@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -23,6 +23,9 @@ const nav = [
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },
 ] as const;
 
+/** فقط پرکاربردترین بخش‌ها همیشه در نوار پایین دیده می‌شوند؛ بقیه داخل «بیشتر». */
+const PRIMARY_PATHS = ["/", "/products", "/invoices", "/customers"] as const;
+
 export function Layout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [appSettings] = settings.useAll();
@@ -44,6 +47,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
   useEffect(() => {
     const on = () => setIsOnline(true);
     const off = () => setIsOnline(false);
@@ -107,38 +112,106 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 
-      <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur">
-        <div
-          className="mx-auto grid max-w-3xl"
-          style={{
-            gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))`,
-            paddingLeft: "var(--safe-left)",
-            paddingRight: "var(--safe-right)",
-          }}
-        >
-          {visibleNav.map(({ to, label, icon: Icon }) => {
-            const active = pathname === to;
-            const badgeCount = to === "/students" ? studentsDueCount : to === "/reminders" ? remindersDueCount : 0;
-            return (
-              <Link
-                key={to}
-                to={to}
-                className={`relative flex flex-col items-center gap-1 py-2 text-[10px] transition-colors ${
-                  active ? "text-primary" : "text-muted-foreground hover:text-foreground"
-                }`}
+      {(() => {
+        const badgeFor = (to: string) =>
+          to === "/students" ? studentsDueCount : to === "/reminders" ? remindersDueCount : 0;
+        const primary = visibleNav.filter((i) => (PRIMARY_PATHS as readonly string[]).includes(i.to));
+        const overflow = visibleNav.filter((i) => !(PRIMARY_PATHS as readonly string[]).includes(i.to));
+        const overflowBadge = overflow.reduce((s, i) => s + badgeFor(i.to), 0);
+        const overflowActive = overflow.some((i) => i.to === pathname);
+        return (
+          <>
+            {/* شیت «بیشتر» — بقیه‌ی بخش‌ها بدون شلوغ کردن نوار پایین */}
+            {moreOpen && (
+              <div
+                className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-[2px]"
+                onClick={() => setMoreOpen(false)}
               >
-                <Icon className={`h-5 w-5 ${active ? "scale-110" : ""} transition-transform`} />
-                <span className={active ? "font-semibold" : ""}>{label}</span>
-                {badgeCount > 0 && (
-                  <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                    {badgeCount}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+                <div
+                  className="absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-border bg-card p-4 shadow-elegant"
+                  style={{ paddingBottom: "calc(6.5rem + var(--safe-bottom))" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-sm font-bold">بخش‌های دیگر</h2>
+                    <button
+                      onClick={() => setMoreOpen(false)}
+                      className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
+                      aria-label="بستن"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mx-auto grid max-w-3xl grid-cols-4 gap-2">
+                    {overflow.map(({ to, label, icon: Icon }) => {
+                      const active = pathname === to;
+                      const badgeCount = badgeFor(to);
+                      return (
+                        <Link
+                          key={to}
+                          to={to}
+                          onClick={() => setMoreOpen(false)}
+                          className={`relative flex flex-col items-center gap-1.5 rounded-2xl border p-3 text-[11px] transition ${
+                            active
+                              ? "border-primary bg-primary/10 font-semibold text-primary"
+                              : "border-border bg-background text-muted-foreground hover:bg-accent"
+                          }`}
+                        >
+                          <Icon className="h-5 w-5" />
+                          <span className="truncate">{label}</span>
+                          {badgeCount > 0 && (
+                            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                              {badgeCount}
+                            </span>
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <nav className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/95 backdrop-blur">
+              <div
+                className="mx-auto grid max-w-3xl grid-cols-5"
+                style={{ paddingLeft: "var(--safe-left)", paddingRight: "var(--safe-right)" }}
+              >
+                {primary.map(({ to, label, icon: Icon }) => {
+                  const active = pathname === to;
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      className={`relative flex flex-col items-center gap-1 py-2.5 text-[11px] transition-colors ${
+                        active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className={`h-5 w-5 ${active ? "scale-110" : ""} transition-transform`} />
+                      <span className={active ? "font-semibold" : ""}>{label}</span>
+                    </Link>
+                  );
+                })}
+                <button
+                  onClick={() => setMoreOpen((v) => !v)}
+                  className={`relative flex flex-col items-center gap-1 py-2.5 text-[11px] transition-colors ${
+                    moreOpen || overflowActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  aria-label="بخش‌های بیشتر"
+                >
+                  <LayoutGrid className={`h-5 w-5 ${moreOpen || overflowActive ? "scale-110" : ""} transition-transform`} />
+                  <span className={moreOpen || overflowActive ? "font-semibold" : ""}>بیشتر</span>
+                  {overflowBadge > 0 && (
+                    <span className="absolute right-2 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                      {overflowBadge}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </nav>
+          </>
+        );
+      })()}
     </div>
   );
 }

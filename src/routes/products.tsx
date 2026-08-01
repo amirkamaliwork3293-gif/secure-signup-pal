@@ -59,6 +59,8 @@ function ProductsPageInner() {
     return () => clearTimeout(t);
   }, [searchQ]);
   const [filterCat, setFilterCat] = useState<string>("all");
+  // نمای انتخابی: همه / رو به اتمام / نزدیک انقضا
+  const [view, setView] = useState<"all" | "low" | "expiry">("all");
   const [showCatManager, setShowCatManager] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [viewBarcode, setViewBarcode] = useState<Product | null>(null);
@@ -109,11 +111,37 @@ function ProductsPageInner() {
   const filtered = useMemo(
     () =>
       filterAndRankSearch(
-        list.filter((p) => filterCat === "all" || p.category === filterCat),
+        list
+          .filter((p) => filterCat === "all" || p.category === filterCat)
+          .filter((p) => {
+            if (view === "low") {
+              const s = stockStatus(p);
+              return s === "low" || s === "out";
+            }
+            if (view === "expiry") {
+              const s = expiryStatus(p);
+              return s === "soon" || s === "expired";
+            }
+            return true;
+          })
+          .sort((a, b) =>
+            view === "expiry" ? (a.expiryAt ?? 0) - (b.expiryAt ?? 0)
+            : view === "low"  ? a.stock - b.stock
+            : 0,
+          ),
         debouncedSearchQ,
         (p) => [p.name, p.code],
       ),
-    [list, filterCat, debouncedSearchQ],
+    [list, filterCat, view, debouncedSearchQ],
+  );
+
+  const lowCount = useMemo(
+    () => list.filter((p) => { const s = stockStatus(p); return s === "low" || s === "out"; }).length,
+    [list],
+  );
+  const expiryCount = useMemo(
+    () => list.filter((p) => { const s = expiryStatus(p); return s === "soon" || s === "expired"; }).length,
+    [list],
   );
 
   const toggleSelect = (id: string) => {

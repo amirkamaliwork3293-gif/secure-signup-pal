@@ -9,6 +9,7 @@ import {
   loadLandingContent,
   saveLandingContent,
   uploadLandingMedia,
+  videoEmbedUrl,
   type LandingContent,
   type LandingMedia,
   type LandingStory,
@@ -360,6 +361,15 @@ export function LandingEditor() {
             {content.media.map((m, i) => (
               <div key={i} className="overflow-hidden rounded-xl border border-border bg-background">
                 {m.type === "video" ? (
+                  videoEmbedUrl(m.url) ? (
+                  <iframe
+                    src={videoEmbedUrl(m.url)!}
+                    title="پیش‌نمایش ویدیو"
+                    allowFullScreen
+                    loading="lazy"
+                    className="aspect-video w-full border-0 bg-black"
+                  />
+                  ) : (
                   <video
                     src={m.url}
                     poster={m.coverUrl}
@@ -368,6 +378,7 @@ export function LandingEditor() {
                     controls
                     className="aspect-video w-full bg-black object-cover"
                   />
+                  )
                 ) : (
                   <img src={m.url} alt="" className="aspect-video w-full object-cover" />
                 )}

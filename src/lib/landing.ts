@@ -32,6 +32,33 @@ export type LandingStory = {
   caption?: string;
 };
 
+/**
+ * تشخیص لینک‌های سرویس‌های اشتراک ویدیو (آپارات، یوتیوب، ...).
+ * این لینک‌ها فایل ویدیو نیستند و با تگ <video> پخش نمی‌شوند؛
+ * باید داخل iframe (پخش‌کننده‌ی خود سرویس) نمایش داده شوند.
+ * خروجی: آدرس embed یا null اگر لینک، فایل مستقیم ویدیو باشد.
+ */
+export function videoEmbedUrl(rawUrl: string): string | null {
+  const url = (rawUrl || "").trim();
+  if (!url) return null;
+
+  // آپارات: https://www.aparat.com/v/XXXXX  یا  /video/video/embed/videohash/XXXX/vt/frame
+  const aparat = url.match(/aparat\.com\/(?:v|video\/video\/embed\/videohash)\/([A-Za-z0-9_-]+)/i);
+  if (aparat) {
+    return `https://www.aparat.com/video/video/embed/videohash/${aparat[1]}/vt/frame`;
+  }
+
+  // یوتیوب
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+
+  // ویمئو
+  const vimeo = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`;
+
+  return null;
+}
+
 export type LandingContent = {
   brand_name: string;
   headline: string;

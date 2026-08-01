@@ -12,6 +12,7 @@ import { formatToman } from "@/lib/store";
 import {
   DEFAULT_LANDING,
   loadLandingContent,
+  videoEmbedUrl,
   type LandingContent,
 } from "@/lib/landing";
 import {
@@ -282,11 +283,23 @@ export function LandingPage() {
             کارکرد بخش‌های مختلف برنامه را از نزدیک ببینید.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {content.media.filter((m) => m.type === "video").map((m, i) => (
+            {content.media.filter((m) => m.type === "video").map((m, i) => {
+              const embed = videoEmbedUrl(m.url);
+              return (
               <figure
                 key={i}
                 className="group overflow-hidden rounded-2xl border border-border bg-card shadow-card transition hover:shadow-elegant"
               >
+                {embed ? (
+                  <iframe
+                    src={embed}
+                    title={m.caption || `ویدیوی معرفی ${i + 1}`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                    allowFullScreen
+                    loading="lazy"
+                    className="aspect-video w-full border-0 bg-black"
+                  />
+                ) : (
                 <video
                     src={m.url}
                     poster={m.coverUrl}
@@ -297,13 +310,15 @@ export function LandingPage() {
                     preload="metadata"
                     className="aspect-video w-full bg-black object-cover transition duration-500 group-hover:scale-[1.02]"
                   />
+                )}
                 {m.caption && (
                   <figcaption className="px-4 py-3 text-center text-sm text-muted-foreground">
                     {m.caption}
                   </figcaption>
                 )}
               </figure>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

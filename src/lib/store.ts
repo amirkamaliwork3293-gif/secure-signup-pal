@@ -2013,3 +2013,22 @@ export function stockStatus(p: Product): "ok" | "low" | "out" {
   if (p.stock <= threshold) return "low";
   return "ok";
 }
+
+/** روزهای باقیمانده تا انقضا (منفی یعنی منقضی‌شده). اگر تاریخ انقضا ثبت نشده باشد null. */
+export function daysToExpiry(p: Product, now = Date.now()): number | null {
+  if (!p.expiryAt) return null;
+  return Math.ceil((p.expiryAt - now) / 86400000);
+}
+
+/** وضعیت انقضا — فقط برای محصولاتی که کاربر تاریخ انقضا ثبت کرده است. */
+export function expiryStatus(
+  p: Product,
+  soonDays = 30,
+  now = Date.now(),
+): "none" | "expired" | "soon" | "ok" {
+  const d = daysToExpiry(p, now);
+  if (d === null) return "none";
+  if (d < 0) return "expired";
+  if (d <= soonDays) return "soon";
+  return "ok";
+}

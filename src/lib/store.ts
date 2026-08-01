@@ -26,6 +26,8 @@ export type Product = {
   wholesalePrice?: number;
   /** حداقل تعداد برای اعمال خودکار قیمت عمده (اختیاری) */
   wholesaleMinQty?: number;
+  /** تاریخ انقضا (timestamp میلی‌ثانیه) — کاملاً اختیاری */
+  expiryAt?: number;
 };
 
 export const COUNT_UNIT = "عدد";

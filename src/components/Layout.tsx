@@ -53,16 +53,11 @@ export function Layout({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-<<<<<<< HEAD
     <div
       className="min-h-[100svh] bg-background"
       style={{ paddingBottom: "calc(7rem + var(--safe-bottom))" }}
     >
       <header className="pt-safe sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur">
-=======
-    <div className="min-h-[100svh] bg-background pb-28">
-      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/85 backdrop-blur">
->>>>>>> d70c83419bbfb86fc39359b4bc82c576ce70cf3d
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
           <Link to="/" className="flex items-center gap-2">
@@ -112,7 +107,6 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 
-<<<<<<< HEAD
       <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur">
         <div
           className="mx-auto grid max-w-3xl"
@@ -122,10 +116,6 @@ export function Layout({ children }: { children: ReactNode }) {
             paddingRight: "var(--safe-right)",
           }}
         >
-=======
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 backdrop-blur">
-        <div className="mx-auto grid max-w-3xl" style={{ gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))` }}>
->>>>>>> d70c83419bbfb86fc39359b4bc82c576ce70cf3d
           {visibleNav.map(({ to, label, icon: Icon }) => {
             const active = pathname === to;
             const badgeCount = to === "/students" ? studentsDueCount : to === "/reminders" ? remindersDueCount : 0;
@@ -139,11 +129,7 @@ export function Layout({ children }: { children: ReactNode }) {
               >
                 <Icon className={`h-5 w-5 ${active ? "scale-110" : ""} transition-transform`} />
                 <span className={active ? "font-semibold" : ""}>{label}</span>
-<<<<<<< HEAD
                 {badgeCount > 0 && (
-=======
-                {showBadge && (
->>>>>>> d70c83419bbfb86fc39359b4bc82c576ce70cf3d
                   <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
                     {badgeCount}
                   </span>

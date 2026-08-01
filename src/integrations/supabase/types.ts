@@ -321,8 +321,8 @@ export type Database = {
       }
       user_data: {
         Row: {
-          accounts: Json
           account_txs: Json
+          accounts: Json
           categories: Json
           current_invoice: Json | null
           customers: Json
@@ -337,8 +337,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          accounts?: Json
           account_txs?: Json
+          accounts?: Json
           categories?: Json
           current_invoice?: Json | null
           customers?: Json
@@ -353,8 +353,8 @@ export type Database = {
           user_id: string
         }
         Update: {
-          accounts?: Json
           account_txs?: Json
+          accounts?: Json
           categories?: Json
           current_invoice?: Json | null
           customers?: Json

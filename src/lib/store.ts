@@ -26,6 +26,8 @@ export type Product = {
   wholesalePrice?: number;
   /** حداقل تعداد برای اعمال خودکار قیمت عمده (اختیاری) */
   wholesaleMinQty?: number;
+  /** تاریخ انقضا (timestamp میلی‌ثانیه) — کاملاً اختیاری */
+  expiryAt?: number;
 };
 
 export const COUNT_UNIT = "عدد";
@@ -1708,7 +1710,11 @@ export function storePublicUrl(userId: string): string {
 }
 
 /** فرمت عدد با جداکننده هزارگان (ارقام فارسی) */
-export function formatNumber(n: number): string {
+export function formatNumber(n: number | string): string {
+  if (typeof n === "string") {
+    // رشته‌ها (مثل «۰۹» یا شماره کارت) فقط رقم‌هایشان فارسی می‌شود تا صفرِ ابتدایی حفظ شود
+    return n.replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]!);
+  }
   return new Intl.NumberFormat("fa-IR").format(n);
 }
 
@@ -2005,5 +2011,24 @@ export function stockStatus(p: Product): "ok" | "low" | "out" {
   if (p.stock <= 0) return "out";
   const threshold = p.lowStockThreshold ?? 5;
   if (p.stock <= threshold) return "low";
+  return "ok";
+}
+
+/** روزهای باقیمانده تا انقضا (منفی یعنی منقضی‌شده). اگر تاریخ انقضا ثبت نشده باشد null. */
+export function daysToExpiry(p: Product, now = Date.now()): number | null {
+  if (!p.expiryAt) return null;
+  return Math.ceil((p.expiryAt - now) / 86400000);
+}
+
+/** وضعیت انقضا — فقط برای محصولاتی که کاربر تاریخ انقضا ثبت کرده است. */
+export function expiryStatus(
+  p: Product,
+  soonDays = 30,
+  now = Date.now(),
+): "none" | "expired" | "soon" | "ok" {
+  const d = daysToExpiry(p, now);
+  if (d === null) return "none";
+  if (d < 0) return "expired";
+  if (d <= soonDays) return "soon";
   return "ok";
 }

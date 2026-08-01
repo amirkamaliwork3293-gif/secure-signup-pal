@@ -5,6 +5,8 @@ import { Layout } from "@/components/Layout";
 import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
   parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef, removeUnitDef,
+  expiryStatus, daysToExpiry, formatJalaliDate, toJalali, jalaliToTimestamp,
+  jalaliMonthLength, JMONTHS_LONG,
   type Product, type Category, type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
@@ -24,6 +26,7 @@ const BarcodeViewModal = lazy(() =>
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
   Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
+  CalendarClock,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -56,6 +59,8 @@ function ProductsPageInner() {
     return () => clearTimeout(t);
   }, [searchQ]);
   const [filterCat, setFilterCat] = useState<string>("all");
+  // نمای انتخابی: همه / رو به اتمام / نزدیک انقضا
+  const [view, setView] = useState<"all" | "low" | "expiry">("all");
   const [showCatManager, setShowCatManager] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [viewBarcode, setViewBarcode] = useState<Product | null>(null);
@@ -106,11 +111,37 @@ function ProductsPageInner() {
   const filtered = useMemo(
     () =>
       filterAndRankSearch(
-        list.filter((p) => filterCat === "all" || p.category === filterCat),
+        list
+          .filter((p) => filterCat === "all" || p.category === filterCat)
+          .filter((p) => {
+            if (view === "low") {
+              const s = stockStatus(p);
+              return s === "low" || s === "out";
+            }
+            if (view === "expiry") {
+              const s = expiryStatus(p);
+              return s === "soon" || s === "expired";
+            }
+            return true;
+          })
+          .sort((a, b) =>
+            view === "expiry" ? (a.expiryAt ?? 0) - (b.expiryAt ?? 0)
+            : view === "low"  ? a.stock - b.stock
+            : 0,
+          ),
         debouncedSearchQ,
         (p) => [p.name, p.code],
       ),
-    [list, filterCat, debouncedSearchQ],
+    [list, filterCat, view, debouncedSearchQ],
+  );
+
+  const lowCount = useMemo(
+    () => list.filter((p) => { const s = stockStatus(p); return s === "low" || s === "out"; }).length,
+    [list],
+  );
+  const expiryCount = useMemo(
+    () => list.filter((p) => { const s = expiryStatus(p); return s === "soon" || s === "expired"; }).length,
+    [list],
   );
 
   const toggleSelect = (id: string) => {
@@ -305,6 +336,33 @@ function ProductsPageInner() {
         </button>
       </div>
 
+      {/* نماها: همه / رو به اتمام / نزدیک انقضا */}
+      <div className="mb-3 flex gap-1.5 overflow-x-auto">
+        {([
+          { key: "all",    label: "همه محصولات", count: list.length,  icon: Package },
+          { key: "low",    label: "رو به اتمام",  count: lowCount,     icon: AlertTriangle },
+          ...(expiryCount > 0 || list.some((p) => p.expiryAt)
+            ? [{ key: "expiry" as const, label: "نزدیک انقضا", count: expiryCount, icon: CalendarClock }]
+            : []),
+        ] as const).map(({ key, label, count, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setView(key as typeof view)}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-medium transition ${
+              view === key
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-card text-muted-foreground"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {label}
+            <span className="rounded-md bg-secondary px-1 text-[10px] text-secondary-foreground">
+              {formatNumber(count)}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Selection bar */}
       {selectMode && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-2 text-xs">
@@ -357,6 +415,24 @@ function ProductsPageInner() {
                       <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">٪{formatNumber(p.discountPercent)} تخفیف</span>
                     )}
                     {stockBadge(p)}
+                    {(() => {
+                      const st = expiryStatus(p);
+                      if (st === "none" || st === "ok") return null;
+                      const d = daysToExpiry(p) ?? 0;
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                            st === "expired"
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-amber-500/10 text-amber-600"
+                          }`}
+                          title={p.expiryAt ? formatJalaliDate(p.expiryAt) : ""}
+                        >
+                          <CalendarClock className="h-2.5 w-2.5" />
+                          {st === "expired" ? "منقضی شده" : `${formatNumber(d)} روز تا انقضا`}
+                        </span>
+                      );
+                    })()}
                     {p.stock > 0 && (
                       <span className="text-[10px] text-muted-foreground">
                         ارزش: {formatToman(p.price * p.stock)}
@@ -515,6 +591,16 @@ function ProductModal({
   const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
   const [wholesalePrice, setWholesalePrice] = useState(initial?.wholesalePrice ? String(initial.wholesalePrice) : "");
   const [wholesaleMinQty, setWholesaleMinQty] = useState(initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "");
+  // تاریخ انقضا — فقط در صورت فعال کردن کاربر نمایش داده و ذخیره می‌شود
+  const nowJ = toJalali(Date.now()) ?? { jy: 1404, jm: 1, jd: 1, h: 0, min: 0 };
+  const initExpJ = initial?.expiryAt ? toJalali(initial.expiryAt) ?? nowJ : nowJ;
+  const [hasExpiry, setHasExpiry] = useState(!!initial?.expiryAt);
+  const [ejy, setEjy] = useState(initExpJ.jy);
+  const [ejm, setEjm] = useState(initExpJ.jm);
+  const [ejd, setEjd] = useState(initExpJ.jd);
+  const expDaysInMonth = jalaliMonthLength(ejy, ejm);
+  useEffect(() => { if (ejd > expDaysInMonth) setEjd(expDaysInMonth); }, [expDaysInMonth, ejd]);
+  const EXP_YEARS = Array.from({ length: 8 }, (_, i) => nowJ.jy + i);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,6 +622,7 @@ function ProductModal({
       discountPercent: discountNum || undefined,
       wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
       wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
+      expiryAt: hasExpiry ? jalaliToTimestamp(ejy, ejm, ejd, 23, 59) : undefined,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);
@@ -660,6 +747,41 @@ function ProductModal({
               </button>
             </div>
           </Field>
+
+          {/* تاریخ انقضا — اختیاری؛ تا زمانی که فعال نشود هیچ فیلدی اضافه نمی‌شود */}
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent">
+            <input
+              type="checkbox"
+              checked={hasExpiry}
+              onChange={(e) => setHasExpiry(e.target.checked)}
+              className="h-4 w-4 accent-[var(--primary)]"
+            />
+            این محصول تاریخ انقضا دارد (اختیاری)
+          </label>
+          {hasExpiry && (
+            <Field label="تاریخ انقضا (شمسی)">
+              <div className="grid grid-cols-3 gap-1.5">
+                <select value={ejd} onChange={(e) => setEjd(+e.target.value)} className={inputCls}>
+                  {Array.from({ length: expDaysInMonth }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>{formatNumber(d)}</option>
+                  ))}
+                </select>
+                <select value={ejm} onChange={(e) => setEjm(+e.target.value)} className={inputCls}>
+                  {JMONTHS_LONG.map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+                <select value={ejy} onChange={(e) => setEjy(+e.target.value)} className={inputCls}>
+                  {EXP_YEARS.map((y) => (
+                    <option key={y} value={y}>{formatNumber(y)}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                محصولاتی که کمتر از ۳۰ روز تا انقضایشان مانده، در تب «نزدیک انقضا» نمایش داده می‌شوند.
+              </p>
+            </Field>
+          )}
 
           {/* بخش اختیاری: قیمت خرید، قیمت مصرف‌کننده، قیمت همکار، تخفیف */}
           <button

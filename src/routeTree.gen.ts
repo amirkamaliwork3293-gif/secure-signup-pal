@@ -182,8 +182,8 @@ export interface FileRoutesByFullPath {
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
-  '/renew': typeof RenewRoute
   '/reminders': typeof RemindersRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -210,8 +210,8 @@ export interface FileRoutesByTo {
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
-  '/renew': typeof RenewRoute
   '/reminders': typeof RemindersRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -239,8 +239,8 @@ export interface FileRoutesById {
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
   '/register': typeof RegisterRoute
-  '/renew': typeof RenewRoute
   '/reminders': typeof RemindersRoute
+  '/renew': typeof RenewRoute
   '/reports': typeof ReportsRoute
   '/scan': typeof ScanRoute
   '/set-password': typeof SetPasswordRoute
@@ -269,8 +269,8 @@ export interface FileRouteTypes {
     | '/purchases'
     | '/quick-add'
     | '/register'
-    | '/renew'
     | '/reminders'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -297,8 +297,8 @@ export interface FileRouteTypes {
     | '/purchases'
     | '/quick-add'
     | '/register'
-    | '/renew'
     | '/reminders'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -325,8 +325,8 @@ export interface FileRouteTypes {
     | '/purchases'
     | '/quick-add'
     | '/register'
-    | '/renew'
     | '/reminders'
+    | '/renew'
     | '/reports'
     | '/scan'
     | '/set-password'
@@ -354,8 +354,8 @@ export interface RootRouteChildren {
   PurchasesRoute: typeof PurchasesRoute
   QuickAddRoute: typeof QuickAddRoute
   RegisterRoute: typeof RegisterRoute
-  RenewRoute: typeof RenewRoute
   RemindersRoute: typeof RemindersRoute
+  RenewRoute: typeof RenewRoute
   ReportsRoute: typeof ReportsRoute
   ScanRoute: typeof ScanRoute
   SetPasswordRoute: typeof SetPasswordRoute
@@ -570,8 +570,8 @@ const rootRouteChildren: RootRouteChildren = {
   PurchasesRoute: PurchasesRoute,
   QuickAddRoute: QuickAddRoute,
   RegisterRoute: RegisterRoute,
-  RenewRoute: RenewRoute,
   RemindersRoute: RemindersRoute,
+  RenewRoute: RenewRoute,
   ReportsRoute: ReportsRoute,
   ScanRoute: ScanRoute,
   SetPasswordRoute: SetPasswordRoute,

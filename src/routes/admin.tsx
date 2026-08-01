@@ -31,7 +31,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "renewals" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "customers" | "plans" | "settings" | "landing";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -163,6 +163,7 @@ function AdminPage() {
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
+            { id: "customers" as Tab, label: "مشتریان", icon: CalendarClock },
             { id: "users" as Tab, label: "کاربران", icon: Users },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
@@ -207,7 +208,10 @@ function AdminPage() {
               />
             )}
             {tab === "renewals" && (
-              <RenewalsTab users={users} phones={phones} />
+              <RenewalsTab users={users} phones={phones} requests={requests} />
+            )}
+            {tab === "customers" && (
+              <CustomersTab requests={requests} users={users} phones={phones} />
             )}
             {tab === "plans" && <PlansTab />}
             {tab === "settings" && <SettingsTab />}
@@ -1074,11 +1078,14 @@ function PlanCard({
 
 // ─── Renewals tab ────────────────────────────────────────────────────────────
 function RenewalsTab({
-  users, phones,
+  users, phones, requests,
 }: {
   users: UserProfile[];
   phones: Record<string, string | null>;
+  requests: SignupRequest[];
 }) {
+  const [subTab, setSubTab] = useState<"expiring" | "history">("expiring");
+  const [detailTarget, setDetailTarget] = useState<SignupRequest | null>(null);
   const now = Date.now();
   const DAY = 24 * 60 * 60 * 1000;
 
@@ -1094,11 +1101,84 @@ function RenewalsTab({
     .filter((r) => r.daysLeft <= 7) // منقضی + نزدیک به انقضا (≤۷ روز)
     .sort((a, b) => a.end - b.end);
 
+  const renewalRequests = requests
+    .filter((r) => (r as any).request_type === "renewal")
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const subTabSwitcher = (
+    <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">
+      {([
+        { id: "expiring" as const, label: "نزدیک به انقضا / منقضی" },
+        { id: "history" as const, label: `تاریخچه تمدیدها (${renewalRequests.length})` },
+      ]).map(({ id, label }) => (
+        <button
+          key={id}
+          onClick={() => setSubTab(id)}
+          className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+            subTab === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (subTab === "history") {
+    return (
+      <div className="space-y-3">
+        {subTabSwitcher}
+        {renewalRequests.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+            <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
+            هنوز هیچ تمدیدی ثبت نشده است.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {renewalRequests.map((r) => (
+              <li
+                key={r.id}
+                onClick={() => setDetailTarget(r)}
+                className="cursor-pointer rounded-2xl border border-border bg-card p-4 hover:bg-accent/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {r.first_name} {r.last_name}
+                      <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{r.username}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="rounded bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                        تمدید
+                      </span>
+                      <span className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                        {PLAN_LABEL[r.plan]}
+                      </span>
+                      <span>{formatJalaliDateTime(r.created_at)}</span>
+                    </div>
+                  </div>
+                  <StatusBadge status={r.status} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {detailTarget && (
+          <CustomerDetailDialog target={detailTarget} requests={requests} onClose={() => setDetailTarget(null)} />
+        )}
+      </div>
+    );
+  }
+
   if (rows.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-        <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
-        فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
+      <div className="space-y-3">
+        {subTabSwitcher}
+        <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
+          فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
+        </div>
       </div>
     );
   }
@@ -1115,6 +1195,7 @@ function RenewalsTab({
 
   return (
     <div className="space-y-3">
+      {subTabSwitcher}
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
         نمایش کاربرانی که اشتراکشان تا ۷ روز آینده تمام می‌شود یا منقضی شده — جهت یادآوری تمدید.
       </div>
@@ -1184,6 +1265,190 @@ function RenewalsTab({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+// ─── Customers tab — date/time range filter across signups + renewals ────────
+function CustomersTab({
+  requests, users, phones,
+}: {
+  requests: SignupRequest[];
+  users: UserProfile[];
+  phones: Record<string, string | null>;
+}) {
+  const defaultFrom = toLocalDatetimeInput(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+  const defaultTo = toLocalDatetimeInput(new Date().toISOString());
+  const [from, setFrom] = useState(defaultFrom);
+  const [to, setTo] = useState(defaultTo);
+  const [detailTarget, setDetailTarget] = useState<SignupRequest | null>(null);
+
+  const fromMs = from ? new Date(from).getTime() : -Infinity;
+  const toMs = to ? new Date(to).getTime() : Infinity;
+
+  const rows = requests
+    .filter((r) => {
+      const t = new Date(r.created_at).getTime();
+      return t >= fromMs && t <= toMs;
+    })
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const profileByUsername = new Map(users.map((u) => [u.username?.toLowerCase(), u]));
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+          <CalendarClock className="h-4 w-4 text-primary" />
+          فیلتر بازه ثبت‌نام / تمدید
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-[11px] text-muted-foreground">از تاریخ/ساعت</label>
+            <input
+              type="datetime-local"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-muted-foreground">تا تاریخ/ساعت</label>
+            <input
+              type="datetime-local"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <Search className="mx-auto mb-2 h-8 w-8 opacity-30" />
+          موردی در این بازه یافت نشد.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((r) => {
+            const isRenewal = (r as any).request_type === "renewal";
+            const profile = profileByUsername.get(r.username?.toLowerCase());
+            const phone = (r as any).phone || phones[r.username?.toLowerCase()] || null;
+            return (
+              <li
+                key={r.id}
+                onClick={() => setDetailTarget(r)}
+                className="cursor-pointer rounded-2xl border border-border bg-card p-4 hover:bg-accent/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {r.first_name} {r.last_name}
+                      <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{r.username}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className={`rounded px-2 py-0.5 font-medium ${
+                          isRenewal
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                            : "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                        }`}
+                      >
+                        {isRenewal ? "تمدید" : "ثبت‌نام"}
+                      </span>
+                      <span className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                        {PLAN_LABEL[r.plan]}
+                      </span>
+                      <span>{formatJalaliDateTime(r.created_at)}</span>
+                      {phone && <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{phone}</span>}
+                      {profile && <StatusBadge status={profile.status} />}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {detailTarget && (
+        <CustomerDetailDialog target={detailTarget} requests={requests} onClose={() => setDetailTarget(null)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Customer detail dialog — full renewal history for a given username ──────
+function CustomerDetailDialog({
+  target, requests, onClose,
+}: {
+  target: SignupRequest;
+  requests: SignupRequest[];
+  onClose: () => void;
+}) {
+  const history = requests
+    .filter((r) => (r as any).request_type === "renewal" && r.username?.toLowerCase() === target.username?.toLowerCase())
+    .slice()
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const signupReq = requests.find(
+    (r) => (r as any).request_type !== "renewal" && r.username?.toLowerCase() === target.username?.toLowerCase(),
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-bold">
+            {target.first_name} {target.last_name}
+            <span dir="ltr" className="mr-2 text-xs font-normal text-muted-foreground">@{target.username}</span>
+          </h3>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {signupReq && (
+          <div className="mb-3 rounded-xl bg-secondary/50 px-3 py-2 text-xs">
+            <span className="text-muted-foreground">تاریخ ثبت‌نام: </span>
+            <strong>{formatJalaliDateTime(signupReq.created_at)}</strong>
+            <span className="text-muted-foreground"> — پلن اولیه: </span>
+            <strong>{PLAN_LABEL[signupReq.plan]}</strong>
+          </div>
+        )}
+
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <BellRing className="h-4 w-4 text-primary" />
+          تاریخچه تمدیدها ({history.length.toLocaleString("fa-IR")} بار)
+        </div>
+
+        {history.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+            این کاربر تاکنون تمدید نکرده است.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {history.map((r, i) => (
+              <li key={r.id} className="rounded-xl border border-border bg-background p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">تمدید #{(i + 1).toLocaleString("fa-IR")}</span>
+                  <StatusBadge status={r.status} />
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground">
+                  <span>{formatJalaliDateTime(r.created_at)}</span>
+                  <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">{PLAN_LABEL[r.plan]}</span>
+                  <span>({PLAN_DURATION_LABEL[r.plan]})</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

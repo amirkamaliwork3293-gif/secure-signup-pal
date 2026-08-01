@@ -1708,7 +1708,11 @@ export function storePublicUrl(userId: string): string {
 }
 
 /** فرمت عدد با جداکننده هزارگان (ارقام فارسی) */
-export function formatNumber(n: number): string {
+export function formatNumber(n: number | string): string {
+  if (typeof n === "string") {
+    // رشته‌ها (مثل «۰۹» یا شماره کارت) فقط رقم‌هایشان فارسی می‌شود تا صفرِ ابتدایی حفظ شود
+    return n.replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[Number(d)]!);
+  }
   return new Intl.NumberFormat("fa-IR").format(n);
 }
 

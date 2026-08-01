@@ -5,6 +5,8 @@ import { Layout } from "@/components/Layout";
 import {
   products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
   parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef, removeUnitDef,
+  expiryStatus, daysToExpiry, formatJalaliDate, toJalali, jalaliToTimestamp,
+  jalaliMonthLength,
   type Product, type Category, type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
@@ -24,6 +26,7 @@ const BarcodeViewModal = lazy(() =>
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
   Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
+  CalendarClock,
 } from "lucide-react";
 import { z } from "zod";
 

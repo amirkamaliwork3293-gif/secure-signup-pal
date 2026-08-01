@@ -1078,11 +1078,14 @@ function PlanCard({
 
 // ─── Renewals tab ────────────────────────────────────────────────────────────
 function RenewalsTab({
-  users, phones,
+  users, phones, requests,
 }: {
   users: UserProfile[];
   phones: Record<string, string | null>;
+  requests: SignupRequest[];
 }) {
+  const [subTab, setSubTab] = useState<"expiring" | "history">("expiring");
+  const [detailTarget, setDetailTarget] = useState<SignupRequest | null>(null);
   const now = Date.now();
   const DAY = 24 * 60 * 60 * 1000;
 
@@ -1098,11 +1101,84 @@ function RenewalsTab({
     .filter((r) => r.daysLeft <= 7) // منقضی + نزدیک به انقضا (≤۷ روز)
     .sort((a, b) => a.end - b.end);
 
+  const renewalRequests = requests
+    .filter((r) => (r as any).request_type === "renewal")
+    .slice()
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const subTabSwitcher = (
+    <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">
+      {([
+        { id: "expiring" as const, label: "نزدیک به انقضا / منقضی" },
+        { id: "history" as const, label: `تاریخچه تمدیدها (${renewalRequests.length})` },
+      ]).map(({ id, label }) => (
+        <button
+          key={id}
+          onClick={() => setSubTab(id)}
+          className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+            subTab === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (subTab === "history") {
+    return (
+      <div className="space-y-3">
+        {subTabSwitcher}
+        {renewalRequests.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+            <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
+            هنوز هیچ تمدیدی ثبت نشده است.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {renewalRequests.map((r) => (
+              <li
+                key={r.id}
+                onClick={() => setDetailTarget(r)}
+                className="cursor-pointer rounded-2xl border border-border bg-card p-4 hover:bg-accent/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {r.first_name} {r.last_name}
+                      <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{r.username}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span className="rounded bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                        تمدید
+                      </span>
+                      <span className="rounded bg-primary/10 px-2 py-0.5 font-medium text-primary">
+                        {PLAN_LABEL[r.plan]}
+                      </span>
+                      <span>{formatJalaliDateTime(r.created_at)}</span>
+                    </div>
+                  </div>
+                  <StatusBadge status={r.status} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {detailTarget && (
+          <CustomerDetailDialog target={detailTarget} requests={requests} onClose={() => setDetailTarget(null)} />
+        )}
+      </div>
+    );
+  }
+
   if (rows.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-        <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
-        فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
+      <div className="space-y-3">
+        {subTabSwitcher}
+        <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
+          فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
+        </div>
       </div>
     );
   }
@@ -1119,6 +1195,7 @@ function RenewalsTab({
 
   return (
     <div className="space-y-3">
+      {subTabSwitcher}
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
         نمایش کاربرانی که اشتراکشان تا ۷ روز آینده تمام می‌شود یا منقضی شده — جهت یادآوری تمدید.
       </div>

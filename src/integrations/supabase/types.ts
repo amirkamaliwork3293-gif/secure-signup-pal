@@ -321,8 +321,6 @@ export type Database = {
       }
       user_data: {
         Row: {
-          accounts: Json
-          account_txs: Json
           categories: Json
           current_invoice: Json | null
           customers: Json
@@ -330,15 +328,12 @@ export type Database = {
           invoices: Json
           products: Json
           purchases: Json
-          reminders: Json
           settings: Json
           students: Json
           updated_at: string
           user_id: string
         }
         Insert: {
-          accounts?: Json
-          account_txs?: Json
           categories?: Json
           current_invoice?: Json | null
           customers?: Json
@@ -346,15 +341,12 @@ export type Database = {
           invoices?: Json
           products?: Json
           purchases?: Json
-          reminders?: Json
           settings?: Json
           students?: Json
           updated_at?: string
           user_id: string
         }
         Update: {
-          accounts?: Json
-          account_txs?: Json
           categories?: Json
           current_invoice?: Json | null
           customers?: Json
@@ -362,7 +354,6 @@ export type Database = {
           invoices?: Json
           products?: Json
           purchases?: Json
-          reminders?: Json
           settings?: Json
           students?: Json
           updated_at?: string

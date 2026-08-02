@@ -495,14 +495,28 @@ function CustomersPageInner() {
 
       {/* جستجو و فیلتر */}
       <div className="mb-3 space-y-2">
-        <div className="relative">
-          <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="جستجوی نام یا تلفن..."
-            className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="جستجوی نام یا تلفن..."
+              className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+            title="نحوه نمایش مشتریان"
+            className={`w-40 shrink-0 rounded-xl border bg-background px-2 py-2 text-xs outline-none focus:border-primary ${
+              sortBy === "default" ? "border-input text-muted-foreground" : "border-primary text-primary"
+            }`}
+          >
+            {(Object.keys(SORT_LABEL) as SortBy[]).map((k) => (
+              <option key={k} value={k}>{SORT_LABEL[k]}</option>
+            ))}
+          </select>
         </div>
         <div className="grid grid-cols-4 gap-1.5">
           {(
@@ -533,7 +547,13 @@ function CustomersPageInner() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sortBy !== "default" && (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          نمایش بر اساس «{SORT_LABEL[sortBy]}» — مبلغ خرید هر مشتری از روی فاکتورهای ثبت‌شده محاسبه می‌شود.
+        </p>
+      )}
+
+      {ordered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <Users className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
@@ -573,7 +593,7 @@ function CustomersPageInner() {
           )}
         </div>
       ) : (
-        renderCards(filtered)
+        renderCards(ordered)
       )}
 
       {showAdd && (

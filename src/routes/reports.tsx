@@ -181,7 +181,6 @@ function ReportsPageInner() {
 
   const maxDay = Math.max(1, ...daily.map(([, v]) => v));
 
-  const allProducts = products.useAll ? undefined : undefined; // (نگهدارنده — از products.getAll استفاده می‌شود)
   const prodStats = useMemo(() => productStats(filtered, products.getAll()), [filtered]);
   const custStats = useMemo(() => customerStats(filtered, products.getAll()), [filtered]);
   const withCost = prodStats.filter((p) => p.hasCost);
@@ -190,7 +189,6 @@ function ReportsPageInner() {
   const topSellers = topBy(prodStats, (p) => p.qty);
   const topCustomers = topBy(custStats, (c) => c.revenue);
   const lowCustomers = bottomBy(custStats, (c) => c.revenue);
-  void allProducts;
 
   const RangeButton = ({ value, icon: Icon }: { value: Range; icon: typeof Calendar }) => (
     <button

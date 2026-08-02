@@ -516,6 +516,35 @@ function ReportsPageInner() {
   );
 }
 
+type StatRow = { key: string; title: string; sub: string; value: string; tone: "good" | "bad" | "muted" };
+
+function StatList({
+  title, icon, rows, empty,
+}: { title: string; icon: React.ReactNode; rows: StatRow[]; empty: string }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4 shadow-card">
+      <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold">{icon}{title}</h2>
+      {rows.length === 0 ? (
+        <div className="py-4 text-center text-xs text-muted-foreground">{empty}</div>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((r) => (
+            <li key={r.key} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-foreground">{r.title}</div>
+                <div className="truncate text-[10px] text-muted-foreground">{r.sub}</div>
+              </div>
+              <span className={`shrink-0 font-bold ${r.tone === "good" ? "text-green-600" : r.tone === "bad" ? "text-destructive" : "text-foreground"}`}>
+                {r.value}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function SummaryCard({
   icon, label, total, count,
 }: { icon: React.ReactNode; label: string; total: number; count: number }) {

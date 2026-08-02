@@ -571,6 +571,66 @@ export function InvoicePageInner() {
 
       {/* Payment method picker */}
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
+        {inv.items.length > 0 && (
+          <div className="mb-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">تخفیف کل فاکتور (اختیاری)</div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-muted-foreground">درصد تخفیف</span>
+                <input
+                  value={inv.discountPercent ? formatNumber(inv.discountPercent) : ""}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
+                    setInv((prev) => recalc({ ...prev, discountPercent: v || undefined, discountAmount: undefined }));
+                  }}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-muted-foreground">مبلغ تخفیف</span>
+                <input
+                  value={inv.discountAmount ? formatNumber(inv.discountAmount) : ""}
+                  onChange={(e) => {
+                    const v = Math.max(0, parseNumberInput(e.target.value));
+                    setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: v || undefined }));
+                  }}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </label>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[5, 10, 15, 20].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setInv((prev) => recalc({ ...prev, discountPercent: p, discountAmount: undefined }))}
+                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                >
+                  {formatNumber(p)}٪
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }))}
+                className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                حذف تخفیف
+              </button>
+            </div>
+            {!!inv.discountAmount && (
+              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                <span>جمع اقلام: <b className="text-foreground">{formatToman(inv.subtotal ?? inv.total)}</b></span>
+                <span>تخفیف: <b className="text-primary">{formatToman(inv.discountAmount)}</b></span>
+              </div>
+            )}
+          </div>
+        )}
         <div className="mb-2 text-xs font-semibold text-muted-foreground">روش پرداخت</div>
         <div className="grid grid-cols-4 gap-2">
           {(["cash", "card", "credit", "check"] as PaymentMethod[]).map((m) => {

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
-import { X, Download, Printer } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Download, Printer, Tag } from "lucide-react";
 import {
-  renderLabelToCanvas, labelDataUrl, buildBarcodesPDF, printBarcodeLabels,
+  renderLabelToCanvas, labelDataUrl, buildBarcodesPDF, printBarcodeLabels, loadPrintLayout,
 } from "@/lib/barcode";
+import { BarcodePrintModal } from "@/components/BarcodePrintModal";
 import { savePdf, saveBase64File, OLD_APP_MESSAGE } from "@/lib/print";
 import { formatToman, type Product } from "@/lib/store";
 
@@ -10,6 +11,7 @@ const VIEW_LABEL = { widthMm: 60, heightMm: 35, showName: true, showPrice: true 
 
 export function BarcodeViewModal({ product, onClose }: { product: Product; onClose: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [labelPrint, setLabelPrint] = useState(false);
 
   useEffect(() => {
     if (!ref.current || !product.code) return;
@@ -39,13 +41,19 @@ export function BarcodeViewModal({ product, onClose }: { product: Product; onClo
   };
 
   const print = async () => {
+    const saved = loadPrintLayout();
     const ok = await printBarcodeLabels([item], {
-      cols: 1, rows: 1, copies: 1,
-      labelWidthMm: VIEW_LABEL.widthMm, labelHeightMm: VIEW_LABEL.heightMm,
-      showName: true, showPrice: true,
+      ...saved,
+      cols: saved.mode === "label" ? saved.cols : 1,
+      rows: 1,
+      copies: 1,
     });
     if (!ok) alert(OLD_APP_MESSAGE);
   };
+
+  if (labelPrint) {
+    return <BarcodePrintModal items={[product]} onClose={() => setLabelPrint(false)} />;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -74,6 +82,12 @@ export function BarcodeViewModal({ product, onClose }: { product: Product; onClo
             <Printer className="h-3.5 w-3.5" /> چاپ
           </button>
         </div>
+        <button
+          onClick={() => setLabelPrint(true)}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary"
+        >
+          <Tag className="h-3.5 w-3.5" /> چاپ با پرینتر لیبل‌زن (تنظیمات)
+        </button>
       </div>
     </div>
   );

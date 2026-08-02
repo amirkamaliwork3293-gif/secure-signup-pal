@@ -147,6 +147,12 @@ export type Invoice = {
   checkDueDate?: string;
   /** توضیحات اختیاری فاکتور — در صورت وجود، روی فاکتور چاپی/PDF/اشتراک‌گذاری هم نمایش داده می‌شود */
   notes?: string;
+  /** جمع اقلام پیش از تخفیف کل فاکتور */
+  subtotal?: number;
+  /** درصد تخفیف روی کل فاکتور (۰ تا ۱۰۰) */
+  discountPercent?: number;
+  /** مبلغ تخفیف کل فاکتور (اگر درصد وارد شود، از روی آن محاسبه می‌شود) */
+  discountAmount?: number;
 };
 
 // ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────
@@ -1605,8 +1611,18 @@ export function emptyInvoice(): Invoice {
 
 export function recalc(inv: Invoice): Invoice {
   // گرد کردن برای جلوگیری از خطای اعشار در فروش وزنی (۲٫۵ × قیمت)
-  const total = Math.round(inv.items.reduce((s, i) => s + i.price * i.quantity, 0));
-  return { ...inv, total };
+  const subtotal = Math.round(inv.items.reduce((s, i) => s + i.price * i.quantity, 0));
+  const pct = Math.max(0, Math.min(100, Number(inv.discountPercent) || 0));
+  const raw = pct > 0
+    ? Math.round((subtotal * pct) / 100)
+    : Math.max(0, Math.round(Number(inv.discountAmount) || 0));
+  const discount = Math.min(subtotal, raw);
+  return {
+    ...inv,
+    subtotal,
+    discountAmount: discount > 0 ? discount : undefined,
+    total: subtotal - discount,
+  };
 }
 
 export function cryptoId() {

@@ -110,6 +110,8 @@ ${inv.notes ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
   <tbody>${rows}</tbody>
   <tfoot>
+    ${inv.discountAmount ? `<tr><td colspan="4">جمع اقلام</td><td>${formatAmount(inv.subtotal ?? inv.total + inv.discountAmount)} ${currencyLabel()}</td></tr>
+    <tr><td colspan="4">تخفیف${inv.discountPercent ? ` (${formatAmount(inv.discountPercent)}٪)` : ""}</td><td>${formatAmount(inv.discountAmount)} ${currencyLabel()}</td></tr>` : ""}
     <tr class="total-row">
       <td colspan="4">جمع کل</td>
       <td>${formatAmount(inv.total)} ${currencyLabel()}</td>
@@ -185,6 +187,7 @@ ${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${inv.n
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
+${inv.discountAmount ? `<div class="line"><span>جمع اقلام</span><span>${fmt(inv.subtotal ?? inv.total + inv.discountAmount)}</span></div><div class="line"><span>تخفیف${inv.discountPercent ? ` (${fmt(inv.discountPercent)}٪)` : ""}</span><span>${fmt(inv.discountAmount)}</span></div>` : ""}
 <div class="total"><span>جمع کل</span><span>${fmt(inv.total)} ${currencyLabel()}</span></div>
 ${inv.paidAmount ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(inv.paidAmount)}</span></div>` : ""}
 ${inv.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(inv.checkAmount)}</span></div>` : ""}

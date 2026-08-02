@@ -13,10 +13,7 @@ import {
   TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
   Award, ArrowDownWideNarrow, Users,
 } from "lucide-react";
-import {
-  productStats, customerStats, topBy, bottomBy,
-  type ProductStat, type CustomerStat,
-} from "@/lib/analytics";
+import { productStats, customerStats, topBy, bottomBy } from "@/lib/analytics";
 
 export const Route = createFileRoute("/reports")({
   head: () => ({

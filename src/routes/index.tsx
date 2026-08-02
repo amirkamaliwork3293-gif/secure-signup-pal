@@ -573,8 +573,21 @@ export function InvoicePageInner() {
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
         {inv.items.length > 0 && (
           <div className="mb-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
-            <div className="mb-2 text-xs font-semibold text-muted-foreground">تخفیف کل فاکتور (اختیاری)</div>
-            <div className="grid grid-cols-2 gap-2">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showDiscount}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setShowDiscount(on);
+                  if (!on) setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }));
+                }}
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
+              <span className="text-xs font-semibold text-muted-foreground">اعمال تخفیف روی کل فاکتور</span>
+            </label>
+            {showDiscount && (<>
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="mb-1 block text-[11px] text-muted-foreground">درصد تخفیف</span>
                 <input
@@ -629,6 +642,7 @@ export function InvoicePageInner() {
                 <span>تخفیف: <b className="text-primary">{formatToman(inv.discountAmount)}</b></span>
               </div>
             )}
+            </>)}
           </div>
         )}
         <div className="mb-2 text-xs font-semibold text-muted-foreground">روش پرداخت</div>

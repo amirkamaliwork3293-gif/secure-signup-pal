@@ -319,3 +319,77 @@ export async function printBarcodeLabels(
   const html = buildLabelsPrintHTML(urls, layout);
   return printHtml(html, "بارکد محصولات");
 }
+
+// ─── حالت لیبل‌زن (رول برچسب) ───────────────────────────────────────────────
+// در این حالت اندازه‌ی «صفحه» دقیقاً برابر اندازه‌ی یک ردیف برچسب است تا
+// پرینترهای حرارتی مثل Remo P600N بدون حاشیه و بدون تغییر مقیاس چاپ کنند.
+
+function rollPageSize(layout: PrintLayout) {
+  const cols = Math.max(1, layout.cols || 1);
+  const gap = gapOf(layout);
+  const pageW = cols * layout.labelWidthMm + (cols - 1) * gap;
+  const pageH = layout.labelHeightMm;
+  return { cols, gap, pageW, pageH };
+}
+
+async function buildLabelRollPDF(items: LabelItem[], layout: PrintLayout): Promise<jsPDF> {
+  const { cols, gap, pageW, pageH } = rollPageSize(layout);
+  const offX = Number(layout.offsetXMm ?? 0);
+  const offY = Number(layout.offsetYMm ?? 0);
+
+  const pdf = new jsPDF({
+    unit: "mm",
+    format: [pageW, pageH],
+    orientation: pageW >= pageH ? "landscape" : "portrait",
+  });
+
+  const expanded = expandCopies(items, Math.max(1, layout.copies));
+  const urls = await renderAllLabels(expanded, layout);
+
+  for (let i = 0; i < expanded.length; i++) {
+    const col = i % cols;
+    if (i > 0 && col === 0) pdf.addPage([pageW, pageH], pageW >= pageH ? "landscape" : "portrait");
+    const x = offX + col * (layout.labelWidthMm + gap);
+    pdf.addImage(urls[i], "PNG", x, offY, layout.labelWidthMm, layout.labelHeightMm);
+  }
+  return pdf;
+}
+
+function buildLabelRollHTML(dataUrls: string[], layout: PrintLayout): string {
+  const { cols, gap, pageW, pageH } = rollPageSize(layout);
+  const offX = Number(layout.offsetXMm ?? 0);
+  const offY = Number(layout.offsetYMm ?? 0);
+
+  const pages: string[] = [];
+  for (let i = 0; i < dataUrls.length; i += cols) {
+    const row = dataUrls
+      .slice(i, i + cols)
+      .map((u) => `<img src="${u}" />`)
+      .join("");
+    pages.push(`<div class="page">${row}</div>`);
+  }
+
+  return `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<title>چاپ لیبل بارکد</title>
+<style>
+  @page { size: ${pageW}mm ${pageH}mm; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #fff; }
+  .page {
+    width: ${pageW}mm; height: ${pageH}mm;
+    display: flex; gap: ${gap}mm; align-items: flex-start;
+    padding: ${offY}mm 0 0 ${offX}mm;
+    break-after: page; page-break-after: always;
+    overflow: hidden;
+  }
+  .page:last-child { break-after: auto; page-break-after: auto; }
+  img { width: ${layout.labelWidthMm}mm; height: ${layout.labelHeightMm}mm; display: block; }
+  @media print { html, body { width: ${pageW}mm; } }
+</style>
+</head>
+<body>${pages.join("")}</body>
+</html>`;
+}

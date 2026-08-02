@@ -76,6 +76,9 @@ export function InvoicePageInner() {
   const [checkDueDate, setCheckDueDate] = useState<string>(inv.checkDueDate ?? "");
   const [notes, setNotes] = useState<string>(inv.notes ?? "");
   const [showSearch, setShowSearch] = useState(false);
+  const [showDiscount, setShowDiscount] = useState(
+    () => !!(inv.discountPercent || inv.discountAmount),
+  );
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
   const [allCustomers] = customers.useAll();

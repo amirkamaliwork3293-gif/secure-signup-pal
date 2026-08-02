@@ -45,6 +45,10 @@ export type LabelOptions = {
   heightMm: number;
   showName?: boolean;
   showPrice?: boolean;
+  /** نمایش رشته‌ی کد زیر میله‌های بارکد */
+  showCode?: boolean;
+  /** ضریب پررنگی/ضخامت میله‌ها برای پرینترهای حرارتی (۱ = عادی) */
+  boldness?: number;
 };
 
 // رزولوشن لیبل: ‎12px/mm ≈ 300dpi — کیفیت چاپ حرفه‌ای
@@ -67,7 +71,7 @@ export async function renderLabelToCanvas(
   opts: LabelOptions,
   target?: HTMLCanvasElement,
 ): Promise<HTMLCanvasElement> {
-  const { widthMm, heightMm, showName = true, showPrice = true } = opts;
+  const { widthMm, heightMm, showName = true, showPrice = true, showCode = true, boldness = 1 } = opts;
   const W = Math.round(widthMm * PX_PER_MM);
   const H = Math.round(heightMm * PX_PER_MM);
 
@@ -80,12 +84,12 @@ export async function renderLabelToCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
-  const pad = Math.round(H * 0.05);
+  const pad = Math.round(Math.min(H, W) * 0.05);
   const hasName = showName && !!item.name;
   const hasPrice = showPrice && typeof item.price === "number";
 
-  const nameFontPx = Math.max(20, Math.round(H * 0.105));
-  const priceFontPx = Math.max(22, Math.round(H * 0.115));
+  const nameFontPx = Math.max(16, Math.round(H * 0.115));
+  const priceFontPx = Math.max(18, Math.round(H * 0.125));
   const lineGap = Math.round(H * 0.025);
 
   const nameH = hasName ? nameFontPx + lineGap : 0;
@@ -97,9 +101,9 @@ export async function renderLabelToCanvas(
   await bwipjs.toCanvas(bc, {
     bcid: /^\d{12,13}$/.test(item.code) ? "ean13" : "code128",
     text: item.code,
-    scale: 4,
+    scale: Math.max(2, Math.round(4 * boldness)),
     height: 11,
-    includetext: true,
+    includetext: showCode,
     textxalign: "center",
     textsize: 9,
     paddingwidth: 2,
@@ -141,6 +145,8 @@ export async function labelDataUrl(item: LabelItem, opts: LabelOptions): Promise
 // ─── چیدمان چاپ ─────────────────────────────────────────────────────────────
 
 export type PrintLayout = {
+  /** a4 = چاپ روی برگه A4 — label = چاپ روی رول/برچسب مخصوص لیبل‌زن */
+  mode?: "a4" | "label";
   cols: number;
   rows: number;
   copies: number;
@@ -148,15 +154,72 @@ export type PrintLayout = {
   labelHeightMm: number;
   showName?: boolean;
   showPrice?: boolean;
+  showCode?: boolean;
+  /** فاصله بین لیبل‌ها (mm) */
+  gapMm?: number;
+  /** جابه‌جایی ریز برای کالیبراسیون پرینتر لیبل‌زن (mm) */
+  offsetXMm?: number;
+  offsetYMm?: number;
+  /** پررنگی میله‌ها برای پرینتر حرارتی */
+  boldness?: number;
 };
 
 export const DEFAULT_LAYOUT: PrintLayout = {
+  mode: "a4",
   cols: 3, rows: 8, copies: 1,
   labelWidthMm: 60, labelHeightMm: 35,
-  showName: true, showPrice: true,
+  showName: true, showPrice: true, showCode: true,
+  gapMm: 2, offsetXMm: 0, offsetYMm: 0, boldness: 1,
 };
 
-const GAP_MM = 2; // فاصله استاندارد بین لیبل‌ها
+/** پیش‌تنظیم‌های رایج رول لیبل (سازگار با Remo P600N و سایر لیبل‌زن‌های حرارتی) */
+export type LabelPreset = {
+  id: string;
+  label: string;
+  widthMm: number;
+  heightMm: number;
+  cols: number;
+  gapMm: number;
+};
+
+export const LABEL_PRESETS: LabelPreset[] = [
+  { id: "50x30", label: "۵۰×۳۰ تک‌ردیفه", widthMm: 50, heightMm: 30, cols: 1, gapMm: 2 },
+  { id: "50x30x2", label: "۵۰×۳۰ دوردیفه", widthMm: 50, heightMm: 30, cols: 2, gapMm: 2 },
+  { id: "40x30", label: "۴۰×۳۰ تک‌ردیفه", widthMm: 40, heightMm: 30, cols: 1, gapMm: 2 },
+  { id: "40x30x2", label: "۴۰×۳۰ دوردیفه", widthMm: 40, heightMm: 30, cols: 2, gapMm: 2 },
+  { id: "38x25x2", label: "۳۸×۲۵ دوردیفه", widthMm: 38, heightMm: 25, cols: 2, gapMm: 2 },
+  { id: "60x40", label: "۶۰×۴۰ تک‌ردیفه", widthMm: 60, heightMm: 40, cols: 1, gapMm: 2 },
+  { id: "100x50", label: "۱۰۰×۵۰ تک‌ردیفه", widthMm: 100, heightMm: 50, cols: 1, gapMm: 2 },
+  { id: "30x20x3", label: "۳۰×۲۰ سه‌ردیفه", widthMm: 30, heightMm: 20, cols: 3, gapMm: 2 },
+];
+
+export const DEFAULT_LABEL_LAYOUT: PrintLayout = {
+  mode: "label",
+  cols: 1, rows: 1, copies: 1,
+  labelWidthMm: 50, labelHeightMm: 30,
+  showName: true, showPrice: true, showCode: true,
+  gapMm: 2, offsetXMm: 0, offsetYMm: 0, boldness: 1,
+};
+
+const LAYOUT_KEY = "kamix_barcode_layout_v1";
+
+/** ذخیره/بازیابی تنظیمات چاپ تا در چاپ تکی و گروهی یکسان باشد */
+export function loadPrintLayout(): PrintLayout {
+  if (typeof localStorage === "undefined") return DEFAULT_LAYOUT;
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return DEFAULT_LAYOUT;
+    return { ...DEFAULT_LAYOUT, ...(JSON.parse(raw) as PrintLayout) };
+  } catch {
+    return DEFAULT_LAYOUT;
+  }
+}
+
+export function savePrintLayout(l: PrintLayout) {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(l)); } catch { /* ignore */ }
+}
+
+const gapOf = (l: PrintLayout) => Math.max(0, Number(l.gapMm ?? 2));
 
 function expandCopies(items: LabelItem[], copies: number): LabelItem[] {
   const out: LabelItem[] = [];
@@ -170,6 +233,8 @@ async function renderAllLabels(items: LabelItem[], layout: PrintLayout): Promise
     heightMm: layout.labelHeightMm,
     showName: layout.showName,
     showPrice: layout.showPrice,
+    showCode: layout.showCode !== false,
+    boldness: layout.boldness ?? 1,
   };
   // کش بر اساس کد: هر بارکد فقط یک‌بار رندر می‌شود حتی با چند کپی
   const cache = new Map<string, string>();
@@ -190,6 +255,8 @@ export async function buildBarcodesPDF(
   items: LabelItem[],
   layout: PrintLayout = DEFAULT_LAYOUT,
 ): Promise<jsPDF> {
+  const GAP_MM = gapOf(layout);
+  if (layout.mode === "label") return buildLabelRollPDF(items, layout);
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -219,6 +286,8 @@ export async function buildBarcodesPDF(
 /** ساخت صفحه HTML چاپ لیبل‌ها — برای چاپ مستقیم در وب و اپ اندروید */
 export function buildLabelsPrintHTML(dataUrls: string[], layout: PrintLayout): string {
   const { labelWidthMm, labelHeightMm } = layout;
+  const GAP_MM = gapOf(layout);
+  if (layout.mode === "label") return buildLabelRollHTML(dataUrls, layout);
   const imgs = dataUrls
     .map((u) => `<img src="${u}" style="width:${labelWidthMm}mm;height:${labelHeightMm}mm;" />`)
     .join("");

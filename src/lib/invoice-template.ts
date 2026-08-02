@@ -375,6 +375,12 @@ export function buildTemplatedInvoiceHTML(
 
   const paid = inv.paidAmount || 0;
   const totalsRows = [
+    inv.discountAmount
+      ? `<tr><td>جمع اقلام</td><td>${formatAmount(inv.subtotal ?? inv.total + inv.discountAmount)} ${currencyLabel()}</td></tr>`
+      : "",
+    inv.discountAmount
+      ? `<tr><td>تخفیف${inv.discountPercent ? ` (${formatAmount(inv.discountPercent)}٪)` : ""}</td><td>${formatAmount(inv.discountAmount)} ${currencyLabel()}</td></tr>`
+      : "",
     `<tr class="grand"><td>جمع کل</td><td>${formatAmount(inv.total)} ${currencyLabel()}</td></tr>`,
     paid ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(paid)} ${currencyLabel()}</td></tr>` : "",
     inv.checkAmount

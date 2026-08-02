@@ -28,6 +28,7 @@ import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as InvoiceDesignRouteImport } from './routes/invoice-design'
+import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as GoldRouteImport } from './routes/gold'
 import { Route as ExpensesRouteImport } from './routes/expenses'
@@ -132,6 +133,11 @@ const InvoiceDesignRoute = InvoiceDesignRouteImport.update({
   path: '/invoice-design',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InventoryRoute = InventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
   path: '/history',
@@ -180,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
+  '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -209,6 +216,7 @@ export interface FileRoutesByTo {
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
+  '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -239,6 +247,7 @@ export interface FileRoutesById {
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
+  '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
   '/invoices': typeof InvoicesRoute
   '/login': typeof LoginRoute
@@ -270,6 +279,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/gold'
     | '/history'
+    | '/inventory'
     | '/invoice-design'
     | '/invoices'
     | '/login'
@@ -299,6 +309,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/gold'
     | '/history'
+    | '/inventory'
     | '/invoice-design'
     | '/invoices'
     | '/login'
@@ -328,6 +339,7 @@ export interface FileRouteTypes {
     | '/expenses'
     | '/gold'
     | '/history'
+    | '/inventory'
     | '/invoice-design'
     | '/invoices'
     | '/login'
@@ -358,6 +370,7 @@ export interface RootRouteChildren {
   ExpensesRoute: typeof ExpensesRoute
   GoldRoute: typeof GoldRoute
   HistoryRoute: typeof HistoryRoute
+  InventoryRoute: typeof InventoryRoute
   InvoiceDesignRoute: typeof InvoiceDesignRoute
   InvoicesRoute: typeof InvoicesRoute
   LoginRoute: typeof LoginRoute
@@ -516,6 +529,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvoiceDesignRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inventory': {
+      id: '/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof InventoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/history': {
       id: '/history'
       path: '/history'
@@ -582,6 +602,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpensesRoute: ExpensesRoute,
   GoldRoute: GoldRoute,
   HistoryRoute: HistoryRoute,
+  InventoryRoute: InventoryRoute,
   InvoiceDesignRoute: InvoiceDesignRoute,
   InvoicesRoute: InvoicesRoute,
   LoginRoute: LoginRoute,

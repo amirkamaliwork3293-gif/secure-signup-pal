@@ -11,9 +11,7 @@ import {
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
   TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
-  Award, ArrowDownWideNarrow, Users,
 } from "lucide-react";
-import { productStats, customerStats, topBy, bottomBy } from "@/lib/analytics";
 
 export const Route = createFileRoute("/reports")({
   head: () => ({
@@ -177,15 +175,6 @@ function ReportsPageInner() {
   }, [history]);
 
   const maxDay = Math.max(1, ...daily.map(([, v]) => v));
-
-  const prodStats = useMemo(() => productStats(filtered, products.getAll()), [filtered]);
-  const custStats = useMemo(() => customerStats(filtered, products.getAll()), [filtered]);
-  const withCost = prodStats.filter((p) => p.hasCost);
-  const topProfit = topBy(withCost, (p) => p.profit);
-  const lowProfit = bottomBy(withCost, (p) => p.profit);
-  const topSellers = topBy(prodStats, (p) => p.qty);
-  const topCustomers = topBy(custStats, (c) => c.revenue);
-  const lowCustomers = bottomBy(custStats, (c) => c.revenue);
 
   const RangeButton = ({ value, icon: Icon }: { value: Range; icon: typeof Calendar }) => (
     <button

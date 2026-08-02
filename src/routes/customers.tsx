@@ -74,6 +74,19 @@ export const Route = createFileRoute("/customers")({
 
 type Filter = "all" | "debtor" | "creditor" | "settled";
 
+/** نمایش‌های تحلیلی کنار جستجو */
+type SortBy = "default" | "topBuyer" | "lowBuyer" | "mostInvoices" | "recent" | "stale" | "newest";
+
+const SORT_LABEL: Record<SortBy, string> = {
+  default: "نمایش پیش‌فرض",
+  topBuyer: "پرخریدترین مشتری‌ها",
+  lowBuyer: "کم‌خریدترین مشتری‌ها",
+  mostInvoices: "بیشترین تعداد فاکتور",
+  recent: "تازه‌ترین خرید",
+  stale: "قدیمی‌ترین خرید (بی‌تحرک)",
+  newest: "تازه‌ترین مشتری‌ها",
+};
+
 const inputCls =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
 
@@ -82,6 +95,7 @@ function CustomersPageInner() {
   const [list, setList] = customers.useAll();
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
   const [filter, setFilter] = useState<Filter>("all");
+  const [sortBy, setSortBy] = useState<SortBy>("default");
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | null>(null);
   const [txTarget, setTxTarget] = useState<{ customer: Customer; type: "debt" | "payment" } | null>(
@@ -99,6 +113,22 @@ function CustomersPageInner() {
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
   }, [incomingQuery]);
+
+  const [history] = invoice.useHistory();
+
+  /** آمار خرید هر مشتری از روی فاکتورهای آرشیوشده */
+  const buyStats = useMemo(() => {
+    const m = new Map<string, { total: number; count: number; lastAt: number }>();
+    for (const c of list) {
+      const invs = invoicesOfCustomer(c, history);
+      m.set(c.id, {
+        total: invs.reduce((s, i) => s + (i.total || 0), 0),
+        count: invs.length,
+        lastAt: invs.reduce((s, i) => Math.max(s, i.createdAt), 0),
+      });
+    }
+    return m;
+  }, [list, history]);
 
   const totals = useMemo(() => {
     let receivable = 0; // مجموع طلب ما از بدهکارها
@@ -132,9 +162,25 @@ function CustomersPageInner() {
     return q ? filterAndRankSearch(statusFiltered, q, (c) => [customerFullName(c), c.phone]) : statusFiltered;
   }, [list, searchQ, filter]);
 
+  /** اعمال نمایش انتخابی (پرخریدترین، کم‌خریدترین و…) */
+  const ordered = useMemo(() => {
+    if (sortBy === "default") return filtered;
+    const st = (c: Customer) => buyStats.get(c.id) ?? { total: 0, count: 0, lastAt: 0 };
+    const arr = [...filtered];
+    switch (sortBy) {
+      case "topBuyer": return arr.sort((a, b) => st(b).total - st(a).total);
+      case "lowBuyer": return arr.sort((a, b) => st(a).total - st(b).total);
+      case "mostInvoices": return arr.sort((a, b) => st(b).count - st(a).count);
+      case "recent": return arr.sort((a, b) => st(b).lastAt - st(a).lastAt);
+      case "stale": return arr.sort((a, b) => st(a).lastAt - st(b).lastAt);
+      case "newest": return arr.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      default: return arr;
+    }
+  }, [filtered, sortBy, buyStats]);
+
   // در حالت «همه» (بدون جستجو) فهرست به سه گروه مجزا تقسیم می‌شود تا طلب و بدهی قاطی نشوند
   const grouped = useMemo(() => {
-    if (filter !== "all" || searchQ.trim()) return null;
+    if (filter !== "all" || searchQ.trim() || sortBy !== "default") return null;
     const debtors: Customer[] = [];
     const creditors: Customer[] = [];
     const settled: Customer[] = [];
@@ -145,7 +191,7 @@ function CustomersPageInner() {
     // طلبکاران: بزرگ‌ترین بدهی ما اول
     creditors.sort((a, b) => customerBalance(a) - customerBalance(b));
     return { debtors, creditors, settled };
-  }, [filtered, filter, searchQ]);
+  }, [filtered, filter, searchQ, sortBy]);
 
   const removeCustomer = (c: Customer) => {
     if (!confirm(`حساب «${customerFullName(c)}» حذف شود؟ تمام سوابق بدهی و پرداخت پاک می‌شود.`))

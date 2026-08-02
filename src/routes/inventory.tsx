@@ -30,15 +30,31 @@ const TAB_LABEL: Record<Tab, string> = {
   all: "همه کالاها", low: "رو به اتمام", expiry: "نزدیک انقضا", dead: "راکد", top: "پرگردش",
 };
 
+/** نمایش‌های تحلیلی کنار جستجو */
+type SortBy = "default" | "topSold" | "lowSold" | "topProfit" | "lowProfit" | "topRevenue" | "highStock" | "lowStockQty";
+
+const SORT_LABEL: Record<SortBy, string> = {
+  default: "نمایش پیش‌فرض",
+  topSold: "پرفروش‌ترین کالاها",
+  lowSold: "کم‌فروش‌ترین کالاها",
+  topProfit: "پرسودترین کالاها",
+  lowProfit: "کم‌سودترین کالاها",
+  topRevenue: "بیشترین درآمد",
+  highStock: "بیشترین موجودی",
+  lowStockQty: "کمترین موجودی",
+};
+
 function InventoryPageInner() {
   const [list] = products.useAll();
   const [history] = invoice.useHistory();
   const [tab, setTab] = useState<Tab>("all");
   const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("default");
 
   const value = useMemo(() => inventoryValue(list), [list]);
   const stats = useMemo(() => productStats(history, list), [history, list]);
   const soldQty = useMemo(() => new Map(stats.map((s) => [s.productId, s.qty])), [stats]);
+  const statMap = useMemo(() => new Map(stats.map((s) => [s.productId, s])), [stats]);
 
   const low = useMemo(
     () => list.filter((p) => p.stock <= (p.lowStockThreshold ?? 3)),
@@ -57,9 +73,22 @@ function InventoryPageInner() {
   const base = tab === "low" ? low : tab === "expiry" ? nearExpiry : tab === "dead" ? dead : tab === "top" ? top : list;
   const shown = useMemo(() => {
     const s = q.trim();
-    if (!s) return base;
-    return base.filter((p) => p.name.includes(s) || p.code?.includes(s) || p.category?.includes(s));
-  }, [base, q]);
+    const arr = s
+      ? base.filter((p) => p.name.includes(s) || p.code?.includes(s) || p.category?.includes(s))
+      : [...base];
+    if (sortBy === "default") return arr;
+    const st = (p: Product) => statMap.get(p.id);
+    switch (sortBy) {
+      case "topSold": return arr.sort((a, b) => (st(b)?.qty ?? 0) - (st(a)?.qty ?? 0));
+      case "lowSold": return arr.sort((a, b) => (st(a)?.qty ?? 0) - (st(b)?.qty ?? 0));
+      case "topProfit": return arr.sort((a, b) => (st(b)?.profit ?? 0) - (st(a)?.profit ?? 0));
+      case "lowProfit": return arr.sort((a, b) => (st(a)?.profit ?? 0) - (st(b)?.profit ?? 0));
+      case "topRevenue": return arr.sort((a, b) => (st(b)?.revenue ?? 0) - (st(a)?.revenue ?? 0));
+      case "highStock": return arr.sort((a, b) => b.stock - a.stock);
+      case "lowStockQty": return arr.sort((a, b) => a.stock - b.stock);
+      default: return arr;
+    }
+  }, [base, q, sortBy, statMap]);
 
   const count: Record<Tab, number> = {
     all: list.length, low: low.length, expiry: nearExpiry.length, dead: dead.length, top: top.length,
@@ -90,15 +119,35 @@ function InventoryPageInner() {
         ))}
       </div>
 
-      <label className="mb-3 flex items-center gap-2 rounded-xl border border-input bg-background px-3 py-2">
-        <Search className="h-4 w-4 text-muted-foreground" />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="جستجو در کالاها…"
-          className="w-full bg-transparent text-sm outline-none"
-        />
-      </label>
+      <div className="mb-3 flex gap-2">
+        <label className="flex flex-1 items-center gap-2 rounded-xl border border-input bg-background px-3 py-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="جستجو در کالاها…"
+            className="w-full bg-transparent text-sm outline-none"
+          />
+        </label>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortBy)}
+          title="نحوه نمایش کالاها"
+          className={`w-40 shrink-0 rounded-xl border bg-background px-2 py-2 text-xs outline-none focus:border-primary ${
+            sortBy === "default" ? "border-input text-muted-foreground" : "border-primary text-primary"
+          }`}
+        >
+          {(Object.keys(SORT_LABEL) as SortBy[]).map((k) => (
+            <option key={k} value={k}>{SORT_LABEL[k]}</option>
+          ))}
+        </select>
+      </div>
+
+      {sortBy !== "default" && (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          نمایش بر اساس «{SORT_LABEL[sortBy]}» — سود و درآمد از روی فاکتورهای ثبت‌شده محاسبه می‌شود.
+        </p>
+      )}
 
       {shown.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -107,7 +156,13 @@ function InventoryPageInner() {
       ) : (
         <ul className="space-y-2">
           {shown.map((p) => (
-            <Row key={p.id} p={p} sold={soldQty.get(p.id) ?? 0} />
+            <Row
+              key={p.id}
+              p={p}
+              sold={soldQty.get(p.id) ?? 0}
+              revenue={statMap.get(p.id)?.revenue ?? 0}
+              profit={statMap.get(p.id)?.hasCost ? statMap.get(p.id)!.profit : null}
+            />
           ))}
         </ul>
       )}
@@ -115,7 +170,7 @@ function InventoryPageInner() {
   );
 }
 
-function Row({ p, sold }: { p: Product; sold: number }) {
+function Row({ p, sold, revenue, profit }: { p: Product; sold: number; revenue: number; profit: number | null }) {
   const lowLimit = p.lowStockThreshold ?? 3;
   const isLow = p.stock <= lowLimit;
   const expDays = p.expiryAt ? Math.ceil((p.expiryAt - Date.now()) / DAY) : null;
@@ -145,6 +200,16 @@ function Row({ p, sold }: { p: Product; sold: number }) {
         {!!p.buyPrice && (
           <span className="rounded-lg bg-secondary px-2 py-1 text-muted-foreground">
             ارزش {formatToman(p.stock * p.buyPrice)}
+          </span>
+        )}
+        {revenue > 0 && (
+          <span className="rounded-lg bg-secondary px-2 py-1 text-muted-foreground">
+            درآمد {formatToman(revenue)}
+          </span>
+        )}
+        {profit !== null && sold > 0 && (
+          <span className={`rounded-lg px-2 py-1 ${profit >= 0 ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+            سود {formatToman(profit)}
           </span>
         )}
         {expDays !== null && (

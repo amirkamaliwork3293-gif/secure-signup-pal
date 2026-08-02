@@ -11,9 +11,7 @@ import {
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
   TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
-  Award, ArrowDownWideNarrow, Users,
 } from "lucide-react";
-import { productStats, customerStats, topBy, bottomBy } from "@/lib/analytics";
 
 export const Route = createFileRoute("/reports")({
   head: () => ({
@@ -177,15 +175,6 @@ function ReportsPageInner() {
   }, [history]);
 
   const maxDay = Math.max(1, ...daily.map(([, v]) => v));
-
-  const prodStats = useMemo(() => productStats(filtered, products.getAll()), [filtered]);
-  const custStats = useMemo(() => customerStats(filtered, products.getAll()), [filtered]);
-  const withCost = prodStats.filter((p) => p.hasCost);
-  const topProfit = topBy(withCost, (p) => p.profit);
-  const lowProfit = bottomBy(withCost, (p) => p.profit);
-  const topSellers = topBy(prodStats, (p) => p.qty);
-  const topCustomers = topBy(custStats, (c) => c.revenue);
-  const lowCustomers = bottomBy(custStats, (c) => c.revenue);
 
   const RangeButton = ({ value, icon: Icon }: { value: Range; icon: typeof Calendar }) => (
     <button
@@ -409,75 +398,6 @@ function ReportsPageInner() {
           </p>
         )}
       </section>
-
-      {/* تحلیل کالاها */}
-      {prodStats.length > 0 && (
-        <div className="mb-4 grid gap-2 sm:grid-cols-2">
-          <StatList
-            title="پرسودترین کالاها"
-            icon={<Award className="h-4 w-4 text-green-600" />}
-            empty="قیمت خرید کالاها ثبت نشده است."
-            rows={topProfit.map((p) => ({
-              key: p.productId,
-              title: p.name,
-              sub: `${formatNumber(p.qty)} فروش · حاشیه ${formatNumber(p.margin)}٪`,
-              value: formatToman(p.profit),
-              tone: "good" as const,
-            }))}
-          />
-          <StatList
-            title="کم‌سودترین کالاها"
-            icon={<ArrowDownWideNarrow className="h-4 w-4 text-destructive" />}
-            empty="قیمت خرید کالاها ثبت نشده است."
-            rows={lowProfit.map((p) => ({
-              key: p.productId,
-              title: p.name,
-              sub: `${formatNumber(p.qty)} فروش · حاشیه ${formatNumber(p.margin)}٪`,
-              value: formatToman(p.profit),
-              tone: p.profit >= 0 ? ("muted" as const) : ("bad" as const),
-            }))}
-          />
-          <StatList
-            title="پرفروش‌ترین کالاها (تعداد)"
-            icon={<Package className="h-4 w-4 text-primary" />}
-            empty="فروشی ثبت نشده است."
-            rows={topSellers.map((p) => ({
-              key: p.productId,
-              title: p.name,
-              sub: `درآمد ${formatToman(p.revenue)}`,
-              value: `${formatNumber(p.qty)} عدد`,
-              tone: "muted" as const,
-            }))}
-          />
-          <StatList
-            title="بهترین مشتری‌ها"
-            icon={<Users className="h-4 w-4 text-primary" />}
-            empty="فاکتوری با نام مشتری ثبت نشده است."
-            rows={topCustomers.map((c) => ({
-              key: c.key,
-              title: c.name,
-              sub: `${formatNumber(c.invoices)} فاکتور · میانگین ${formatToman(c.avg)}`,
-              value: formatToman(c.revenue),
-              tone: "good" as const,
-            }))}
-          />
-          {lowCustomers.length > 0 && (
-            <StatList
-              title="کم‌خریدترین مشتری‌ها"
-              icon={<Users className="h-4 w-4 text-muted-foreground" />}
-              empty="—"
-              rows={lowCustomers.map((c) => ({
-                key: c.key,
-                title: c.name,
-                sub: `${formatNumber(c.invoices)} فاکتور · آخرین خرید ${formatJalaliDate(c.lastAt)}`,
-                value: formatToman(c.revenue),
-                tone: "muted" as const,
-              }))}
-            />
-          )}
-        </div>
-      )}
-
       <section className="rounded-2xl border border-border bg-card p-4 shadow-card">
         <h2 className="mb-3 text-sm font-semibold">درآمد روزانه (۳۰ روز اخیر)</h2>
         {daily.length === 0 ? (
@@ -510,35 +430,6 @@ function ReportsPageInner() {
         )}
       </section>
     </Layout>
-  );
-}
-
-type StatRow = { key: string; title: string; sub: string; value: string; tone: "good" | "bad" | "muted" };
-
-function StatList({
-  title, icon, rows, empty,
-}: { title: string; icon: React.ReactNode; rows: StatRow[]; empty: string }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-4 shadow-card">
-      <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold">{icon}{title}</h2>
-      {rows.length === 0 ? (
-        <div className="py-4 text-center text-xs text-muted-foreground">{empty}</div>
-      ) : (
-        <ul className="space-y-1.5">
-          {rows.map((r) => (
-            <li key={r.key} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-foreground">{r.title}</div>
-                <div className="truncate text-[10px] text-muted-foreground">{r.sub}</div>
-              </div>
-              <span className={`shrink-0 font-bold ${r.tone === "good" ? "text-green-600" : r.tone === "bad" ? "text-destructive" : "text-foreground"}`}>
-                {r.value}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 

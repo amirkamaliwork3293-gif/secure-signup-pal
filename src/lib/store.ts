@@ -597,6 +597,7 @@ export async function hydrateFromCloud(userId: string) {
         settings: read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS),
       };
       await supabase.from("user_data").insert(seed);
+      cloudHydrated = true;
       return;
     }
     // Overwrite local cache with cloud data — but NEVER for fields that have
@@ -618,13 +619,17 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
     overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
     overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
+    cloudHydrated = true;
   } catch (e) {
     console.warn("[store] hydrate failed", e);
+    // Read failed: stay locked so local state can never overwrite cloud data.
+    // Pending edits keep their dirty markers and retry after a successful read.
+    setTimeout(() => {
+      if (cloudUserId === userId && !cloudHydrated) void hydrateFromCloud(userId);
+    }, 15000);
   } finally {
-    // Only allow cloud writes once we know what the cloud already holds.
-    cloudHydrated = true;
     // Flush any restored offline edits back to the cloud.
-    if (Object.keys(pendingPush).length > 0) {
+    if (cloudHydrated && Object.keys(pendingPush).length > 0) {
       if (pushTimer) clearTimeout(pushTimer);
       pushTimer = setTimeout(flushCloudPush, 600);
     }

@@ -406,6 +406,11 @@ function write<T>(key: string, value: T) {
 // ─── Cloud sync ──────────────────────────────────────────────────────────────
 
 let cloudUserId: string | null = null;
+// Until the cloud row has been read for this session, we must not push local
+// state up: a fresh/cleared browser could otherwise overwrite real cloud data
+// with empty arrays. Restored offline edits are flushed explicitly after
+// hydration finishes.
+let cloudHydrated = false;
 const pendingPush: Record<string, unknown> = {};
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -468,6 +473,10 @@ function scheduleCloudPush(key: string, value: unknown) {
 async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
+  if (!cloudHydrated) {
+    // Keep everything queued; hydrateFromCloud() triggers the flush when done.
+    return;
+  }
   const fieldsToPush = { ...pendingPush };
   const fieldNames = Object.keys(fieldsToPush);
   if (fieldNames.length === 0) return;
@@ -558,6 +567,7 @@ async function flushCloudPush() {
 
 export async function hydrateFromCloud(userId: string) {
   cloudUserId = userId;
+  cloudHydrated = false;
   // Restore any unsynced local changes from a previous session so they get
   // re-pushed and are never overwritten by cloud data below.
   const dirty = readDirtySet();

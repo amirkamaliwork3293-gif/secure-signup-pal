@@ -621,6 +621,8 @@ export async function hydrateFromCloud(userId: string) {
   } catch (e) {
     console.warn("[store] hydrate failed", e);
   } finally {
+    // Only allow cloud writes once we know what the cloud already holds.
+    cloudHydrated = true;
     // Flush any restored offline edits back to the cloud.
     if (Object.keys(pendingPush).length > 0) {
       if (pushTimer) clearTimeout(pushTimer);

@@ -14,7 +14,6 @@ import {
 } from "@/lib/storeProfile";
 import { openExternal } from "@/lib/openExternal";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
-import { BackupSection } from "@/components/BackupDialog";
 import {
   Settings,
   Save,
@@ -297,9 +296,6 @@ function SettingsPageInner() {
 
       {/* پروفایل عمومی فروشگاه */}
       <StoreProfileSection shopName={shopName} />
-
-      {/* پشتیبان‌گیری از اطلاعات */}
-      <BackupSection />
 
       {/* دانلود نسخه اندروید — همیشه در دسترس */}
       <div className="mt-4 text-center">

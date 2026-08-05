@@ -33,6 +33,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as GoldRouteImport } from './routes/gold'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CustomersRouteImport } from './routes/customers'
+import { Route as BackupRouteImport } from './routes/backup'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StoreStoreIdRouteImport } from './routes/store.$storeId'
@@ -158,6 +159,11 @@ const CustomersRoute = CustomersRouteImport.update({
   path: '/customers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BackupRoute = BackupRouteImport.update({
+  id: '/backup',
+  path: '/backup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -182,6 +188,7 @@ const MUserIdRoute = MUserIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
@@ -212,6 +219,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
@@ -243,6 +251,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
@@ -275,6 +284,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/backup'
     | '/customers'
     | '/expenses'
     | '/gold'
@@ -305,6 +315,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/backup'
     | '/customers'
     | '/expenses'
     | '/gold'
@@ -335,6 +346,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/backup'
     | '/customers'
     | '/expenses'
     | '/gold'
@@ -366,6 +378,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  BackupRoute: typeof BackupRoute
   CustomersRoute: typeof CustomersRoute
   ExpensesRoute: typeof ExpensesRoute
   GoldRoute: typeof GoldRoute
@@ -564,6 +577,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CustomersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/backup': {
+      id: '/backup'
+      path: '/backup'
+      fullPath: '/backup'
+      preLoaderRoute: typeof BackupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin': {
       id: '/admin'
       path: '/admin'
@@ -598,6 +618,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  BackupRoute: BackupRoute,
   CustomersRoute: CustomersRoute,
   ExpensesRoute: ExpensesRoute,
   GoldRoute: GoldRoute,

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitSignupRequest, getPublicSettings } from "@/lib/auth.functions";
-import { createReceiptUploadUrl } from "@/lib/receipts.functions";
+import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
@@ -71,6 +71,9 @@ function RegisterPage() {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
+  const [receiptRef, setReceiptRef] = useState("");
+  const [receiptDate, setReceiptDate] = useState("");
 
   const [card, setCard] = useState({
     card_number: "",
@@ -116,19 +119,31 @@ function RegisterPage() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const onPickFile = (f: File | null) => {
+  // عکس رسید همان لحظه‌ی انتخاب فشرده می‌شود (حداکثر ۱۶۰۰ پیکسل، کیفیت ۰٫۸۵ —
+  // متن و مبلغ رسید کاملاً خوانا می‌ماند ولی حجم آپلود چند برابر کمتر می‌شود).
+  // اگر فایل با فرمتی باشد که مرورگر نتواند فشرده کند (مثلاً HEIC آیفون) و از سقف
+  // رد شود، کاربر پیام فارسی می‌گیرد و می‌تواند از کادر متنی جایگزین استفاده کند.
+  const onPickFile = async (f: File | null) => {
     if (!f) return;
-    // عمداً هیچ محدودیتی روی فرمت یا حجم فایل رسید اعمال نمی‌شود — بعضی گوشی‌ها
-    // (خصوصاً آیفون با فرمت HEIC) نوع فایل را درست گزارش نمی‌کنند یا عکس‌هایشان
-    // حجم بالاتری دارد؛ محدودکردن این‌جا باعث می‌شد ثبت‌نام بعضی کاربران گیر کند.
     setError("");
-    setReceiptFile(f);
     try {
-      setReceiptPreview(URL.createObjectURL(f));
-    } catch {
-      // پیش‌نمایش برای بعضی فرمت‌ها (مثل HEIC در مرورگرهای غیر-Safari) ممکن است
-      // ساخته نشود — مشکلی نیست، خود فایل هنوز برای آپلود انتخاب‌شده باقی می‌ماند.
+      const { prepareImageUpload } = await import("@/lib/imageCompress");
+      const prepared = await prepareImageUpload(f, "receipt");
+      setReceiptFile(prepared);
+      try {
+        setReceiptPreview(URL.createObjectURL(prepared));
+      } catch {
+        // پیش‌نمایش برای بعضی فرمت‌ها ساخته نمی‌شود — فایل همچنان قابل ارسال است.
+        setReceiptPreview(null);
+      }
+    } catch (e: any) {
+      setReceiptFile(null);
       setReceiptPreview(null);
+      if (fileRef.current) fileRef.current.value = "";
+      setError(
+        (e?.message || "این فایل قابل استفاده نیست.") +
+          " می‌توانید به‌جای عکس، کد پیگیری و تاریخ واریز را در کادر پایین بنویسید.",
+      );
     }
   };
 
@@ -139,26 +154,34 @@ function RegisterPage() {
     if (!isValidIranPhone(phone)) { setError("شماره موبایل معتبر وارد کنید (مثل 09xxxxxxxxx)."); return; }
     if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
     if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
-    if (!receiptFile) { setError("لطفاً عکس رسید پرداخت را آپلود کنید."); return; }
+    const note = receiptNote(receiptRef, receiptDate);
+    if (!receiptFile && !note) {
+      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
+      return;
+    }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
     setLoading(true);
     try {
-      setUploading(true);
-      // پسوند واقعی فایل (هر چیزی، نه فقط چند فرمت خاص) — اگر نامعتبر/خالی بود، jpg پیش‌فرض است
-      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
-      const { path, token } = await signReceiptUpload({
-        data: { username: usernameField, ext, kind: "signup" },
-      });
-      const { error: upErr } = await supabase.storage
-        .from("receipts")
-        .uploadToSignedUrl(path, token, receiptFile, {
-          // بعضی مرورگرها/فرمت‌ها نوع فایل را خالی گزارش می‌کنند — یک نوع پیش‌فرض امن جایگزین می‌شود
-          contentType: receiptFile.type || "application/octet-stream",
-          upsert: false,
+      let path: string | null = null;
+      if (receiptFile) {
+        setUploading(true);
+        // پسوند واقعی فایل (هر چیزی، نه فقط چند فرمت خاص) — اگر نامعتبر/خالی بود، jpg پیش‌فرض است
+        const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
+        const signed = await signReceiptUpload({
+          data: { username: usernameField, ext, kind: "signup" },
         });
-      setUploading(false);
-      if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+        const { error: upErr } = await supabase.storage
+          .from("receipts")
+          .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
+            // بعضی مرورگرها/فرمت‌ها نوع فایل را خالی گزارش می‌کنند — یک نوع پیش‌فرض امن جایگزین می‌شود
+            contentType: receiptFile.type || "application/octet-stream",
+            upsert: false,
+          });
+        setUploading(false);
+        if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+        path = signed.path;
+      }
 
       await submit({
         data: {
@@ -169,6 +192,7 @@ function RegisterPage() {
           plan,
           payment_confirmed: paid,
           receipt_url: path,
+          receipt_note: note,
           phone: phone.trim() || undefined,
         },
       });
@@ -379,7 +403,7 @@ function RegisterPage() {
         {/* Receipt upload */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            عکس رسید پرداخت <span className="text-destructive">*</span>
+            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate) && <span className="text-destructive">*</span>}
           </label>
           {receiptPreview ? (
             <div className="relative rounded-xl border border-border bg-background p-2">
@@ -412,16 +436,44 @@ function RegisterPage() {
             >
               <Upload className="h-5 w-5" />
               <span>برای انتخاب عکس رسید کلیک کنید</span>
-              <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
+              <span className="text-[10px] opacity-70">عکس به‌صورت خودکار فشرده می‌شود</span>
             </button>
           )}
+          {/* عمداً accept محدود نشده — بعضی گوشی‌ها (HEIC آیفون) یا رسید PDF بانک‌ها
+              در حالت accept="image/*" اصلاً در انتخابگر فایل دیده نمی‌شوند. کنترل
+              حجم با فشرده‌سازی و سقف ۳ مگابایت انجام می‌شود، نه با فیلتر فرمت. */}
           <input
             ref={fileRef}
             type="file"
             className="hidden"
-            onChange={(e) => onPickFile(e.target.files?.[0] || null)}
+            onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
           />
         </div>
+
+        {/* جایگزین متنی رسید — اگر کاربر عکس ندارد یا آپلود برایش سخت است */}
+        {!receiptFile && (
+          <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 p-3">
+            <div className="text-[11px] leading-6 text-muted-foreground">
+              عکس رسید ندارید؟ به‌جای آن <strong>کد پیگیری تراکنش</strong> و{" "}
+              <strong>تاریخ واریز</strong> را بنویسید تا مدیر پرداخت شما را بررسی کند.
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field
+                label="کد پیگیری/ارجاع تراکنش"
+                value={receiptRef}
+                onChange={setReceiptRef}
+                placeholder="مثلاً: 123456789"
+                dir="ltr"
+              />
+              <Field
+                label="تاریخ واریز"
+                value={receiptDate}
+                onChange={setReceiptDate}
+                placeholder="مثلاً: ۱۴۰۵/۰۵/۱۵"
+              />
+            </div>
+          </div>
+        )}
 
         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">
           <input

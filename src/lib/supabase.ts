@@ -35,6 +35,8 @@ export type SignupRequest = {
   reviewed_at: string | null;
   phone?: string | null;
   receipt_url?: string | null;
+  /** جایگزین متنی رسید (کد پیگیری + تاریخ واریز) وقتی کاربر عکس آپلود نکرده است */
+  receipt_note?: string | null;
   request_type?: "signup" | "renewal";
   target_user_id?: string | null;
   /** رمز انتخابی کاربر — فقط تا زمانی که ادمین پیام خوش‌آمدگویی را ارسال کند نگه داشته می‌شود. */

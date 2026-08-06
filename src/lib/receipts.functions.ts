@@ -11,6 +11,19 @@ import { z } from "zod";
  * keys) and uses the service-role admin client to mint an upload token,
  * which the client then consumes with `uploadToSignedUrl`.
  */
+/**
+ * ساخت متن «رسید دستی» از کد پیگیری + تاریخ واریز.
+ * جایگزین آپلود عکس است (هم ترافیک استوریج را کم می‌کند، هم برای کاربری که
+ * عکس رسید ندارد راه ثبت‌نام را باز می‌گذارد). اگر هر دو فیلد پر نباشند null
+ * برمی‌گرداند تا مدیر هیچ‌وقت اطلاعات ناقص نبیند.
+ */
+export function receiptNote(ref: string, date: string): string | null {
+  const r = ref.trim();
+  const d = date.trim();
+  if (!r || !d) return null;
+  return `کد پیگیری: ${r} — تاریخ واریز: ${d}`.slice(0, 500);
+}
+
 export const createReceiptUploadUrl = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z

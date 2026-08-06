@@ -1,7 +1,12 @@
 /**
  * ویرایشگر صفحه‌ی معرفی (Landing) در پنل ادمین.
  * مدیر می‌تواند عنوان، توضیحات، ویژگی‌ها و ویدیو/عکس‌های صفحه‌ی معرفی را تنظیم کند.
- * رسانه از طریق آپلود فایل (باکت landing-media) یا وارد کردن لینک اضافه می‌شود.
+ *
+ * ⚠️ ویدیو فقط با «لینک آپارات/یوتیوب/ویمئو» اضافه می‌شود — آپلود فایل ویدیو
+ * عمداً حذف شده است، چون سرو شدن ویدیو از Supabase Storage در روزهای پربازدید
+ * (پست وایرال اینستاگرام) ده‌ها گیگابایت Cached Egress می‌سازد و سرویس را قطع می‌کند.
+ * عکس‌ها (استوری‌ها) همچنان آپلود می‌شوند ولی فشرده و با کش طولانی‌مدت.
+ * جزئیات: docs/STORAGE_AND_BANDWIDTH.md
  */
 import { useEffect, useRef, useState } from "react";
 import {
@@ -15,7 +20,7 @@ import {
   type LandingStory,
 } from "@/lib/landing";
 import {
-  Save, Loader2, Plus, Trash2, Upload, Film, Image as ImageIcon,
+  Save, Loader2, Plus, Trash2, Film, Image as ImageIcon,
   Link as LinkIcon, CheckCircle2, AlertTriangle,
   Phone, Instagram, Send, MessageCircle, Mail, Sparkles,
 } from "lucide-react";
@@ -26,13 +31,9 @@ export function LandingEditor() {
   const [content, setContent] = useState<LandingContent>(DEFAULT_LANDING);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
-  const [dragOver, setDragOver] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [newUrl, setNewUrl] = useState("");
   const [newType, setNewType] = useState<"video" | "image">("video");
-  const fileRef = useRef<HTMLInputElement>(null);
   const storyFileRef = useRef<HTMLInputElement>(null);
   const [storyUploading, setStoryUploading] = useState(false);
 
@@ -70,11 +71,15 @@ export function LandingEditor() {
     setMsg(null);
     const added: LandingStory[] = [];
     let failed = 0;
+    let lastError = "";
     for (const file of files) {
       try {
         const url = await uploadLandingMedia(file);
         added.push({ image_url: url, caption: "" });
-      } catch { failed++; }
+      } catch (err: any) {
+        failed++;
+        lastError = err?.message || "";
+      }
     }
     if (added.length > 0) {
       setContent((c) => ({ ...c, stories: [...(c.stories || []), ...added] }));
@@ -82,65 +87,33 @@ export function LandingEditor() {
     setMsg(
       failed === 0
         ? { type: "ok", text: `${added.length} استوری اضافه شد. برای اعمال، «ذخیره» را بزنید.` }
-        : { type: "err", text: `${added.length} استوری اضافه شد، ${failed} فایل ناموفق بود.` },
+        : {
+            type: "err",
+            text: `${added.length} استوری اضافه شد، ${failed} فایل ناموفق بود.${lastError ? ` (${lastError})` : ""}`,
+          },
     );
     setStoryUploading(false);
   };
 
+  // افزودن رسانه فقط با لینک. ویدیو باید لینک آپارات/یوتیوب/ویمئو باشد تا داخل
+  // iframe همان سرویس پخش شود و هیچ ترافیکی روی Supabase Storage نیفتد.
   const addUrlMedia = () => {
     const url = newUrl.trim();
     if (!url) return;
-    addMedia({ type: newType, url });
-    setNewUrl("");
-  };
-
-  const uploadFiles = async (files: File[]) => {
-    if (files.length === 0) return;
-    setUploading(true);
-    setMsg(null);
-    setUploadProgress({ done: 0, total: files.length });
-    const uploaded: LandingMedia[] = [];
-    let failed = 0;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const url = await uploadLandingMedia(file);
-        uploaded.push({ type: file.type.startsWith("video") ? "video" : "image", url });
-      } catch {
-        failed++;
-      }
-      setUploadProgress({ done: i + 1, total: files.length });
+    if (!/^https?:\/\//i.test(url)) {
+      setMsg({ type: "err", text: "لینک باید کامل و با https:// وارد شود." });
+      return;
     }
-    if (uploaded.length > 0) {
-      setContent((c) => ({ ...c, media: [...c.media, ...uploaded] }));
-    }
-    if (failed === 0) {
-      setMsg({ type: "ok", text: `${uploaded.length} فایل آپلود شد. برای اعمال، «ذخیره» را بزنید.` });
-    } else if (uploaded.length > 0) {
-      setMsg({ type: "err", text: `${uploaded.length} فایل آپلود شد، ${failed} فایل ناموفق بود.` });
-    } else {
+    if (newType === "video" && !videoEmbedUrl(url)) {
       setMsg({
         type: "err",
-        text: "آپلود ناموفق بود. اگر باکت landing-media ساخته نشده، فایل SQL راه‌اندازی را اجرا کنید یا لینک رسانه را دستی وارد کنید.",
+        text: "لینک ویدیو باید از آپارات، یوتیوب یا ویمئو باشد. آپلود مستقیم فایل ویدیو غیرفعال است؛ لطفاً ویدیو را در آپارات یا یوتیوب بارگذاری کنید و لینک آن را اینجا وارد کنید.",
       });
+      return;
     }
-    setUploading(false);
-    setUploadProgress(null);
-  };
-
-  const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    await uploadFiles(files);
-  };
-
-  const onDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = Array.from(e.dataTransfer.files || []).filter(
-      (f) => f.type.startsWith("video") || f.type.startsWith("image"),
-    );
-    await uploadFiles(files);
+    addMedia({ type: newType, url });
+    setNewUrl("");
+    setMsg({ type: "ok", text: "رسانه اضافه شد. برای اعمال، «ذخیره» را بزنید." });
   };
 
   const save = async () => {
@@ -239,7 +212,7 @@ export function LandingEditor() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {(content.stories || []).map((s, i) => (
               <div key={i} className="overflow-hidden rounded-xl border border-border bg-background">
-                <img src={s.image_url} alt="" className="aspect-square w-full object-cover" />
+                <img src={s.image_url} alt="" loading="lazy" decoding="async" className="aspect-square w-full object-cover" />
                 <div className="space-y-2 p-2">
                   <input
                     value={s.caption || ""}
@@ -264,65 +237,18 @@ export function LandingEditor() {
 
       {/* Media */}
       <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-card">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-bold">ویدیوهای معرفی برنامه</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              فقط ویدیوها در بخش «معرفی برنامه» نمایش داده می‌شوند. عکس‌ها را در بخش «استوری‌ها» بالای این کارت اضافه کنید.
-            </div>
+        <div>
+          <div className="text-sm font-bold">ویدیوهای معرفی برنامه</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            فقط ویدیوها در بخش «معرفی برنامه» نمایش داده می‌شوند. عکس‌ها را در بخش «استوری‌ها» بالای این کارت اضافه کنید.
           </div>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
-          >
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            آپلود فایل
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="video/*,image/*"
-            multiple
-            onChange={onPickFile}
-            className="hidden"
-          />
         </div>
 
-        {/* Drag-and-drop zone */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => !uploading && fileRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed p-6 text-center transition ${
-            dragOver
-              ? "border-primary bg-primary/10"
-              : "border-border bg-muted/30 hover:border-primary/50 hover:bg-primary/5"
-          } ${uploading ? "pointer-events-none opacity-60" : ""}`}
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <div className="text-xs font-semibold text-primary">
-                در حال آپلود{uploadProgress ? ` (${uploadProgress.done}/${uploadProgress.total})` : ""}...
-              </div>
-            </>
-          ) : (
-            <>
-              <Upload className="h-6 w-6 text-primary" />
-              <div className="text-sm font-bold text-foreground">
-                فایل ویدیو یا عکس را اینجا رها کنید
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                یا برای انتخاب کلیک کنید — چند فایل هم‌زمان پشتیبانی می‌شود
-              </div>
-            </>
-          )}
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-[11px] leading-6 text-amber-800 dark:text-amber-300">
+          🎬 <strong>ویدیو فقط با لینک اضافه می‌شود</strong> — ویدیو را در آپارات یا یوتیوب
+          بارگذاری کنید و لینک آن را در کادر زیر بگذارید. آپلود مستقیم فایل ویدیو غیرفعال
+          شده است، چون پخش ویدیو از سرور خودمان در روزهای پربازدید حجم اینترنت سرویس را
+          تمام می‌کند و باعث قطعی می‌شود.
         </div>
 
         {/* Add by URL */}
@@ -338,7 +264,7 @@ export function LandingEditor() {
           <input
             value={newUrl}
             onChange={(e) => setNewUrl(e.target.value)}
-            placeholder="لینک ویدیو/عکس (https://...)"
+            placeholder="لینک آپارات/یوتیوب برای ویدیو — یا لینک عکس (https://...)"
             dir="ltr"
             className={`${INPUT} flex-1 min-w-[180px]`}
           />
@@ -376,11 +302,14 @@ export function LandingEditor() {
                     muted
                     playsInline
                     controls
+                    // فقط متادیتا؛ ویدیوهای قدیمیِ باقی‌مانده در استوریج نباید
+                    // با باز کردن پنل ادمین کامل دانلود شوند.
+                    preload="metadata"
                     className="aspect-video w-full bg-black object-cover"
                   />
                   )
                 ) : (
-                  <img src={m.url} alt="" className="aspect-video w-full object-cover" />
+                  <img src={m.url} alt="" loading="lazy" decoding="async" className="aspect-video w-full object-cover" />
                 )}
                 <div className="flex items-center justify-between gap-2 p-2">
                   <span className="flex items-center gap-1 text-[11px] text-muted-foreground">

@@ -106,13 +106,14 @@ export async function deleteItem(id: string) {
 
 /** آپلود عکس آیتم منو در باکت خصوصی + بازگرداندن لینک امضاشده با اعتبار ۱۰ سال. */
 export async function uploadMenuImage(userId: string, file: File): Promise<string> {
-  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
-  assertMaxFileSize(file, 10);
-  const compressed = await compressImage(file, { maxDim: 1280, quality: 0.8 });
+  const { prepareImageUpload, CACHE_ONE_YEAR } = await import("@/lib/imageCompress");
+  const compressed = await prepareImageUpload(file, "content");
   const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const { error } = await supabase.storage.from("menu-images").upload(path, compressed, {
     upsert: false,
+    // مسیر یکتا → کش یک‌ساله؛ منوی عمومی زیر بار زیاد از CDN سرو می‌شود نه از مبدأ
+    cacheControl: `${CACHE_ONE_YEAR}`,
     contentType: compressed.type || "image/jpeg",
   });
   if (error) throw error;

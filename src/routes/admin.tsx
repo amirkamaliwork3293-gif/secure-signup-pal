@@ -322,6 +322,22 @@ function RequestsTab({
               <ReceiptThumb path={(r as any).receipt_url as string} />
             )}
 
+            {/* رسید دستی: کاربر عکس نفرستاده و کد پیگیری/تاریخ واریز را تایپ کرده است */}
+            {(r as any).receipt_note && (
+              <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-6">
+                <div className="mb-1 font-semibold text-amber-700 dark:text-amber-400">
+                  رسید دستی (بدون عکس)
+                </div>
+                <div className="text-foreground">{(r as any).receipt_note as string}</div>
+              </div>
+            )}
+
+            {!(r as any).receipt_url && !(r as any).receipt_note && r.status === "pending" && (
+              <div className="mt-3 text-[11px] text-muted-foreground">
+                رسیدی ثبت نشده است.
+              </div>
+            )}
+
             {r.status === "pending" && (
               <div className="mt-3 flex gap-2">
                 <button

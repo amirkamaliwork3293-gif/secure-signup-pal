@@ -44,3 +44,55 @@ export function assertMaxFileSize(file: File, maxMB = 10): void {
     throw new Error(`حجم فایل بیش از حد مجاز است (حداکثر ${maxMB} مگابایت).`);
   }
 }
+
+/**
+ * محدودیت‌های استاندارد آپلود تصویر در کل برنامه — همه‌ی مسیرهای آپلود باید از
+ * همین‌ها استفاده کنند تا مصرف Storage و پهنای‌باند (Cached Egress) قابل پیش‌بینی بماند.
+ * جزئیات و دلیل انتخاب این اعداد: docs/STORAGE_AND_BANDWIDTH.md
+ */
+export const IMAGE_LIMITS = {
+  /** تصاویر محتوایی: نمونه‌کار، عکس منو، استوری و رسانه‌ی صفحه‌ی معرفی */
+  content: { maxDim: 1280, quality: 0.8, maxMB: 3 },
+  /** لوگو/آواتار — همیشه کوچک نمایش داده می‌شود، پس ابعاد کوچک‌تر */
+  logo: { maxDim: 512, quality: 0.85, maxMB: 1 },
+  /** رسید پرداخت — باید متن و مبلغ آن خوانا بماند، پس ابعاد و کیفیت بالاتر */
+  receipt: { maxDim: 1600, quality: 0.85, maxMB: 3 },
+} as const;
+
+export type ImageKind = keyof typeof IMAGE_LIMITS;
+
+/**
+ * cacheControl استاندارد برای آپلود در Supabase Storage (بر حسب ثانیه).
+ * - ONE_YEAR: فایل‌هایی که مسیرشان یکتاست و هرگز جایگزین نمی‌شوند (عکس منو،
+ *   نمونه‌کار، رسانه‌ی صفحه‌ی معرفی) — کش طولانی هیچ‌وقت بیات نمی‌شود.
+ * - ONE_WEEK: فایل‌هایی که روی مسیر ثابت جایگزین می‌شوند (لوگوی فروشگاه)؛
+ *   لینک آن‌ها پارامتر ?v=timestamp دارد پس با آپلود جدید کش خودکار می‌شکند.
+ */
+export const CACHE_ONE_YEAR = 31_536_000;
+export const CACHE_ONE_WEEK = 604_800;
+
+/** سقف حجم فایل خامِ ورودی (قبل از فشرده‌سازی) — جلوگیری از آپلود فایل‌های غول‌آسا/ویدیو */
+const RAW_INPUT_MAX_MB = 20;
+
+/**
+ * آماده‌سازی استاندارد یک تصویر برای آپلود: فشرده‌سازی + اعمال سقف حجم.
+ * اگر فایل حتی بعد از فشرده‌سازی از سقف رد شد (مثلاً فرمتی که مرورگر نمی‌تواند
+ * پردازش کند مثل HEIC خیلی سنگین) خطای فارسی پرتاب می‌شود تا کالر پیام مناسب بدهد.
+ */
+export async function prepareImageUpload(file: File, kind: ImageKind): Promise<File> {
+  const { maxDim, quality, maxMB } = IMAGE_LIMITS[kind];
+  assertMaxFileSize(file, RAW_INPUT_MAX_MB);
+  const cap = maxMB * 1024 * 1024;
+
+  let out = await compressImage(file, { maxDim, quality, maxBytes: cap });
+  if (out.size > cap) {
+    // تلاش دوم با ابعاد/کیفیت کمتر — برای عکس‌های خیلی بزرگ گوشی‌های جدید
+    out = await compressImage(out, { maxDim: Math.round(maxDim * 0.75), quality: 0.6, maxBytes: cap });
+  }
+  if (out.size > cap) {
+    throw new Error(
+      `حجم این فایل حتی پس از فشرده‌سازی بیشتر از ${maxMB} مگابایت است. لطفاً عکس کوچک‌تری انتخاب کنید.`,
+    );
+  }
+  return out;
+}

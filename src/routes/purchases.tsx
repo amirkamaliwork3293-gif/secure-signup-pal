@@ -31,6 +31,7 @@ import {
   type PaymentMethod,
   type UnitDef,
 } from "@/lib/store";
+import { purchaseLineTotal, purchaseTotal } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
@@ -79,7 +80,7 @@ function EditablePurchaseItem({
               className="w-full rounded-lg border border-input bg-card px-2 py-1 text-sm outline-none focus:border-primary"
             />
           )}
-          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(item.buyPrice * item.quantity)}</div>
+          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(purchaseLineTotal(item))}</div>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
           <button
@@ -174,7 +175,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   };
 
   const saveEdit = () => {
-    const total = draft.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
+    const total = purchaseTotal(draft.items);
     const jd = parseJalaliInput(dateStr);
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
     // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
@@ -301,7 +302,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                 {saved.items.map((it, i) => (
                   <li key={i} className="flex justify-between text-xs text-muted-foreground">
                     <span>{it.name} × {formatNumber(it.quantity)}</span>
-                    <span>{formatToman(it.buyPrice * it.quantity)}</span>
+                    <span>{formatToman(purchaseLineTotal(it))}</span>
                   </li>
                 ))}
               </ul>
@@ -433,7 +434,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
               </div>
 
               <div className="text-left text-sm font-semibold text-primary">
-                جمع کل: {formatToman(draft.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0))}
+                جمع کل: {formatToman(purchaseTotal(draft.items))}
               </div>
 
               <div className="flex gap-2">
@@ -517,7 +518,7 @@ export function PurchasesPageInner() {
     return filterAndRankSearch(customerList, q, (c) => [customerFullName(c), c.phone ?? ""]).slice(0, 8);
   }, [customerList, customerQuery]);
 
-  const total = draft.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
+  const total = purchaseTotal(draft.items);
 
   const addExisting = (p: Product) => {
     setDraft((prev) => {
@@ -723,7 +724,7 @@ export function PurchasesPageInner() {
                 )}
               </div>
               <div className="mt-1.5 text-left text-xs text-muted-foreground">
-                جمع: {formatToman(it.buyPrice * it.quantity)}
+                جمع: {formatToman(purchaseLineTotal(it))}
               </div>
             </div>
           ))}

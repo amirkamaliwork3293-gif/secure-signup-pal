@@ -22,6 +22,7 @@ import {
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
+import { lineTotal } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
@@ -858,7 +859,7 @@ export function InvoicePageInner() {
                       {item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}
                     </span>
                     <span className="font-semibold text-primary">
-                      = {formatToman(Math.round(item.price * item.quantity))}
+                      = {formatToman(lineTotal(item))}
                     </span>
                     {wholesalePrice > 0 && !weight && (
                       <button

@@ -8,6 +8,7 @@
  */
 import { jsPDF } from "jspdf";
 import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
@@ -212,7 +213,7 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
     cols.qty.x - cols.qty.w / 2, cy,
   );
   ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText(formatAmount(Math.round(item.price * item.quantity)), cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(formatAmount(lineTotal(item)), cols.total.x - cols.total.w / 2, cy);
 
   ctx.textAlign = "right";
   ctx.fillText(fitText(ctx, item.name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);
@@ -220,22 +221,77 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
   return y + ROW_H;
 }
 
-function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
+/** یک سطر از جدول مبالغ انتهای فاکتور */
+function drawSummaryRow(ctx: Ctx, y: number, label: string, value: string, strong: boolean): number {
   const cols = columns();
-  ctx.fillStyle = HEAD_BG;
-  ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, HEAD_H);
+  const h = strong ? HEAD_H : ROW_H;
+  if (strong) {
+    ctx.fillStyle = HEAD_BG;
+    ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, h);
+  }
   ctx.strokeStyle = BORDER;
-  ctx.strokeRect(MARGIN, y, PAGE_W - MARGIN * 2, HEAD_H);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(MARGIN, y, PAGE_W - MARGIN * 2, h);
 
-  const cy = y + HEAD_H / 2;
+  const cy = y + h / 2;
   ctx.fillStyle = INK;
-  ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
+  ctx.font = `${strong ? 700 : 400} ${(strong ? 3.8 : 3.5) * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText("جمع کل", PAGE_W - MARGIN - 2 * SCALE, cy);
+  ctx.fillText(label, PAGE_W - MARGIN - 2 * SCALE, cy);
   ctx.textAlign = "center";
-  ctx.fillText(`${formatAmount(inv.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(value, cols.total.x - cols.total.w / 2, cy);
+  return y + h;
+}
 
-  return y + HEAD_H;
+/**
+ * جدول مبالغ پایان فاکتور. قبلاً فقط «جمع کل» چاپ می‌شد؛ در نتیجه روی فاکتور
+ * تخفیف‌دار جمعِ ستون اقلام با جمع کل نمی‌خواند و روی فاکتور نسیه هیچ اشاره‌ای
+ * به مانده‌ی بدهی نبود. حالا دقیقاً همان سطرهای نسخه‌ی چاپی HTML رسم می‌شود.
+ */
+function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
+  const t = invoiceTotals(inv);
+  let cur = y;
+  if (t.discount > 0) {
+    cur = drawSummaryRow(ctx, cur, "جمع اقلام", `${formatAmount(t.subtotal)} ${currencyLabel()}`, false);
+    cur = drawSummaryRow(
+      ctx, cur,
+      `تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}`,
+      `${formatAmount(t.discount)} ${currencyLabel()}`,
+      false,
+    );
+  }
+  cur = drawSummaryRow(ctx, cur, "جمع کل", `${formatAmount(t.total)} ${currencyLabel()}`, true);
+  if (t.paid > 0) {
+    cur = drawSummaryRow(ctx, cur, "پرداخت نقدی", `${formatAmount(t.paid)} ${currencyLabel()}`, false);
+  }
+  if (t.checkAmount > 0) {
+    cur = drawSummaryRow(
+      ctx, cur,
+      `مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}`,
+      `${formatAmount(t.checkAmount)} ${currencyLabel()}`,
+      false,
+    );
+  }
+  if (t.remaining > 0) {
+    cur = drawSummaryRow(
+      ctx, cur,
+      `مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}`,
+      `${formatAmount(t.remaining)} ${currencyLabel()}`,
+      true,
+    );
+  }
+  return cur;
+}
+
+/** ارتفاع موردنیاز جدول مبالغ — برای رزرو جا در صفحه‌بندی */
+function totalBlockHeight(inv: Invoice): number {
+  const t = invoiceTotals(inv);
+  let h = HEAD_H; // جمع کل
+  if (t.discount > 0) h += ROW_H * 2;
+  if (t.paid > 0) h += ROW_H;
+  if (t.checkAmount > 0) h += ROW_H;
+  if (t.remaining > 0) h += HEAD_H;
+  return h;
 }
 
 function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
@@ -268,8 +324,10 @@ export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
     let y = drawHeader(ctx, inv, pageNo, logoImg);
     y = drawTableHead(ctx, y);
 
-    const reservedBottom = MARGIN + 14 * SCALE; // جا برای پانویس
-    while (i < items.length && y + ROW_H + HEAD_H <= PAGE_H - reservedBottom) {
+    // جا برای پانویس + جدول مبالغ (که حالا چند سطر دارد، نه فقط «جمع کل»)
+    const reservedBottom = MARGIN + 14 * SCALE;
+    const totalsH = totalBlockHeight(inv);
+    while (i < items.length && y + ROW_H + totalsH <= PAGE_H - reservedBottom) {
       y = drawRow(ctx, y, i, items[i]);
       i++;
     }

@@ -9,6 +9,10 @@ import {
   expensesTotal,
   expenseNextDue,
   EXPENSE_CATEGORIES,
+  expenseCategoryList,
+  addExpenseCategory,
+  removeExpenseCategory,
+  settings as settingsStore,
   formatToman,
   formatNumber,
   formatJalaliDate,
@@ -71,6 +75,8 @@ function ExpensesPageInner() {
   const [list] = expensesStore.useAll();
   const [range, setRange] = useState<Range>("month");
   const [query, setQuery] = useState("");
+  /** فیلتر دسته‌بندی — null یعنی همه‌ی دسته‌ها */
+  const [catFilter, setCatFilter] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -79,16 +85,23 @@ function ExpensesPageInner() {
     return list.filter((e) => e.at >= from);
   }, [list, range]);
 
+  /** بازه + فیلتر دسته — مبنای جمع‌ها و فهرست نمایش */
+  const filteredByCat = useMemo(
+    () => (catFilter ? inRange.filter((e) => (e.category || "متفرقه") === catFilter) : inRange),
+    [inRange, catFilter],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim();
-    const base = [...inRange].sort((a, b) => b.at - a.at);
+    const base = [...filteredByCat].sort((a, b) => b.at - a.at);
     if (!q) return base;
     return base.filter((e) =>
       [e.title, e.category, e.note].filter(Boolean).some((t) => String(t).includes(q)),
     );
-  }, [inRange, query]);
+  }, [filteredByCat, query]);
 
-  const total = expensesTotal(inRange);
+  const total = expensesTotal(filteredByCat);
+  // نمودار دسته‌ها همیشه بر اساس کل بازه است (نه فیلتر دسته) تا سهم هر دسته دیده شود
   const byCategory = useMemo(() => expensesByCategory(inRange), [inRange]);
   const recurring = useMemo(
     () =>
@@ -150,9 +163,12 @@ function ExpensesPageInner() {
       </div>
 
       <section className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
-        <div className="text-xs opacity-80">مجموع هزینه‌ها ({RANGE_LABEL[range]})</div>
+        <div className="text-xs opacity-80">
+          مجموع هزینه‌ها ({RANGE_LABEL[range]}
+          {catFilter ? ` — دسته: ${catFilter}` : ""})
+        </div>
         <div className="mt-1 text-xl font-bold">{formatToman(total)}</div>
-        <div className="mt-0.5 text-xs opacity-80">{formatNumber(inRange.length)} مورد</div>
+        <div className="mt-0.5 text-xs opacity-80">{formatNumber(filteredByCat.length)} مورد</div>
       </section>
 
       {!showForm && !editingId && (
@@ -204,20 +220,68 @@ function ExpensesPageInner() {
             هزینه به تفکیک دسته ({RANGE_LABEL[range]})
           </h2>
           <ul className="space-y-2">
-            {byCategory.map(({ category, total: t }) => (
-              <li key={category} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">{category}</span>
-                  <span className="font-semibold text-primary">{formatToman(t)}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-gradient-primary" style={{ width: `${(t / Math.max(1, total)) * 100}%` }} />
-                </div>
-              </li>
-            ))}
+            {/* کلیک روی هر دسته، فهرست را روی همان دسته فیلتر می‌کند */}
+            {byCategory.map(({ category, total: t }) => {
+              const rangeTotal = expensesTotal(inRange);
+              const active = catFilter === category;
+              return (
+                <li key={category}>
+                  <button
+                    type="button"
+                    onClick={() => setCatFilter(active ? null : category)}
+                    className={`w-full space-y-1 rounded-lg p-1.5 text-right transition hover:bg-accent ${
+                      active ? "bg-primary/10 ring-1 ring-primary/40" : ""
+                    }`}
+                    title={active ? "نمایش همه دسته‌ها" : `فقط دسته «${category}»`}
+                  >
+                    <div className="flex justify-between text-xs">
+                      <span className={active ? "font-semibold text-primary" : "text-muted-foreground"}>
+                        {category}
+                      </span>
+                      <span className="font-semibold text-primary">{formatToman(t)}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-gradient-primary"
+                        style={{ width: `${(t / Math.max(1, rangeTotal)) * 100}%` }}
+                      />
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
+
+      {/* فیلتر دسته‌بندی */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => setCatFilter(null)}
+          className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+            catFilter === null
+              ? "bg-primary text-primary-foreground"
+              : "border border-border bg-background text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          همه دسته‌ها
+        </button>
+        {expenseCategoryList(list).map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCatFilter((f) => (f === c ? null : c))}
+            className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+              catFilter === c
+                ? "bg-primary text-primary-foreground"
+                : "border border-border bg-background text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
 
       <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
         <Search className="h-4 w-4 text-muted-foreground" />
@@ -307,9 +371,21 @@ function ExpenseForm({
   onSave: (e: Expense) => void;
   onCancel: () => void;
 }) {
+  const [appSettings] = settingsStore.useAll();
   const [title, setTitle] = useState(initial.title);
   const [amount, setAmount] = useState(initial.amount);
   const [category, setCategory] = useState(initial.category || EXPENSE_CATEGORIES[0]);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(() => expenseCategoryList());
+  const [newCategory, setNewCategory] = useState("");
+
+  /** افزودن دسته‌ی سفارشی و انتخاب فوری همان دسته برای این هزینه */
+  const addCategory = () => {
+    const name = newCategory.trim();
+    if (!name) return;
+    setCategoryOptions(addExpenseCategory(name));
+    setCategory(name);
+    setNewCategory("");
+  };
   const [note, setNote] = useState(initial.note ?? "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(initial.paymentMethod ?? "cash");
   const initJ = toJalali(initial.at) ?? { jy: 1403, jm: 1, jd: 1, h: 0, min: 0 };
@@ -363,20 +439,56 @@ function ExpenseForm({
 
       <Field label="دسته‌بندی">
         <div className="flex flex-wrap gap-1.5">
-          {EXPENSE_CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategory(c)}
-              className={`rounded-full px-3 py-1.5 text-[11px] transition ${
-                category === c
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-border bg-background text-muted-foreground hover:bg-accent"
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+          {categoryOptions.map((c) => {
+            // فقط دسته‌های ساخته‌شده توسط کاربر قابل حذف‌اند؛ دسته‌های پیش‌فرض نه.
+            const custom = (appSettings.expenseCategories ?? []).includes(c);
+            return (
+              <span
+                key={c}
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] transition ${
+                  category === c
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                <button type="button" onClick={() => setCategory(c)}>
+                  {c}
+                </button>
+                {custom && (
+                  <button
+                    type="button"
+                    title="حذف این دسته از فهرست"
+                    aria-label={`حذف دسته ${c}`}
+                    onClick={() => {
+                      setCategoryOptions(removeExpenseCategory(c));
+                      if (category === c) setCategory(EXPENSE_CATEGORIES[0]);
+                    }}
+                    className="opacity-60 hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </div>
+        {/* ساخت دسته‌ی دلخواه — در تنظیمات ذخیره می‌شود و بین دستگاه‌ها همگام می‌ماند */}
+        <div className="mt-2 flex gap-1.5">
+          <input
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); } }}
+            placeholder="دسته‌ی جدید (مثلاً بسته‌بندی)"
+            className={`${INPUT} py-2 text-xs`}
+          />
+          <button
+            type="button"
+            onClick={addCategory}
+            disabled={!newCategory.trim()}
+            className="shrink-0 rounded-xl border border-primary/40 px-3 text-xs font-semibold text-primary disabled:opacity-40"
+          >
+            افزودن
+          </button>
         </div>
       </Field>
 

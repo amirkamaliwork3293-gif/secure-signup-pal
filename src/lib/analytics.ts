@@ -5,6 +5,7 @@
  * قیمت فروش و قیمت خرید (ذخیره‌شده روی خود آیتم یا قیمت خرید فعلی کالا) به‌دست می‌آید.
  */
 import type { Invoice, Product } from "@/lib/store";
+import { discountFactor, lineTotal } from "@/lib/invoice-math";
 
 export type ProductStat = {
   productId: string;
@@ -36,11 +37,13 @@ export function productStats(list: Invoice[], allProducts: Product[]): ProductSt
 
   const map = new Map<string, ProductStat & { _invIds: Set<string> }>();
   for (const inv of list) {
+    // تخفیف کل فاکتور روی ردیف‌ها سرشکن می‌شود (هم‌راستا با گزارش سود)
+    const factor = discountFactor(inv);
     for (const item of inv.items) {
       const cost = item.buyPrice ?? buy.get(item.productId);
       const hasCost = typeof cost === "number" && cost > 0;
-      const revenue = item.price * item.quantity;
-      const profit = hasCost ? (item.price - cost!) * item.quantity : 0;
+      const revenue = lineTotal(item) * factor;
+      const profit = hasCost ? revenue - cost! * item.quantity : 0;
       const prev = map.get(item.productId) ?? {
         productId: item.productId, name: item.name, qty: 0, revenue: 0, profit: 0,
         hasCost: false, margin: 0, invoices: 0, lastAt: 0, _invIds: new Set<string>(),
@@ -89,9 +92,12 @@ export function customerStats(list: Invoice[], allProducts: Product[]): Customer
     const key = phone || name;
 
     let profit = 0;
+    const factor = discountFactor(inv);
     for (const item of inv.items) {
       const cost = item.buyPrice ?? buy.get(item.productId);
-      if (typeof cost === "number" && cost > 0) profit += (item.price - cost) * item.quantity;
+      if (typeof cost === "number" && cost > 0) {
+        profit += lineTotal(item) * factor - cost * item.quantity;
+      }
     }
 
     const prev = map.get(key) ?? {

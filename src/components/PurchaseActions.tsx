@@ -11,6 +11,7 @@ import { Printer, Share2, Receipt, FileDown } from "lucide-react";
 import type { Purchase } from "@/lib/store";
 import { formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, currencyLabel } from "@/lib/store";
 import { printHtml, OLD_APP_MESSAGE, isNativeApp, saveBase64File, downloadBlob } from "@/lib/print";
+import { purchaseLineTotal } from "@/lib/invoice-math";
 
 // ─── HTML فاکتور خرید (A4) ──────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
         <td>${item.name}</td>
         <td>${item.quantity.toLocaleString("fa-IR")}${item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}</td>
         <td>${formatAmount(item.buyPrice)}</td>
-        <td>${formatAmount(item.buyPrice * item.quantity)}</td>
+        <td>${formatAmount(purchaseLineTotal(item))}</td>
       </tr>`,
     )
     .join("");
@@ -157,7 +158,7 @@ function buildPurchaseShareText(p: Purchase): string {
     p.note ? `📝 یادداشت: ${p.note}` : "",
     `─────────────────`,
     ...p.items.map(
-      (item) => `• ${item.name}  ×${item.quantity}  =  ${formatAmount(item.buyPrice * item.quantity)} ${currencyLabel()}`,
+      (item) => `• ${item.name}  ×${item.quantity}  =  ${formatAmount(purchaseLineTotal(item))} ${currencyLabel()}`,
     ),
     `─────────────────`,
     `💰 جمع کل: ${formatAmount(p.total)} ${currencyLabel()}`,

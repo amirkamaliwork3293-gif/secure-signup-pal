@@ -6,10 +6,11 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseCard } from "@/routes/purchases";
 import {
   invoice, products, purchases, formatToman, formatNumber, formatJalaliDateTime, settings,
-  PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
+  PAYMENT_LABEL, parseNumberInput, applyProductDiscount, recalc,
   toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp, toJalali,
   type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
 } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   History as HistoryIcon,
@@ -33,6 +34,20 @@ export const Route = createFileRoute("/history")({
   component: HistoryPage,
 });
 
+/** یک سطر از خلاصه‌ی مبالغ فاکتور */
+function Row({
+  label, value, bold, tone,
+}: { label: string; value: string; bold?: boolean; tone?: "primary" | "destructive" }) {
+  const color =
+    tone === "primary" ? "text-primary" : tone === "destructive" ? "text-destructive" : "text-foreground";
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`${color} ${bold ? "font-bold" : "font-medium"}`}>{value}</span>
+    </div>
+  );
+}
+
 // ─── ویرایش یک آیتم ─────────────────────────────────────────────────────────
 
 function EditableItem({
@@ -49,7 +64,7 @@ function EditableItem({
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.name}</div>
-          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(item.price * item.quantity)}</div>
+          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(lineTotal(item))}</div>
         </div>
         {/* تعداد */}
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
@@ -137,8 +152,6 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   };
 
   const saveEdit = () => {
-    // محاسبه مجدد جمع کل
-    const total = draft.items.reduce((s, i) => s + i.price * i.quantity, 0);
     // پارس تاریخ/ساعت شمسی
     const jd = parseJalaliInput(dateStr);
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
@@ -146,7 +159,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     const prevTime = toJalali(saved.createdAt);
     const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
-    const updated = { ...draft, total, createdAt: newCreatedAt };
+    // بازمحاسبه با recalc — تخفیف فاکتور (درصدی یا مبلغی) حفظ و دوباره اعمال
+    // می‌شود. قبلاً اینجا فقط جمع خام اقلام حساب می‌شد و تخفیفِ فاکتور بعد از هر
+    // ویرایش از جمع کل حذف می‌شد، در حالی‌که سطر «تخفیف» روی فاکتور چاپی می‌ماند.
+    const updated = recalc({ ...draft, createdAt: newCreatedAt });
     invoice.updateHistory(updated);
     setSaved(updated);
     setDraft(updated);
@@ -283,10 +299,34 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 {saved.items.map((item) => (
                   <li key={item.productId} className="flex justify-between text-xs text-muted-foreground">
                     <span>{item.name} × {item.quantity.toLocaleString("fa-IR")}</span>
-                    <span>{formatToman(item.price * item.quantity)}</span>
+                    <span>{formatToman(lineTotal(item))}</span>
                   </li>
                 ))}
               </ul>
+              {/* خلاصه‌ی مبالغ — عیناً همان چیزی که روی فاکتور چاپی می‌آید */}
+              {(() => {
+                const t = invoiceTotals(saved);
+                const showBreakdown = t.discount > 0 || t.paid > 0 || t.checkAmount > 0;
+                if (!showBreakdown) return null;
+                return (
+                  <div className="space-y-1 rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                    <Row label="جمع اقلام" value={formatToman(t.subtotal)} />
+                    {t.discount > 0 && (
+                      <Row
+                        label={`تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}`}
+                        value={formatToman(t.discount)}
+                        tone="primary"
+                      />
+                    )}
+                    <Row label="جمع کل" value={formatToman(t.total)} bold />
+                    {t.paid > 0 && <Row label="پرداخت نقدی" value={formatToman(t.paid)} />}
+                    {t.checkAmount > 0 && <Row label="مبلغ چک" value={formatToman(t.checkAmount)} />}
+                    {t.remaining > 0 && (
+                      <Row label="مانده" value={formatToman(t.remaining)} tone="destructive" />
+                    )}
+                  </div>
+                );
+              })()}
             </>
           )}
 
@@ -420,13 +460,26 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 )}
               </div>
 
-              {/* جمع موقت */}
-              <div className="text-left text-sm font-semibold text-primary">
-                جمع کل:{" "}
-                {formatToman(
-                  draft.items.reduce((s, i) => s + i.price * i.quantity, 0)
-                )}
-              </div>
+              {/* جمع موقت — دقیقاً با همان منطقی که ذخیره و چاپ می‌شود */}
+              {(() => {
+                const t = invoiceTotals(draft);
+                return (
+                  <div className="space-y-0.5 text-left text-sm">
+                    {t.discount > 0 && (
+                      <>
+                        <div className="text-xs text-muted-foreground">
+                          جمع اقلام: {formatToman(t.subtotal)}
+                        </div>
+                        <div className="text-xs text-primary">
+                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}:{" "}
+                          {formatToman(t.discount)}
+                        </div>
+                      </>
+                    )}
+                    <div className="font-semibold text-primary">جمع کل: {formatToman(t.total)}</div>
+                  </div>
+                );
+              })()}
 
               {/* دکمه‌های ذخیره/لغو */}
               <div className="flex gap-2">

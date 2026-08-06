@@ -28,8 +28,16 @@ import {
   PAYMENT_LABEL,
   accountBalance,
 } from "@/lib/store";
+import { invoiceTotals, lineTotal, purchaseLineTotal } from "@/lib/invoice-math";
 
 type Row = Record<string, string | number>;
+
+/**
+ * ستون‌هایی که مقدارشان «مبلغ/عدد» است و در اکسل باید با جداکننده‌ی هزارگان
+ * نمایش داده شوند (به‌صورت عدد واقعی ذخیره می‌شوند تا در اکسل قابل جمع‌زدن باشند).
+ */
+const MONEY_HEADER = /مبلغ|قیمت|جمع|مانده|تخفیف|شهریه|پرداخت|ارزش|بدهی|موجودی|واریز|برداشت/;
+const COUNT_HEADER = /تعداد|دوره|حد |طول/;
 type SectionKey =
   | "products"
   | "customers"
@@ -128,6 +136,70 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
   function buildSheets(): { name: string; rows: Row[] }[] {
     const out: { name: string; rows: Row[] }[] = [];
 
+    // ── برگه‌ی «خلاصه» — نمای کلی کسب‌وکار در یک نگاه، ابتدای فایل ──────────
+    const summary: Row[] = [];
+    const addSummary = (title: string, count: number, amountLabel: string, amount: number) =>
+      summary.push({ بخش: title, "تعداد رکورد": count, "شرح مبلغ": amountLabel, مبلغ: amount });
+
+    if (selected.products) {
+      addSummary(
+        "محصولات و انبار",
+        prods.length,
+        "ارزش موجودی انبار (به قیمت فروش)",
+        prods.reduce((s, p) => s + (p.price || 0) * (p.stock || 0), 0),
+      );
+    }
+    if (selected.customers) {
+      const receivable = custs.reduce((s, c) => s + Math.max(0, customerBalance(c)), 0);
+      const payable = custs.reduce((s, c) => s + Math.max(0, -customerBalance(c)), 0);
+      addSummary("مشتریان — طلب شما", custs.length, "مجموع بدهی مشتریان به شما", receivable);
+      addSummary("مشتریان — بدهی شما", custs.length, "مجموع طلب مشتریان از شما", payable);
+    }
+    if (selected.invoices) {
+      const totals = invs.map((i) => invoiceTotals(i));
+      addSummary(
+        "فاکتورهای فروش",
+        invs.length,
+        "مجموع فروش",
+        totals.reduce((s, t) => s + t.total, 0),
+      );
+      const unpaid = totals.reduce((s, t) => s + t.remaining, 0);
+      if (unpaid > 0) addSummary("فاکتورهای نسیه/چک", invs.length, "مجموع مانده‌ی وصول‌نشده", unpaid);
+    }
+    if (selected.purchases) {
+      addSummary(
+        "فاکتورهای خرید",
+        purch.length,
+        "مجموع خرید",
+        purch.reduce((s, p) => s + (p.total || 0), 0),
+      );
+    }
+    if (selected.expenses) {
+      addSummary(
+        "هزینه‌ها",
+        exps.length,
+        "مجموع هزینه‌ها",
+        exps.reduce((s, e) => s + (e.amount || 0), 0),
+      );
+    }
+    if (selected.accounts) {
+      addSummary(
+        "حساب‌ها و کارت‌ها",
+        accs.length,
+        "مجموع موجودی حساب‌ها",
+        accs.reduce((s, a) => s + accountBalance(a, txs), 0),
+      );
+    }
+    if (summary.length > 0) {
+      out.push({
+        name: "خلاصه",
+        rows: [
+          { بخش: "تاریخ تهیه نسخه پشتیبان", "تعداد رکورد": "", "شرح مبلغ": formatJalaliDateTime(Date.now()), مبلغ: "" },
+          ...summary,
+        ],
+      });
+    }
+
     if (selected.products) {
       out.push({
         name: "محصولات",
@@ -185,31 +257,40 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     if (selected.invoices) {
       out.push({
         name: "فاکتورهای فروش",
-        rows: invs.map((inv) => ({
-          "شناسه": inv.id,
-          تاریخ: d(inv.createdAt),
-          مشتری: [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
-          "تلفن مشتری": inv.customer?.phone ?? "",
-          "تعداد اقلام": inv.items?.length ?? 0,
-          "جمع کل": inv.total ?? 0,
-          "روش پرداخت": inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "",
-          "پرداخت‌شده": inv.paidAmount ?? "",
-          "مبلغ تخفیف": inv.discountAmount ?? "",
-          توضیحات: inv.notes ?? "",
-        })),
+        // مبالغ از همان منبعی می‌آیند که فاکتور چاپی استفاده می‌کند (invoice-math)
+        rows: invs.map((inv) => {
+          const t = invoiceTotals(inv);
+          return {
+            "شماره فاکتور": inv.id.toUpperCase(),
+            تاریخ: d(inv.createdAt),
+            مشتری: [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+            "تلفن مشتری": inv.customer?.phone ?? "",
+            "تعداد اقلام": inv.items?.length ?? 0,
+            "جمع اقلام": t.subtotal,
+            "درصد تخفیف": t.discountPercent || "",
+            "مبلغ تخفیف": t.discount || "",
+            "جمع کل": t.total,
+            "روش پرداخت": inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "",
+            "پرداخت نقدی": t.paid || "",
+            "مبلغ چک": t.checkAmount || "",
+            "مانده": t.remaining || "",
+            توضیحات: inv.notes ?? "",
+          };
+        }),
       });
       out.push({
         name: "اقلام فاکتور فروش",
         rows: invs.flatMap((inv) =>
           (inv.items ?? []).map((it) => ({
-            "شناسه فاکتور": inv.id,
+            "شماره فاکتور": inv.id.toUpperCase(),
             تاریخ: d(inv.createdAt),
+            مشتری: [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
             کالا: it.name,
             تعداد: it.quantity,
             واحد: it.unit ?? "",
             "قیمت واحد": it.price,
             "قیمت خرید": it.buyPrice ?? "",
-            جمع: it.price * it.quantity,
+            جمع: lineTotal(it),
           })),
         ),
       });
@@ -219,7 +300,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       out.push({
         name: "فاکتورهای خرید",
         rows: purch.map((p) => ({
-          "شناسه": p.id,
+          "شماره فاکتور": p.id.toUpperCase(),
           تاریخ: d(p.createdAt),
           "تامین‌کننده": p.supplierName ?? "",
           تلفن: p.supplierPhone ?? "",
@@ -234,13 +315,14 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         name: "اقلام فاکتور خرید",
         rows: purch.flatMap((p) =>
           (p.items ?? []).map((it) => ({
-            "شناسه فاکتور": p.id,
+            "شماره فاکتور": p.id.toUpperCase(),
             تاریخ: d(p.createdAt),
+            "تامین‌کننده": p.supplierName ?? "",
             کالا: it.name,
             تعداد: it.quantity,
             واحد: it.unit ?? "",
             "قیمت خرید": it.buyPrice,
-            جمع: it.buyPrice * it.quantity,
+            جمع: purchaseLineTotal(it),
           })),
         ),
       });
@@ -350,6 +432,11 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
 
   const stamp = () => new Date().toISOString().slice(0, 10);
 
+  /**
+   * ساخت فایل اکسل خوانا: هر بخش یک برگه، ستون‌ها با عرض متناسب محتوا،
+   * مبالغ به‌صورت عدد واقعی با جداکننده‌ی هزارگان (قابل جمع‌زدن در اکسل)،
+   * فیلتر روی سطر عنوان و جهت راست‌به‌چپ.
+   */
   async function exportExcel() {
     setError(null);
     const sheets = buildSheets();
@@ -361,12 +448,43 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     try {
       const XLSX = await import("xlsx");
       const wb = XLSX.utils.book_new();
+      // کل کارپوشه راست‌به‌چپ باز شود (متن و ستون‌ها فارسی‌اند)
+      wb.Workbook = { ...(wb.Workbook ?? {}), Views: [{ RTL: true }] };
+
       for (const s of sheets) {
-        const ws = XLSX.utils.json_to_sheet(s.rows);
-        XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 30));
+        const headers = Object.keys(s.rows[0] ?? {});
+        const ws = XLSX.utils.json_to_sheet(s.rows, { header: headers });
+        const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
+
+        // عرض ستون‌ها بر اساس بلندترین محتوای همان ستون (با سقف معقول)
+        ws["!cols"] = headers.map((h) => {
+          const longest = s.rows.reduce((m, r) => {
+            const v = r[h];
+            const len = typeof v === "number" ? String(Math.round(v)).length + 3 : String(v ?? "").length;
+            return Math.max(m, len);
+          }, h.length);
+          return { wch: Math.min(42, Math.max(10, longest + 2)) };
+        });
+
+        // قالب عددی ستون‌های مبلغ/تعداد
+        headers.forEach((h, c) => {
+          const fmt = MONEY_HEADER.test(h) ? "#,##0" : COUNT_HEADER.test(h) ? "#,##0.###" : null;
+          if (!fmt) return;
+          for (let r = range.s.r + 1; r <= range.e.r; r++) {
+            const cell = ws[XLSX.utils.encode_cell({ r, c })];
+            if (cell && cell.t === "n") cell.z = fmt;
+          }
+        });
+
+        // فیلتر/مرتب‌سازی روی سطر عنوان
+        if (headers.length > 0 && s.rows.length > 1) ws["!autofilter"] = { ref: ws["!ref"] as string };
+
+        // نام برگه در اکسل حداکثر ۳۱ کاراکتر و بدون کاراکترهای غیرمجاز
+        XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 30));
       }
-      XLSX.writeFile(wb, `kamix-backup-${stamp()}.xlsx`);
-    } catch {
+      XLSX.writeFile(wb, `kamix-backup-${stamp()}.xlsx`, { compression: true });
+    } catch (e) {
+      console.error("[backup] excel export failed", e);
       setError("ساخت فایل اکسل ناموفق بود. لطفاً دوباره تلاش کنید.");
     } finally {
       setBusy(false);

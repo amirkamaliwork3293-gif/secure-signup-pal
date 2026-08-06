@@ -8,6 +8,7 @@ import {
   expenses as expensesStore, expensesTotal, expensesByCategory,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
+import { discountFactor, lineTotal } from "@/lib/invoice-math";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
   TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
@@ -82,11 +83,15 @@ function computeProfit(list: Invoice[]): ProfitSummary {
   let missingCost = 0;
 
   for (const inv of list) {
+    // تخفیفِ کل فاکتور روی ردیف‌ها سرشکن می‌شود تا درآمد و سودِ گزارش با پولی
+    // که واقعاً دریافت شده بخواند (قبلاً تخفیف نادیده گرفته می‌شد و سود بیشتر
+    // از واقعیت نشان داده می‌شد).
+    const factor = discountFactor(inv);
     for (const item of inv.items) {
       const cost = item.buyPrice ?? productBuy.get(item.productId);
-      const revenue = item.price * item.quantity;
+      const revenue = lineTotal(item) * factor;
       const hasCost = typeof cost === "number" && cost > 0;
-      const itemProfit = hasCost ? (item.price - cost!) * item.quantity : 0;
+      const itemProfit = hasCost ? revenue - cost! * item.quantity : 0;
       if (hasCost) profit += itemProfit;
       else missingCost++;
 

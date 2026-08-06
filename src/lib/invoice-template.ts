@@ -7,6 +7,7 @@
  */
 import {
   formatAmount,
+  formatNumber,
   currencyLabel,
   formatJalaliDate,
   formatJalaliDateTime,
@@ -14,6 +15,7 @@ import {
   COUNT_UNIT,
   type Invoice,
 } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 
 // ─── مدل داده ───────────────────────────────────────────────────────────────
 
@@ -268,7 +270,7 @@ function esc(s: unknown): string {
 
 export function resolveField(inv: Invoice, f: TplField): string {
   const c = inv.customer;
-  const paid = inv.paidAmount || 0;
+  const t = invoiceTotals(inv);
   switch (f.key) {
     case "static":
       return f.value || "";
@@ -287,11 +289,11 @@ export function resolveField(inv: Invoice, f: TplField): string {
     case "invoice.itemsCount":
       return inv.items.length.toLocaleString("fa-IR");
     case "invoice.total":
-      return `${formatAmount(inv.total)} ${currencyLabel()}`;
+      return `${formatAmount(t.total)} ${currencyLabel()}`;
     case "invoice.paid":
-      return `${formatAmount(paid)} ${currencyLabel()}`;
+      return `${formatAmount(t.paid)} ${currencyLabel()}`;
     case "invoice.remaining":
-      return `${formatAmount(Math.max(0, inv.total - paid))} ${currencyLabel()}`;
+      return `${formatAmount(t.remaining)} ${currencyLabel()}`;
     case "shop.name":
       return inv.shopName || "";
     case "shop.address":
@@ -329,7 +331,7 @@ function cellValue(inv: Invoice, key: TplColumnKey, item: Invoice["items"][numbe
     case "discount":
       return item.discountPercent ? `٪${item.discountPercent.toLocaleString("fa-IR")}` : "—";
     case "total":
-      return formatAmount(Math.round(item.price * item.quantity));
+      return formatAmount(lineTotal(item));
     default:
       return "";
   }
@@ -373,21 +375,21 @@ export function buildTemplatedInvoiceHTML(
     )
     .join("");
 
-  const paid = inv.paidAmount || 0;
+  const amounts = invoiceTotals(inv);
   const totalsRows = [
-    inv.discountAmount
-      ? `<tr><td>جمع اقلام</td><td>${formatAmount(inv.subtotal ?? inv.total + inv.discountAmount)} ${currencyLabel()}</td></tr>`
+    amounts.discount
+      ? `<tr><td>جمع اقلام</td><td>${formatAmount(amounts.subtotal)} ${currencyLabel()}</td></tr>`
       : "",
-    inv.discountAmount
-      ? `<tr><td>تخفیف${inv.discountPercent ? ` (${formatAmount(inv.discountPercent)}٪)` : ""}</td><td>${formatAmount(inv.discountAmount)} ${currencyLabel()}</td></tr>`
+    amounts.discount
+      ? `<tr><td>تخفیف${amounts.discountPercent ? ` (${formatNumber(amounts.discountPercent)}٪)` : ""}</td><td>${formatAmount(amounts.discount)} ${currencyLabel()}</td></tr>`
       : "",
-    `<tr class="grand"><td>جمع کل</td><td>${formatAmount(inv.total)} ${currencyLabel()}</td></tr>`,
-    paid ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(paid)} ${currencyLabel()}</td></tr>` : "",
-    inv.checkAmount
-      ? `<tr><td>مبلغ چک${inv.checkNumber ? ` (${esc(inv.checkNumber)})` : ""}</td><td>${formatAmount(inv.checkAmount)} ${currencyLabel()}</td></tr>`
+    `<tr class="grand"><td>جمع کل</td><td>${formatAmount(amounts.total)} ${currencyLabel()}</td></tr>`,
+    amounts.paid ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(amounts.paid)} ${currencyLabel()}</td></tr>` : "",
+    amounts.checkAmount
+      ? `<tr><td>مبلغ چک${inv.checkNumber ? ` (${esc(inv.checkNumber)})` : ""}</td><td>${formatAmount(amounts.checkAmount)} ${currencyLabel()}</td></tr>`
       : "",
-    inv.paymentMethod === "credit"
-      ? `<tr class="due"><td>مانده نسیه</td><td>${formatAmount(Math.max(0, inv.total - paid))} ${currencyLabel()}</td></tr>`
+    amounts.remaining > 0
+      ? `<tr class="due"><td>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</td><td>${formatAmount(amounts.remaining)} ${currencyLabel()}</td></tr>`
       : "",
   ]
     .filter(Boolean)

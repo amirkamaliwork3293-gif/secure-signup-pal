@@ -27,6 +27,7 @@ import {
   type PaymentMethod,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
+import { invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
 import { isWebView } from "@/lib/isWebView";
@@ -109,6 +110,7 @@ function CustomersPageInner() {
   const [contactsMsg, setContactsMsg] = useState<string | null>(null);
   // ثبت سریع: "debt" = مشتری به ما بدهکار شد (طلب ما)، "payment" = ما به مشتری بدهکاریم (طلب مشتری)
   const [quickEntry, setQuickEntry] = useState<"debt" | "payment" | null>(null);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -401,8 +403,32 @@ function CustomersPageInner() {
             <Plus className="h-3.5 w-3.5" />
             مشتری جدید
           </button>
+          {list.length > 0 && (
+            <button
+              onClick={() => setShowDeleteAll(true)}
+              title="حذف همه مشتریان"
+              aria-label="حذف همه مشتریان"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {showDeleteAll && (
+        <DeleteAllCustomersDialog
+          count={list.length}
+          onCancel={() => setShowDeleteAll(false)}
+          onConfirm={() => {
+            customers.removeAll();
+            setShowDeleteAll(false);
+            setDetailTarget(null);
+            setEditTarget(null);
+            setTxTarget(null);
+          }}
+        />
+      )}
 
       {contactsMsg && (
         <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
@@ -1885,6 +1911,72 @@ function CustomerDetailModal({
   );
 }
 
+// ─── حذف همه‌ی مشتریان (عملیات برگشت‌ناپذیر) ─────────────────────────────────
+
+/**
+ * دیالوگ تایید حذف کامل فهرست مشتریان. عمداً سخت‌گیرانه است: کاربر باید کلمه‌ی
+ * «حذف» را تایپ کند، و دقیقاً نوشته شده چه چیزی پاک می‌شود و چه چیزی نمی‌شود.
+ */
+function DeleteAllCustomersDialog({
+  count, onConfirm, onCancel,
+}: { count: number; onConfirm: () => void; onCancel: () => void }) {
+  const [typed, setTyped] = useState("");
+  const ok = typed.trim() === "حذف";
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-foreground/50 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-sm rounded-2xl border border-destructive/40 bg-card p-5 shadow-elegant">
+        <h3 className="mb-2 flex items-center gap-2 text-base font-bold text-destructive">
+          <Trash2 className="h-4 w-4" />
+          حذف همه‌ی مشتریان
+        </h3>
+        <div className="space-y-2 text-xs leading-6 text-muted-foreground">
+          <p>
+            با این کار <b className="text-foreground">{formatNumber(count)} مشتری</b> و
+            {" "}<b className="text-foreground">تمام سوابق بدهی و پرداخت آن‌ها</b> برای همیشه پاک می‌شود.
+            این عمل قابل بازگشت نیست.
+          </p>
+          <p className="rounded-xl border border-border bg-background p-2.5">
+            ✅ فاکتورهای فروش، هزینه‌ها، محصولات و بقیه‌ی اطلاعات شما دست‌نخورده باقی می‌ماند.
+            فقط فهرست مشتریان و دفتر بدهی‌شان حذف می‌شود.
+          </p>
+          <p>
+            پیشنهاد می‌کنیم قبل از ادامه، از «تنظیمات ← پشتیبان‌گیری» یک نسخه پشتیبان بگیرید.
+          </p>
+          <p className="text-foreground">برای تایید، کلمه‌ی «حذف» را بنویسید:</p>
+        </div>
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="حذف"
+          className="mt-2 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-destructive"
+        />
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={!ok}
+            className="flex-1 rounded-xl bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground disabled:opacity-40"
+          >
+            حذف همه
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-xl border border-border py-2.5 text-sm font-semibold hover:bg-accent"
+          >
+            انصراف
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── فاکتور فروش سریع برای یک مشتری مشخص (از داخل صفحه مشتریان) ───────────────
 
 function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
@@ -1941,8 +2033,10 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
     setShowManualItem(false);
   };
 
-  const paid = paymentMethod === "credit" ? Math.min(parseNumberInput(paidAmount), cartInv.total) : cartInv.total;
-  const debt = paymentMethod === "credit" ? Math.max(0, cartInv.total - paid) : 0;
+  // مبالغ از منبع واحد invoice-math خوانده می‌شوند تا با فاکتور چاپی یکی باشند
+  const cartTotals = invoiceTotals({ ...cartInv, paymentMethod, paidAmount: parseNumberInput(paidAmount) });
+  const paid = paymentMethod === "credit" ? cartTotals.paid : cartTotals.total;
+  const debt = paymentMethod === "credit" ? cartTotals.remaining : 0;
 
   const submit = () => {
     if (cartInv.items.length === 0) {

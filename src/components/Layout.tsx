@@ -1,8 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup } from "lucide-react";
 import type { ReactNode } from "react";
-import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount } from "@/lib/store";
+import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { useState, useEffect } from "react";
@@ -50,6 +50,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  // وضعیت همگام‌سازی ابری — فقط وقتی واقعاً شکست خورده هشدار نشان داده می‌شود
+  const sync = useSyncState();
+  const syncFailed = sync.failed && sync.pending > 0 && state.status === "authenticated";
   const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
   useEffect(() => {
@@ -110,6 +113,18 @@ export function Layout({ children }: { children: ReactNode }) {
         >
           <WifiOff className="h-3.5 w-3.5" />
           آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد
+        </div>
+      )}
+
+      {/* هشدار همگام‌نشدن با سرور — خطای ذخیره هرگز بی‌صدا نمی‌ماند */}
+      {isOnline && syncFailed && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-destructive px-4 py-2 text-xs font-semibold text-destructive-foreground"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <CloudOff className="h-3.5 w-3.5 shrink-0" />
+          ذخیره‌ی آخرین تغییرات روی سرور ناموفق بود — روی این دستگاه محفوظ است و تلاش
+          مجدد ادامه دارد. تا رفع مشکل، از این دستگاه خارج نشوید.
         </div>
       )}
 

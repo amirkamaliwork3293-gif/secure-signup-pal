@@ -112,7 +112,13 @@ function ProductsPageInner() {
     () =>
       filterAndRankSearch(
         list
-          .filter((p) => filterCat === "all" || p.category === filterCat)
+          .filter((p) =>
+            filterCat === "all"
+              ? true
+              : filterCat === "__none"
+                ? !p.category
+                : p.category === filterCat,
+          )
           .filter((p) => {
             if (view === "low") {
               const s = stockStatus(p);

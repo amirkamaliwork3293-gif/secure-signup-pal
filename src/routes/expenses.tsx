@@ -374,18 +374,10 @@ function ExpenseForm({
   const [appSettings] = settingsStore.useAll();
   const [title, setTitle] = useState(initial.title);
   const [amount, setAmount] = useState(initial.amount);
-  const [category, setCategory] = useState(initial.category || EXPENSE_CATEGORIES[0]);
+  // دسته‌بندی کاملاً دلخواه است: کاربر خودش نام دسته را می‌نویسد. دسته‌هایی که
+  // قبلاً استفاده کرده به‌صورت پیشنهاد نمایش داده می‌شوند تا دوباره تایپ نکند.
+  const [category, setCategory] = useState(initial.category || "");
   const [categoryOptions, setCategoryOptions] = useState<string[]>(() => expenseCategoryList());
-  const [newCategory, setNewCategory] = useState("");
-
-  /** افزودن دسته‌ی سفارشی و انتخاب فوری همان دسته برای این هزینه */
-  const addCategory = () => {
-    const name = newCategory.trim();
-    if (!name) return;
-    setCategoryOptions(addExpenseCategory(name));
-    setCategory(name);
-    setNewCategory("");
-  };
   const [note, setNote] = useState(initial.note ?? "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(initial.paymentMethod ?? "cash");
   const initJ = toJalali(initial.at) ?? { jy: 1403, jm: 1, jd: 1, h: 0, min: 0 };

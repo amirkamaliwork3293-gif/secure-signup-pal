@@ -392,11 +392,14 @@ function ExpenseForm({
 
   const submit = () => {
     if (amount <= 0) { setErr("مبلغ هزینه را وارد کنید."); return; }
+    const cat = category.trim() || "بدون دسته";
+    // دسته‌ی تازه‌ای که کاربر نوشته، برای دفعات بعد به‌عنوان پیشنهاد ذخیره می‌شود
+    if (category.trim()) addExpenseCategory(cat);
     onSave({
       ...initial,
-      title: title.trim() || category,
+      title: title.trim() || cat,
       amount,
-      category,
+      category: cat,
       note: note.trim() || undefined,
       paymentMethod,
       at: jalaliToTimestamp(jy, jm, jd, hh, mm),

@@ -22,7 +22,7 @@ import {
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
-import { lineTotal } from "@/lib/invoice-math";
+import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,

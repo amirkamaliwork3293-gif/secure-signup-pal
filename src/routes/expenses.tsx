@@ -429,59 +429,51 @@ function ExpenseForm({
         </Field>
       </div>
 
-      <Field label="دسته‌بندی">
-        <div className="flex flex-wrap gap-1.5">
-          {categoryOptions.map((c) => {
-            // فقط دسته‌های ساخته‌شده توسط کاربر قابل حذف‌اند؛ دسته‌های پیش‌فرض نه.
-            const custom = (appSettings.expenseCategories ?? []).includes(c);
-            return (
-              <span
-                key={c}
-                className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] transition ${
-                  category === c
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                <button type="button" onClick={() => setCategory(c)}>
-                  {c}
-                </button>
-                {custom && (
-                  <button
-                    type="button"
-                    title="حذف این دسته از فهرست"
-                    aria-label={`حذف دسته ${c}`}
-                    onClick={() => {
-                      setCategoryOptions(removeExpenseCategory(c));
-                      if (category === c) setCategory(EXPENSE_CATEGORIES[0]);
-                    }}
-                    className="opacity-60 hover:opacity-100"
+      <Field label="دسته‌بندی (نام دلخواه خودتان)">
+        <input
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          placeholder="مثلاً اجاره مغازه، حقوق کارگر، بسته‌بندی…"
+          className={INPUT}
+        />
+        {categoryOptions.length > 0 && (
+          <>
+            <div className="mt-2 text-[10px] text-muted-foreground">دسته‌هایی که قبلاً ساخته‌اید:</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {categoryOptions.map((c) => {
+                const removable = (appSettings.expenseCategories ?? []).includes(c);
+                return (
+                  <span
+                    key={c}
+                    className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] transition ${
+                      category.trim() === c
+                        ? "bg-primary text-primary-foreground"
+                        : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                    }`}
                   >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </span>
-            );
-          })}
-        </div>
-        {/* ساخت دسته‌ی دلخواه — در تنظیمات ذخیره می‌شود و بین دستگاه‌ها همگام می‌ماند */}
-        <div className="mt-2 flex gap-1.5">
-          <input
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(); } }}
-            placeholder="دسته‌ی جدید (مثلاً بسته‌بندی)"
-            className={`${INPUT} py-2 text-xs`}
-          />
-          <button
-            type="button"
-            onClick={addCategory}
-            disabled={!newCategory.trim()}
-            className="shrink-0 rounded-xl border border-primary/40 px-3 text-xs font-semibold text-primary disabled:opacity-40"
-          >
-            افزودن
-          </button>
-        </div>
+                    <button type="button" onClick={() => setCategory(c)}>
+                      {c}
+                    </button>
+                    {removable && (
+                      <button
+                        type="button"
+                        title="حذف این دسته از فهرست پیشنهادها"
+                        aria-label={`حذف دسته ${c}`}
+                        onClick={() => {
+                          setCategoryOptions(removeExpenseCategory(c));
+                          if (category.trim() === c) setCategory("");
+                        }}
+                        className="opacity-60 hover:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </>
+        )}
       </Field>
 
       <Field label="تاریخ (شمسی)">

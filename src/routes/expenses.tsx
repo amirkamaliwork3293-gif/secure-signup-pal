@@ -8,7 +8,6 @@ import {
   expensesByCategory,
   expensesTotal,
   expenseNextDue,
-  EXPENSE_CATEGORIES,
   expenseCategoryList,
   addExpenseCategory,
   removeExpenseCategory,

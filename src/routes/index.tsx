@@ -665,10 +665,14 @@ export function InvoicePageInner() {
                 حذف تخفیف
               </button>
             </div>
-            {!!inv.discountAmount && (
-              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-                <span>جمع اقلام: <b className="text-foreground">{formatToman(inv.subtotal ?? inv.total)}</b></span>
-                <span>تخفیف: <b className="text-primary">{formatToman(inv.discountAmount)}</b></span>
+            {totals.discount > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                <span>جمع اقلام: <b className="block text-foreground">{formatToman(totals.subtotal)}</b></span>
+                <span>
+                  تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
+                  <b className="block text-primary">{formatToman(totals.discount)}</b>
+                </span>
+                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
               </div>
             )}
             </>)}

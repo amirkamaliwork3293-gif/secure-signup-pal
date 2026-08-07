@@ -91,6 +91,33 @@ export function InvoicePageInner() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
 
+  // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
+  // مبالغ نقد/چک تا لحظه‌ی «ثبت فاکتور» فقط در state محلی بودند؛ به همین دلیل
+  // فاکتورِ چاپ/اشتراک‌شده‌ی پیش از ثبت، «مانده نسیه» را برابر کل مبلغ نشان
+  // می‌داد. حالا یک نسخه‌ی کامل از فاکتور ساخته می‌شود و همه‌جا (نمایش، چاپ،
+  // ثبت) دقیقاً همان اعداد استفاده می‌شود.
+  const deferred = paymentMethod === "credit" || paymentMethod === "check";
+  const baseTotal = invoiceTotals(inv).total;
+  const paidNow = Math.min(baseTotal, Math.max(0, Math.round(paidAmount || 0)));
+  const checkNow =
+    paymentMethod === "check"
+      ? Math.min(
+          baseTotal - paidNow,
+          Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
+        )
+      : 0;
+  const draftInvoice = {
+    ...inv,
+    customer,
+    paymentMethod,
+    paidAmount: deferred ? paidNow : undefined,
+    checkAmount: paymentMethod === "check" ? checkNow : undefined,
+    checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
+    checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+    notes: notes.trim() ? notes.trim() : undefined,
+  };
+  const totals = invoiceTotals(draftInvoice);
+
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
     setCustomer(inv.customer ?? {});

@@ -350,7 +350,7 @@ export function InvoicePageInner() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs/5 opacity-80">جمع کل فاکتور</div>
-            <div className="mt-1 text-2xl font-bold">{formatToman(inv.total)}</div>
+            <div className="mt-1 text-2xl font-bold">{formatToman(totals.total)}</div>
             <div className="text-xs opacity-70 mt-0.5">{inv.items.length} قلم کالا</div>
           </div>
           <Receipt className="h-10 w-10 opacity-80" />

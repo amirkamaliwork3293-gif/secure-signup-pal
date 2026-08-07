@@ -8,7 +8,7 @@ import {
   expenses as expensesStore, expensesTotal, expensesByCategory,
   type Invoice, type PaymentMethod,
 } from "@/lib/store";
-import { discountFactor, lineTotal } from "@/lib/invoice-math";
+import { discountFactor, lineTotal, invoiceTotals } from "@/lib/invoice-math";
 import {
   BarChart3, Calendar, CalendarDays, CalendarRange, Wallet, CreditCard, Clock,
   TrendingUp, TrendingDown, Package, FileCheck, CalendarSearch, PieChart,
@@ -55,9 +55,12 @@ function summarize(list: Invoice[]) {
   let total = 0;
   for (const inv of list) {
     const m = (inv.paymentMethod ?? "unknown") as keyof typeof by;
+    // مبلغ همیشه از روی اقلام و تخفیف بازمحاسبه می‌شود تا فاکتورهای قدیمی یا
+    // ویرایش‌شده هم دقیقاً همان عددی را نشان بدهند که روی فاکتور چاپ می‌شود.
+    const t = invoiceTotals(inv).total;
     by[m].count += 1;
-    by[m].total += inv.total;
-    total += inv.total;
+    by[m].total += t;
+    total += t;
   }
   return { by, total, count: list.length };
 }
@@ -109,7 +112,9 @@ function computeProfit(list: Invoice[]): ProfitSummary {
     }
   }
 
-  const perProduct = Array.from(per.values()).sort((a, b) => b.profit - a.profit);
+  const perProduct = Array.from(per.values())
+    .map((p) => ({ ...p, revenue: Math.round(p.revenue), profit: Math.round(p.profit) }))
+    .sort((a, b) => b.profit - a.profit);
   return { profit: Math.round(profit), missingCost, perProduct };
 }
 
@@ -118,7 +123,7 @@ function daysInMonthBreakdown(list: Invoice[]) {
   for (const inv of list) {
     const d = new Date(inv.createdAt);
     const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    map.set(key, (map.get(key) ?? 0) + inv.total);
+    map.set(key, (map.get(key) ?? 0) + invoiceTotals(inv).total);
   }
   return Array.from(map.entries())
     .sort((a, b) => (a[0] < b[0] ? 1 : -1))

@@ -306,7 +306,7 @@ function ProductsPageInner() {
         </button>
       </div>
 
-      {/* Search + category filter */}
+      {/* Search */}
       <div className="mb-3 flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -317,24 +317,71 @@ function ProductsPageInner() {
             className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
           />
         </div>
-        <select
-          value={filterCat}
-          onChange={(e) => setFilterCat(e.target.value)}
-          className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-        >
-          <option value="all">همه دسته‌ها</option>
-          {catList.map((c) => (
-            <option key={c.id} value={c.name}>{c.name}</option>
-          ))}
-        </select>
-        <button
-          onClick={() => setShowCatManager(true)}
-          className="rounded-xl border border-border px-2 text-xs"
-          title="مدیریت دسته‌ها"
-        >
-          <Filter className="h-4 w-4" />
-        </button>
       </div>
+
+      {/* دسته‌بندی محصولات — واضح و قابل لمس، نه یک آیکن ریز */}
+      <section className="mb-3 rounded-2xl border border-border bg-card p-3 shadow-card">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-1.5 text-xs font-bold">
+            <Filter className="h-4 w-4 text-primary" />
+            دسته‌بندی محصولات
+          </h2>
+          <button
+            onClick={() => setShowCatManager(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-primary/40 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            مدیریت دسته‌ها
+          </button>
+        </div>
+        {catList.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            هنوز دسته‌بندی نساخته‌اید. با «مدیریت دسته‌ها» دسته بسازید (مثلاً لبنیات، نوشیدنی) تا محصولات‌تان مرتب شوند.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setFilterCat("all")}
+              className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                filterCat === "all"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "border border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              همه ({formatNumber(list.length)})
+            </button>
+            {catList.map((c) => {
+              const count = list.filter((p) => p.category === c.name).length;
+              const active = filterCat === c.name;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setFilterCat(active ? "all" : c.name)}
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {c.name} ({formatNumber(count)})
+                </button>
+              );
+            })}
+            {list.some((p) => !p.category) && (
+              <button
+                onClick={() => setFilterCat(filterCat === "__none" ? "all" : "__none")}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition ${
+                  filterCat === "__none"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "border border-dashed border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                بدون دسته ({formatNumber(list.filter((p) => !p.category).length)})
+              </button>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* نماها: همه / رو به اتمام / نزدیک انقضا */}
       <div className="mb-3 flex gap-1.5 overflow-x-auto">

@@ -22,7 +22,7 @@ import {
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
-import { lineTotal } from "@/lib/invoice-math";
+import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
@@ -91,6 +91,33 @@ export function InvoicePageInner() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
 
+  // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
+  // مبالغ نقد/چک تا لحظه‌ی «ثبت فاکتور» فقط در state محلی بودند؛ به همین دلیل
+  // فاکتورِ چاپ/اشتراک‌شده‌ی پیش از ثبت، «مانده نسیه» را برابر کل مبلغ نشان
+  // می‌داد. حالا یک نسخه‌ی کامل از فاکتور ساخته می‌شود و همه‌جا (نمایش، چاپ،
+  // ثبت) دقیقاً همان اعداد استفاده می‌شود.
+  const deferred = paymentMethod === "credit" || paymentMethod === "check";
+  const baseTotal = invoiceTotals(inv).total;
+  const paidNow = Math.min(baseTotal, Math.max(0, Math.round(paidAmount || 0)));
+  const checkNow =
+    paymentMethod === "check"
+      ? Math.min(
+          baseTotal - paidNow,
+          Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
+        )
+      : 0;
+  const draftInvoice = {
+    ...inv,
+    customer,
+    paymentMethod,
+    paidAmount: deferred ? paidNow : undefined,
+    checkAmount: paymentMethod === "check" ? checkNow : undefined,
+    checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
+    checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+    notes: notes.trim() ? notes.trim() : undefined,
+  };
+  const totals = invoiceTotals(draftInvoice);
+
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
     setCustomer(inv.customer ?? {});
@@ -155,11 +182,9 @@ export function InvoicePageInner() {
       );
       return;
     }
-    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از جمع کل بیشتر باشند
-    const paid = Math.min(inv.total, Math.max(0, Math.round(paidAmount || 0)));
-    const chk = paymentMethod === "check"
-      ? Math.min(inv.total - paid, Math.max(0, Math.round(checkAmount || (inv.total - paid))))
-      : 0;
+    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از «جمع کل پس از تخفیف» بیشتر باشند
+    const paid = paidNow;
+    const chk = checkNow;
     const finalInv = {
       ...inv,
       customer,
@@ -177,7 +202,7 @@ export function InvoicePageInner() {
     invoice.archive(finalInv);
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
-      const debt = Math.max(0, inv.total - paid);
+      const debt = Math.max(0, baseTotal - paid);
       if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
       else if (hasCustomer) customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
@@ -325,7 +350,7 @@ export function InvoicePageInner() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs/5 opacity-80">جمع کل فاکتور</div>
-            <div className="mt-1 text-2xl font-bold">{formatToman(inv.total)}</div>
+            <div className="mt-1 text-2xl font-bold">{formatToman(totals.total)}</div>
             <div className="text-xs opacity-70 mt-0.5">{inv.items.length} قلم کالا</div>
           </div>
           <Receipt className="h-10 w-10 opacity-80" />
@@ -475,11 +500,11 @@ export function InvoicePageInner() {
             <div className="flex gap-1.5 flex-1 justify-end">
               <InvoiceActions
                 inv={{
-                  ...inv,
-                  customer,
+                  ...draftInvoice,
                   shopName: appSettings.shopName,
+                  shopAddress: appSettings.storeAddress || undefined,
+                  shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
                   shopLogoUrl: appSettings.logoUrl || undefined,
-                  notes: notes.trim() ? notes.trim() : undefined,
                   // فاکتور هنوز ثبت نهایی نشده — تاریخ/ساعت چاپ باید همین لحظه باشد،
                   // نه لحظه‌ی باز شدن این تب (که ممکن است قدیمی‌تر باشد)
                   createdAt: Date.now(),
@@ -640,10 +665,14 @@ export function InvoicePageInner() {
                 حذف تخفیف
               </button>
             </div>
-            {!!inv.discountAmount && (
-              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-                <span>جمع اقلام: <b className="text-foreground">{formatToman(inv.subtotal ?? inv.total)}</b></span>
-                <span>تخفیف: <b className="text-primary">{formatToman(inv.discountAmount)}</b></span>
+            {totals.discount > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                <span>جمع اقلام: <b className="block text-foreground">{formatToman(totals.subtotal)}</b></span>
+                <span>
+                  تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
+                  <b className="block text-primary">{formatToman(totals.discount)}</b>
+                </span>
+                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
               </div>
             )}
             </>)}
@@ -688,8 +717,8 @@ export function InvoicePageInner() {
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b></span>
-              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(Math.max(0, inv.total - (paidAmount || 0)))}</b></span>
+              <span>جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b></span>
+              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(totals.remaining)}</b></span>
             </div>
           </div>
         )}
@@ -715,7 +744,7 @@ export function InvoicePageInner() {
                   value={
                     checkAmount
                       ? formatNumber(checkAmount)
-                      : formatNumber(Math.max(0, inv.total - (paidAmount || 0)))
+                      : formatNumber(Math.max(0, totals.total - totals.paid))
                   }
                   onChange={(e) => setCheckAmount(parseNumberInput(e.target.value))}
                   placeholder="۰"
@@ -741,12 +770,11 @@ export function InvoicePageInner() {
               />
             </div>
             <div className="text-[11px] text-muted-foreground">
-              جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b> · بدهی مشتری (چک):{" "}
-              <b className="text-destructive">
-                {formatToman(
-                  checkAmount || Math.max(0, inv.total - (paidAmount || 0)),
-                )}
-              </b>
+              جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b> · بدهی مشتری (چک):{" "}
+              <b className="text-destructive">{formatToman(totals.checkAmount)}</b>
+              {totals.remaining > 0 && (
+                <> · مانده: <b className="text-destructive">{formatToman(totals.remaining)}</b></>
+              )}
             </div>
           </div>
         )}

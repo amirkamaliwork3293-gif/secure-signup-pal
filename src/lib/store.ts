@@ -1119,19 +1119,11 @@ export type Expense = {
   createdAt: number;
 };
 
-/** دسته‌بندی‌های پیش‌فرض هزینه — کاربر می‌تواند دسته‌ی دلخواه هم اضافه کند */
-export const EXPENSE_CATEGORIES = [
-  "اجاره",
-  "حقوق و دستمزد",
-  "قبوض (برق، آب، گاز)",
-  "اینترنت و تلفن",
-  "حمل و نقل",
-  "تبلیغات",
-  "تعمیر و نگهداری",
-  "مالیات و عوارض",
-  "ملزومات مصرفی",
-  "متفرقه",
-] as const;
+/**
+ * دسته‌بندی هزینه کاملاً دست خود کاربر است؛ هیچ دسته‌ی از پیش تعیین‌شده‌ای وجود
+ * ندارد. این آرایه فقط برای سازگاری با کدهای قدیمی خالی نگه داشته شده است.
+ */
+export const EXPENSE_CATEGORIES: readonly string[] = [];
 
 /**
  * فهرست کامل دسته‌های هزینه: پیش‌فرض‌ها + دسته‌های سفارشی کاربر (در تنظیمات
@@ -1140,8 +1132,10 @@ export const EXPENSE_CATEGORIES = [
  */
 export function expenseCategoryList(list?: Expense[]): string[] {
   const custom = settings.get().expenseCategories ?? [];
-  const used = (list ?? read<Expense[]>(EXPENSES_KEY, [])).map((e) => e.category).filter(Boolean);
-  return [...new Set([...EXPENSE_CATEGORIES, ...custom, ...used])];
+  const used = (list ?? read<Expense[]>(EXPENSES_KEY, []))
+    .map((e) => (e.category || "").trim())
+    .filter(Boolean);
+  return [...new Set([...custom, ...used])];
 }
 
 /** افزودن یک دسته‌ی هزینه‌ی سفارشی (تکراری/خالی نادیده گرفته می‌شود) */
@@ -1150,7 +1144,7 @@ export function addExpenseCategory(name: string): string[] {
   if (!clean) return expenseCategoryList();
   const s = settings.get();
   const custom = s.expenseCategories ?? [];
-  if (!EXPENSE_CATEGORIES.includes(clean as (typeof EXPENSE_CATEGORIES)[number]) && !custom.includes(clean)) {
+  if (!custom.includes(clean)) {
     settings.save({ ...s, expenseCategories: [...custom, clean] });
   }
   return expenseCategoryList();
@@ -1175,7 +1169,7 @@ export function emptyExpense(): Expense {
     id: cryptoId(),
     title: "",
     amount: 0,
-    category: EXPENSE_CATEGORIES[0],
+    category: "",
     at: Date.now(),
     paymentMethod: "cash",
     createdAt: Date.now(),
@@ -1770,10 +1764,15 @@ export function emptyInvoice(): Invoice {
  */
 export function recalc(inv: Invoice): Invoice {
   const t = invoiceTotals(inv);
+  // اگر تخفیف درصدی فعال است، «مبلغ تخفیف» نباید به‌عنوان یک مقدار مستقل ذخیره
+  // شود؛ وگرنه با تغییر اقلام، عددِ کهنه روی فاکتور می‌ماند و دو منبع حقیقت
+  // می‌سازد. مبلغ همیشه از درصد بازمحاسبه می‌شود.
+  const pct = Math.max(0, Math.min(100, Number(inv.discountPercent) || 0));
   return {
     ...inv,
     subtotal: t.subtotal,
-    discountAmount: t.discount > 0 ? t.discount : undefined,
+    discountPercent: pct > 0 ? pct : undefined,
+    discountAmount: pct > 0 ? undefined : t.discount > 0 ? t.discount : undefined,
     total: t.total,
   };
 }

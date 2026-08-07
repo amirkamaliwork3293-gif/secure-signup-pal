@@ -717,8 +717,8 @@ export function InvoicePageInner() {
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b></span>
-              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(Math.max(0, inv.total - (paidAmount || 0)))}</b></span>
+              <span>جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b></span>
+              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(totals.remaining)}</b></span>
             </div>
           </div>
         )}
@@ -744,7 +744,7 @@ export function InvoicePageInner() {
                   value={
                     checkAmount
                       ? formatNumber(checkAmount)
-                      : formatNumber(Math.max(0, inv.total - (paidAmount || 0)))
+                      : formatNumber(Math.max(0, totals.total - totals.paid))
                   }
                   onChange={(e) => setCheckAmount(parseNumberInput(e.target.value))}
                   placeholder="۰"
@@ -770,12 +770,11 @@ export function InvoicePageInner() {
               />
             </div>
             <div className="text-[11px] text-muted-foreground">
-              جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b> · بدهی مشتری (چک):{" "}
-              <b className="text-destructive">
-                {formatToman(
-                  checkAmount || Math.max(0, inv.total - (paidAmount || 0)),
-                )}
-              </b>
+              جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b> · بدهی مشتری (چک):{" "}
+              <b className="text-destructive">{formatToman(totals.checkAmount)}</b>
+              {totals.remaining > 0 && (
+                <> · مانده: <b className="text-destructive">{formatToman(totals.remaining)}</b></>
+              )}
             </div>
           </div>
         )}

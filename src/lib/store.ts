@@ -1764,10 +1764,15 @@ export function emptyInvoice(): Invoice {
  */
 export function recalc(inv: Invoice): Invoice {
   const t = invoiceTotals(inv);
+  // اگر تخفیف درصدی فعال است، «مبلغ تخفیف» نباید به‌عنوان یک مقدار مستقل ذخیره
+  // شود؛ وگرنه با تغییر اقلام، عددِ کهنه روی فاکتور می‌ماند و دو منبع حقیقت
+  // می‌سازد. مبلغ همیشه از درصد بازمحاسبه می‌شود.
+  const pct = Math.max(0, Math.min(100, Number(inv.discountPercent) || 0));
   return {
     ...inv,
     subtotal: t.subtotal,
-    discountAmount: t.discount > 0 ? t.discount : undefined,
+    discountPercent: pct > 0 ? pct : undefined,
+    discountAmount: pct > 0 ? undefined : t.discount > 0 ? t.discount : undefined,
     total: t.total,
   };
 }

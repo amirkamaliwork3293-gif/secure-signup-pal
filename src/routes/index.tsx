@@ -182,11 +182,9 @@ export function InvoicePageInner() {
       );
       return;
     }
-    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از جمع کل بیشتر باشند
-    const paid = Math.min(inv.total, Math.max(0, Math.round(paidAmount || 0)));
-    const chk = paymentMethod === "check"
-      ? Math.min(inv.total - paid, Math.max(0, Math.round(checkAmount || (inv.total - paid))))
-      : 0;
+    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از «جمع کل پس از تخفیف» بیشتر باشند
+    const paid = paidNow;
+    const chk = checkNow;
     const finalInv = {
       ...inv,
       customer,
@@ -204,7 +202,7 @@ export function InvoicePageInner() {
     invoice.archive(finalInv);
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
-      const debt = Math.max(0, inv.total - paid);
+      const debt = Math.max(0, baseTotal - paid);
       if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
       else if (hasCustomer) customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {

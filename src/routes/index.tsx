@@ -500,11 +500,11 @@ export function InvoicePageInner() {
             <div className="flex gap-1.5 flex-1 justify-end">
               <InvoiceActions
                 inv={{
-                  ...inv,
-                  customer,
+                  ...draftInvoice,
                   shopName: appSettings.shopName,
+                  shopAddress: appSettings.storeAddress || undefined,
+                  shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
                   shopLogoUrl: appSettings.logoUrl || undefined,
-                  notes: notes.trim() ? notes.trim() : undefined,
                   // فاکتور هنوز ثبت نهایی نشده — تاریخ/ساعت چاپ باید همین لحظه باشد،
                   // نه لحظه‌ی باز شدن این تب (که ممکن است قدیمی‌تر باشد)
                   createdAt: Date.now(),

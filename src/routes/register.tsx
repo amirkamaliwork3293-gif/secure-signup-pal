@@ -74,6 +74,7 @@ function RegisterPage() {
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptDate, setReceiptDate] = useState("");
+  const [receiptTime, setReceiptTime] = useState("");
 
   const [card, setCard] = useState({
     card_number: "",
@@ -154,9 +155,9 @@ function RegisterPage() {
     if (!isValidIranPhone(phone)) { setError("شماره موبایل معتبر وارد کنید (مثل 09xxxxxxxxx)."); return; }
     if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
     if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
-    const note = receiptNote(receiptRef, receiptDate);
+    const note = receiptNote(receiptRef, receiptDate, receiptTime);
     if (!receiptFile && !note) {
-      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
+      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری، تاریخ و ساعت دقیق واریز را بنویسید.");
       return;
     }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
@@ -403,7 +404,7 @@ function RegisterPage() {
         {/* Receipt upload */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate) && <span className="text-destructive">*</span>}
+            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate, receiptTime) && <span className="text-destructive">*</span>}
           </label>
           {receiptPreview ? (
             <div className="relative rounded-xl border border-border bg-background p-2">
@@ -455,7 +456,8 @@ function RegisterPage() {
           <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 p-3">
             <div className="text-[11px] leading-6 text-muted-foreground">
               عکس رسید ندارید؟ به‌جای آن <strong>کد پیگیری تراکنش</strong> و{" "}
-              <strong>تاریخ واریز</strong> را بنویسید تا مدیر پرداخت شما را بررسی کند.
+              <strong>تاریخ واریز</strong> و <strong>ساعت و دقیقه‌ی دقیق واریز</strong> را
+              بنویسید تا مدیر بتواند تراکنش شما را دقیق تطبیق دهد و تایید کند.
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Field
@@ -472,6 +474,13 @@ function RegisterPage() {
                 placeholder="مثلاً: ۱۴۰۵/۰۵/۱۵"
               />
             </div>
+            <Field
+              label="ساعت و دقیقه واریز (الزامی)"
+              value={receiptTime}
+              onChange={setReceiptTime}
+              placeholder="مثلاً: 21:35"
+              dir="ltr"
+            />
           </div>
         )}
 

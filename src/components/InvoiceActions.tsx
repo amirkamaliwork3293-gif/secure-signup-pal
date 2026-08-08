@@ -5,7 +5,8 @@
  */
 
 import { useState } from "react";
-import { Printer, Share2, Receipt, FileDown } from "lucide-react";
+import { Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
+import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 import type { Invoice } from "@/lib/store";
 import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, formatNumber, currencyLabel } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
@@ -202,7 +203,7 @@ ${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "
 
 // ─── متن ساده برای اشتراک‌گذاری ───────────────────────────────────────────
 
-function buildShareText(inv: Invoice): string {
+export function buildShareText(inv: Invoice): string {
   const date = formatJalaliDate(inv.createdAt);
   const customer = inv.customer;
   const customerName =
@@ -252,6 +253,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const fontSize = appSettings.invoiceFontSize ?? 13;
   const template = appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined;
   const [sharingPdf, setSharingPdf] = useState(false);
+  const [messaging, setMessaging] = useState(false);
 
   // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
   const handlePrint = async () => {
@@ -393,6 +395,24 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         <Share2 className={iconSize} />
         {showLabels && <span>ارسال</span>}
       </button>
+
+      <button
+        type="button"
+        onClick={() => setMessaging(true)}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
+        title="ارسال متن فاکتور با واتساپ/پیامک (قابل ویرایش)"
+      >
+        <MessageSquare className={iconSize} />
+        {showLabels && <span>پیام به مشتری</span>}
+      </button>
+
+      {messaging && (
+        <InvoiceMessageDialog
+          defaultText={buildShareText(inv)}
+          defaultPhone={inv.customer?.phone ?? ""}
+          onClose={() => setMessaging(false)}
+        />
+      )}
     </>
   );
 }

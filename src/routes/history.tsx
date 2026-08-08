@@ -123,6 +123,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(initialInv.createdAt));
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -173,9 +174,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("آیا این فاکتور حذف شود؟")) {
-      invoice.deleteFromHistory(saved.id);
-    }
+    setConfirmDelete(true);
   };
 
   const updateItem = (idx: number, updated: InvoiceItem) => {
@@ -503,6 +502,45 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* تایید حذف فاکتور — با انتخاب برگشت کالاها به انبار */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xl"
+          >
+            <div className="text-sm font-bold">حذف فاکتور</div>
+            <p className="text-xs leading-6 text-muted-foreground">
+              می‌خواهید کالاهای این فاکتور به موجودی انبار برگردند؟
+            </p>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id, { restock: true }); setConfirmDelete(false); }}
+              className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              حذف فاکتور + برگشت کالاها به انبار
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id); setConfirmDelete(false); }}
+              className="w-full rounded-xl border border-destructive/40 py-2.5 text-sm font-medium text-destructive"
+            >
+              فقط حذف فاکتور (بدون تغییر موجودی)
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+              className="w-full rounded-xl border border-border py-2.5 text-sm"
+            >
+              انصراف
+            </button>
+          </div>
         </div>
       )}
     </li>

@@ -1,0 +1,1 @@
+ALTER TABLE public.signup_requests ADD COLUMN IF NOT EXISTS receipt_note text;

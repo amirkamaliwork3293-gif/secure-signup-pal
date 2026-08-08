@@ -173,9 +173,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("آیا این فاکتور حذف شود؟")) {
-      invoice.deleteFromHistory(saved.id);
-    }
+    setConfirmDelete(true);
   };
 
   const updateItem = (idx: number, updated: InvoiceItem) => {

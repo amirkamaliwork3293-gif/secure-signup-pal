@@ -34,6 +34,7 @@ function RenewPage() {
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptDate, setReceiptDate] = useState("");
+  const [receiptTime, setReceiptTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -107,9 +108,9 @@ function RenewPage() {
   const handleSubmit = async () => {
     setError("");
     if (!visiblePlans.includes(plan)) { setError("لطفاً یکی از پلن‌های فعال را انتخاب کنید."); return; }
-    const note = receiptNote(receiptRef, receiptDate);
+    const note = receiptNote(receiptRef, receiptDate, receiptTime);
     if (!receiptFile && !note) {
-      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
+      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری، تاریخ و ساعت دقیق واریز را بنویسید.");
       return;
     }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
@@ -259,7 +260,7 @@ function RenewPage() {
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate) && <span className="text-destructive">*</span>}
+            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate, receiptTime) && <span className="text-destructive">*</span>}
           </label>
           {receiptPreview ? (
             <div className="relative rounded-xl border border-border bg-background p-2">
@@ -299,7 +300,8 @@ function RenewPage() {
           <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 p-3">
             <div className="text-[11px] leading-6 text-muted-foreground">
               عکس رسید ندارید؟ به‌جای آن <strong>کد پیگیری تراکنش</strong> و{" "}
-              <strong>تاریخ واریز</strong> را بنویسید تا مدیر پرداخت شما را بررسی کند.
+              <strong>تاریخ واریز</strong> و <strong>ساعت و دقیقه‌ی دقیق واریز</strong> را
+              بنویسید تا مدیر بتواند تراکنش شما را دقیق تطبیق دهد و تایید کند.
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -321,6 +323,16 @@ function RenewPage() {
                   className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
                 />
               </div>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">ساعت و دقیقه واریز (الزامی)</label>
+              <input
+                value={receiptTime}
+                onChange={(e) => setReceiptTime(e.target.value)}
+                placeholder="مثلاً: 21:35"
+                dir="ltr"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+              />
             </div>
           </div>
         )}

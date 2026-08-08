@@ -1015,8 +1015,18 @@ export const invoice = {
       hist.map((inv) => (inv.id === updated.id ? fixed : inv)),
     );
   },
-  deleteFromHistory: (id: string) => {
+  /**
+   * حذف فاکتور از تاریخچه. اگر opts.restock=true باشد، کالاهای همان فاکتور به
+   * انبار برمی‌گردند (چون هنگام ثبت فاکتور از موجودی کسر شده بودند). این کار
+   * اختیاری است تا کاربر بتواند بین «فاکتور اشتباه بوده» و «کالا واقعاً رفته»
+   * تفاوت بگذارد.
+   */
+  deleteFromHistory: (id: string, opts?: { restock?: boolean }) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
+    const target = hist.find((inv) => inv.id === id);
+    if (opts?.restock && target) {
+      reconcileStockForInvoiceEdit(target.items, []);
+    }
     write(
       HISTORY_KEY,
       hist.filter((inv) => inv.id !== id),

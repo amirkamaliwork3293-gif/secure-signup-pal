@@ -123,6 +123,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(initialInv.createdAt));
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);

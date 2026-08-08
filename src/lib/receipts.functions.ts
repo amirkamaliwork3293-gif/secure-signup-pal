@@ -12,16 +12,18 @@ import { z } from "zod";
  * which the client then consumes with `uploadToSignedUrl`.
  */
 /**
- * ساخت متن «رسید دستی» از کد پیگیری + تاریخ واریز.
+ * ساخت متن «رسید دستی» از کد پیگیری + تاریخ واریز + ساعت و دقیقه‌ی واریز.
  * جایگزین آپلود عکس است (هم ترافیک استوریج را کم می‌کند، هم برای کاربری که
- * عکس رسید ندارد راه ثبت‌نام را باز می‌گذارد). اگر هر دو فیلد پر نباشند null
- * برمی‌گرداند تا مدیر هیچ‌وقت اطلاعات ناقص نبیند.
+ * عکس رسید ندارد راه ثبت‌نام را باز می‌گذارد). ساعت و دقیقه الزامی است چون
+ * مدیر با آن می‌تواند صحت تراکنش را در صورت‌حساب بانکی تطبیق دهد. اگر هر سه
+ * فیلد پر نباشند null برمی‌گرداند تا مدیر هیچ‌وقت اطلاعات ناقص نبیند.
  */
-export function receiptNote(ref: string, date: string): string | null {
+export function receiptNote(ref: string, date: string, time = ""): string | null {
   const r = ref.trim();
   const d = date.trim();
-  if (!r || !d) return null;
-  return `کد پیگیری: ${r} — تاریخ واریز: ${d}`.slice(0, 500);
+  const t = time.trim();
+  if (!r || !d || !t) return null;
+  return `کد پیگیری: ${r} — تاریخ واریز: ${d} — ساعت واریز: ${t}`.slice(0, 500);
 }
 
 export const createReceiptUploadUrl = createServerFn({ method: "POST" })

@@ -761,7 +761,7 @@ export function HistoryPageInner() {
         </div>
       ) : (
         <>
-          {searchQ.trim() && (
+          {(searchQ.trim() || range.from || range.to) && (
             <p className="mb-2 text-xs text-muted-foreground">{formatNumber(activeFiltered.length)} فاکتور یافت شد</p>
           )}
           {category === "sale" ? (

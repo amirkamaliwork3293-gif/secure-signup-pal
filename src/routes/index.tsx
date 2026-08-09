@@ -509,6 +509,21 @@ export function InvoicePageInner() {
             {showCustomer ? "بستن" : "مشتری"}
           </button>
 
+          {askFields.length > 0 && (
+            <button
+              onClick={() => setShowFields((v) => !v)}
+              className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {showFields ? "بستن" : "فیلدهای فاکتور"}
+              {filledFieldsCount > 0 && (
+                <span className="rounded-full bg-background px-1.5 text-[10px] font-bold text-primary">
+                  {formatNumber(filledFieldsCount)}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* پرینت / دانلود / ارسال — غیرفعال وقتی فاکتور خالیه */}
           {inv.items.length > 0 && (
             <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">

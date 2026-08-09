@@ -555,6 +555,38 @@ export function InvoicePageInner() {
         </div>
       </section>
 
+      {/* خانه‌های سفارشی فاکتور — فقط اگر کاربر در «طراح فاکتور» تعریف کرده باشد */}
+      {showFields && askFields.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
+          <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <FileText className="h-4 w-4 text-primary" />
+            فیلدهای سفارشی فاکتور
+          </h3>
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            این خانه‌ها را خودتان در «طراح فاکتور» تعریف کرده‌اید. هرچه اینجا بنویسید، روی
+            فاکتور چاپی همین فاکتور می‌نشیند. خالی بگذارید تا نمایش داده نشود.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {askFields.map((f) => (
+              <div key={f.id}>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  {f.label}
+                  {f.blockTitle ? <span className="opacity-60"> · {f.blockTitle}</span> : null}
+                </label>
+                <input
+                  value={customFields[f.id] ?? ""}
+                  onChange={(e) =>
+                    setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))
+                  }
+                  placeholder={f.label}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Customer info panel */}
       {showCustomer && (
         <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">

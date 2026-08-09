@@ -583,6 +583,21 @@ export function HistoryPageInner() {
   const [purchaseList] = purchases.useHistory();
   const [category, setCategory] = useState<InvoiceCategory>("sale");
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+  const [showRange, setShowRange] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const range = useMemo(() => {
+    const f = parseJalaliInput(fromDate);
+    const t = parseJalaliInput(toDate);
+    return {
+      from: f ? jalaliToTimestamp(f.jy, f.jm, f.jd, 0, 0) : null,
+      to: t ? jalaliToTimestamp(t.jy, t.jm, t.jd, 23, 59) : null,
+    };
+  }, [fromDate, toDate]);
+
+  const inRange = (ts: number) =>
+    (range.from == null || ts >= range.from) && (range.to == null || ts <= range.to);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -590,24 +605,28 @@ export function HistoryPageInner() {
 
   const filtered = useMemo(() => {
     const q = searchQ.trim();
-    if (!q) return list;
-    return filterAndRankSearch(list, q, (inv) => [
+    const base = list.filter((inv) => inRange(inv.createdAt));
+    if (!q) return base;
+    return filterAndRankSearch(base, q, (inv) => [
       inv.id,
       [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);
-  }, [list, searchQ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, searchQ, range]);
 
   const filteredPurchases = useMemo(() => {
     const q = searchQ.trim();
-    if (!q) return purchaseList;
-    return filterAndRankSearch(purchaseList, q, (p) => [
+    const base = purchaseList.filter((p) => inRange(p.createdAt));
+    if (!q) return base;
+    return filterAndRankSearch(base, q, (p) => [
       p.id,
       p.supplierName,
       ...p.items.map((i) => i.name),
     ]);
-  }, [purchaseList, searchQ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseList, searchQ, range]);
 
   const activeList = category === "sale" ? list : purchaseList;
   const activeFiltered = category === "sale" ? filtered : filteredPurchases;
@@ -643,18 +662,87 @@ export function HistoryPageInner() {
       </div>
 
       {activeList.length > 0 && (
-        <div className="relative mb-3">
-          <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
-          />
-          {searchQ && (
-            <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
-              <X className="h-4 w-4" />
+        <div className="mb-3 space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-8 text-sm outline-none focus:border-primary"
+              />
+              {searchQ && (
+                <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRange((s) => !s)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${
+                showRange || range.from || range.to
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-background text-muted-foreground"
+              }`}
+            >
+              <Calendar className="h-4 w-4" />
+              بازه تاریخ
             </button>
+          </div>
+
+          {showRange && (
+            <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+              <div>
+                <div className="mb-1 text-[11px] text-muted-foreground">از تاریخ</div>
+                <JalaliDateSelect
+                  value={fromDate || toJalaliInputDate(Date.now())}
+                  onChange={setFromDate}
+                  yearsBack={3}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] text-muted-foreground">تا تاریخ</div>
+                <JalaliDateSelect
+                  value={toDate || toJalaliInputDate(Date.now())}
+                  onChange={setToDate}
+                  yearsBack={3}
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = toJalaliInputDate(Date.now());
+                    setFromDate(today);
+                    setToDate(today);
+                  }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] hover:border-primary hover:text-primary"
+                >
+                  فقط امروز
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const j = toJalali(Date.now());
+                    if (!j) return;
+                    setFromDate(`${j.jy}/${String(j.jm).padStart(2, "0")}/01`);
+                    setToDate(toJalaliInputDate(Date.now()));
+                  }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] hover:border-primary hover:text-primary"
+                >
+                  این ماه
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFromDate(""); setToDate(""); }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] text-muted-foreground"
+                >
+                  حذف فیلتر
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

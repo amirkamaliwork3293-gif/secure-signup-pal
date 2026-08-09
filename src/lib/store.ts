@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { invoiceTotals, purchaseTotal } from "@/lib/invoice-math";
+import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -154,6 +154,11 @@ export type Invoice = {
   discountPercent?: number;
   /** مبلغ تخفیف کل فاکتور (اگر درصد وارد شود، از روی آن محاسبه می‌شود) */
   discountAmount?: number;
+  /**
+   * مقدار خانه‌های سفارشی «طراح فاکتور» که کاربر هنگام ثبت فاکتور پر کرده است.
+   * کلید = شناسه‌ی فیلد در قالب فاکتور.
+   */
+  customFields?: Record<string, string>;
 };
 
 // ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────
@@ -186,6 +191,10 @@ export type Purchase = {
   shopName?: string;
   /** لوگوی فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی/PDF (اختیاری) */
   shopLogoUrl?: string;
+  /** درصد تخفیف روی کل فاکتور خرید (۰ تا ۱۰۰) */
+  discountPercent?: number;
+  /** مبلغ تخفیف کل فاکتور خرید */
+  discountAmount?: number;
 };
 
 export function emptyPurchase(): Purchase {
@@ -193,7 +202,7 @@ export function emptyPurchase(): Purchase {
 }
 
 export function recalcPurchase(p: Purchase): Purchase {
-  return { ...p, total: purchaseTotal(p.items) };
+  return { ...p, total: purchaseTotals(p).total };
 }
 
 // ─── Customers / Debtors ─────────────────────────────────────────────────────

@@ -343,6 +343,24 @@ function InvoiceDesignPage() {
                           onChange={(e) => updField(b.id, f.id, { value: e.target.value })}
                         />
                       )}
+                      {(f.key === "static" || f.key === "blank") && (
+                        <label
+                          className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] transition ${
+                            f.askAtCheckout
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground"
+                          }`}
+                          title="این خانه هنگام ثبت فاکتور در برنامه از شما پرسیده می‌شود"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!f.askAtCheckout}
+                            onChange={(e) => updField(b.id, f.id, { askAtCheckout: e.target.checked })}
+                            className="h-3.5 w-3.5 accent-[var(--primary)]"
+                          />
+                          هنگام ثبت فاکتور پر شود
+                        </label>
+                      )}
                       <button type="button" onClick={() => moveField(b.id, fi, -1)} className="rounded-lg border border-border p-1.5">
                         <ChevronUp className="h-3.5 w-3.5" />
                       </button>

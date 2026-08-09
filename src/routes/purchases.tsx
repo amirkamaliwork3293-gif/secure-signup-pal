@@ -31,7 +31,7 @@ import {
   type PaymentMethod,
   type UnitDef,
 } from "@/lib/store";
-import { purchaseLineTotal, purchaseTotal } from "@/lib/invoice-math";
+import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
@@ -175,7 +175,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   };
 
   const saveEdit = () => {
-    const total = purchaseTotal(draft.items);
+    const total = purchaseTotals(draft).total;
     const jd = parseJalaliInput(dateStr);
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
     // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
@@ -433,9 +433,28 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                 </button>
               </div>
 
-              <div className="text-left text-sm font-semibold text-primary">
-                جمع کل: {formatToman(purchaseTotal(draft.items))}
-              </div>
+              <PurchaseDiscountBox
+                discountPercent={draft.discountPercent}
+                discountAmount={draft.discountAmount}
+                onChange={(p) => setDraft((d) => ({ ...d, ...p }))}
+              />
+
+              {(() => {
+                const t = purchaseTotals(draft);
+                return (
+                  <div className="space-y-0.5 text-left text-sm">
+                    {t.discount > 0 && (
+                      <>
+                        <div className="text-xs text-muted-foreground">جمع اقلام: {formatToman(t.subtotal)}</div>
+                        <div className="text-xs text-primary">
+                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: {formatToman(t.discount)}
+                        </div>
+                      </>
+                    )}
+                    <div className="font-semibold text-primary">جمع کل: {formatToman(t.total)}</div>
+                  </div>
+                );
+              })()}
 
               <div className="flex gap-2">
                 <button
@@ -465,6 +484,51 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
 }
 
 // ─── صفحه اصلی: ثبت فاکتور خرید جدید + تاریخچه ────────────────────────────────
+
+/** جعبه‌ی تخفیف کل فاکتور خرید — درصد یا مبلغ ثابت */
+function PurchaseDiscountBox({
+  discountPercent,
+  discountAmount,
+  onChange,
+}: {
+  discountPercent?: number;
+  discountAmount?: number;
+  onChange: (p: { discountPercent?: number; discountAmount?: number }) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-background p-2">
+      <div className="mb-1.5 text-[11px] text-muted-foreground">تخفیف کل فاکتور خرید (اختیاری)</div>
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-1">
+          <input
+            inputMode="numeric"
+            value={discountPercent ? formatNumber(discountPercent) : ""}
+            onChange={(e) => {
+              const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+              onChange({ discountPercent: v || undefined, discountAmount: undefined });
+            }}
+            placeholder="درصد"
+            className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+          />
+          <span className="text-[11px] text-muted-foreground">٪</span>
+        </div>
+        <div className="flex flex-1 items-center gap-1">
+          <input
+            inputMode="numeric"
+            value={discountAmount ? formatNumber(discountAmount) : ""}
+            onChange={(e) => {
+              const v = Math.max(0, parseNumberInput(e.target.value));
+              onChange({ discountAmount: v || undefined, discountPercent: undefined });
+            }}
+            placeholder="مبلغ"
+            className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+          />
+          <span className="text-[11px] text-muted-foreground">تومان</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function PurchasesPageInner() {
   const { q: incomingQuery } = Route.useSearch();
@@ -518,7 +582,8 @@ export function PurchasesPageInner() {
     return filterAndRankSearch(customerList, q, (c) => [customerFullName(c), c.phone ?? ""]).slice(0, 8);
   }, [customerList, customerQuery]);
 
-  const total = purchaseTotal(draft.items);
+  const totals = purchaseTotals(draft);
+  const total = totals.total;
 
   const addExisting = (p: Product) => {
     setDraft((prev) => {
@@ -855,9 +920,31 @@ export function PurchasesPageInner() {
         </div>
       </div>
 
-      <div className="mb-4 flex items-center justify-between rounded-2xl border border-border bg-card p-4">
-        <span className="text-sm font-medium text-muted-foreground">جمع کل فاکتور خرید</span>
-        <span className="text-lg font-bold">{formatToman(total)}</span>
+      <div className="mb-3">
+        <PurchaseDiscountBox
+          discountPercent={draft.discountPercent}
+          discountAmount={draft.discountAmount}
+          onChange={(p) => setDraft((d) => recalcPurchase({ ...d, ...p }))}
+        />
+      </div>
+
+      <div className="mb-4 space-y-1 rounded-2xl border border-border bg-card p-4">
+        {totals.discount > 0 && (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>جمع اقلام</span>
+              <span>{formatToman(totals.subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-primary">
+              <span>تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}</span>
+              <span>{formatToman(totals.discount)}</span>
+            </div>
+          </>
+        )}
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-muted-foreground">جمع کل فاکتور خرید</span>
+          <span className="text-lg font-bold">{formatToman(total)}</span>
+        </div>
       </div>
 
       <button

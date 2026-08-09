@@ -61,6 +61,18 @@ export function purchaseTotal(items: readonly { buyPrice: number; quantity: numb
   return (items ?? []).reduce((s, it) => s + purchaseLineTotal(it), 0);
 }
 
+/** جمع اقلام، تخفیف و مبلغ نهایی فاکتور خرید (با تخفیف کل، اگر ثبت شده باشد) */
+export function purchaseTotals(p: {
+  items?: readonly { buyPrice: number; quantity: number }[];
+  discountPercent?: number | null;
+  discountAmount?: number | null;
+}): { subtotal: number; discount: number; discountPercent: number; total: number } {
+  const subtotal = purchaseTotal(p.items);
+  const discount = discountOf(subtotal, p.discountPercent, p.discountAmount);
+  const pct = Math.max(0, Math.min(100, Number(p.discountPercent) || 0));
+  return { subtotal, discount, discountPercent: pct, total: subtotal - discount };
+}
+
 /**
  * ضریب سرشکن‌کردن تخفیفِ کلِ فاکتور روی تک‌تک ردیف‌ها (۱ = بدون تخفیف).
  * برای گزارش‌ها لازم است: اگر روی فاکتور ۱٬۰۰۰٬۰۰۰ تومانی ۱۵٪ تخفیف داده شده،

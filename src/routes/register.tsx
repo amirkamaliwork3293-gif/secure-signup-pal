@@ -6,6 +6,8 @@ import { submitSignupRequest, getPublicSettings } from "@/lib/auth.functions";
 import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
@@ -73,8 +75,8 @@ function RegisterPage() {
   const [uploading, setUploading] = useState(false);
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
-  const [receiptDate, setReceiptDate] = useState("");
-  const [receiptTime, setReceiptTime] = useState("");
+  const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
+  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
 
   const [card, setCard] = useState({
     card_number: "",
@@ -459,7 +461,7 @@ function RegisterPage() {
               <strong>تاریخ واریز</strong> و <strong>ساعت و دقیقه‌ی دقیق واریز</strong> را
               بنویسید تا مدیر بتواند تراکنش شما را دقیق تطبیق دهد و تایید کند.
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2">
               <Field
                 label="کد پیگیری/ارجاع تراکنش"
                 value={receiptRef}
@@ -467,20 +469,17 @@ function RegisterPage() {
                 placeholder="مثلاً: 123456789"
                 dir="ltr"
               />
-              <Field
-                label="تاریخ واریز"
-                value={receiptDate}
-                onChange={setReceiptDate}
-                placeholder="مثلاً: ۱۴۰۵/۰۵/۱۵"
-              />
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تاریخ واریز</label>
+                <JalaliDateSelect value={receiptDate} onChange={setReceiptDate} />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  ساعت و دقیقه واریز (الزامی)
+                </label>
+                <TimeSelect value={receiptTime} onChange={setReceiptTime} />
+              </div>
             </div>
-            <Field
-              label="ساعت و دقیقه واریز (الزامی)"
-              value={receiptTime}
-              onChange={setReceiptTime}
-              placeholder="مثلاً: 21:35"
-              dir="ltr"
-            />
           </div>
         )}
 

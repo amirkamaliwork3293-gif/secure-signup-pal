@@ -6,6 +6,8 @@ import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from
 import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
 import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/renew")({
@@ -33,8 +35,8 @@ function RenewPage() {
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
-  const [receiptDate, setReceiptDate] = useState("");
-  const [receiptTime, setReceiptTime] = useState("");
+  const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
+  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -303,7 +305,7 @@ function RenewPage() {
               <strong>تاریخ واریز</strong> و <strong>ساعت و دقیقه‌ی دقیق واریز</strong> را
               بنویسید تا مدیر بتواند تراکنش شما را دقیق تطبیق دهد و تایید کند.
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">کد پیگیری/ارجاع تراکنش</label>
                 <input
@@ -316,23 +318,12 @@ function RenewPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تاریخ واریز</label>
-                <input
-                  value={receiptDate}
-                  onChange={(e) => setReceiptDate(e.target.value)}
-                  placeholder="مثلاً: ۱۴۰۵/۰۵/۱۵"
-                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-                />
+                <JalaliDateSelect value={receiptDate} onChange={setReceiptDate} />
               </div>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">ساعت و دقیقه واریز (الزامی)</label>
-              <input
-                value={receiptTime}
-                onChange={(e) => setReceiptTime(e.target.value)}
-                placeholder="مثلاً: 21:35"
-                dir="ltr"
-                className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-              />
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">ساعت و دقیقه واریز (الزامی)</label>
+                <TimeSelect value={receiptTime} onChange={setReceiptTime} />
+              </div>
             </div>
           </div>
         )}

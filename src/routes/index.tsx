@@ -1,6 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice,
@@ -23,6 +23,7 @@ import {
   type PaymentMethod,
 } from "@/lib/store";
 import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
+import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
@@ -69,6 +70,8 @@ export function InvoicePageInner() {
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
   const [showCustomer, setShowCustomer] = useState(false);
+  const [showFields, setShowFields] = useState(false);
+  const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(inv.paymentMethod ?? "cash");
   const [paidAmount, setPaidAmount] = useState<number>(inv.paidAmount ?? 0);
@@ -106,10 +109,18 @@ export function InvoicePageInner() {
           Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
         )
       : 0;
+  // خانه‌های سفارشی «طراح فاکتور» که کاربر خواسته هنگام ثبت فاکتور پر شوند
+  const askFields = useMemo(
+    () => checkoutFields(normalizeTemplate(appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined)),
+    [appSettings.invoiceTemplate],
+  );
+  const filledFieldsCount = askFields.filter((f) => (customFields[f.id] ?? "").trim()).length;
+
   const draftInvoice = {
     ...inv,
     customer,
     paymentMethod,
+    customFields: Object.keys(customFields).length ? customFields : undefined,
     paidAmount: deferred ? paidNow : undefined,
     checkAmount: paymentMethod === "check" ? checkNow : undefined,
     checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
@@ -189,6 +200,7 @@ export function InvoicePageInner() {
       ...inv,
       customer,
       paymentMethod,
+      customFields: Object.keys(customFields).length ? customFields : undefined,
       shopName: appSettings.shopName,
       shopAddress: appSettings.storeAddress || undefined,
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
@@ -221,6 +233,8 @@ export function InvoicePageInner() {
     setNotes("");
     setCustomerQ("");
     setShowCustomer(false);
+    setCustomFields({});
+    setShowFields(false);
   };
 
   const saveCustomer = () => {
@@ -486,18 +500,33 @@ export function InvoicePageInner() {
         )}
 
         {/* Bottom buttons */}
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowCustomer((v) => !v)}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
           >
             <User className="h-3.5 w-3.5" />
             {showCustomer ? "بستن" : "مشتری"}
           </button>
 
+          {askFields.length > 0 && (
+            <button
+              onClick={() => setShowFields((v) => !v)}
+              className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {showFields ? "بستن" : "فیلدهای فاکتور"}
+              {filledFieldsCount > 0 && (
+                <span className="rounded-full bg-background px-1.5 text-[10px] font-bold text-primary">
+                  {formatNumber(filledFieldsCount)}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* پرینت / دانلود / ارسال — غیرفعال وقتی فاکتور خالیه */}
           {inv.items.length > 0 && (
-            <div className="flex gap-1.5 flex-1 justify-end">
+            <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
               <InvoiceActions
                 inv={{
                   ...draftInvoice,
@@ -518,13 +547,45 @@ export function InvoicePageInner() {
           <button
             onClick={checkout}
             disabled={inv.items.length === 0}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50"
+            className="flex w-full shrink-0 items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50 sm:w-auto"
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             ثبت فاکتور
           </button>
         </div>
       </section>
+
+      {/* خانه‌های سفارشی فاکتور — فقط اگر کاربر در «طراح فاکتور» تعریف کرده باشد */}
+      {showFields && askFields.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
+          <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <FileText className="h-4 w-4 text-primary" />
+            فیلدهای سفارشی فاکتور
+          </h3>
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            این خانه‌ها را خودتان در «طراح فاکتور» تعریف کرده‌اید. هرچه اینجا بنویسید، روی
+            فاکتور چاپی همین فاکتور می‌نشیند. خالی بگذارید تا نمایش داده نشود.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {askFields.map((f) => (
+              <div key={f.id}>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  {f.label}
+                  {f.blockTitle ? <span className="opacity-60"> · {f.blockTitle}</span> : null}
+                </label>
+                <input
+                  value={customFields[f.id] ?? ""}
+                  onChange={(e) =>
+                    setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))
+                  }
+                  placeholder={f.label}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Customer info panel */}
       {showCustomer && (

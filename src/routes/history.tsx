@@ -452,6 +452,39 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 )}
               </div>
 
+              {/* تخفیف کل فاکتور */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 text-[11px] text-muted-foreground">تخفیف کل فاکتور</div>
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center gap-1">
+                    <input
+                      inputMode="numeric"
+                      value={draft.discountPercent ? formatNumber(draft.discountPercent) : ""}
+                      onChange={(e) => {
+                        const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+                        setDraft((d) => ({ ...d, discountPercent: v || undefined, discountAmount: undefined }));
+                      }}
+                      placeholder="درصد"
+                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <span className="text-[11px] text-muted-foreground">٪</span>
+                  </div>
+                  <div className="flex flex-1 items-center gap-1">
+                    <input
+                      inputMode="numeric"
+                      value={draft.discountAmount ? formatNumber(draft.discountAmount) : ""}
+                      onChange={(e) => {
+                        const v = Math.max(0, parseNumberInput(e.target.value));
+                        setDraft((d) => ({ ...d, discountAmount: v || undefined, discountPercent: undefined }));
+                      }}
+                      placeholder="مبلغ"
+                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <span className="text-[11px] text-muted-foreground">تومان</span>
+                  </div>
+                </div>
+              </div>
+
               {/* جمع موقت — دقیقاً با همان منطقی که ذخیره و چاپ می‌شود */}
               {(() => {
                 const t = invoiceTotals(draft);

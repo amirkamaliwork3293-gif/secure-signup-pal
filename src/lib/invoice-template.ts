@@ -45,6 +45,12 @@ export type TplField = {
   key: TplFieldKey;
   /** مقدار ثابت — فقط وقتی key === "static" */
   value?: string;
+  /**
+   * اگر true باشد، این خانه هنگام ثبت فاکتور در خود برنامه از کاربر پرسیده
+   * می‌شود (مثل نام مشتری) و مقدار واردشده روی همان فاکتور ذخیره می‌شود.
+   * فقط برای فیلدهای «خانه خالی» و «متن ثابت» معنا دارد.
+   */
+  askAtCheckout?: boolean;
 };
 
 export type TplBlock = {
@@ -271,6 +277,9 @@ function esc(s: unknown): string {
 export function resolveField(inv: Invoice, f: TplField): string {
   const c = inv.customer;
   const t = invoiceTotals(inv);
+  // مقداری که کاربر هنگام ثبت فاکتور برای این خانه وارد کرده، بر همه‌چیز مقدم است
+  const typed = inv.customFields?.[f.id];
+  if (typed != null && String(typed).trim() !== "") return String(typed);
   switch (f.key) {
     case "static":
       return f.value || "";

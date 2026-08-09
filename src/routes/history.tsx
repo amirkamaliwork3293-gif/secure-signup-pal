@@ -12,6 +12,7 @@ import {
 } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
@@ -337,21 +338,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5" /> تاریخ و ساعت فاکتور (شمسی)
                 </div>
-                <div className="flex gap-2" dir="ltr">
-                  <input
+                <div className="space-y-1.5">
+                  <JalaliDateSelect
                     value={dateStr}
-                    onChange={(e) => { setDateStr(e.target.value); setDateErr(null); }}
-                    placeholder="1403/05/12"
-                    inputMode="numeric"
-                    className="flex-1 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    onChange={(v) => { setDateStr(v); setDateErr(null); }}
+                    yearsBack={3}
                   />
-                  <input
-                    value={timeStr}
-                    onChange={(e) => setTimeStr(e.target.value)}
-                    placeholder="14:30"
-                    inputMode="numeric"
-                    className="w-24 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
-                  />
+                  <TimeSelect value={timeStr} onChange={setTimeStr} />
                 </div>
                 {dateErr && <div className="mt-1 text-[10px] text-destructive">{dateErr}</div>}
               </div>

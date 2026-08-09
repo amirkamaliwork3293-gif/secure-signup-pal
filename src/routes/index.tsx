@@ -486,10 +486,10 @@ export function InvoicePageInner() {
         )}
 
         {/* Bottom buttons */}
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowCustomer((v) => !v)}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
           >
             <User className="h-3.5 w-3.5" />
             {showCustomer ? "بستن" : "مشتری"}
@@ -497,7 +497,7 @@ export function InvoicePageInner() {
 
           {/* پرینت / دانلود / ارسال — غیرفعال وقتی فاکتور خالیه */}
           {inv.items.length > 0 && (
-            <div className="flex gap-1.5 flex-1 justify-end">
+            <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
               <InvoiceActions
                 inv={{
                   ...draftInvoice,
@@ -518,7 +518,7 @@ export function InvoicePageInner() {
           <button
             onClick={checkout}
             disabled={inv.items.length === 0}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50"
+            className="flex w-full shrink-0 items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50 sm:w-auto"
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             ثبت فاکتور

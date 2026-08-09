@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { invoiceTotals, purchaseTotal } from "@/lib/invoice-math";
+import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -186,6 +186,10 @@ export type Purchase = {
   shopName?: string;
   /** لوگوی فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی/PDF (اختیاری) */
   shopLogoUrl?: string;
+  /** درصد تخفیف روی کل فاکتور خرید (۰ تا ۱۰۰) */
+  discountPercent?: number;
+  /** مبلغ تخفیف کل فاکتور خرید */
+  discountAmount?: number;
 };
 
 export function emptyPurchase(): Purchase {
@@ -193,7 +197,7 @@ export function emptyPurchase(): Purchase {
 }
 
 export function recalcPurchase(p: Purchase): Purchase {
-  return { ...p, total: purchaseTotal(p.items) };
+  return { ...p, total: purchaseTotals(p).total };
 }
 
 // ─── Customers / Debtors ─────────────────────────────────────────────────────

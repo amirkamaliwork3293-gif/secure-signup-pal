@@ -128,6 +128,18 @@ export function tplId(): string {
   return Math.random().toString(36).slice(2, 9);
 }
 
+/** فیلدهایی از قالب که کاربر خواسته هنگام ثبت فاکتور در برنامه پر شوند */
+export function checkoutFields(t?: Partial<InvoiceTemplate> | null): { id: string; label: string; blockTitle?: string }[] {
+  if (!t?.enabled || !Array.isArray(t.blocks)) return [];
+  const out: { id: string; label: string; blockTitle?: string }[] = [];
+  for (const b of t.blocks) {
+    for (const f of b.fields ?? []) {
+      if (f.askAtCheckout) out.push({ id: f.id, label: f.label || "بدون عنوان", blockTitle: b.title });
+    }
+  }
+  return out;
+}
+
 export const DEFAULT_COLUMNS: TplColumn[] = (
   ["index", "name", "unit", "qty", "price", "discount", "total"] as TplColumnKey[]
 ).map((key) => ({ key, label: COLUMN_LABELS[key], enabled: key !== "discount" }));

@@ -109,6 +109,13 @@ export function InvoicePageInner() {
           Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
         )
       : 0;
+  // خانه‌های سفارشی «طراح فاکتور» که کاربر خواسته هنگام ثبت فاکتور پر شوند
+  const askFields = useMemo(
+    () => checkoutFields(normalizeTemplate(appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined)),
+    [appSettings.invoiceTemplate],
+  );
+  const filledFieldsCount = askFields.filter((f) => (customFields[f.id] ?? "").trim()).length;
+
   const draftInvoice = {
     ...inv,
     customer,

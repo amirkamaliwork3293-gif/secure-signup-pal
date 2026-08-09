@@ -485,6 +485,51 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
 
 // ─── صفحه اصلی: ثبت فاکتور خرید جدید + تاریخچه ────────────────────────────────
 
+/** جعبه‌ی تخفیف کل فاکتور خرید — درصد یا مبلغ ثابت */
+function PurchaseDiscountBox({
+  discountPercent,
+  discountAmount,
+  onChange,
+}: {
+  discountPercent?: number;
+  discountAmount?: number;
+  onChange: (p: { discountPercent?: number; discountAmount?: number }) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-background p-2">
+      <div className="mb-1.5 text-[11px] text-muted-foreground">تخفیف کل فاکتور خرید (اختیاری)</div>
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-1">
+          <input
+            inputMode="numeric"
+            value={discountPercent ? formatNumber(discountPercent) : ""}
+            onChange={(e) => {
+              const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+              onChange({ discountPercent: v || undefined, discountAmount: undefined });
+            }}
+            placeholder="درصد"
+            className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+          />
+          <span className="text-[11px] text-muted-foreground">٪</span>
+        </div>
+        <div className="flex flex-1 items-center gap-1">
+          <input
+            inputMode="numeric"
+            value={discountAmount ? formatNumber(discountAmount) : ""}
+            onChange={(e) => {
+              const v = Math.max(0, parseNumberInput(e.target.value));
+              onChange({ discountAmount: v || undefined, discountPercent: undefined });
+            }}
+            placeholder="مبلغ"
+            className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+          />
+          <span className="text-[11px] text-muted-foreground">تومان</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PurchasesPageInner() {
   const { q: incomingQuery } = Route.useSearch();
   const [allProducts] = products.useAll();
@@ -537,7 +582,8 @@ export function PurchasesPageInner() {
     return filterAndRankSearch(customerList, q, (c) => [customerFullName(c), c.phone ?? ""]).slice(0, 8);
   }, [customerList, customerQuery]);
 
-  const total = purchaseTotal(draft.items);
+  const totals = purchaseTotals(draft);
+  const total = totals.total;
 
   const addExisting = (p: Product) => {
     setDraft((prev) => {

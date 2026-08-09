@@ -6,6 +6,8 @@ import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from
 import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
 import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/renew")({
@@ -33,8 +35,8 @@ function RenewPage() {
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
-  const [receiptDate, setReceiptDate] = useState("");
-  const [receiptTime, setReceiptTime] = useState("");
+  const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
+  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);

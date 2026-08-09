@@ -1,6 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice,
@@ -23,6 +23,7 @@ import {
   type PaymentMethod,
 } from "@/lib/store";
 import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
+import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
@@ -69,6 +70,8 @@ export function InvoicePageInner() {
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
   const [showCustomer, setShowCustomer] = useState(false);
+  const [showFields, setShowFields] = useState(false);
+  const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(inv.paymentMethod ?? "cash");
   const [paidAmount, setPaidAmount] = useState<number>(inv.paidAmount ?? 0);

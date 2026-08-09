@@ -920,9 +920,31 @@ export function PurchasesPageInner() {
         </div>
       </div>
 
-      <div className="mb-4 flex items-center justify-between rounded-2xl border border-border bg-card p-4">
-        <span className="text-sm font-medium text-muted-foreground">جمع کل فاکتور خرید</span>
-        <span className="text-lg font-bold">{formatToman(total)}</span>
+      <div className="mb-3">
+        <PurchaseDiscountBox
+          discountPercent={draft.discountPercent}
+          discountAmount={draft.discountAmount}
+          onChange={(p) => setDraft((d) => recalcPurchase({ ...d, ...p }))}
+        />
+      </div>
+
+      <div className="mb-4 space-y-1 rounded-2xl border border-border bg-card p-4">
+        {totals.discount > 0 && (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>جمع اقلام</span>
+              <span>{formatToman(totals.subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-primary">
+              <span>تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}</span>
+              <span>{formatToman(totals.discount)}</span>
+            </div>
+          </>
+        )}
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-muted-foreground">جمع کل فاکتور خرید</span>
+          <span className="text-lg font-bold">{formatToman(total)}</span>
+        </div>
       </div>
 
       <button

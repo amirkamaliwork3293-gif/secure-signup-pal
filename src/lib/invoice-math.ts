@@ -68,7 +68,7 @@ export function purchaseTotals(p: {
   discountAmount?: number | null;
 }): { subtotal: number; discount: number; discountPercent: number; total: number } {
   const subtotal = purchaseTotal(p.items);
-  const discount = clampDiscount(subtotal, p.discountPercent, p.discountAmount);
+  const discount = discountOf(subtotal, p.discountPercent, p.discountAmount);
   const pct = Math.max(0, Math.min(100, Number(p.discountPercent) || 0));
   return { subtotal, discount, discountPercent: pct, total: subtotal - discount };
 }

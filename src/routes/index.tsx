@@ -110,6 +110,7 @@ export function InvoicePageInner() {
     ...inv,
     customer,
     paymentMethod,
+    customFields: Object.keys(customFields).length ? customFields : undefined,
     paidAmount: deferred ? paidNow : undefined,
     checkAmount: paymentMethod === "check" ? checkNow : undefined,
     checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
@@ -189,6 +190,7 @@ export function InvoicePageInner() {
       ...inv,
       customer,
       paymentMethod,
+      customFields: Object.keys(customFields).length ? customFields : undefined,
       shopName: appSettings.shopName,
       shopAddress: appSettings.storeAddress || undefined,
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
@@ -221,6 +223,8 @@ export function InvoicePageInner() {
     setNotes("");
     setCustomerQ("");
     setShowCustomer(false);
+    setCustomFields({});
+    setShowFields(false);
   };
 
   const saveCustomer = () => {

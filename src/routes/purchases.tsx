@@ -31,7 +31,7 @@ import {
   type PaymentMethod,
   type UnitDef,
 } from "@/lib/store";
-import { purchaseLineTotal, purchaseTotal } from "@/lib/invoice-math";
+import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
@@ -175,7 +175,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   };
 
   const saveEdit = () => {
-    const total = purchaseTotal(draft.items);
+    const total = purchaseTotals(draft).total;
     const jd = parseJalaliInput(dateStr);
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
     // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
@@ -433,9 +433,28 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                 </button>
               </div>
 
-              <div className="text-left text-sm font-semibold text-primary">
-                جمع کل: {formatToman(purchaseTotal(draft.items))}
-              </div>
+              <PurchaseDiscountBox
+                discountPercent={draft.discountPercent}
+                discountAmount={draft.discountAmount}
+                onChange={(p) => setDraft((d) => ({ ...d, ...p }))}
+              />
+
+              {(() => {
+                const t = purchaseTotals(draft);
+                return (
+                  <div className="space-y-0.5 text-left text-sm">
+                    {t.discount > 0 && (
+                      <>
+                        <div className="text-xs text-muted-foreground">جمع اقلام: {formatToman(t.subtotal)}</div>
+                        <div className="text-xs text-primary">
+                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: {formatToman(t.discount)}
+                        </div>
+                      </>
+                    )}
+                    <div className="font-semibold text-primary">جمع کل: {formatToman(t.total)}</div>
+                  </div>
+                );
+              })()}
 
               <div className="flex gap-2">
                 <button

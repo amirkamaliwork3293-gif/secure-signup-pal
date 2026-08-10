@@ -316,6 +316,46 @@ function SettingsPageInner() {
 const profileInputCls =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
 
+/** گروه تنظیمات تاشو — گزینه‌های مرتبط کنار هم و صفحه‌ی تمیزتر. */
+function Group({
+  title,
+  subtitle,
+  icon: Icon,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-right transition hover:bg-accent/50"
+      >
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+          <Icon className="h-4.5 w-4.5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">{title}</span>
+          {subtitle && <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>}
+        </span>
+        {open ? (
+          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+      </button>
+      {open && <div className="space-y-4 border-t border-border px-4 py-4">{children}</div>}
+    </section>
+  );
+}
+
 function ChangePasswordSection() {
   const { state } = useAuth();
   const username =

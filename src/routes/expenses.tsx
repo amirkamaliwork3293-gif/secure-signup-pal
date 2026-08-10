@@ -485,6 +485,43 @@ function ExpenseForm({
         )}
       </Field>
 
+      {accountsList.length > 0 && (
+        <Field label="پرداخت از کدام حساب/کارت؟ (اختیاری)">
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAccountId("")}
+              className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                accountId === ""
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              بدون تأثیر بر حساب
+            </button>
+            {accountsList.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setAccountId(a.id)}
+                className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                  accountId === a.id
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {a.name} · {formatToman(accountBalance(a, txsList))}
+              </button>
+            ))}
+          </div>
+          {accountId && (
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              مبلغ این هزینه از موجودی حساب انتخاب‌شده کم می‌شود.
+            </div>
+          )}
+        </Field>
+      )}
+
       <Field label="تاریخ (شمسی)">
         <div className="grid grid-cols-3 gap-1.5">
           <select value={jd} onChange={(e) => setJd(+e.target.value)} className={SELECT}>

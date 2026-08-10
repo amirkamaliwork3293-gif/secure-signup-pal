@@ -19,6 +19,8 @@ import {
   Save,
   Scale,
   Store,
+  FileText,
+  LayoutGrid,
   ChevronDown,
   ChevronUp,
   Copy,

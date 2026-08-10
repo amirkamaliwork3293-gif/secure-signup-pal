@@ -1395,6 +1395,8 @@ export type AccountTx = {
   amount: number;
   note?: string;
   at: number;
+  /** اگر این تراکنش خودکار از یک هزینه ساخته شده باشد، شناسه‌ی آن هزینه */
+  expenseId?: string;
   createdAt: number;
 };
 

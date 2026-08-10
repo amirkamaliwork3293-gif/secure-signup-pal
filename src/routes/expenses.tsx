@@ -364,8 +364,43 @@ function ExpensesPageInner() {
   );
 }
 
+/** نوار موجودی حساب‌ها روی صفحه‌ی هزینه‌ها — همیشه عدد زنده‌ی هر کارت را نشان می‌دهد. */
+function AccountsStrip({ onManage }: { onManage: () => void }) {
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  if (accountsList.length === 0) return null;
+  const total = accountsList.reduce((s, a) => s + accountBalance(a, txsList), 0);
+  return (
+    <section className="mb-4">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="text-[11px] text-muted-foreground">
+          موجودی حساب‌ها — مجموع: <span className="font-semibold text-foreground">{formatToman(total)}</span>
+        </div>
+        <button type="button" onClick={onManage} className="text-[11px] text-primary">
+          مدیریت حساب‌ها
+        </button>
+      </div>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {accountsList.map((a) => {
+          const balance = accountBalance(a, txsList);
+          return (
+            <div
+              key={a.id}
+              className="min-w-[8.5rem] shrink-0 rounded-2xl border border-border bg-card p-3 shadow-card"
+            >
+              <div className="truncate text-[11px] text-muted-foreground">{a.name}</div>
+              <div className={`mt-1 text-sm font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}>
+                {formatToman(balance)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ExpenseForm({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   initial,
   onSave,
   onCancel,

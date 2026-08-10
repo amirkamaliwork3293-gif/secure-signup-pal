@@ -391,6 +391,9 @@ function ExpenseForm({
   const [recurring, setRecurring] = useState(!!initial.recurringDays);
   const [recurringDays, setRecurringDays] = useState(initial.recurringDays ?? 30);
   const [err, setErr] = useState<string | null>(null);
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  const [accountId, setAccountId] = useState(initial.accountId ?? "");
 
   const submit = () => {
     if (amount <= 0) { setErr("مبلغ هزینه را وارد کنید."); return; }
@@ -406,6 +409,7 @@ function ExpenseForm({
       paymentMethod,
       at: jalaliToTimestamp(jy, jm, jd, hh, mm),
       recurringDays: recurring ? Math.max(1, recurringDays) : undefined,
+      accountId: accountId || undefined,
     });
   };
 

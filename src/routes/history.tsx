@@ -125,6 +125,11 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // افزودن کالای دلخواه (خارج از فهرست محصولات) هنگام ویرایش فاکتور
+  const [showManual, setShowManual] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPrice, setManualPrice] = useState(0);
+  const [manualQty, setManualQty] = useState(1);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -187,6 +192,22 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const removeItem = (idx: number) => {
     setDraft((d) => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
+  };
+
+  const addManualItem = () => {
+    const name = manualName.trim();
+    if (!name || manualPrice <= 0) return;
+    setDraft((d) => ({
+      ...d,
+      items: [
+        ...d.items,
+        { productId: `manual-${Date.now()}`, name, price: manualPrice, quantity: Math.max(1, manualQty) },
+      ],
+    }));
+    setManualName("");
+    setManualPrice(0);
+    setManualQty(1);
+    setShowManual(false);
   };
 
   const addProduct = (p: Product) => {
@@ -449,6 +470,58 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                       </li>
                     ))}
                   </ul>
+                )}
+
+                {/* کالای دلخواه — بدون نیاز به ثبت در فهرست محصولات */}
+                {!showManual ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowManual(true)}
+                    className="mt-2 w-full rounded-lg border border-dashed border-primary/50 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/5"
+                  >
+                    + کالا / خدمت دلخواه (خارج از محصولات)
+                  </button>
+                ) : (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-border bg-card p-2">
+                    <input
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="نام کالا یا خدمت"
+                      className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        inputMode="numeric"
+                        value={manualPrice ? formatNumber(manualPrice) : ""}
+                        onChange={(e) => setManualPrice(parseNumberInput(e.target.value))}
+                        placeholder="قیمت (تومان)"
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                      />
+                      <input
+                        inputMode="numeric"
+                        value={formatNumber(manualQty)}
+                        onChange={(e) => setManualQty(Math.max(1, parseNumberInput(e.target.value) || 1))}
+                        placeholder="تعداد"
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={addManualItem}
+                        className="flex-1 rounded-lg bg-primary py-1.5 text-[11px] font-semibold text-primary-foreground"
+                      >
+                        افزودن
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowManual(false); setManualName(""); setManualPrice(0); setManualQty(1); }}
+                        className="rounded-lg border border-border px-3 py-1.5 text-[11px]"
+                      >
+                        لغو
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 

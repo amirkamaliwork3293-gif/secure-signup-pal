@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
+import { ReminderToast } from "@/components/ReminderToast";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -129,6 +130,9 @@ export function Layout({ children }: { children: ReactNode }) {
       )}
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
+
+      {/* اعلان شناور یادآوری‌های سررسیدشده */}
+      {state.status === "authenticated" && appSettings.showRemindersFeature !== false && <ReminderToast />}
 
       {(() => {
         const badgeFor = (to: string) =>

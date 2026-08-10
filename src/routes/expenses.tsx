@@ -170,6 +170,9 @@ function ExpensesPageInner() {
         <div className="mt-0.5 text-xs opacity-80">{formatNumber(filteredByCat.length)} مورد</div>
       </section>
 
+      {/* موجودی لحظه‌ای هر حساب/کارت — هزینه‌ها و واریز/برداشت‌ها روی همین اعداد اثر می‌گذارند */}
+      <AccountsStrip onManage={() => setPage("accounts")} />
+
       {!showForm && !editingId && (
         <button
           onClick={() => { setShowForm(true); setEditingId(null); }}
@@ -361,6 +364,42 @@ function ExpensesPageInner() {
   );
 }
 
+/** نوار موجودی حساب‌ها روی صفحه‌ی هزینه‌ها — همیشه عدد زنده‌ی هر کارت را نشان می‌دهد. */
+function AccountsStrip({ onManage }: { onManage: () => void }) {
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  if (accountsList.length === 0) return null;
+  const total = accountsList.reduce((s, a) => s + accountBalance(a, txsList), 0);
+  return (
+    <section className="mb-4">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="text-[11px] text-muted-foreground">
+          موجودی حساب‌ها — مجموع: <span className="font-semibold text-foreground">{formatToman(total)}</span>
+        </div>
+        <button type="button" onClick={onManage} className="text-[11px] text-primary">
+          مدیریت حساب‌ها
+        </button>
+      </div>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {accountsList.map((a) => {
+          const balance = accountBalance(a, txsList);
+          return (
+            <div
+              key={a.id}
+              className="min-w-[8.5rem] shrink-0 rounded-2xl border border-border bg-card p-3 shadow-card"
+            >
+              <div className="truncate text-[11px] text-muted-foreground">{a.name}</div>
+              <div className={`mt-1 text-sm font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}>
+                {formatToman(balance)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ExpenseForm({
   initial,
   onSave,
@@ -388,6 +427,9 @@ function ExpenseForm({
   const [recurring, setRecurring] = useState(!!initial.recurringDays);
   const [recurringDays, setRecurringDays] = useState(initial.recurringDays ?? 30);
   const [err, setErr] = useState<string | null>(null);
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  const [accountId, setAccountId] = useState(initial.accountId ?? "");
 
   const submit = () => {
     if (amount <= 0) { setErr("مبلغ هزینه را وارد کنید."); return; }
@@ -403,6 +445,7 @@ function ExpenseForm({
       paymentMethod,
       at: jalaliToTimestamp(jy, jm, jd, hh, mm),
       recurringDays: recurring ? Math.max(1, recurringDays) : undefined,
+      accountId: accountId || undefined,
     });
   };
 
@@ -477,6 +520,43 @@ function ExpenseForm({
           </>
         )}
       </Field>
+
+      {accountsList.length > 0 && (
+        <Field label="پرداخت از کدام حساب/کارت؟ (اختیاری)">
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAccountId("")}
+              className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                accountId === ""
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              بدون تأثیر بر حساب
+            </button>
+            {accountsList.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setAccountId(a.id)}
+                className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                  accountId === a.id
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {a.name} · {formatToman(accountBalance(a, txsList))}
+              </button>
+            ))}
+          </div>
+          {accountId && (
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              مبلغ این هزینه از موجودی حساب انتخاب‌شده کم می‌شود.
+            </div>
+          )}
+        </Field>
+      )}
 
       <Field label="تاریخ (شمسی)">
         <div className="grid grid-cols-3 gap-1.5">

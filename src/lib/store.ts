@@ -1135,6 +1135,12 @@ export type Expense = {
   note?: string;
   /** هزینه‌ی تکرارشونده (مثل اجاره ماهانه) — تعداد روز دوره؛ خالی یعنی یک‌بار */
   recurringDays?: number;
+  /**
+   * حساب/کارتی که این هزینه از آن پرداخت شده است. اگر پر باشد، مبلغ هزینه
+   * به‌صورت یک «برداشت» از موجودی همان حساب کم می‌شود و با ویرایش/حذف هزینه،
+   * آن برداشت هم به‌روزرسانی یا حذف می‌شود.
+   */
+  accountId?: string;
   createdAt: number;
 };
 
@@ -1228,17 +1234,50 @@ export const expenses = {
   save: (list: Expense[]) => write(EXPENSES_KEY, list),
   add: (e: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
-    write(EXPENSES_KEY, [{ ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() }, ...list]);
+    const created = { ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() };
+    write(EXPENSES_KEY, [created, ...list]);
+    syncExpenseAccountTx(created);
   },
   update: (updated: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
     write(EXPENSES_KEY, list.map((e) => (e.id === updated.id ? updated : e)));
+    syncExpenseAccountTx(updated);
   },
   remove: (id: string) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
     write(EXPENSES_KEY, list.filter((e) => e.id !== id));
+    removeExpenseAccountTx(id);
   },
 };
+
+/**
+ * هزینه‌ای که از یک حساب/کارت پرداخت شده، باید از موجودی همان حساب کم شود.
+ * برای هر هزینه حداکثر یک تراکنشِ «برداشت» با شناسه‌ی expenseId نگه داشته
+ * می‌شود؛ با ویرایش هزینه همان تراکنش به‌روز و با تغییر حساب یا حذف هزینه،
+ * تراکنش قبلی حذف می‌شود تا موجودی هیچ‌وقت دوبار کم/زیاد نشود.
+ */
+function syncExpenseAccountTx(e: Expense) {
+  const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.expenseId !== e.id);
+  if (e.accountId && e.amount > 0) {
+    txs.unshift({
+      id: cryptoId(),
+      accountId: e.accountId,
+      type: "withdraw",
+      amount: e.amount,
+      note: `هزینه: ${e.title || e.category || "بدون عنوان"}`,
+      at: e.at,
+      expenseId: e.id,
+      createdAt: Date.now(),
+    });
+  }
+  write(ACCOUNT_TXS_KEY, txs);
+}
+
+function removeExpenseAccountTx(expenseId: string) {
+  const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
+  const next = txs.filter((t) => t.expenseId !== expenseId);
+  if (next.length !== txs.length) write(ACCOUNT_TXS_KEY, next);
+}
 
 // ─── Reminders (یادآوری‌ها — پیگیری وظایف و مشتریان) ─────────────────────────
 
@@ -1356,6 +1395,8 @@ export type AccountTx = {
   amount: number;
   note?: string;
   at: number;
+  /** اگر این تراکنش خودکار از یک هزینه ساخته شده باشد، شناسه‌ی آن هزینه */
+  expenseId?: string;
   createdAt: number;
 };
 

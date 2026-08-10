@@ -170,6 +170,9 @@ function ExpensesPageInner() {
         <div className="mt-0.5 text-xs opacity-80">{formatNumber(filteredByCat.length)} مورد</div>
       </section>
 
+      {/* موجودی لحظه‌ای هر حساب/کارت — هزینه‌ها و واریز/برداشت‌ها روی همین اعداد اثر می‌گذارند */}
+      <AccountsStrip onManage={() => setPage("accounts")} />
+
       {!showForm && !editingId && (
         <button
           onClick={() => { setShowForm(true); setEditingId(null); }}

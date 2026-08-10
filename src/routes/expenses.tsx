@@ -365,6 +365,7 @@ function ExpensesPageInner() {
 }
 
 function ExpenseForm({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   initial,
   onSave,
   onCancel,

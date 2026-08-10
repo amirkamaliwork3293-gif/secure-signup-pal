@@ -125,6 +125,11 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // افزودن کالای دلخواه (خارج از فهرست محصولات) هنگام ویرایش فاکتور
+  const [showManual, setShowManual] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPrice, setManualPrice] = useState(0);
+  const [manualQty, setManualQty] = useState(1);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -187,6 +192,22 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const removeItem = (idx: number) => {
     setDraft((d) => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
+  };
+
+  const addManualItem = () => {
+    const name = manualName.trim();
+    if (!name || manualPrice <= 0) return;
+    setDraft((d) => ({
+      ...d,
+      items: [
+        ...d.items,
+        { productId: `manual-${Date.now()}`, name, price: manualPrice, quantity: Math.max(1, manualQty) },
+      ],
+    }));
+    setManualName("");
+    setManualPrice(0);
+    setManualQty(1);
+    setShowManual(false);
   };
 
   const addProduct = (p: Product) => {

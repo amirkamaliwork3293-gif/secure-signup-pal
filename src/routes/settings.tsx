@@ -99,7 +99,8 @@ function SettingsPageInner() {
         <h1 className="text-lg font-bold">تنظیمات</h1>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4 space-y-4">
+      <div className="space-y-3">
+      <Group title="فروشگاه و نمایش" subtitle="نام فروشگاه و واحد مبالغ" icon={Settings} defaultOpen>
         {/* نام فروشگاه */}
         <div>
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">
@@ -116,6 +117,40 @@ function SettingsPageInner() {
           </p>
         </div>
 
+        {/* واحد نمایش مبالغ — تومان / ریال */}
+        <div className="rounded-xl border border-border bg-background p-3">
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <Coins className="h-4 w-4 text-primary" />
+            واحد نمایش مبالغ
+          </span>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {([
+              { v: "toman", l: "تومان" },
+              { v: "rial", l: "ریال" },
+            ] as { v: "toman" | "rial"; l: string }[]).map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                onClick={() => setCurrencyUnit(o.v)}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  currencyUnit === o.v
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {o.l}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            همه‌ی قیمت‌ها و مبالغ برنامه (فاکتور، گزارش، مشتریان و...) با این واحد نمایش داده
+            می‌شوند. توجه: مبالغ همیشه <strong>به تومان وارد و ذخیره</strong> می‌شوند؛ این گزینه
+            فقط نحوه‌ی نمایش را تغییر می‌دهد (هر ۱ تومان = ۱۰ ریال).
+          </p>
+        </div>
+      </Group>
+
+      <Group title="فاکتور" subtitle="اندازه فونت و چیدمان فاکتور" icon={FileText}>
         {/* سایز فونت فاکتور */}
         <div>
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">
@@ -160,39 +195,9 @@ function SettingsPageInner() {
           </span>
           <ExternalLink className="h-4 w-4 shrink-0 text-primary" />
         </Link>
+      </Group>
 
-        {/* واحد نمایش مبالغ — تومان / ریال */}
-        <div className="rounded-xl border border-border bg-background p-3">
-          <span className="flex items-center gap-2 text-sm font-medium">
-            <Coins className="h-4 w-4 text-primary" />
-            واحد نمایش مبالغ
-          </span>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {([
-              { v: "toman", l: "تومان" },
-              { v: "rial", l: "ریال" },
-            ] as { v: "toman" | "rial"; l: string }[]).map((o) => (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => setCurrencyUnit(o.v)}
-                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
-                  currencyUnit === o.v
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {o.l}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            همه‌ی قیمت‌ها و مبالغ برنامه (فاکتور، گزارش، مشتریان و...) با این واحد نمایش داده
-            می‌شوند. توجه: مبالغ همیشه <strong>به تومان وارد و ذخیره</strong> می‌شوند؛ این گزینه
-            فقط نحوه‌ی نمایش را تغییر می‌دهد (هر ۱ تومان = ۱۰ ریال).
-          </p>
-        </div>
-
+      <Group title="قابلیت‌های اختیاری" subtitle="بخش‌هایی که در نوار پایین دیده می‌شوند" icon={LayoutGrid}>
         {/* واحد فروش/فروش وزنی حالا مستقیماً در فرم هر محصول تعریف می‌شود، نه اینجا */}
         <div className="rounded-xl border border-border bg-background p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -281,8 +286,9 @@ function SettingsPageInner() {
             یادآوری وظایف، سررسیدها و پیگیری مشتریان — با هشدار «امروز / سررسید گذشته» در نوار پایین.
           </p>
         </div>
+      </Group>
 
-        <button
+      <button
           onClick={save}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
         >

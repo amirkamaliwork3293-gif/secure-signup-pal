@@ -83,6 +83,7 @@ export function InvoicePageInner() {
   const [showDiscount, setShowDiscount] = useState(
     () => !!(inv.discountPercent || inv.discountAmount),
   );
+  const [showTax, setShowTax] = useState(() => !!inv.taxPercent);
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
   const [allCustomers] = customers.useAll();
@@ -732,6 +733,74 @@ export function InvoicePageInner() {
                 <span>
                   تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
                   <b className="block text-primary">{formatToman(totals.discount)}</b>
+                </span>
+                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
+              </div>
+            )}
+            </>)}
+          </div>
+        )}
+        {/* مالیات کل فاکتور — اختیاری، دقیقاً با همان الگوی تخفیف */}
+        {inv.items.length > 0 && (
+          <div className="mb-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showTax}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setShowTax(on);
+                  if (!on) setInv((prev) => recalc({ ...prev, taxPercent: undefined }));
+                }}
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
+              <span className="text-xs font-semibold text-muted-foreground">اعمال مالیات روی کل فاکتور</span>
+            </label>
+            {showTax && (<>
+            <div className="mt-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-muted-foreground">درصد مالیات</span>
+                <input
+                  value={inv.taxPercent ? formatNumber(inv.taxPercent) : ""}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
+                    setInv((prev) => recalc({ ...prev, taxPercent: v || undefined }));
+                  }}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </label>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[9, 10].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: p }))}
+                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                >
+                  {formatNumber(p)}٪
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: undefined }))}
+                className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                حذف مالیات
+              </button>
+            </div>
+            {totals.tax > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                <span>
+                  {totals.discount > 0 ? "پس از تخفیف" : "جمع اقلام"}:{" "}
+                  <b className="block text-foreground">{formatToman(totals.subtotal - totals.discount)}</b>
+                </span>
+                <span>
+                  مالیات{totals.taxPercent ? ` (٪${formatNumber(totals.taxPercent)})` : ""}:{" "}
+                  <b className="block text-primary">{formatToman(totals.tax)}</b>
                 </span>
                 <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
               </div>

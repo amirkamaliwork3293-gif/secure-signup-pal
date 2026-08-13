@@ -1,5 +1,5 @@
 /**
- * بررسی سلامت محاسبات مبالغ فاکتور (تخفیف، نسیه، چک، مقدار وزنی، گرد کردن).
+ * بررسی سلامت محاسبات مبالغ فاکتور (تخفیف، مالیات، نسیه، چک، مقدار وزنی، گرد کردن).
  * اجرا:  node scripts/test-invoice-math.mjs
  * (بدون فریم‌ورک تست — فقط assert؛ اگر عددی خراب شود، همین‌جا می‌ترکد.)
  */
@@ -12,6 +12,7 @@ import {
   netLineRevenue,
   purchaseLineTotal,
   purchaseTotal,
+  taxOf,
 } from "../src/lib/invoice-math.ts";
 
 const inv = (items, extra = {}) => ({ id: "x", createdAt: 0, items, total: 0, ...extra });
@@ -150,4 +151,64 @@ const item = (price, quantity) => ({ productId: "p", name: "کالا", price, qu
   assert.equal(purchaseTotal(undefined), 0);
 }
 
-console.log("✅ همه‌ی سناریوهای محاسبه‌ی فاکتور درست است (۱۳ گروه بررسی)");
+// ── ۱۴) فقط مالیات درصدی ───────────────────────────────────────────────────
+{
+  const t = invoiceTotals(inv([item(100_000, 1)], { taxPercent: 9 }));
+  assert.equal(t.subtotal, 100_000);
+  assert.equal(t.discount, 0);
+  assert.equal(t.tax, 9_000);
+  assert.equal(t.taxPercent, 9);
+  assert.equal(t.total, 109_000, "جمع کل = جمع اقلام + مالیات");
+
+  const none = invoiceTotals(inv([item(100_000, 1)]));
+  assert.equal(none.tax, 0, "بدون درصد مالیات، مالیاتی وجود ندارد");
+  assert.equal(none.total, 100_000);
+}
+
+// ── ۱۵) تخفیف + مالیات با هم: مالیات روی مبلغ پس از تخفیف ──────────────────
+{
+  const t = invoiceTotals(inv([item(100_000, 2)], { discountPercent: 10, taxPercent: 9 }));
+  assert.equal(t.subtotal, 200_000);
+  assert.equal(t.discount, 20_000);
+  assert.equal(t.tax, 16_200, "مالیات = ٪۹ از (۲۰۰٬۰۰۰ − ۲۰٬۰۰۰)");
+  assert.equal(t.total, 196_200, "جمع کل = جمع اقلام − تخفیف + مالیات");
+}
+
+// ── ۱۶) مالیات + نسیه: مانده باید از جمع کلِ با مالیات حساب شود ────────────
+{
+  const t = invoiceTotals(
+    inv([item(1_000_000, 1)], { taxPercent: 10, paymentMethod: "credit", paidAmount: 500_000 }),
+  );
+  assert.equal(t.total, 1_100_000);
+  assert.equal(t.paid, 500_000);
+  assert.equal(t.remaining, 600_000, "مانده = جمع کل (با مالیات) − پرداخت نقدی");
+}
+
+// ── ۱۷) مالیات: گرد کردن و ورودی‌های نامعتبر ───────────────────────────────
+{
+  const t = invoiceTotals(inv([item(33_333, 1)], { taxPercent: 9 }));
+  assert.equal(t.tax, 3_000); // round(2999.97)
+  assert.equal(Number.isInteger(t.total), true, "مبلغ نهایی همیشه عدد صحیح است");
+
+  const bad = invoiceTotals(inv([item(10_000, 1)], { taxPercent: -5 }));
+  assert.equal(bad.tax, 0, "درصد مالیات منفی نادیده گرفته می‌شود");
+
+  const over100 = invoiceTotals(inv([item(10_000, 1)], { taxPercent: 250 }));
+  assert.equal(over100.tax, 10_000, "درصد مالیات به ۱۰۰ محدود می‌شود");
+
+  assert.equal(taxOf(0, 9), 0, "مبنای صفر، مالیات صفر");
+  assert.equal(taxOf(100_000, undefined), 0);
+}
+
+// ── ۱۸) مالیات نباید درآمد/سود گزارش‌ها را تغییر دهد ───────────────────────
+{
+  const i = inv([item(600_000, 1), item(400_000, 1)], { discountPercent: 10, taxPercent: 9 });
+  assert.equal(discountFactor(i), 0.9, "ضریب سرشکن فقط تابع تخفیف است، نه مالیات");
+  assert.equal(
+    netLineRevenue(i, i.items[0]) + netLineRevenue(i, i.items[1]),
+    invoiceTotals(i).total - invoiceTotals(i).tax,
+    "درآمد خالص ردیف‌ها = جمع کل منهای مالیات",
+  );
+}
+
+console.log("✅ همه‌ی سناریوهای محاسبه‌ی فاکتور درست است (۱۸ گروه بررسی)");

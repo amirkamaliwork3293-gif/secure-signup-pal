@@ -14,11 +14,14 @@
  *  ۲) جمع اقلام (subtotal) = مجموع جمعِ ردیف‌های گردشده.
  *  ۳) تخفیف: اگر درصد وارد شده باشد اولویت با درصد است، وگرنه مبلغ ثابت.
  *     تخفیف هرگز از جمع اقلام بیشتر نمی‌شود و منفی نمی‌شود.
- *  ۴) مبلغ قابل پرداخت (total) = جمع اقلام − تخفیف.
- *  ۵) مانده = total − پرداخت نقدی − مبلغ چک (هرگز منفی نمی‌شود).
+ *  ۴) مالیات (اختیاری): درصدی روی «جمع اقلام − تخفیف» — یعنی مبنای مالیات،
+ *     مبلغ پس از تخفیف است (روال معمول مالیات بر ارزش افزوده).
+ *     مالیات = round((subtotal − discount) × taxPercent / 100)
+ *  ۵) مبلغ قابل پرداخت (total) = جمع اقلام − تخفیف + مالیات.
+ *  ۶) مانده = total − پرداخت نقدی − مبلغ چک (هرگز منفی نمی‌شود).
  *
- * مالیات: فاکتور فروش عادی مالیات ندارد. تنها بخش دارای مالیات، ماشین‌حساب
- * طلا (routes/gold.tsx) است که فاکتور ذخیره‌شده نمی‌سازد و محاسبه‌ی مستقل دارد.
+ * توجه: ماشین‌حساب طلا (routes/gold.tsx) محاسبه‌ی مالیات مستقل خودش را دارد
+ * و فاکتور ذخیره‌شده نمی‌سازد؛ به این فایل ربطی ندارد.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 import type { Invoice, InvoiceItem } from "@/lib/store";
@@ -45,6 +48,16 @@ export function discountOf(
       ? Math.round((subtotal * pct) / 100)
       : Math.max(0, Math.round(Number(discountAmount) || 0));
   return Math.min(Math.max(0, subtotal), raw);
+}
+
+/**
+ * مبلغ مالیات فاکتور بر اساس درصد (قاعده‌ی ۴).
+ * مبنا (base) باید «جمع اقلام پس از تخفیف» باشد؛ درصد به بازه‌ی ۰ تا ۱۰۰ محدود می‌شود.
+ */
+export function taxOf(base: number, taxPercent?: number | null): number {
+  const pct = Math.max(0, Math.min(100, Number(taxPercent) || 0));
+  if (pct <= 0 || base <= 0) return 0;
+  return Math.round((base * pct) / 100);
 }
 
 // ─── فاکتور خرید (از تامین‌کننده) ───────────────────────────────────────────
@@ -78,6 +91,9 @@ export function purchaseTotals(p: {
  * برای گزارش‌ها لازم است: اگر روی فاکتور ۱٬۰۰۰٬۰۰۰ تومانی ۱۵٪ تخفیف داده شده،
  * درآمد واقعی ۸۵۰٬۰۰۰ است و سود هم باید از همان عدد حساب شود، نه از قیمت
  * فهرست. بدون این ضریب، سودِ گزارش‌شده به‌اندازه‌ی کل تخفیف‌ها بیش‌برآورد می‌شد.
+ *
+ * مالیات عمداً در این ضریب لحاظ نمی‌شود: مالیات درآمد فروشنده نیست (از مشتری
+ * گرفته و به دولت پرداخت می‌شود)، پس نباید سود/درآمد گزارش‌ها را باد کند.
  */
 export function discountFactor(inv: Invoice): number {
   const subtotal = itemsSubtotal(inv.items);
@@ -98,7 +114,11 @@ export type InvoiceTotals = {
   discount: number;
   /** درصد تخفیف — فقط اگر کاربر درصدی وارد کرده باشد */
   discountPercent: number;
-  /** مبلغ قابل پرداخت پس از تخفیف */
+  /** مبلغ مالیات اعمال‌شده روی «جمع اقلام − تخفیف» (۰ یعنی بدون مالیات) */
+  tax: number;
+  /** درصد مالیات — فقط اگر کاربر درصدی وارد کرده باشد */
+  taxPercent: number;
+  /** مبلغ قابل پرداخت پس از تخفیف و مالیات */
   total: number;
   /** پرداخت نقدی ثبت‌شده (حداکثر تا سقف مبلغ قابل پرداخت) */
   paid: number;
@@ -116,7 +136,8 @@ export type InvoiceTotals = {
 export function invoiceTotals(inv: Invoice): InvoiceTotals {
   const subtotal = itemsSubtotal(inv.items);
   const discount = discountOf(subtotal, inv.discountPercent, inv.discountAmount);
-  const total = subtotal - discount;
+  const tax = taxOf(subtotal - discount, inv.taxPercent);
+  const total = subtotal - discount + tax;
   const paid = Math.min(total, Math.max(0, Math.round(Number(inv.paidAmount) || 0)));
   const checkAmount = Math.min(total - paid, Math.max(0, Math.round(Number(inv.checkAmount) || 0)));
   // مانده فقط برای فاکتورهای نسیه/چک معنا دارد. در فاکتور نقدی/کارتی کل مبلغ در
@@ -126,6 +147,8 @@ export function invoiceTotals(inv: Invoice): InvoiceTotals {
     subtotal,
     discount,
     discountPercent: Math.max(0, Math.min(100, Number(inv.discountPercent) || 0)),
+    tax,
+    taxPercent: Math.max(0, Math.min(100, Number(inv.taxPercent) || 0)),
     total,
     paid,
     checkAmount,

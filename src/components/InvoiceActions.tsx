@@ -114,8 +114,9 @@ ${inv.notes ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
   <tbody>${rows}</tbody>
   <tfoot>
-    ${t.discount ? `<tr><td colspan="4">جمع اقلام</td><td>${formatAmount(t.subtotal)} ${currencyLabel()}</td></tr>
-    <tr><td colspan="4">تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</td><td>${formatAmount(t.discount)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.discount || t.tax ? `<tr><td colspan="4">جمع اقلام</td><td>${formatAmount(t.subtotal)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.discount ? `<tr><td colspan="4">تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</td><td>${formatAmount(t.discount)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.tax ? `<tr><td colspan="4">مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</td><td>${formatAmount(t.tax)} ${currencyLabel()}</td></tr>` : ""}
     <tr class="total-row">
       <td colspan="4">جمع کل</td>
       <td>${formatAmount(t.total)} ${currencyLabel()}</td>
@@ -192,7 +193,9 @@ ${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${inv.n
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
-${t.discount ? `<div class="line"><span>جمع اقلام</span><span>${fmt(t.subtotal)}</span></div><div class="line"><span>تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</span><span>${fmt(t.discount)}</span></div>` : ""}
+${t.discount || t.tax ? `<div class="line"><span>جمع اقلام</span><span>${fmt(t.subtotal)}</span></div>` : ""}
+${t.discount ? `<div class="line"><span>تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</span><span>${fmt(t.discount)}</span></div>` : ""}
+${t.tax ? `<div class="line"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${fmt(t.tax)}</span></div>` : ""}
 <div class="total"><span>جمع کل</span><span>${fmt(t.total)} ${currencyLabel()}</span></div>
 ${t.paid ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(t.paid)}</span></div>` : ""}
 ${t.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
@@ -224,9 +227,12 @@ export function buildShareText(inv: Invoice): string {
         `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(lineTotal(item))} ${currencyLabel()}`
     ),
     `─────────────────`,
-    t.discount ? `جمع اقلام: ${formatAmount(t.subtotal)} ${currencyLabel()}` : "",
+    t.discount || t.tax ? `جمع اقلام: ${formatAmount(t.subtotal)} ${currencyLabel()}` : "",
     t.discount
       ? `تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: ${formatAmount(t.discount)} ${currencyLabel()}`
+      : "",
+    t.tax
+      ? `مالیات${t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}: ${formatAmount(t.tax)} ${currencyLabel()}`
       : "",
     `💰 جمع کل: ${formatAmount(t.total)} ${currencyLabel()}`,
     t.paid ? `پرداخت نقدی: ${formatAmount(t.paid)} ${currencyLabel()}` : "",

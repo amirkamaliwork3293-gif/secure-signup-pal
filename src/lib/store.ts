@@ -154,6 +154,8 @@ export type Invoice = {
   discountPercent?: number;
   /** مبلغ تخفیف کل فاکتور (اگر درصد وارد شود، از روی آن محاسبه می‌شود) */
   discountAmount?: number;
+  /** درصد مالیات روی کل فاکتور (۰ تا ۱۰۰) — روی «جمع اقلام − تخفیف» اعمال می‌شود (اختیاری) */
+  taxPercent?: number;
   /**
    * مقدار خانه‌های سفارشی «طراح فاکتور» که کاربر هنگام ثبت فاکتور پر کرده است.
    * کلید = شناسه‌ی فیلد در قالب فاکتور.
@@ -1828,11 +1830,15 @@ export function recalc(inv: Invoice): Invoice {
   // شود؛ وگرنه با تغییر اقلام، عددِ کهنه روی فاکتور می‌ماند و دو منبع حقیقت
   // می‌سازد. مبلغ همیشه از درصد بازمحاسبه می‌شود.
   const pct = Math.max(0, Math.min(100, Number(inv.discountPercent) || 0));
+  // مالیات فقط درصدی است؛ مبلغش همیشه از روی درصد و «جمع اقلام − تخفیف»
+  // بازمحاسبه می‌شود (invoiceTotals) تا با تغییر اقلام، عدد کهنه باقی نماند.
+  const taxPct = Math.max(0, Math.min(100, Number(inv.taxPercent) || 0));
   return {
     ...inv,
     subtotal: t.subtotal,
     discountPercent: pct > 0 ? pct : undefined,
     discountAmount: pct > 0 ? undefined : t.discount > 0 ? t.discount : undefined,
+    taxPercent: taxPct > 0 ? taxPct : undefined,
     total: t.total,
   };
 }

@@ -327,7 +327,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               {/* خلاصه‌ی مبالغ — عیناً همان چیزی که روی فاکتور چاپی می‌آید */}
               {(() => {
                 const t = invoiceTotals(saved);
-                const showBreakdown = t.discount > 0 || t.paid > 0 || t.checkAmount > 0;
+                const showBreakdown = t.discount > 0 || t.tax > 0 || t.paid > 0 || t.checkAmount > 0;
                 if (!showBreakdown) return null;
                 return (
                   <div className="space-y-1 rounded-lg border border-border bg-background px-3 py-2 text-xs">
@@ -337,6 +337,12 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                         label={`تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}`}
                         value={formatToman(t.discount)}
                         tone="primary"
+                      />
+                    )}
+                    {t.tax > 0 && (
+                      <Row
+                        label={`مالیات${t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}`}
+                        value={formatToman(t.tax)}
                       />
                     )}
                     <Row label="جمع کل" value={formatToman(t.total)} bold />
@@ -558,21 +564,45 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 </div>
               </div>
 
+              {/* مالیات کل فاکتور — درصدی و اختیاری، روی «جمع اقلام − تخفیف» */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 text-[11px] text-muted-foreground">مالیات کل فاکتور (اختیاری)</div>
+                <div className="flex items-center gap-1">
+                  <input
+                    inputMode="numeric"
+                    value={draft.taxPercent ? formatNumber(draft.taxPercent) : ""}
+                    onChange={(e) => {
+                      const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+                      setDraft((d) => ({ ...d, taxPercent: v || undefined }));
+                    }}
+                    placeholder="درصد مالیات"
+                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                  />
+                  <span className="text-[11px] text-muted-foreground">٪</span>
+                </div>
+              </div>
+
               {/* جمع موقت — دقیقاً با همان منطقی که ذخیره و چاپ می‌شود */}
               {(() => {
                 const t = invoiceTotals(draft);
                 return (
                   <div className="space-y-0.5 text-left text-sm">
+                    {(t.discount > 0 || t.tax > 0) && (
+                      <div className="text-xs text-muted-foreground">
+                        جمع اقلام: {formatToman(t.subtotal)}
+                      </div>
+                    )}
                     {t.discount > 0 && (
-                      <>
-                        <div className="text-xs text-muted-foreground">
-                          جمع اقلام: {formatToman(t.subtotal)}
-                        </div>
-                        <div className="text-xs text-primary">
-                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}:{" "}
-                          {formatToman(t.discount)}
-                        </div>
-                      </>
+                      <div className="text-xs text-primary">
+                        تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}:{" "}
+                        {formatToman(t.discount)}
+                      </div>
+                    )}
+                    {t.tax > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        مالیات{t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}:{" "}
+                        {formatToman(t.tax)}
+                      </div>
                     )}
                     <div className="font-semibold text-primary">جمع کل: {formatToman(t.total)}</div>
                   </div>

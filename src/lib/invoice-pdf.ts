@@ -251,12 +251,22 @@ function drawSummaryRow(ctx: Ctx, y: number, label: string, value: string, stron
 function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   const t = invoiceTotals(inv);
   let cur = y;
-  if (t.discount > 0) {
+  if (t.discount > 0 || t.tax > 0) {
     cur = drawSummaryRow(ctx, cur, "جمع اقلام", `${formatAmount(t.subtotal)} ${currencyLabel()}`, false);
+  }
+  if (t.discount > 0) {
     cur = drawSummaryRow(
       ctx, cur,
       `تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}`,
       `${formatAmount(t.discount)} ${currencyLabel()}`,
+      false,
+    );
+  }
+  if (t.tax > 0) {
+    cur = drawSummaryRow(
+      ctx, cur,
+      `مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}`,
+      `${formatAmount(t.tax)} ${currencyLabel()}`,
       false,
     );
   }
@@ -287,7 +297,9 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
 function totalBlockHeight(inv: Invoice): number {
   const t = invoiceTotals(inv);
   let h = HEAD_H; // جمع کل
-  if (t.discount > 0) h += ROW_H * 2;
+  if (t.discount > 0 || t.tax > 0) h += ROW_H; // جمع اقلام
+  if (t.discount > 0) h += ROW_H;
+  if (t.tax > 0) h += ROW_H;
   if (t.paid > 0) h += ROW_H;
   if (t.checkAmount > 0) h += ROW_H;
   if (t.remaining > 0) h += HEAD_H;

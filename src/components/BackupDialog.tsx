@@ -269,6 +269,8 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
             "جمع اقلام": t.subtotal,
             "درصد تخفیف": t.discountPercent || "",
             "مبلغ تخفیف": t.discount || "",
+            "درصد مالیات": t.taxPercent || "",
+            "مبلغ مالیات": t.tax || "",
             "جمع کل": t.total,
             "روش پرداخت": inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "",
             "پرداخت نقدی": t.paid || "",

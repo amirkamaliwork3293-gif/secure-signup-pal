@@ -398,11 +398,14 @@ export function buildTemplatedInvoiceHTML(
 
   const amounts = invoiceTotals(inv);
   const totalsRows = [
-    amounts.discount
+    amounts.discount || amounts.tax
       ? `<tr><td>جمع اقلام</td><td>${formatAmount(amounts.subtotal)} ${currencyLabel()}</td></tr>`
       : "",
     amounts.discount
       ? `<tr><td>تخفیف${amounts.discountPercent ? ` (${formatNumber(amounts.discountPercent)}٪)` : ""}</td><td>${formatAmount(amounts.discount)} ${currencyLabel()}</td></tr>`
+      : "",
+    amounts.tax
+      ? `<tr><td>مالیات${amounts.taxPercent ? ` (${formatNumber(amounts.taxPercent)}٪)` : ""}</td><td>${formatAmount(amounts.tax)} ${currencyLabel()}</td></tr>`
       : "",
     `<tr class="grand"><td>جمع کل</td><td>${formatAmount(amounts.total)} ${currencyLabel()}</td></tr>`,
     amounts.paid ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(amounts.paid)} ${currencyLabel()}</td></tr>` : "",

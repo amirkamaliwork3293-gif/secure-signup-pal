@@ -161,12 +161,14 @@ export function LandingPage() {
           <div className="flex items-center gap-2">
             <Link
               to="/login"
+              preload={false}
               className="rounded-xl px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accent"
             >
               ورود
             </Link>
             <Link
               to="/register"
+              preload={false}
               className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-elegant transition hover:opacity-90"
             >
               ثبت‌نام
@@ -238,6 +240,7 @@ export function LandingPage() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               to="/register"
+              preload={false}
               className="flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-primary px-8 py-4 text-base font-extrabold text-primary-foreground shadow-elegant transition hover:opacity-90 sm:w-auto"
             >
               ثبت‌نام و شروع
@@ -245,6 +248,7 @@ export function LandingPage() {
             </Link>
             <Link
               to="/login"
+              preload={false}
               className="flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl border border-primary/40 bg-card px-8 py-4 text-base font-bold text-foreground transition hover:bg-accent sm:w-auto"
             >
               قبلاً حساب دارم — ورود
@@ -384,6 +388,7 @@ export function LandingPage() {
           <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               to="/register"
+              preload={false}
               className="flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-background px-8 py-4 text-base font-extrabold text-primary transition hover:opacity-90 sm:w-auto"
             >
               ثبت‌نام
@@ -391,6 +396,7 @@ export function LandingPage() {
             </Link>
             <Link
               to="/login"
+              preload={false}
               className="flex w-full max-w-xs items-center justify-center rounded-2xl border border-primary-foreground/40 px-8 py-4 text-base font-bold text-primary-foreground transition hover:bg-primary-foreground/10 sm:w-auto"
             >
               ورود به حساب
@@ -524,6 +530,7 @@ function PlanCard({
   return (
     <Link
       to="/register"
+      preload={false}
       className={`group relative flex flex-col rounded-3xl border p-6 pt-8 text-center shadow-card transition-all duration-300 hover:-translate-y-3 hover:shadow-2xl ${
         recommended
           ? "z-10 border-primary bg-gradient-primary text-primary-foreground shadow-elegant sm:scale-105"

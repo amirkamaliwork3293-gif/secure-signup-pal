@@ -9,8 +9,8 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
-    // Preload target route on link hover / focus — ناوبری تقریباً آنی
-    defaultPreload: "intent",
+    // Preload روی hover برای بازدید لندینگ (اینستاگرام) چند درخواست SSR اضافه می‌ساخت
+    defaultPreload: false,
     // Preloaded route data تا ۳۰ ثانیه تازه در نظر گرفته می‌شود تا کلیک
     // بلافاصله بعد از hover دوباره fetch نکند.
     defaultPreloadStaleTime: 30_000,

@@ -28,6 +28,10 @@ export const Route = createFileRoute("/store/$storeId")({
       },
     ],
   }),
+  headers: () => ({
+    "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    Vary: "Accept, Accept-Encoding",
+  }),
   component: StorePage,
 });
 

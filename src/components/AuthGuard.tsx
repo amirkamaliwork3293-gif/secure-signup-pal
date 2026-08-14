@@ -1,10 +1,21 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { useAuth } from "@/lib/AuthContext";
-import { LoginPage } from "@/routes/login";
 import { LandingPage } from "@/components/LandingPage";
 import { isWebView } from "@/lib/isWebView";
 import { ShieldOff, Lock, Clock, CalendarX } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+
+const LoginPage = lazy(() =>
+  import("@/routes/login").then((m) => ({ default: m.LoginPage })),
+);
+
+function LoginFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    </div>
+  );
+}
 
 type Props = {
   children: ReactNode;
@@ -38,7 +49,13 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
   if (state.status === "unauthenticated") {
     // داخل اپلیکیشن (وب‌ویو) یا مسیر ادمین → مستقیم صفحه‌ی ورود.
     // در مرورگر وب → ابتدا صفحه‌ی معرفی نمایش داده می‌شود.
-    return isWebView() || adminOnly ? <LoginPage /> : <LandingPage />;
+    return isWebView() || adminOnly ? (
+      <Suspense fallback={<LoginFallback />}>
+        <LoginPage />
+      </Suspense>
+    ) : (
+      <LandingPage />
+    );
   }
 
   if (state.status === "pending") {

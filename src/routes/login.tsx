@@ -20,6 +20,10 @@ export const Route = createFileRoute("/login")({
     ],
     links: [{ rel: "canonical", href: LOGIN_URL }],
   }),
+  headers: () => ({
+    "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    Vary: "Accept, Accept-Encoding",
+  }),
   component: LoginPage,
 });
 

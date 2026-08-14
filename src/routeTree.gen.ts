@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VoiceProductsRouteImport } from './routes/voice-products'
 import { Route as VoiceRouteImport } from './routes/voice'
+import { Route as TutorialRouteImport } from './routes/tutorial'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as StoreQrRouteImport } from './routes/store-qr'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
@@ -48,6 +49,11 @@ const VoiceProductsRoute = VoiceProductsRouteImport.update({
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TutorialRoute = TutorialRouteImport.update({
+  id: '/tutorial',
+  path: '/tutorial',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StudentsRoute = StudentsRouteImport.update({
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tutorial': typeof TutorialRoute
   '/voice': typeof VoiceRoute
   '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
@@ -250,6 +257,7 @@ export interface FileRoutesByTo {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tutorial': typeof TutorialRoute
   '/voice': typeof VoiceRoute
   '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
@@ -283,6 +291,7 @@ export interface FileRoutesById {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
+  '/tutorial': typeof TutorialRoute
   '/voice': typeof VoiceRoute
   '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
@@ -317,6 +326,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tutorial'
     | '/voice'
     | '/voice-products'
     | '/m/$userId'
@@ -349,6 +359,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tutorial'
     | '/voice'
     | '/voice-products'
     | '/m/$userId'
@@ -381,6 +392,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/store-qr'
     | '/students'
+    | '/tutorial'
     | '/voice'
     | '/voice-products'
     | '/m/$userId'
@@ -414,6 +426,7 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   StoreQrRoute: typeof StoreQrRoute
   StudentsRoute: typeof StudentsRoute
+  TutorialRoute: typeof TutorialRoute
   VoiceRoute: typeof VoiceRoute
   VoiceProductsRoute: typeof VoiceProductsRoute
   MUserIdRoute: typeof MUserIdRoute
@@ -434,6 +447,13 @@ declare module '@tanstack/react-router' {
       path: '/voice'
       fullPath: '/voice'
       preLoaderRoute: typeof VoiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tutorial': {
+      id: '/tutorial'
+      path: '/tutorial'
+      fullPath: '/tutorial'
+      preLoaderRoute: typeof TutorialRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/students': {
@@ -662,6 +682,7 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   StoreQrRoute: StoreQrRoute,
   StudentsRoute: StudentsRoute,
+  TutorialRoute: TutorialRoute,
   VoiceRoute: VoiceRoute,
   VoiceProductsRoute: VoiceProductsRoute,
   MUserIdRoute: MUserIdRoute,

@@ -16,6 +16,7 @@ import {
 import { parseVoiceText, type ParsedItem, type ParsedCandidate } from "@/lib/voice/persian-nlu";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseVoiceInvoiceLLM } from "@/lib/api/voice.functions";
+import { VoiceMicIcon } from "@/components/VoiceMicIcon";
 import {
   Mic,
   MicOff,
@@ -266,7 +267,7 @@ function VoicePageInner() {
   return (
     <Layout>
       <h1 className="mb-1 flex items-center gap-2 text-lg font-bold">
-        <Mic className="h-5 w-5 text-primary" />
+        <VoiceMicIcon className="pointer-events-none" />
         ثبت صوتی فاکتور
       </h1>
       <p className="mb-4 text-sm text-muted-foreground">
@@ -280,12 +281,10 @@ function VoicePageInner() {
           <button
             type="button"
             onClick={() => (listening ? stopListening() : startListening())}
-            className={`grid h-24 w-24 place-items-center rounded-full text-primary-foreground shadow-elegant transition ${
-              listening ? "animate-pulse bg-destructive" : "bg-gradient-primary"
-            }`}
+            className="flex flex-col items-center gap-3 transition"
             aria-label={listening ? "توقف ضبط" : "شروع ضبط"}
           >
-            {listening ? <MicOff className="h-10 w-10" /> : <Mic className="h-10 w-10" />}
+            <VoiceMicIcon size="lg" active={listening} />
           </button>
           <div className="text-center text-sm font-medium">
             {listening ? "در حال شنیدن… دوباره بزنید تا متوقف شود" : "برای صحبت بزنید"}

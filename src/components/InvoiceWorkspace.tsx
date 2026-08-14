@@ -37,12 +37,12 @@ import {
   FileText,
   Plus as PlusIcon,
   Pencil,
-  Mic,
   Package,
   UserCheck,
   NotebookPen,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { VoiceMicIcon } from "@/components/VoiceMicIcon";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 export function InvoiceWorkspace() {
@@ -362,9 +362,9 @@ export function InvoiceWorkspace() {
           </Link>
           <Link
             to="/voice"
-            className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
+            className="relative flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
-            <Mic className="h-4 w-4" />
+            <VoiceMicIcon />
             ثبت صوتی
           </Link>
           <button

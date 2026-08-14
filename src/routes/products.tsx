@@ -26,8 +26,9 @@ const BarcodeViewModal = lazy(() =>
 import {
   Plus, Trash2, Package, X, Pencil, AlertTriangle,
   Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
-  CalendarClock, Mic,
+  CalendarClock,
 } from "lucide-react";
+import { VoiceMicIcon } from "@/components/VoiceMicIcon";
 import { z } from "zod";
 
 const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
@@ -299,7 +300,7 @@ function ProductsPageInner() {
       {/* Action toolbar */}
       <div className="mb-3 grid grid-cols-5 gap-1.5">
         <Link to="/voice-products" className="inline-flex items-center justify-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-2 py-2 text-[11px] font-medium text-primary">
-          <Mic className="h-3.5 w-3.5" /> ثبت صوتی
+          <VoiceMicIcon iconClassName="h-3.5 w-3.5" /> ثبت صوتی
         </Link>
         <button onClick={() => setShowImport(true)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
           <Upload className="h-3.5 w-3.5" /> ورود گروهی

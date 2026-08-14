@@ -257,7 +257,81 @@ html[data-app="1"] .landing-page {
   border-radius: 50%;
   background: white;
   box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  border: none;
   cursor: pointer;
 }
 
+/* ─── آیکون میکروفون ثبت صوتی — انیمیشن موج و پالس ─────────────────────── */
+@keyframes voice-ring-expand {
+  0% { transform: scale(0.85); opacity: 0.55; }
+  100% { transform: scale(1.65); opacity: 0; }
+}
+@keyframes voice-core-glow {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 45%, transparent); }
+  50% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--primary) 0%, transparent); }
+}
+@keyframes voice-bar-dance {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.5; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes voice-sm-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+@keyframes voice-sm-ping {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.voice-mic-lg .voice-mic-ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 9999px;
+  border: 2px solid color-mix(in oklab, var(--primary) 55%, transparent);
+  animation: voice-ring-expand 2.4s ease-out infinite;
+  pointer-events: none;
+}
+.voice-mic-lg .voice-mic-ring-2 { animation-delay: 0.8s; }
+.voice-mic-lg .voice-mic-ring-3 { animation-delay: 1.6s; }
+
+.voice-mic-lg .voice-mic-core {
+  animation: voice-core-glow 2s ease-in-out infinite;
+}
+
+.voice-mic-lg .voice-mic-waves {
+  pointer-events: none;
+}
+.voice-mic-lg .voice-mic-wave-bar {
+  display: block;
+  width: 3px;
+  height: 14px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--primary) 70%, transparent);
+  transform-origin: bottom center;
+  animation: voice-bar-dance 0.9s ease-in-out infinite;
+}
+
+.voice-mic-sm .voice-mic-sm-ping {
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--primary) 35%, transparent);
+  animation: voice-sm-ping 2s ease-out infinite;
+  pointer-events: none;
+}
+.voice-mic-sm .voice-mic-sm-icon {
+  color: currentColor;
+  animation: voice-sm-bounce 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-mic-lg .voice-mic-ring,
+  .voice-mic-lg .voice-mic-core,
+  .voice-mic-lg .voice-mic-wave-bar,
+  .voice-mic-sm .voice-mic-sm-ping,
+  .voice-mic-sm .voice-mic-sm-icon {
+    animation: none !important;
+  }
+}

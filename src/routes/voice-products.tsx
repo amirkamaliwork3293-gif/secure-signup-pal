@@ -19,6 +19,7 @@ import {
 } from "@/lib/voice/product-nlu";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseVoiceProductLLM } from "@/lib/api/voice.functions";
+import { VoiceMicIcon } from "@/components/VoiceMicIcon";
 import {
   Mic,
   MicOff,
@@ -232,7 +233,7 @@ function VoiceProductsPageInner() {
     <Layout>
       <div className="mb-1 flex items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-lg font-bold">
-          <Mic className="h-5 w-5 text-primary" />
+          <VoiceMicIcon className="pointer-events-none" />
           ثبت صوتی محصولات
         </h1>
         <Link
@@ -253,12 +254,10 @@ function VoiceProductsPageInner() {
           <button
             type="button"
             onClick={() => (listening ? stopListening() : startListening())}
-            className={`grid h-24 w-24 place-items-center rounded-full text-primary-foreground shadow-elegant transition ${
-              listening ? "animate-pulse bg-destructive" : "bg-gradient-primary"
-            }`}
+            className="flex flex-col items-center gap-3 transition"
             aria-label={listening ? "توقف ضبط" : "شروع ضبط"}
           >
-            {listening ? <MicOff className="h-10 w-10" /> : <Mic className="h-10 w-10" />}
+            <VoiceMicIcon size="lg" active={listening} />
           </button>
           <div className="text-center text-sm font-medium">
             {listening ? "در حال شنیدن… دوباره بزنید تا متوقف شود" : "برای صحبت بزنید"}

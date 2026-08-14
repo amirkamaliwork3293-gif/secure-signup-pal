@@ -97,3 +97,72 @@ export const parseVoiceInvoiceLLM = createServerFn({ method: "POST" })
       return { available: false };
     }
   });
+
+// ─── ثبت صوتی محصولات (fallback LLM) ───────────────────────────────────────────
+
+const ParsedProductSchema = z.object({
+  name: z.string(),
+  stock: z.number(),
+  unit: z.string(),
+  /** قیمت فروش به تومان */
+  price: z.number(),
+});
+
+export type LlmParsedProduct = z.infer<typeof ParsedProductSchema>;
+
+export type LlmParseProductResult =
+  | { available: false }
+  | { available: true; items: LlmParsedProduct[] };
+
+export const parseVoiceProductLLM = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      transcript: z.string().min(1),
+      unitNames: z.array(z.string()).max(100),
+    }),
+  )
+  .handler(async ({ data }): Promise<LlmParseProductResult> => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return { available: false };
+
+    const system =
+      "تو دستیار یک فروشگاه فارسی‌زبان هستی. جمله‌ی محاوره‌ای فروشنده را برای «ثبت محصول جدید» " +
+      "به فیلدهای ساختاریافته تبدیل کن: نام محصول، موجودی/تعداد، واحد، قیمت فروش. " +
+      "قیمت همیشه به تومان برگردان (اگر ریال گفت تقسیم بر ۱۰ کن؛ «۲۵۰ هزار» = ۲۵۰۰۰۰ تومان). " +
+      "اعداد فارسی و کلمات عددی (بیست، دویست و پنجاه، ...) را به عدد تبدیل کن. " +
+      "واحد باید یکی از واحدهای داده‌شده باشد؛ اگر گفته نشد «عدد» بگذار. " +
+      "اگر موجودی گفته نشد ۰ بگذار. چند محصول با «و» جدا می‌شوند. " +
+      'خروجی فقط JSON معتبر: {"items":[{"name":"...","stock":0,"unit":"عدد","price":0}]}';
+
+    const user =
+      `واحدهای مجاز: ${data.unitNames.join("، ")}\n\n` + `جمله: «${data.transcript}»`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          max_tokens: 1024,
+          system,
+          messages: [{ role: "user", content: user }],
+        }),
+      });
+      if (!res.ok) return { available: false };
+      const json = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+      const text = json.content?.find((b) => b.type === "text")?.text ?? "";
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return { available: false };
+      const parsed = JSON.parse(match[0]) as unknown;
+      const shape = z.object({ items: z.array(ParsedProductSchema) }).safeParse(parsed);
+      if (!shape.success) return { available: false };
+      return { available: true, items: shape.data.items };
+    } catch {
+      return { available: false };
+    }
+  });

@@ -21,6 +21,22 @@ const PAID_PLANS: Plan[] = ["1month", "3month", "6month", "12month"];
 // We only retain the canonical email here as a non-secret identifier.
 const ADMIN_EMAIL = "amirkamali@kamali.local";
 
+// getPublicSettings روی هر بازدید صفحه‌ی معرفی/ثبت‌نام/تمدید صدا زده می‌شود؛ در
+// روزهای وایرال یعنی هزاران کوئری تکراری روی همان یک ردیف app_settings. نتیجه ۶۰
+// ثانیه در حافظه‌ی همان نمونه‌ی سرور کش می‌شود تا فشار روی دیتابیس (Compute/Egress)
+// پایین بماند. هر تغییر ادمین در تنظیمات، کش را فوراً باطل می‌کند.
+let publicSettingsCache: { at: number; value: PublicSettings } | null = null;
+const PUBLIC_SETTINGS_TTL_MS = 60_000;
+type PublicSettings = {
+  card_number: string;
+  card_holder: string;
+  bank_name: string;
+  plans: PlansConfig;
+};
+function invalidatePublicSettings() {
+  publicSettingsCache = null;
+}
+
 function getAdminUsername(): string {
   return (process.env.ADMIN_USERNAME || "").trim();
 }
@@ -71,6 +87,8 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       plan: Plan;
       payment_confirmed: boolean;
       receipt_url?: string | null;
+      /** جایگزین متنی رسید (کد پیگیری + تاریخ واریز) وقتی کاربر عکس آپلود نمی‌کند */
+      receipt_note?: string | null;
       phone?: string;
     }) => {
       if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
@@ -81,7 +99,10 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       if (!VALID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
       if (d.plan === "trial") throw new Error("برای نسخه تست از فرم اختصاصی استفاده کنید.");
       if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
-      if (!d.receipt_url) throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید.");
+      // یا عکس رسید، یا اطلاعات متنی واریز — یکی از این دو الزامی است
+      if (!d.receipt_url && !d.receipt_note?.trim()) {
+        throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
+      }
       if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) {
         throw new Error("این یوزرنیم رزرو شده است.");
       }
@@ -162,6 +183,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     // تایید مدیر) فرستاده شود؛ بلافاصله بعد از تایید/رد پاک می‌شود.
     const optional: Record<string, unknown> = { temp_password: data.password };
     if (phone) optional.phone = phone;
+    if (data.receipt_note?.trim()) optional.receipt_note = data.receipt_note.trim().slice(0, 500);
 
     let result = await supabaseAdmin
       .from("signup_requests")
@@ -169,7 +191,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       .select("id")
       .single();
 
-    if (/phone|temp_password/i.test(result.error?.message || "")) {
+    if (/phone|temp_password|receipt_note/i.test(result.error?.message || "")) {
       // Column not yet migrated — retry with the base columns only
       result = await supabaseAdmin
         .from("signup_requests")
@@ -348,15 +370,17 @@ async function purgeReceipt(supabaseAdmin: any, requestId: string) {
       .eq("id", requestId)
       .maybeSingle();
     const path = row?.receipt_url as string | null | undefined;
-    if (path) {
-      await supabaseAdmin.storage.from("receipts").remove([path]);
-    }
+    if (!path) return;
+    const { error: rmErr } = await supabaseAdmin.storage.from("receipts").remove([path]);
+    if (rmErr) console.warn("[purgeReceipt] storage remove failed:", path, rmErr.message);
+    // ستون مسیر فایل پاک می‌شود ولی خود رکورد (و متن رسید) برای تاریخچه می‌ماند
     await supabaseAdmin
       .from("signup_requests")
       .update({ receipt_url: null })
       .eq("id", requestId);
-  } catch {
+  } catch (e) {
     // حذف رسید بحرانی نیست؛ اگر شکست خورد جریان تایید/رد را قطع نکن
+    console.warn("[purgeReceipt] cleanup failed for request", requestId, e);
   }
 }
 
@@ -516,6 +540,7 @@ export const updateCardSettings = createServerFn({ method: "POST" })
       })
       .eq("id", 1);
     if (error) throw new Error(error.message);
+    invalidatePublicSettings();
     return { success: true };
   });
 
@@ -582,6 +607,7 @@ export const updatePlanPrices = createServerFn({ method: "POST" })
       })
       .eq("id", 1);
     if (error) throw new Error(error.message);
+    invalidatePublicSettings();
     return { success: true };
   });
 
@@ -775,18 +801,24 @@ export const updatePlanConfigs = createServerFn({ method: "POST" })
       })
       .eq("id", 1);
     if (error) throw new Error(error.message);
+    invalidatePublicSettings();
     return { success: true };
   });
 
 // ─── User: submit a renewal request (extends current account, no new signup) ──
 export const submitRenewalRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { plan: Plan; receipt_url: string; payment_confirmed: boolean }) => {
-    if (!PAID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
-    if (!d.receipt_url) throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید.");
-    if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
-    return d;
-  })
+  .inputValidator(
+    (d: { plan: Plan; receipt_url?: string | null; receipt_note?: string | null; payment_confirmed: boolean }) => {
+      if (!PAID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
+      // یا عکس رسید، یا اطلاعات متنی واریز — یکی از این دو الزامی است
+      if (!d.receipt_url && !d.receipt_note?.trim()) {
+        throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
+      }
+      if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
+      return d;
+    },
+  )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -810,23 +842,36 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
       .maybeSingle();
     if (existing) throw new Error("درخواست تمدید قبلی شما هنوز در انتظار بررسی است.");
 
-    const { data: created, error } = await supabaseAdmin
+    const renewalBase = {
+      first_name: profile.first_name || "",
+      last_name: profile.last_name || "",
+      username: profile.username,
+      plan: data.plan,
+      payment_confirmed: data.payment_confirmed,
+      receipt_url: data.receipt_url ?? null,
+      password_set: true,
+      request_type: "renewal",
+      target_user_id: context.userId,
+    };
+    const note = data.receipt_note?.trim().slice(0, 500);
+
+    let result = await supabaseAdmin
       .from("signup_requests")
-      .insert({
-        first_name: profile.first_name || "",
-        last_name: profile.last_name || "",
-        username: profile.username,
-        plan: data.plan,
-        payment_confirmed: data.payment_confirmed,
-        receipt_url: data.receipt_url,
-        password_set: true,
-        request_type: "renewal",
-        target_user_id: context.userId,
-      } as any)
+      .insert((note ? { ...renewalBase, receipt_note: note } : renewalBase) as any)
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
-    return { id: created.id };
+
+    // اگر ستون receipt_note هنوز مهاجرت نشده، بدون آن دوباره تلاش کن تا
+    // درخواست تمدید کاربر هرگز به‌خاطر مهاجرت انجام‌نشده شکست نخورد.
+    if (note && /receipt_note/i.test(result.error?.message || "")) {
+      result = await supabaseAdmin
+        .from("signup_requests")
+        .insert(renewalBase as any)
+        .select("id")
+        .single();
+    }
+    if (result.error) throw new Error(result.error.message);
+    return { id: result.data.id };
   });
 
 // ─── Public: payment + plans info for signup/renew pages ─────────────────────
@@ -834,16 +879,21 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
 // Used by anon and authenticated users so we can keep the underlying table
 // locked down behind admin-only RLS.
 export const getPublicSettings = createServerFn({ method: "GET" }).handler(async () => {
+  if (publicSettingsCache && Date.now() - publicSettingsCache.at < PUBLIC_SETTINGS_TTL_MS) {
+    return publicSettingsCache.value;
+  }
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin
     .from("app_settings")
     .select("card_number, card_holder, bank_name, plans")
     .eq("id", 1)
     .maybeSingle();
-  return {
+  const value: PublicSettings = {
     card_number: (data as any)?.card_number ?? "",
     card_holder: (data as any)?.card_holder ?? "",
     bank_name: (data as any)?.bank_name ?? "",
     plans: normalizePlans((data as any)?.plans),
   };
+  publicSettingsCache = { at: Date.now(), value };
+  return value;
 });

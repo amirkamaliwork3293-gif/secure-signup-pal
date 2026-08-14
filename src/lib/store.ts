@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -153,6 +154,13 @@ export type Invoice = {
   discountPercent?: number;
   /** مبلغ تخفیف کل فاکتور (اگر درصد وارد شود، از روی آن محاسبه می‌شود) */
   discountAmount?: number;
+  /** درصد مالیات روی کل فاکتور (۰ تا ۱۰۰) — روی «جمع اقلام − تخفیف» اعمال می‌شود (اختیاری) */
+  taxPercent?: number;
+  /**
+   * مقدار خانه‌های سفارشی «طراح فاکتور» که کاربر هنگام ثبت فاکتور پر کرده است.
+   * کلید = شناسه‌ی فیلد در قالب فاکتور.
+   */
+  customFields?: Record<string, string>;
 };
 
 // ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────
@@ -185,6 +193,10 @@ export type Purchase = {
   shopName?: string;
   /** لوگوی فروشگاه — از تنظیمات، برای نمایش روی فاکتور چاپی/PDF (اختیاری) */
   shopLogoUrl?: string;
+  /** درصد تخفیف روی کل فاکتور خرید (۰ تا ۱۰۰) */
+  discountPercent?: number;
+  /** مبلغ تخفیف کل فاکتور خرید */
+  discountAmount?: number;
 };
 
 export function emptyPurchase(): Purchase {
@@ -192,8 +204,7 @@ export function emptyPurchase(): Purchase {
 }
 
 export function recalcPurchase(p: Purchase): Purchase {
-  const total = p.items.reduce((s, it) => s + it.buyPrice * it.quantity, 0);
-  return { ...p, total };
+  return { ...p, total: purchaseTotals(p).total };
 }
 
 // ─── Customers / Debtors ─────────────────────────────────────────────────────
@@ -330,6 +341,8 @@ export type AppSettings = {
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
   invoiceTemplate?: { [key: string]: JsonValue };
+  /** دسته‌بندی‌های هزینه‌ی سفارشی کاربر (علاوه بر EXPENSE_CATEGORIES پیش‌فرض) */
+  expenseCategories?: string[];
 };
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
@@ -447,6 +460,46 @@ function clearDirty(fields: string[]) {
   writeDirtySet(set);
 }
 
+// ─── وضعیت همگام‌سازی (برای نمایش به کاربر — خطای ذخیره هرگز بی‌صدا نماند) ──
+export type SyncState = {
+  /** تعداد بخش‌هایی که تغییرشان هنوز روی سرور ذخیره نشده */
+  pending: number;
+  /** آخرین تلاش ذخیره ناموفق بوده و در حال تلاش مجدد هستیم */
+  failed: boolean;
+  /** پیام خطای آخرین شکست (برای لاگ/نمایش) */
+  lastError?: string;
+  /** زمان آخرین ذخیره‌ی موفق روی سرور */
+  lastOkAt?: number;
+};
+
+let syncState: SyncState = { pending: 0, failed: false };
+
+function publishSyncState(patch: Partial<SyncState>) {
+  syncState = { ...syncState, ...patch };
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("store-sync", { detail: syncState }));
+  }
+}
+
+export function getSyncState(): SyncState {
+  return syncState;
+}
+
+/** هوک نمایش وضعیت همگام‌سازی (نوار هشدار بالای صفحه) */
+export function useSyncState(): SyncState {
+  const [s, setS] = useState<SyncState>(() => ({
+    ...syncState,
+    // تغییرات همگام‌نشده‌ی جامانده از نشست قبلی هم باید شمرده شوند
+    pending: syncState.pending || readDirtySet().size,
+  }));
+  useEffect(() => {
+    const onSync = (e: Event) => setS({ ...(e as CustomEvent<SyncState>).detail });
+    window.addEventListener("store-sync", onSync);
+    return () => window.removeEventListener("store-sync", onSync);
+  }, []);
+  return s;
+}
+
 function scheduleRetry() {
   if (retryTimer) return;
   retryTimer = setTimeout(() => {
@@ -461,11 +514,19 @@ function scheduleRetry() {
 
 function scheduleCloudPush(key: string, value: unknown) {
   const field = CLOUD_FIELDS[key];
-  if (!field || !cloudUserId) return;
+  if (!field) return;
+  if (!cloudUserId) {
+    // هنوز کاربر/همگام‌سازی آماده نیست (مثلاً درست بعد از باز شدن برنامه و پیش از
+    // پایان hydrate). نشانه‌ی «تغییر همگام‌نشده» را همین‌جا ثبت می‌کنیم تا این
+    // نوشتن در اولین hydrate بعدی از localStorage خوانده و به سرور فرستاده شود.
+    markDirty([field]);
+    return;
+  }
   pendingPush[field] = value;
   // Persist dirty marker immediately so a page reload before the debounced
   // flush still knows this field has unsynced local changes.
   markDirty([field]);
+  publishSyncState({ pending: readDirtySet().size });
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(flushCloudPush, 600);
 }
@@ -554,13 +615,24 @@ async function flushCloudPush() {
     }
     clearDirty(confirmed);
     retryDelay = 5000;
+    publishSyncState({
+      pending: readDirtySet().size,
+      failed: false,
+      lastError: undefined,
+      lastOkAt: Date.now(),
+    });
   } catch (e) {
-    console.warn("[store] cloud push failed", e);
+    console.error("[store] cloud push failed", { fields: fieldNames, error: e });
     // Failure: keep values in pendingPush and dirty markers persisted, then
     // retry with exponential backoff. The online listener also retries.
     for (const f of fieldNames) {
       if (!(f in pendingPush)) pendingPush[f] = fieldsToPush[f];
     }
+    publishSyncState({
+      pending: readDirtySet().size,
+      failed: true,
+      lastError: (e as { message?: string })?.message || String(e),
+    });
     scheduleRetry();
   }
 }
@@ -587,24 +659,31 @@ export async function hydrateFromCloud(userId: string) {
       .maybeSingle();
     if (error) throw error;
     if (!data) {
-      // First device for this user: seed cloud row with whatever exists locally
-      const seed = {
-        user_id: userId,
-        products: read<Product[]>(PRODUCTS_KEY, []),
-        categories: read<Category[]>(CATEGORIES_KEY, DEFAULT_CATEGORIES),
-        invoices: read<Invoice[]>(HISTORY_KEY, []),
-        current_invoice: read<Invoice | null>(INVOICE_KEY, null),
-        settings: read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS),
-      };
-      await supabase.from("user_data").insert(seed);
+      // اولین دستگاه این کاربر: هر چیزی که به‌صورت محلی وجود دارد باید بالا برود.
+      // به‌جای insert دستی (که قبلاً فقط ۵ فیلد را می‌فرستاد و مشتریان/هزینه‌ها/
+      // خریدها/... را جا می‌انداخت) همه‌ی فیلدها را در صف push می‌گذاریم تا از
+      // همان مسیر upsert معمولی — با همه‌ی fallbackهای ستون‌های قدیمی — ذخیره شوند.
+      for (const [localKey, field] of Object.entries(CLOUD_FIELDS)) {
+        try {
+          const raw = localStorage.getItem(scopedKey(localKey));
+          if (raw == null) continue;
+          pendingPush[field] = JSON.parse(raw);
+          markDirty([field]);
+        } catch { /* مقدار خراب — نادیده */ }
+      }
       cloudHydrated = true;
-      return;
+      return; // بلوک finally صف را flush می‌کند
     }
     // Overwrite local cache with cloud data — but NEVER for fields that have
     // unsynced local changes (dirty), otherwise offline edits would be lost.
+    // نکته‌ی مهم: مجموعه‌ی dirty دوباره و همین‌الان خوانده می‌شود، چون ممکن است
+    // کاربر در فاصله‌ی خواندن از سرور (چند صد میلی‌ثانیه) چیزی ثبت کرده باشد؛
+    // با تکیه بر snapshot قدیمی، آن ثبت با داده‌ی سرور بازنویسی می‌شد و کاربر
+    // «ناپدید شدن» آن را می‌دید.
+    const dirtyNow = new Set<string>([...dirty, ...readDirtySet()]);
     const overwrite = (field: string, key: string, value: unknown) => {
       if (value == null) return;
-      if (dirty.has(field)) return;
+      if (dirtyNow.has(field)) return;
       writeLocalOnly(key, value);
     };
     overwrite("products", PRODUCTS_KEY, data.products);
@@ -621,7 +700,12 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
     cloudHydrated = true;
   } catch (e) {
-    console.warn("[store] hydrate failed", e);
+    console.error("[store] hydrate failed", e);
+    publishSyncState({
+      pending: readDirtySet().size,
+      failed: true,
+      lastError: (e as { message?: string })?.message || String(e),
+    });
     // Read failed: stay locked so local state can never overwrite cloud data.
     // Pending edits keep their dirty markers and retry after a successful read.
     setTimeout(() => {
@@ -661,6 +745,19 @@ if (typeof window !== "undefined") {
       flushCloudPush();
     }
   });
+
+  // بستن تب / رفتن اپ به پس‌زمینه: منتظر تایمر ۶۰۰ میلی‌ثانیه‌ای نمی‌مانیم و
+  // همان لحظه تلاش می‌کنیم ذخیره کنیم. (اگر نرسد، نشانه‌ی dirty باقی می‌ماند و
+  // اجرای بعدی برنامه دوباره می‌فرستد — پس در بدترین حالت هم چیزی گم نمی‌شود.)
+  const flushNow = () => {
+    if (!cloudUserId || Object.keys(pendingPush).length === 0) return;
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    void flushCloudPush();
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushNow();
+  });
+  window.addEventListener("pagehide", flushNow);
 }
 
 // ─── React hook ──────────────────────────────────────────────────────────────
@@ -904,7 +1001,9 @@ export const invoice = {
     // همین تاریخ را ببینند و بین «تاریخچه» و «دفتر بدهی مشتری» اختلاف نیفتد.
     const finalizedAt = Date.now();
     inv.createdAt = finalizedAt;
-    const stamped: Invoice = { ...inv, createdAt: finalizedAt };
+    // بازمحاسبه‌ی نهایی: مبلغ ثبت‌شده در تاریخچه همیشه با اقلام و تخفیف همان
+    // لحظه می‌خواند، حتی اگر فراخوان یادش رفته باشد recalc را صدا بزند.
+    const stamped: Invoice = recalc({ ...inv, createdAt: finalizedAt });
     write(HISTORY_KEY, [stamped, ...hist]);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
@@ -920,13 +1019,25 @@ export const invoice = {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     const prev = hist.find((inv) => inv.id === updated.id);
     if (prev) reconcileStockForInvoiceEdit(prev.items, updated.items);
+    // مثل archive: مبالغ همیشه از روی اقلام و تخفیفِ ویرایش‌شده بازمحاسبه می‌شوند
+    const fixed = recalc(updated);
     write(
       HISTORY_KEY,
-      hist.map((inv) => (inv.id === updated.id ? updated : inv)),
+      hist.map((inv) => (inv.id === updated.id ? fixed : inv)),
     );
   },
-  deleteFromHistory: (id: string) => {
+  /**
+   * حذف فاکتور از تاریخچه. اگر opts.restock=true باشد، کالاهای همان فاکتور به
+   * انبار برمی‌گردند (چون هنگام ثبت فاکتور از موجودی کسر شده بودند). این کار
+   * اختیاری است تا کاربر بتواند بین «فاکتور اشتباه بوده» و «کالا واقعاً رفته»
+   * تفاوت بگذارد.
+   */
+  deleteFromHistory: (id: string, opts?: { restock?: boolean }) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
+    const target = hist.find((inv) => inv.id === id);
+    if (opts?.restock && target) {
+      reconcileStockForInvoiceEdit(target.items, []);
+    }
     write(
       HISTORY_KEY,
       hist.filter((inv) => inv.id !== id),
@@ -1026,28 +1137,66 @@ export type Expense = {
   note?: string;
   /** هزینه‌ی تکرارشونده (مثل اجاره ماهانه) — تعداد روز دوره؛ خالی یعنی یک‌بار */
   recurringDays?: number;
+  /**
+   * حساب/کارتی که این هزینه از آن پرداخت شده است. اگر پر باشد، مبلغ هزینه
+   * به‌صورت یک «برداشت» از موجودی همان حساب کم می‌شود و با ویرایش/حذف هزینه،
+   * آن برداشت هم به‌روزرسانی یا حذف می‌شود.
+   */
+  accountId?: string;
   createdAt: number;
 };
 
-export const EXPENSE_CATEGORIES = [
-  "اجاره",
-  "حقوق و دستمزد",
-  "قبوض (برق، آب، گاز)",
-  "اینترنت و تلفن",
-  "حمل و نقل",
-  "تبلیغات",
-  "تعمیر و نگهداری",
-  "مالیات و عوارض",
-  "ملزومات مصرفی",
-  "متفرقه",
-] as const;
+/**
+ * دسته‌بندی هزینه کاملاً دست خود کاربر است؛ هیچ دسته‌ی از پیش تعیین‌شده‌ای وجود
+ * ندارد. این آرایه فقط برای سازگاری با کدهای قدیمی خالی نگه داشته شده است.
+ */
+export const EXPENSE_CATEGORIES: readonly string[] = [];
+
+/**
+ * فهرست کامل دسته‌های هزینه: پیش‌فرض‌ها + دسته‌های سفارشی کاربر (در تنظیمات
+ * ذخیره می‌شوند، پس مثل بقیه‌ی تنظیمات بین دستگاه‌ها همگام می‌شوند) + هر دسته‌ای
+ * که در هزینه‌های موجود استفاده شده (تا داده‌ی قدیمی هیچ‌وقت بی‌دسته نشود).
+ */
+export function expenseCategoryList(list?: Expense[]): string[] {
+  const custom = settings.get().expenseCategories ?? [];
+  const used = (list ?? read<Expense[]>(EXPENSES_KEY, []))
+    .map((e) => (e.category || "").trim())
+    .filter(Boolean);
+  return [...new Set([...custom, ...used])];
+}
+
+/** افزودن یک دسته‌ی هزینه‌ی سفارشی (تکراری/خالی نادیده گرفته می‌شود) */
+export function addExpenseCategory(name: string): string[] {
+  const clean = name.trim();
+  if (!clean) return expenseCategoryList();
+  const s = settings.get();
+  const custom = s.expenseCategories ?? [];
+  if (!custom.includes(clean)) {
+    settings.save({ ...s, expenseCategories: [...custom, clean] });
+  }
+  return expenseCategoryList();
+}
+
+/**
+ * حذف یک دسته‌ی سفارشی از فهرست. هزینه‌های ثبت‌شده با آن دسته دست نمی‌خورند
+ * (دسته‌شان همان می‌ماند و در فهرست هم — چون استفاده شده — دیده می‌شود).
+ * دسته‌های پیش‌فرض قابل حذف نیستند.
+ */
+export function removeExpenseCategory(name: string): string[] {
+  const s = settings.get();
+  const custom = s.expenseCategories ?? [];
+  if (custom.includes(name)) {
+    settings.save({ ...s, expenseCategories: custom.filter((c) => c !== name) });
+  }
+  return expenseCategoryList();
+}
 
 export function emptyExpense(): Expense {
   return {
     id: cryptoId(),
     title: "",
     amount: 0,
-    category: EXPENSE_CATEGORIES[0],
+    category: "",
     at: Date.now(),
     paymentMethod: "cash",
     createdAt: Date.now(),
@@ -1087,17 +1236,50 @@ export const expenses = {
   save: (list: Expense[]) => write(EXPENSES_KEY, list),
   add: (e: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
-    write(EXPENSES_KEY, [{ ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() }, ...list]);
+    const created = { ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() };
+    write(EXPENSES_KEY, [created, ...list]);
+    syncExpenseAccountTx(created);
   },
   update: (updated: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
     write(EXPENSES_KEY, list.map((e) => (e.id === updated.id ? updated : e)));
+    syncExpenseAccountTx(updated);
   },
   remove: (id: string) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
     write(EXPENSES_KEY, list.filter((e) => e.id !== id));
+    removeExpenseAccountTx(id);
   },
 };
+
+/**
+ * هزینه‌ای که از یک حساب/کارت پرداخت شده، باید از موجودی همان حساب کم شود.
+ * برای هر هزینه حداکثر یک تراکنشِ «برداشت» با شناسه‌ی expenseId نگه داشته
+ * می‌شود؛ با ویرایش هزینه همان تراکنش به‌روز و با تغییر حساب یا حذف هزینه،
+ * تراکنش قبلی حذف می‌شود تا موجودی هیچ‌وقت دوبار کم/زیاد نشود.
+ */
+function syncExpenseAccountTx(e: Expense) {
+  const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.expenseId !== e.id);
+  if (e.accountId && e.amount > 0) {
+    txs.unshift({
+      id: cryptoId(),
+      accountId: e.accountId,
+      type: "withdraw",
+      amount: e.amount,
+      note: `هزینه: ${e.title || e.category || "بدون عنوان"}`,
+      at: e.at,
+      expenseId: e.id,
+      createdAt: Date.now(),
+    });
+  }
+  write(ACCOUNT_TXS_KEY, txs);
+}
+
+function removeExpenseAccountTx(expenseId: string) {
+  const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
+  const next = txs.filter((t) => t.expenseId !== expenseId);
+  if (next.length !== txs.length) write(ACCOUNT_TXS_KEY, next);
+}
 
 // ─── Reminders (یادآوری‌ها — پیگیری وظایف و مشتریان) ─────────────────────────
 
@@ -1215,6 +1397,8 @@ export type AccountTx = {
   amount: number;
   note?: string;
   at: number;
+  /** اگر این تراکنش خودکار از یک هزینه ساخته شده باشد، شناسه‌ی آن هزینه */
+  expenseId?: string;
   createdAt: number;
 };
 
@@ -1304,6 +1488,15 @@ export const customers = {
       CUSTOMERS_KEY,
       read<Customer[]>(CUSTOMERS_KEY, []).filter((c) => c.id !== id),
     );
+  },
+
+  /**
+   * حذف کامل فهرست مشتریان (به‌همراه سوابق بدهی/پرداخت که داخل خود مشتری ذخیره
+   * می‌شوند). هیچ داده‌ی دیگری — فاکتورها، هزینه‌ها، محصولات — دست نمی‌خورد.
+   * فقط از مسیر دیالوگ تاییدِ صفحه‌ی مشتریان صدا زده می‌شود.
+   */
+  removeAll: () => {
+    write(CUSTOMERS_KEY, [] as Customer[]);
   },
 
   addTx: (customerId: string, tx: Omit<CustomerTx, "id" | "at"> & { at?: number }) => {
@@ -1626,19 +1819,27 @@ export function emptyInvoice(): Invoice {
   return { id: cryptoId(), createdAt: Date.now(), items: [], total: 0 };
 }
 
+/**
+ * بازمحاسبه‌ی مبالغ فاکتور. منطق محاسبه در ‎@/lib/invoice-math‎ متمرکز است تا
+ * صفحه، چاپ، PDF و اکسل همگی دقیقاً یک عدد را نشان بدهند.
+ * هر تغییری در اقلام/تخفیف باید از این تابع رد شود.
+ */
 export function recalc(inv: Invoice): Invoice {
-  // گرد کردن برای جلوگیری از خطای اعشار در فروش وزنی (۲٫۵ × قیمت)
-  const subtotal = Math.round(inv.items.reduce((s, i) => s + i.price * i.quantity, 0));
+  const t = invoiceTotals(inv);
+  // اگر تخفیف درصدی فعال است، «مبلغ تخفیف» نباید به‌عنوان یک مقدار مستقل ذخیره
+  // شود؛ وگرنه با تغییر اقلام، عددِ کهنه روی فاکتور می‌ماند و دو منبع حقیقت
+  // می‌سازد. مبلغ همیشه از درصد بازمحاسبه می‌شود.
   const pct = Math.max(0, Math.min(100, Number(inv.discountPercent) || 0));
-  const raw = pct > 0
-    ? Math.round((subtotal * pct) / 100)
-    : Math.max(0, Math.round(Number(inv.discountAmount) || 0));
-  const discount = Math.min(subtotal, raw);
+  // مالیات فقط درصدی است؛ مبلغش همیشه از روی درصد و «جمع اقلام − تخفیف»
+  // بازمحاسبه می‌شود (invoiceTotals) تا با تغییر اقلام، عدد کهنه باقی نماند.
+  const taxPct = Math.max(0, Math.min(100, Number(inv.taxPercent) || 0));
   return {
     ...inv,
-    subtotal,
-    discountAmount: discount > 0 ? discount : undefined,
-    total: subtotal - discount,
+    subtotal: t.subtotal,
+    discountPercent: pct > 0 ? pct : undefined,
+    discountAmount: pct > 0 ? undefined : t.discount > 0 ? t.discount : undefined,
+    taxPercent: taxPct > 0 ? taxPct : undefined,
+    total: t.total,
   };
 }
 

@@ -3,8 +3,17 @@
  * خواندن با کلاینت anon (خواندنِ عمومی)، ذخیره با کلاینت احرازشده‌ی ادمین.
  * اگر جدول هنوز ساخته نشده باشد، از محتوای پیش‌فرض استفاده می‌شود تا
  * صفحه همیشه زیبا و پر نمایش داده شود.
+ *
+ * ⚠️ محدودیت‌های پهنای‌باند (این‌ها را بدون خواندن مستند برنگردانید):
+ *  - ویدیو فقط با «لینک» (آپارات/یوتیوب/ویمئو) اضافه می‌شود، نه آپلود فایل.
+ *    یک ویدیوی چندمگابایتی در باکت landing-media با یک پست وایرال اینستاگرام
+ *    ده‌ها گیگابایت Cached Egress می‌سازد و باعث قطع سرویس Supabase می‌شود.
+ *  - عکس‌ها قبل از آپلود فشرده می‌شوند (lib/imageCompress) و با cacheControl
+ *    یک‌ساله آپلود می‌شوند؛ مسیر فایل یکتاست پس کش طولانی هیچ‌وقت بیات نمی‌شود.
+ * جزئیات کامل: docs/STORAGE_AND_BANDWIDTH.md
  */
 import { supabase } from "@/lib/supabase";
+import { CACHE_ONE_YEAR } from "@/lib/imageCompress";
 
 export type LandingMedia = {
   type: "video" | "image";
@@ -145,12 +154,29 @@ export async function saveLandingContent(content: LandingContent): Promise<void>
   }
 }
 
+/**
+ * آپلود عکس صفحه‌ی معرفی (استوری/رسانه) در باکت عمومی `landing-media`.
+ * فقط تصویر پذیرفته می‌شود — ویدیو باید با لینک آپارات/یوتیوب اضافه شود.
+ */
 export async function uploadLandingMedia(file: File): Promise<string> {
-  const ext = file.name.split(".").pop() || "bin";
+  if (!file.type.startsWith("image/")) {
+    throw new Error(
+      "فقط عکس قابل آپلود است. برای ویدیو، لینک آپارات یا یوتیوب را وارد کنید (آپلود مستقیم ویدیو غیرفعال شده است).",
+    );
+  }
+  const { prepareImageUpload } = await import("@/lib/imageCompress");
+  const compressed = await prepareImageUpload(file, "content");
+  const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `media/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const { error } = await supabase.storage
     .from("landing-media")
-    .upload(path, file, { cacheControl: "3600", upsert: false });
+    // مسیر یکتاست، پس کش یک‌ساله امن است و بازدیدکننده‌های تکراری/CDN دیگر از
+    // مبدأ Supabase فایل نمی‌گیرند (کلید کاهش Cached Egress در روزهای وایرال).
+    .upload(path, compressed, {
+      cacheControl: `${CACHE_ONE_YEAR}`,
+      upsert: false,
+      contentType: compressed.type || "image/jpeg",
+    });
   if (error) throw new Error(error.message);
   const { data } = supabase.storage.from("landing-media").getPublicUrl(path);
   return data.publicUrl;

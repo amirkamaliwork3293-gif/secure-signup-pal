@@ -6,11 +6,13 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseCard } from "@/routes/purchases";
 import {
   invoice, products, purchases, formatToman, formatNumber, formatJalaliDateTime, settings,
-  PAYMENT_LABEL, parseNumberInput, applyProductDiscount,
+  PAYMENT_LABEL, parseNumberInput, applyProductDiscount, recalc,
   toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp, toJalali,
   type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
 } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { filterAndRankSearch } from "@/lib/search";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import {
   History as HistoryIcon,
   ChevronDown, ChevronUp,
@@ -33,6 +35,20 @@ export const Route = createFileRoute("/history")({
   component: HistoryPage,
 });
 
+/** یک سطر از خلاصه‌ی مبالغ فاکتور */
+function Row({
+  label, value, bold, tone,
+}: { label: string; value: string; bold?: boolean; tone?: "primary" | "destructive" }) {
+  const color =
+    tone === "primary" ? "text-primary" : tone === "destructive" ? "text-destructive" : "text-foreground";
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`${color} ${bold ? "font-bold" : "font-medium"}`}>{value}</span>
+    </div>
+  );
+}
+
 // ─── ویرایش یک آیتم ─────────────────────────────────────────────────────────
 
 function EditableItem({
@@ -49,7 +65,7 @@ function EditableItem({
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.name}</div>
-          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(item.price * item.quantity)}</div>
+          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(lineTotal(item))}</div>
         </div>
         {/* تعداد */}
         <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
@@ -108,6 +124,12 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(initialInv.createdAt));
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // افزودن کالای دلخواه (خارج از فهرست محصولات) هنگام ویرایش فاکتور
+  const [showManual, setShowManual] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualPrice, setManualPrice] = useState(0);
+  const [manualQty, setManualQty] = useState(1);
 
   const customer = saved.customer;
   const hasCustomer = customer && (customer.firstName || customer.lastName || customer.phone);
@@ -137,8 +159,6 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   };
 
   const saveEdit = () => {
-    // محاسبه مجدد جمع کل
-    const total = draft.items.reduce((s, i) => s + i.price * i.quantity, 0);
     // پارس تاریخ/ساعت شمسی
     const jd = parseJalaliInput(dateStr);
     if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
@@ -146,7 +166,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
     const prevTime = toJalali(saved.createdAt);
     const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
-    const updated = { ...draft, total, createdAt: newCreatedAt };
+    // بازمحاسبه با recalc — تخفیف فاکتور (درصدی یا مبلغی) حفظ و دوباره اعمال
+    // می‌شود. قبلاً اینجا فقط جمع خام اقلام حساب می‌شد و تخفیفِ فاکتور بعد از هر
+    // ویرایش از جمع کل حذف می‌شد، در حالی‌که سطر «تخفیف» روی فاکتور چاپی می‌ماند.
+    const updated = recalc({ ...draft, createdAt: newCreatedAt });
     invoice.updateHistory(updated);
     setSaved(updated);
     setDraft(updated);
@@ -157,9 +180,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("آیا این فاکتور حذف شود؟")) {
-      invoice.deleteFromHistory(saved.id);
-    }
+    setConfirmDelete(true);
   };
 
   const updateItem = (idx: number, updated: InvoiceItem) => {
@@ -171,6 +192,22 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const removeItem = (idx: number) => {
     setDraft((d) => ({ ...d, items: d.items.filter((_, i) => i !== idx) }));
+  };
+
+  const addManualItem = () => {
+    const name = manualName.trim();
+    if (!name || manualPrice <= 0) return;
+    setDraft((d) => ({
+      ...d,
+      items: [
+        ...d.items,
+        { productId: `manual-${Date.now()}`, name, price: manualPrice, quantity: Math.max(1, manualQty) },
+      ],
+    }));
+    setManualName("");
+    setManualPrice(0);
+    setManualQty(1);
+    setShowManual(false);
   };
 
   const addProduct = (p: Product) => {
@@ -283,10 +320,40 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 {saved.items.map((item) => (
                   <li key={item.productId} className="flex justify-between text-xs text-muted-foreground">
                     <span>{item.name} × {item.quantity.toLocaleString("fa-IR")}</span>
-                    <span>{formatToman(item.price * item.quantity)}</span>
+                    <span>{formatToman(lineTotal(item))}</span>
                   </li>
                 ))}
               </ul>
+              {/* خلاصه‌ی مبالغ — عیناً همان چیزی که روی فاکتور چاپی می‌آید */}
+              {(() => {
+                const t = invoiceTotals(saved);
+                const showBreakdown = t.discount > 0 || t.tax > 0 || t.paid > 0 || t.checkAmount > 0;
+                if (!showBreakdown) return null;
+                return (
+                  <div className="space-y-1 rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                    <Row label="جمع اقلام" value={formatToman(t.subtotal)} />
+                    {t.discount > 0 && (
+                      <Row
+                        label={`تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}`}
+                        value={formatToman(t.discount)}
+                        tone="primary"
+                      />
+                    )}
+                    {t.tax > 0 && (
+                      <Row
+                        label={`مالیات${t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}`}
+                        value={formatToman(t.tax)}
+                      />
+                    )}
+                    <Row label="جمع کل" value={formatToman(t.total)} bold />
+                    {t.paid > 0 && <Row label="پرداخت نقدی" value={formatToman(t.paid)} />}
+                    {t.checkAmount > 0 && <Row label="مبلغ چک" value={formatToman(t.checkAmount)} />}
+                    {t.remaining > 0 && (
+                      <Row label="مانده" value={formatToman(t.remaining)} tone="destructive" />
+                    )}
+                  </div>
+                );
+              })()}
             </>
           )}
 
@@ -298,21 +365,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Calendar className="h-3.5 w-3.5" /> تاریخ و ساعت فاکتور (شمسی)
                 </div>
-                <div className="flex gap-2" dir="ltr">
-                  <input
+                <div className="space-y-1.5">
+                  <JalaliDateSelect
                     value={dateStr}
-                    onChange={(e) => { setDateStr(e.target.value); setDateErr(null); }}
-                    placeholder="1403/05/12"
-                    inputMode="numeric"
-                    className="flex-1 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    onChange={(v) => { setDateStr(v); setDateErr(null); }}
+                    yearsBack={3}
                   />
-                  <input
-                    value={timeStr}
-                    onChange={(e) => setTimeStr(e.target.value)}
-                    placeholder="14:30"
-                    inputMode="numeric"
-                    className="w-24 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
-                  />
+                  <TimeSelect value={timeStr} onChange={setTimeStr} />
                 </div>
                 {dateErr && <div className="mt-1 text-[10px] text-destructive">{dateErr}</div>}
               </div>
@@ -418,15 +477,137 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                     ))}
                   </ul>
                 )}
-              </div>
 
-              {/* جمع موقت */}
-              <div className="text-left text-sm font-semibold text-primary">
-                جمع کل:{" "}
-                {formatToman(
-                  draft.items.reduce((s, i) => s + i.price * i.quantity, 0)
+                {/* کالای دلخواه — بدون نیاز به ثبت در فهرست محصولات */}
+                {!showManual ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowManual(true)}
+                    className="mt-2 w-full rounded-lg border border-dashed border-primary/50 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/5"
+                  >
+                    + کالا / خدمت دلخواه (خارج از محصولات)
+                  </button>
+                ) : (
+                  <div className="mt-2 space-y-1.5 rounded-lg border border-border bg-card p-2">
+                    <input
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="نام کالا یا خدمت"
+                      className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        inputMode="numeric"
+                        value={manualPrice ? formatNumber(manualPrice) : ""}
+                        onChange={(e) => setManualPrice(parseNumberInput(e.target.value))}
+                        placeholder="قیمت (تومان)"
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                      />
+                      <input
+                        inputMode="numeric"
+                        value={formatNumber(manualQty)}
+                        onChange={(e) => setManualQty(Math.max(1, parseNumberInput(e.target.value) || 1))}
+                        placeholder="تعداد"
+                        className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={addManualItem}
+                        className="flex-1 rounded-lg bg-primary py-1.5 text-[11px] font-semibold text-primary-foreground"
+                      >
+                        افزودن
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowManual(false); setManualName(""); setManualPrice(0); setManualQty(1); }}
+                        className="rounded-lg border border-border px-3 py-1.5 text-[11px]"
+                      >
+                        لغو
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
+
+              {/* تخفیف کل فاکتور */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 text-[11px] text-muted-foreground">تخفیف کل فاکتور</div>
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center gap-1">
+                    <input
+                      inputMode="numeric"
+                      value={draft.discountPercent ? formatNumber(draft.discountPercent) : ""}
+                      onChange={(e) => {
+                        const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+                        setDraft((d) => ({ ...d, discountPercent: v || undefined, discountAmount: undefined }));
+                      }}
+                      placeholder="درصد"
+                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <span className="text-[11px] text-muted-foreground">٪</span>
+                  </div>
+                  <div className="flex flex-1 items-center gap-1">
+                    <input
+                      inputMode="numeric"
+                      value={draft.discountAmount ? formatNumber(draft.discountAmount) : ""}
+                      onChange={(e) => {
+                        const v = Math.max(0, parseNumberInput(e.target.value));
+                        setDraft((d) => ({ ...d, discountAmount: v || undefined, discountPercent: undefined }));
+                      }}
+                      placeholder="مبلغ"
+                      className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                    />
+                    <span className="text-[11px] text-muted-foreground">تومان</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* مالیات کل فاکتور — درصدی و اختیاری، روی «جمع اقلام − تخفیف» */}
+              <div className="rounded-xl border border-border bg-background p-2">
+                <div className="mb-1.5 text-[11px] text-muted-foreground">مالیات کل فاکتور (اختیاری)</div>
+                <div className="flex items-center gap-1">
+                  <input
+                    inputMode="numeric"
+                    value={draft.taxPercent ? formatNumber(draft.taxPercent) : ""}
+                    onChange={(e) => {
+                      const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
+                      setDraft((d) => ({ ...d, taxPercent: v || undefined }));
+                    }}
+                    placeholder="درصد مالیات"
+                    className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+                  />
+                  <span className="text-[11px] text-muted-foreground">٪</span>
+                </div>
+              </div>
+
+              {/* جمع موقت — دقیقاً با همان منطقی که ذخیره و چاپ می‌شود */}
+              {(() => {
+                const t = invoiceTotals(draft);
+                return (
+                  <div className="space-y-0.5 text-left text-sm">
+                    {(t.discount > 0 || t.tax > 0) && (
+                      <div className="text-xs text-muted-foreground">
+                        جمع اقلام: {formatToman(t.subtotal)}
+                      </div>
+                    )}
+                    {t.discount > 0 && (
+                      <div className="text-xs text-primary">
+                        تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}:{" "}
+                        {formatToman(t.discount)}
+                      </div>
+                    )}
+                    {t.tax > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        مالیات{t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}:{" "}
+                        {formatToman(t.tax)}
+                      </div>
+                    )}
+                    <div className="font-semibold text-primary">جمع کل: {formatToman(t.total)}</div>
+                  </div>
+                );
+              })()}
 
               {/* دکمه‌های ذخیره/لغو */}
               <div className="flex gap-2">
@@ -452,6 +633,45 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
           )}
         </div>
       )}
+
+      {/* تایید حذف فاکتور — با انتخاب برگشت کالاها به انبار */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xl"
+          >
+            <div className="text-sm font-bold">حذف فاکتور</div>
+            <p className="text-xs leading-6 text-muted-foreground">
+              می‌خواهید کالاهای این فاکتور به موجودی انبار برگردند؟
+            </p>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id, { restock: true }); setConfirmDelete(false); }}
+              className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              حذف فاکتور + برگشت کالاها به انبار
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id); setConfirmDelete(false); }}
+              className="w-full rounded-xl border border-destructive/40 py-2.5 text-sm font-medium text-destructive"
+            >
+              فقط حذف فاکتور (بدون تغییر موجودی)
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+              className="w-full rounded-xl border border-border py-2.5 text-sm"
+            >
+              انصراف
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -466,6 +686,21 @@ export function HistoryPageInner() {
   const [purchaseList] = purchases.useHistory();
   const [category, setCategory] = useState<InvoiceCategory>("sale");
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+  const [showRange, setShowRange] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const range = useMemo(() => {
+    const f = parseJalaliInput(fromDate);
+    const t = parseJalaliInput(toDate);
+    return {
+      from: f ? jalaliToTimestamp(f.jy, f.jm, f.jd, 0, 0) : null,
+      to: t ? jalaliToTimestamp(t.jy, t.jm, t.jd, 23, 59) : null,
+    };
+  }, [fromDate, toDate]);
+
+  const inRange = (ts: number) =>
+    (range.from == null || ts >= range.from) && (range.to == null || ts <= range.to);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
@@ -473,24 +708,28 @@ export function HistoryPageInner() {
 
   const filtered = useMemo(() => {
     const q = searchQ.trim();
-    if (!q) return list;
-    return filterAndRankSearch(list, q, (inv) => [
+    const base = list.filter((inv) => inRange(inv.createdAt));
+    if (!q) return base;
+    return filterAndRankSearch(base, q, (inv) => [
       inv.id,
       [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);
-  }, [list, searchQ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, searchQ, range]);
 
   const filteredPurchases = useMemo(() => {
     const q = searchQ.trim();
-    if (!q) return purchaseList;
-    return filterAndRankSearch(purchaseList, q, (p) => [
+    const base = purchaseList.filter((p) => inRange(p.createdAt));
+    if (!q) return base;
+    return filterAndRankSearch(base, q, (p) => [
       p.id,
       p.supplierName,
       ...p.items.map((i) => i.name),
     ]);
-  }, [purchaseList, searchQ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseList, searchQ, range]);
 
   const activeList = category === "sale" ? list : purchaseList;
   const activeFiltered = category === "sale" ? filtered : filteredPurchases;
@@ -526,18 +765,87 @@ export function HistoryPageInner() {
       </div>
 
       {activeList.length > 0 && (
-        <div className="relative mb-3">
-          <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
-          />
-          {searchQ && (
-            <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
-              <X className="h-4 w-4" />
+        <div className="mb-3 space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-8 text-sm outline-none focus:border-primary"
+              />
+              {searchQ && (
+                <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowRange((s) => !s)}
+              className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${
+                showRange || range.from || range.to
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-background text-muted-foreground"
+              }`}
+            >
+              <Calendar className="h-4 w-4" />
+              بازه تاریخ
             </button>
+          </div>
+
+          {showRange && (
+            <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+              <div>
+                <div className="mb-1 text-[11px] text-muted-foreground">از تاریخ</div>
+                <JalaliDateSelect
+                  value={fromDate || toJalaliInputDate(Date.now())}
+                  onChange={setFromDate}
+                  yearsBack={3}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] text-muted-foreground">تا تاریخ</div>
+                <JalaliDateSelect
+                  value={toDate || toJalaliInputDate(Date.now())}
+                  onChange={setToDate}
+                  yearsBack={3}
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = toJalaliInputDate(Date.now());
+                    setFromDate(today);
+                    setToDate(today);
+                  }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] hover:border-primary hover:text-primary"
+                >
+                  فقط امروز
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const j = toJalali(Date.now());
+                    if (!j) return;
+                    setFromDate(`${j.jy}/${String(j.jm).padStart(2, "0")}/01`);
+                    setToDate(toJalaliInputDate(Date.now()));
+                  }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] hover:border-primary hover:text-primary"
+                >
+                  این ماه
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFromDate(""); setToDate(""); }}
+                  className="rounded-lg border border-border px-2.5 py-1 text-[11px] text-muted-foreground"
+                >
+                  حذف فیلتر
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -556,7 +864,7 @@ export function HistoryPageInner() {
         </div>
       ) : (
         <>
-          {searchQ.trim() && (
+          {(searchQ.trim() || range.from || range.to) && (
             <p className="mb-2 text-xs text-muted-foreground">{formatNumber(activeFiltered.length)} فاکتور یافت شد</p>
           )}
           {category === "sale" ? (

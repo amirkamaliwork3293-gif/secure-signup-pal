@@ -8,7 +8,10 @@ import {
   expensesByCategory,
   expensesTotal,
   expenseNextDue,
-  EXPENSE_CATEGORIES,
+  expenseCategoryList,
+  addExpenseCategory,
+  removeExpenseCategory,
+  settings as settingsStore,
   formatToman,
   formatNumber,
   formatJalaliDate,
@@ -71,6 +74,8 @@ function ExpensesPageInner() {
   const [list] = expensesStore.useAll();
   const [range, setRange] = useState<Range>("month");
   const [query, setQuery] = useState("");
+  /** فیلتر دسته‌بندی — null یعنی همه‌ی دسته‌ها */
+  const [catFilter, setCatFilter] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -79,16 +84,23 @@ function ExpensesPageInner() {
     return list.filter((e) => e.at >= from);
   }, [list, range]);
 
+  /** بازه + فیلتر دسته — مبنای جمع‌ها و فهرست نمایش */
+  const filteredByCat = useMemo(
+    () => (catFilter ? inRange.filter((e) => (e.category || "متفرقه") === catFilter) : inRange),
+    [inRange, catFilter],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim();
-    const base = [...inRange].sort((a, b) => b.at - a.at);
+    const base = [...filteredByCat].sort((a, b) => b.at - a.at);
     if (!q) return base;
     return base.filter((e) =>
       [e.title, e.category, e.note].filter(Boolean).some((t) => String(t).includes(q)),
     );
-  }, [inRange, query]);
+  }, [filteredByCat, query]);
 
-  const total = expensesTotal(inRange);
+  const total = expensesTotal(filteredByCat);
+  // نمودار دسته‌ها همیشه بر اساس کل بازه است (نه فیلتر دسته) تا سهم هر دسته دیده شود
   const byCategory = useMemo(() => expensesByCategory(inRange), [inRange]);
   const recurring = useMemo(
     () =>
@@ -150,10 +162,16 @@ function ExpensesPageInner() {
       </div>
 
       <section className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
-        <div className="text-xs opacity-80">مجموع هزینه‌ها ({RANGE_LABEL[range]})</div>
+        <div className="text-xs opacity-80">
+          مجموع هزینه‌ها ({RANGE_LABEL[range]}
+          {catFilter ? ` — دسته: ${catFilter}` : ""})
+        </div>
         <div className="mt-1 text-xl font-bold">{formatToman(total)}</div>
-        <div className="mt-0.5 text-xs opacity-80">{formatNumber(inRange.length)} مورد</div>
+        <div className="mt-0.5 text-xs opacity-80">{formatNumber(filteredByCat.length)} مورد</div>
       </section>
+
+      {/* موجودی لحظه‌ای هر حساب/کارت — هزینه‌ها و واریز/برداشت‌ها روی همین اعداد اثر می‌گذارند */}
+      <AccountsStrip onManage={() => setPage("accounts")} />
 
       {!showForm && !editingId && (
         <button
@@ -204,20 +222,68 @@ function ExpensesPageInner() {
             هزینه به تفکیک دسته ({RANGE_LABEL[range]})
           </h2>
           <ul className="space-y-2">
-            {byCategory.map(({ category, total: t }) => (
-              <li key={category} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">{category}</span>
-                  <span className="font-semibold text-primary">{formatToman(t)}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-gradient-primary" style={{ width: `${(t / Math.max(1, total)) * 100}%` }} />
-                </div>
-              </li>
-            ))}
+            {/* کلیک روی هر دسته، فهرست را روی همان دسته فیلتر می‌کند */}
+            {byCategory.map(({ category, total: t }) => {
+              const rangeTotal = expensesTotal(inRange);
+              const active = catFilter === category;
+              return (
+                <li key={category}>
+                  <button
+                    type="button"
+                    onClick={() => setCatFilter(active ? null : category)}
+                    className={`w-full space-y-1 rounded-lg p-1.5 text-right transition hover:bg-accent ${
+                      active ? "bg-primary/10 ring-1 ring-primary/40" : ""
+                    }`}
+                    title={active ? "نمایش همه دسته‌ها" : `فقط دسته «${category}»`}
+                  >
+                    <div className="flex justify-between text-xs">
+                      <span className={active ? "font-semibold text-primary" : "text-muted-foreground"}>
+                        {category}
+                      </span>
+                      <span className="font-semibold text-primary">{formatToman(t)}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-gradient-primary"
+                        style={{ width: `${(t / Math.max(1, rangeTotal)) * 100}%` }}
+                      />
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
+
+      {/* فیلتر دسته‌بندی */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => setCatFilter(null)}
+          className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+            catFilter === null
+              ? "bg-primary text-primary-foreground"
+              : "border border-border bg-background text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          همه دسته‌ها
+        </button>
+        {expenseCategoryList(list).map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCatFilter((f) => (f === c ? null : c))}
+            className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+              catFilter === c
+                ? "bg-primary text-primary-foreground"
+                : "border border-border bg-background text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
 
       <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
         <Search className="h-4 w-4 text-muted-foreground" />
@@ -298,6 +364,42 @@ function ExpensesPageInner() {
   );
 }
 
+/** نوار موجودی حساب‌ها روی صفحه‌ی هزینه‌ها — همیشه عدد زنده‌ی هر کارت را نشان می‌دهد. */
+function AccountsStrip({ onManage }: { onManage: () => void }) {
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  if (accountsList.length === 0) return null;
+  const total = accountsList.reduce((s, a) => s + accountBalance(a, txsList), 0);
+  return (
+    <section className="mb-4">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="text-[11px] text-muted-foreground">
+          موجودی حساب‌ها — مجموع: <span className="font-semibold text-foreground">{formatToman(total)}</span>
+        </div>
+        <button type="button" onClick={onManage} className="text-[11px] text-primary">
+          مدیریت حساب‌ها
+        </button>
+      </div>
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {accountsList.map((a) => {
+          const balance = accountBalance(a, txsList);
+          return (
+            <div
+              key={a.id}
+              className="min-w-[8.5rem] shrink-0 rounded-2xl border border-border bg-card p-3 shadow-card"
+            >
+              <div className="truncate text-[11px] text-muted-foreground">{a.name}</div>
+              <div className={`mt-1 text-sm font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}>
+                {formatToman(balance)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ExpenseForm({
   initial,
   onSave,
@@ -307,9 +409,13 @@ function ExpenseForm({
   onSave: (e: Expense) => void;
   onCancel: () => void;
 }) {
+  const [appSettings] = settingsStore.useAll();
   const [title, setTitle] = useState(initial.title);
   const [amount, setAmount] = useState(initial.amount);
-  const [category, setCategory] = useState(initial.category || EXPENSE_CATEGORIES[0]);
+  // دسته‌بندی کاملاً دلخواه است: کاربر خودش نام دسته را می‌نویسد. دسته‌هایی که
+  // قبلاً استفاده کرده به‌صورت پیشنهاد نمایش داده می‌شوند تا دوباره تایپ نکند.
+  const [category, setCategory] = useState(initial.category || "");
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(() => expenseCategoryList());
   const [note, setNote] = useState(initial.note ?? "");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(initial.paymentMethod ?? "cash");
   const initJ = toJalali(initial.at) ?? { jy: 1403, jm: 1, jd: 1, h: 0, min: 0 };
@@ -321,18 +427,25 @@ function ExpenseForm({
   const [recurring, setRecurring] = useState(!!initial.recurringDays);
   const [recurringDays, setRecurringDays] = useState(initial.recurringDays ?? 30);
   const [err, setErr] = useState<string | null>(null);
+  const [accountsList] = accountsStore.useAll();
+  const [txsList] = accountTxsStore.useAll();
+  const [accountId, setAccountId] = useState(initial.accountId ?? "");
 
   const submit = () => {
     if (amount <= 0) { setErr("مبلغ هزینه را وارد کنید."); return; }
+    const cat = category.trim() || "بدون دسته";
+    // دسته‌ی تازه‌ای که کاربر نوشته، برای دفعات بعد به‌عنوان پیشنهاد ذخیره می‌شود
+    if (category.trim()) addExpenseCategory(cat);
     onSave({
       ...initial,
-      title: title.trim() || category,
+      title: title.trim() || cat,
       amount,
-      category,
+      category: cat,
       note: note.trim() || undefined,
       paymentMethod,
       at: jalaliToTimestamp(jy, jm, jd, hh, mm),
       recurringDays: recurring ? Math.max(1, recurringDays) : undefined,
+      accountId: accountId || undefined,
     });
   };
 
@@ -361,24 +474,89 @@ function ExpenseForm({
         </Field>
       </div>
 
-      <Field label="دسته‌بندی">
-        <div className="flex flex-wrap gap-1.5">
-          {EXPENSE_CATEGORIES.map((c) => (
+      <Field label="دسته‌بندی (نام دلخواه خودتان)">
+        <input
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          placeholder="مثلاً اجاره مغازه، حقوق کارگر، بسته‌بندی…"
+          className={INPUT}
+        />
+        {categoryOptions.length > 0 && (
+          <>
+            <div className="mt-2 text-[10px] text-muted-foreground">دسته‌هایی که قبلاً ساخته‌اید:</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {categoryOptions.map((c) => {
+                const removable = (appSettings.expenseCategories ?? []).includes(c);
+                return (
+                  <span
+                    key={c}
+                    className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] transition ${
+                      category.trim() === c
+                        ? "bg-primary text-primary-foreground"
+                        : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                    }`}
+                  >
+                    <button type="button" onClick={() => setCategory(c)}>
+                      {c}
+                    </button>
+                    {removable && (
+                      <button
+                        type="button"
+                        title="حذف این دسته از فهرست پیشنهادها"
+                        aria-label={`حذف دسته ${c}`}
+                        onClick={() => {
+                          setCategoryOptions(removeExpenseCategory(c));
+                          if (category.trim() === c) setCategory("");
+                        }}
+                        className="opacity-60 hover:opacity-100"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Field>
+
+      {accountsList.length > 0 && (
+        <Field label="پرداخت از کدام حساب/کارت؟ (اختیاری)">
+          <div className="flex flex-wrap gap-1.5">
             <button
-              key={c}
               type="button"
-              onClick={() => setCategory(c)}
+              onClick={() => setAccountId("")}
               className={`rounded-full px-3 py-1.5 text-[11px] transition ${
-                category === c
+                accountId === ""
                   ? "bg-primary text-primary-foreground"
                   : "border border-border bg-background text-muted-foreground hover:bg-accent"
               }`}
             >
-              {c}
+              بدون تأثیر بر حساب
             </button>
-          ))}
-        </div>
-      </Field>
+            {accountsList.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setAccountId(a.id)}
+                className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                  accountId === a.id
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {a.name} · {formatToman(accountBalance(a, txsList))}
+              </button>
+            ))}
+          </div>
+          {accountId && (
+            <div className="mt-1.5 text-[10px] text-muted-foreground">
+              مبلغ این هزینه از موجودی حساب انتخاب‌شده کم می‌شود.
+            </div>
+          )}
+        </Field>
+      )}
 
       <Field label="تاریخ (شمسی)">
         <div className="grid grid-cols-3 gap-1.5">

@@ -4,8 +4,10 @@ import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/lib/AuthContext";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
-import { createReceiptUploadUrl } from "@/lib/receipts.functions";
+import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/renew")({
@@ -31,6 +33,10 @@ function RenewPage() {
   const [copied, setCopied] = useState(false);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
+  const [receiptRef, setReceiptRef] = useState("");
+  const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
+  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -76,42 +82,61 @@ function RenewPage() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const onPickFile = (f: File | null) => {
+  // عکس رسید همان لحظه‌ی انتخاب فشرده می‌شود (دقیقاً مثل صفحه‌ی ثبت‌نام) — خوانا
+  // می‌ماند ولی حجم آپلود و مصرف پهنای‌باند چند برابر کمتر می‌شود.
+  const onPickFile = async (f: File | null) => {
     if (!f) return;
-    // عمداً هیچ محدودیتی روی فرمت یا حجم فایل رسید اعمال نمی‌شود — بعضی گوشی‌ها
-    // (خصوصاً آیفون با فرمت HEIC) نوع فایل را درست گزارش نمی‌کنند یا عکس‌هایشان
-    // حجم بالاتری دارد؛ محدودکردن این‌جا باعث می‌شد ثبت درخواست بعضی کاربران گیر کند.
     setError("");
-    setReceiptFile(f);
     try {
-      setReceiptPreview(URL.createObjectURL(f));
-    } catch {
+      const { prepareImageUpload } = await import("@/lib/imageCompress");
+      const prepared = await prepareImageUpload(f, "receipt");
+      setReceiptFile(prepared);
+      try {
+        setReceiptPreview(URL.createObjectURL(prepared));
+      } catch {
+        setReceiptPreview(null);
+      }
+    } catch (e: any) {
+      setReceiptFile(null);
       setReceiptPreview(null);
+      if (fileRef.current) fileRef.current.value = "";
+      setError(
+        (e?.message || "این فایل قابل استفاده نیست.") +
+          " می‌توانید به‌جای عکس، کد پیگیری و تاریخ واریز را در کادر پایین بنویسید.",
+      );
     }
   };
 
   const handleSubmit = async () => {
     setError("");
     if (!visiblePlans.includes(plan)) { setError("لطفاً یکی از پلن‌های فعال را انتخاب کنید."); return; }
-    if (!receiptFile) { setError("لطفاً عکس رسید پرداخت را آپلود کنید."); return; }
+    const note = receiptNote(receiptRef, receiptDate, receiptTime);
+    if (!receiptFile && !note) {
+      setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری، تاریخ و ساعت دقیق واریز را بنویسید.");
+      return;
+    }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
 
     setLoading(true);
     try {
-      const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
-      const { path, token } = await signReceiptUpload({
-        data: { username: String(username || "user"), ext, kind: "renew" },
-      });
-      const { error: upErr } = await supabase.storage
-        .from("receipts")
-        .uploadToSignedUrl(path, token, receiptFile, {
-          contentType: receiptFile.type || "application/octet-stream",
-          upsert: false,
+      let path: string | null = null;
+      if (receiptFile) {
+        const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
+        const signed = await signReceiptUpload({
+          data: { username: String(username || "user"), ext, kind: "renew" },
         });
-      if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+        const { error: upErr } = await supabase.storage
+          .from("receipts")
+          .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
+            contentType: receiptFile.type || "application/octet-stream",
+            upsert: false,
+          });
+        if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+        path = signed.path;
+      }
 
-      await submit({ data: { plan, receipt_url: path, payment_confirmed: paid } });
+      await submit({ data: { plan, receipt_url: path, receipt_note: note, payment_confirmed: paid } });
       setDone(true);
     } catch (e: any) {
       setError(e?.message || "خطا در ارسال درخواست تمدید.");
@@ -236,7 +261,9 @@ function RenewPage() {
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">عکس رسید پرداخت <span className="text-destructive">*</span></label>
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            عکس رسید پرداخت {!receiptNote(receiptRef, receiptDate, receiptTime) && <span className="text-destructive">*</span>}
+          </label>
           {receiptPreview ? (
             <div className="relative rounded-xl border border-border bg-background p-2">
               <img src={receiptPreview} alt="رسید" className="mx-auto max-h-48 rounded-lg object-contain" />
@@ -258,12 +285,48 @@ function RenewPage() {
               className="flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border bg-background py-6 text-xs text-muted-foreground hover:border-primary hover:text-primary">
               <Upload className="h-5 w-5" />
               <span>برای انتخاب عکس رسید کلیک کنید</span>
-              <span className="text-[10px] opacity-70">هر فرمت و حجمی مجاز است</span>
+              <span className="text-[10px] opacity-70">عکس به‌صورت خودکار فشرده می‌شود</span>
             </button>
           )}
-          {/* هیچ محدودیتی روی نوع یا حجم فایل نیست — دقیقاً مثل صفحهٔ ثبت‌نام */}
-          <input ref={fileRef} type="file" className="hidden" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
+          {/* accept عمداً محدود نشده — دقیقاً مثل صفحه‌ی ثبت‌نام (HEIC/PDF) */}
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => void onPickFile(e.target.files?.[0] || null)}
+          />
         </div>
+
+        {/* جایگزین متنی رسید — دقیقاً مثل صفحه‌ی ثبت‌نام */}
+        {!receiptFile && (
+          <div className="space-y-2 rounded-xl border border-dashed border-border bg-muted/30 p-3">
+            <div className="text-[11px] leading-6 text-muted-foreground">
+              عکس رسید ندارید؟ به‌جای آن <strong>کد پیگیری تراکنش</strong> و{" "}
+              <strong>تاریخ واریز</strong> و <strong>ساعت و دقیقه‌ی دقیق واریز</strong> را
+              بنویسید تا مدیر بتواند تراکنش شما را دقیق تطبیق دهد و تایید کند.
+            </div>
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">کد پیگیری/ارجاع تراکنش</label>
+                <input
+                  value={receiptRef}
+                  onChange={(e) => setReceiptRef(e.target.value)}
+                  placeholder="مثلاً: 123456789"
+                  dir="ltr"
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">تاریخ واریز</label>
+                <JalaliDateSelect value={receiptDate} onChange={setReceiptDate} />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">ساعت و دقیقه واریز (الزامی)</label>
+                <TimeSelect value={receiptTime} onChange={setReceiptTime} />
+              </div>
+            </div>
+          </div>
+        )}
 
         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-sm">
           <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} className="h-4 w-4 accent-primary" />

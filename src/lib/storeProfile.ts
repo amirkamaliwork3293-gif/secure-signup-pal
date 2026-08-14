@@ -47,7 +47,7 @@ const sb = supabase as unknown as {
       upload: (
         path: string,
         file: File,
-        opts?: { upsert?: boolean; contentType?: string },
+        opts?: { upsert?: boolean; contentType?: string; cacheControl?: string },
       ) => Promise<{ error: SbError }>;
       getPublicUrl: (path: string) => { data: { publicUrl: string } };
       createSignedUrl: (
@@ -216,10 +216,9 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
 
 /** آپلود لوگوی فروشگاه در باکت عمومی و بازگرداندن URL عمومی. */
 export async function uploadStoreLogo(userId: string, file: File): Promise<string> {
-  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
-  assertMaxFileSize(file, 10);
-  // لوگو: ابعاد کوچک‌تر برای صرفه‌جویی بیشتر
-  const compressed = await compressImage(file, { maxDim: 512, quality: 0.85 });
+  const { prepareImageUpload, CACHE_ONE_WEEK } = await import("@/lib/imageCompress");
+  // لوگو: ابعاد کوچک‌تر برای صرفه‌جویی بیشتر (پیش‌تنظیم استاندارد «logo»)
+  const compressed = await prepareImageUpload(file, "logo");
   const ext =
     (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   // نام ثابت + upsert=true → لوگوی قبلی خودکار جایگزین می‌شود و انباشته نمی‌شود
@@ -228,6 +227,9 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
   try {
     res = await sb.storage.from("store-assets").upload(path, compressed, {
       upsert: true,
+      // مسیر لوگو ثابت است ولی لینک برگشتی ?v=timestamp دارد؛ پس کش هفتگی امن است
+      // و بازدیدکننده‌های صفحه‌ی عمومی فروشگاه لوگو را هر بار از Supabase نمی‌گیرند.
+      cacheControl: `${CACHE_ONE_WEEK}`,
       contentType: compressed.type || "image/jpeg",
     });
   } catch (e) {
@@ -253,9 +255,8 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
 
 /** آپلود یک تصویر نمونه‌کار در باکت `store-assets` و بازگرداندن URL امضاشده‌ی طولانی‌مدت. */
 export async function uploadPortfolioImage(userId: string, file: File): Promise<string> {
-  const { compressImage, assertMaxFileSize } = await import("@/lib/imageCompress");
-  assertMaxFileSize(file, 10);
-  const compressed = await compressImage(file, { maxDim: 1280, quality: 0.8 });
+  const { prepareImageUpload, CACHE_ONE_YEAR } = await import("@/lib/imageCompress");
+  const compressed = await prepareImageUpload(file, "content");
   const ext =
     (compressed.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${userId}/portfolio/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -263,6 +264,8 @@ export async function uploadPortfolioImage(userId: string, file: File): Promise<
   try {
     res = await sb.storage.from("store-assets").upload(path, compressed, {
       upsert: true,
+      // مسیر یکتا (timestamp + random) → کش یک‌ساله هرگز بیات نمی‌شود
+      cacheControl: `${CACHE_ONE_YEAR}`,
       contentType: compressed.type || "image/jpeg",
     });
   } catch (e) {

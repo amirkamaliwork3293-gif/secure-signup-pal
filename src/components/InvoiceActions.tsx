@@ -5,9 +5,11 @@
  */
 
 import { useState } from "react";
-import { Printer, Share2, Receipt, FileDown } from "lucide-react";
+import { Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
+import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 import type { Invoice } from "@/lib/store";
-import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, currencyLabel } from "@/lib/store";
+import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, formatNumber, currencyLabel } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { printHtml, OLD_APP_MESSAGE, isNativeApp, saveBase64File, downloadBlob } from "@/lib/print";
 import {
   normalizeTemplate,
@@ -40,6 +42,8 @@ export function buildInvoiceHTML(
       ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
       : "—";
 
+  // همه‌ی مبالغ از یک منبع واحد (invoice-math) می‌آیند تا با صفحه یکی باشند
+  const t = invoiceTotals(inv);
   const rows = inv.items
     .map(
       (item, i) => `<tr>
@@ -55,7 +59,7 @@ export function buildInvoiceHTML(
             ? `<span style="text-decoration:line-through;color:#999;margin-left:6px;">${formatAmount(item.originalPrice)}</span>`
             : ""
         }${formatAmount(item.price)}</td>
-        <td>${formatAmount(item.price * item.quantity)}</td>
+        <td>${formatAmount(lineTotal(item))}</td>
       </tr>`
     )
     .join("");
@@ -110,15 +114,16 @@ ${inv.notes ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
   <tbody>${rows}</tbody>
   <tfoot>
-    ${inv.discountAmount ? `<tr><td colspan="4">جمع اقلام</td><td>${formatAmount(inv.subtotal ?? inv.total + inv.discountAmount)} ${currencyLabel()}</td></tr>
-    <tr><td colspan="4">تخفیف${inv.discountPercent ? ` (${formatAmount(inv.discountPercent)}٪)` : ""}</td><td>${formatAmount(inv.discountAmount)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.discount || t.tax ? `<tr><td colspan="4">جمع اقلام</td><td>${formatAmount(t.subtotal)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.discount ? `<tr><td colspan="4">تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</td><td>${formatAmount(t.discount)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.tax ? `<tr><td colspan="4">مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</td><td>${formatAmount(t.tax)} ${currencyLabel()}</td></tr>` : ""}
     <tr class="total-row">
       <td colspan="4">جمع کل</td>
-      <td>${formatAmount(inv.total)} ${currencyLabel()}</td>
+      <td>${formatAmount(t.total)} ${currencyLabel()}</td>
     </tr>
-    ${inv.paidAmount ? `<tr><td colspan="4">پرداخت نقدی</td><td>${formatAmount(inv.paidAmount)} ${currencyLabel()}</td></tr>` : ""}
-    ${inv.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${formatAmount(inv.checkAmount)} ${currencyLabel()}</td></tr>` : ""}
-    ${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<tr><td colspan="4">مانده نسیه</td><td>${formatAmount(Math.max(0, inv.total - (inv.paidAmount || 0)))} ${currencyLabel()}</td></tr>` : ""}
+    ${t.paid ? `<tr><td colspan="4">پرداخت نقدی</td><td>${formatAmount(t.paid)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.checkAmount ? `<tr><td colspan="4">مبلغ چک${inv.checkNumber ? ` (شماره ${inv.checkNumber})` : ""}${inv.checkDueDate ? ` — سررسید ${new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",timeZone:"Asia/Tehran"}).format(new Date(inv.checkDueDate))}` : ""}</td><td>${formatAmount(t.checkAmount)} ${currencyLabel()}</td></tr>` : ""}
+    ${t.remaining > 0 ? `<tr><td colspan="4">مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</td><td>${formatAmount(t.remaining)} ${currencyLabel()}</td></tr>` : ""}
   </tfoot>
 </table>
 <div class="footer">با تشکر از خرید شما — ${shopName}</div>
@@ -135,12 +140,13 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
     : "";
   const shopName = inv.shopName || "فروشگاه";
   const fmt = formatAmount;
+  const t = invoiceTotals(inv);
   const rows = inv.items
     .map(
       (it) => `
       <div class="row">
         <div class="name">${it.name}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
-        <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(it.price * it.quantity)}</span></div>
+        <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(lineTotal(it))}</span></div>
       </div>`
     )
     .join("");
@@ -187,24 +193,29 @@ ${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${inv.n
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
-${inv.discountAmount ? `<div class="line"><span>جمع اقلام</span><span>${fmt(inv.subtotal ?? inv.total + inv.discountAmount)}</span></div><div class="line"><span>تخفیف${inv.discountPercent ? ` (${fmt(inv.discountPercent)}٪)` : ""}</span><span>${fmt(inv.discountAmount)}</span></div>` : ""}
-<div class="total"><span>جمع کل</span><span>${fmt(inv.total)} ${currencyLabel()}</span></div>
-${inv.paidAmount ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(inv.paidAmount)}</span></div>` : ""}
-${inv.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(inv.checkAmount)}</span></div>` : ""}
-${inv.paymentMethod === "credit" && inv.paidAmount != null ? `<div class="line"><span>مانده نسیه</span><span>${fmt(Math.max(0, inv.total - (inv.paidAmount || 0)))}</span></div>` : ""}
+${t.discount || t.tax ? `<div class="line"><span>جمع اقلام</span><span>${fmt(t.subtotal)}</span></div>` : ""}
+${t.discount ? `<div class="line"><span>تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</span><span>${fmt(t.discount)}</span></div>` : ""}
+${t.tax ? `<div class="line"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${fmt(t.tax)}</span></div>` : ""}
+<div class="total"><span>جمع کل</span><span>${fmt(t.total)} ${currencyLabel()}</span></div>
+${t.paid ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(t.paid)}</span></div>` : ""}
+${t.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
+${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${fmt(t.remaining)}</span></div>` : ""}
 <div class="foot">با تشکر از خرید شما</div>
 </body></html>`;
 }
 
 // ─── متن ساده برای اشتراک‌گذاری ───────────────────────────────────────────
 
-function buildShareText(inv: Invoice): string {
+export function buildShareText(inv: Invoice): string {
   const date = formatJalaliDate(inv.createdAt);
   const customer = inv.customer;
   const customerName =
     customer
       ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
       : "";
+  // متن اشتراکی هم باید دقیقاً همان اعداد فاکتور چاپی را نشان بدهد؛ قبلاً فقط
+  // «جمع کل» را داشت و مشتری با جمع‌زدن ردیف‌ها به عدد دیگری می‌رسید.
+  const t = invoiceTotals(inv);
   const lines = [
     `🧾 فاکتور ${inv.shopName || "فروشگاه"}`,
     `📅 تاریخ: ${date}`,
@@ -213,10 +224,20 @@ function buildShareText(inv: Invoice): string {
     `─────────────────`,
     ...inv.items.map(
       (item) =>
-        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(item.price * item.quantity)} ${currencyLabel()}`
+        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(lineTotal(item))} ${currencyLabel()}`
     ),
     `─────────────────`,
-    `💰 جمع کل: ${formatAmount(inv.total)} ${currencyLabel()}`,
+    t.discount || t.tax ? `جمع اقلام: ${formatAmount(t.subtotal)} ${currencyLabel()}` : "",
+    t.discount
+      ? `تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: ${formatAmount(t.discount)} ${currencyLabel()}`
+      : "",
+    t.tax
+      ? `مالیات${t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}: ${formatAmount(t.tax)} ${currencyLabel()}`
+      : "",
+    `💰 جمع کل: ${formatAmount(t.total)} ${currencyLabel()}`,
+    t.paid ? `پرداخت نقدی: ${formatAmount(t.paid)} ${currencyLabel()}` : "",
+    t.checkAmount ? `مبلغ چک: ${formatAmount(t.checkAmount)} ${currencyLabel()}` : "",
+    t.remaining > 0 ? `مانده: ${formatAmount(t.remaining)} ${currencyLabel()}` : "",
   ].filter(Boolean);
   return lines.join("\n");
 }
@@ -238,6 +259,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const fontSize = appSettings.invoiceFontSize ?? 13;
   const template = appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined;
   const [sharingPdf, setSharingPdf] = useState(false);
+  const [messaging, setMessaging] = useState(false);
 
   // ── چاپ (وب: iframe — اپ اندروید: پلاگین چاپ نیتیو) ───────────────────────
   const handlePrint = async () => {
@@ -379,6 +401,24 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         <Share2 className={iconSize} />
         {showLabels && <span>ارسال</span>}
       </button>
+
+      <button
+        type="button"
+        onClick={() => setMessaging(true)}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
+        title="ارسال متن فاکتور با واتساپ/پیامک (قابل ویرایش)"
+      >
+        <MessageSquare className={iconSize} />
+        {showLabels && <span>پیام به مشتری</span>}
+      </button>
+
+      {messaging && (
+        <InvoiceMessageDialog
+          defaultText={buildShareText(inv)}
+          defaultPhone={inv.customer?.phone ?? ""}
+          onClose={() => setMessaging(false)}
+        />
+      )}
     </>
   );
 }

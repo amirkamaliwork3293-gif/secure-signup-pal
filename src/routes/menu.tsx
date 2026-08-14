@@ -125,7 +125,7 @@ function MenuPage() {
             return (
               <li key={it.id} className="flex items-start gap-3 rounded-2xl border border-border bg-card p-3">
                 {it.image_url ? (
-                  <img src={it.image_url} alt={it.name} className="h-16 w-16 shrink-0 rounded-xl object-cover" />
+                  <img src={it.image_url} alt={it.name} loading="lazy" decoding="async" className="h-16 w-16 shrink-0 rounded-xl object-cover" />
                 ) : (
                   <div className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><ImageIcon className="h-5 w-5" /></div>
                 )}

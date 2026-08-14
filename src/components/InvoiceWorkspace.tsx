@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import {
   invoice,
@@ -14,7 +14,6 @@ import {
   customerBalance,
   cryptoId,
   addProductToInvoice,
-  invoiceLineTotal,
   isWeightUnit,
   applyProductDiscount,
   PAYMENT_LABEL,
@@ -22,6 +21,8 @@ import {
   type CustomerInfo,
   type PaymentMethod,
 } from "@/lib/store";
+import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
+import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 import { filterAndRankSearch } from "@/lib/search";
 import {
   Minus,
@@ -43,12 +44,14 @@ import {
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 
-/** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ (اینستاگرام) کد اپ را دانلود نکنند. */
+/** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 export function InvoiceWorkspace() {
   const [inv, setInv] = invoice.useCurrent();
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
   const [showCustomer, setShowCustomer] = useState(false);
+  const [showFields, setShowFields] = useState(false);
+  const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(inv.paymentMethod ?? "cash");
   const [paidAmount, setPaidAmount] = useState<number>(inv.paidAmount ?? 0);
@@ -60,6 +63,7 @@ export function InvoiceWorkspace() {
   const [showDiscount, setShowDiscount] = useState(
     () => !!(inv.discountPercent || inv.discountAmount),
   );
+  const [showTax, setShowTax] = useState(() => !!inv.taxPercent);
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
   const [allCustomers] = customers.useAll();
@@ -70,6 +74,41 @@ export function InvoiceWorkspace() {
   const [manualQty, setManualQty] = useState("1");
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
+
+  // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
+  // مبالغ نقد/چک تا لحظه‌ی «ثبت فاکتور» فقط در state محلی بودند؛ به همین دلیل
+  // فاکتورِ چاپ/اشتراک‌شده‌ی پیش از ثبت، «مانده نسیه» را برابر کل مبلغ نشان
+  // می‌داد. حالا یک نسخه‌ی کامل از فاکتور ساخته می‌شود و همه‌جا (نمایش، چاپ،
+  // ثبت) دقیقاً همان اعداد استفاده می‌شود.
+  const deferred = paymentMethod === "credit" || paymentMethod === "check";
+  const baseTotal = invoiceTotals(inv).total;
+  const paidNow = Math.min(baseTotal, Math.max(0, Math.round(paidAmount || 0)));
+  const checkNow =
+    paymentMethod === "check"
+      ? Math.min(
+          baseTotal - paidNow,
+          Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
+        )
+      : 0;
+  // خانه‌های سفارشی «طراح فاکتور» که کاربر خواسته هنگام ثبت فاکتور پر شوند
+  const askFields = useMemo(
+    () => checkoutFields(normalizeTemplate(appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined)),
+    [appSettings.invoiceTemplate],
+  );
+  const filledFieldsCount = askFields.filter((f) => (customFields[f.id] ?? "").trim()).length;
+
+  const draftInvoice = {
+    ...inv,
+    customer,
+    paymentMethod,
+    customFields: Object.keys(customFields).length ? customFields : undefined,
+    paidAmount: deferred ? paidNow : undefined,
+    checkAmount: paymentMethod === "check" ? checkNow : undefined,
+    checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
+    checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+    notes: notes.trim() ? notes.trim() : undefined,
+  };
+  const totals = invoiceTotals(draftInvoice);
 
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
@@ -135,16 +174,14 @@ export function InvoiceWorkspace() {
       );
       return;
     }
-    const invoiceForPayment = recalc(inv);
-    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از جمع کل بیشتر باشند
-    const paid = Math.min(invoiceForPayment.total, Math.max(0, Math.round(paidAmount || 0)));
-    const chk = paymentMethod === "check"
-      ? Math.min(invoiceForPayment.total - paid, Math.max(0, Math.round(checkAmount || (invoiceForPayment.total - paid))))
-      : 0;
-    const finalInv = recalc({
-      ...invoiceForPayment,
+    // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از «جمع کل پس از تخفیف» بیشتر باشند
+    const paid = paidNow;
+    const chk = checkNow;
+    const finalInv = {
+      ...inv,
       customer,
       paymentMethod,
+      customFields: Object.keys(customFields).length ? customFields : undefined,
       shopName: appSettings.shopName,
       shopAddress: appSettings.storeAddress || undefined,
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
@@ -154,11 +191,11 @@ export function InvoiceWorkspace() {
       checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
       checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
-    });
+    };
     invoice.archive(finalInv);
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
-      const debt = Math.max(0, finalInv.total - paid);
+      const debt = Math.max(0, baseTotal - paid);
       if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
       else if (hasCustomer) customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
@@ -177,6 +214,8 @@ export function InvoiceWorkspace() {
     setNotes("");
     setCustomerQ("");
     setShowCustomer(false);
+    setCustomFields({});
+    setShowFields(false);
   };
 
   const saveCustomer = () => {
@@ -306,7 +345,7 @@ export function InvoiceWorkspace() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs/5 opacity-80">جمع کل فاکتور</div>
-            <div className="mt-1 text-2xl font-bold">{formatToman(inv.total)}</div>
+            <div className="mt-1 text-2xl font-bold">{formatToman(totals.total)}</div>
             <div className="text-xs opacity-70 mt-0.5">{inv.items.length} قلم کالا</div>
           </div>
           <Receipt className="h-10 w-10 opacity-80" />
@@ -442,27 +481,40 @@ export function InvoiceWorkspace() {
         )}
 
         {/* Bottom buttons */}
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowCustomer((v) => !v)}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
           >
             <User className="h-3.5 w-3.5" />
             {showCustomer ? "بستن" : "مشتری"}
           </button>
 
+          {askFields.length > 0 && (
+            <button
+              onClick={() => setShowFields((v) => !v)}
+              className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {showFields ? "بستن" : "فیلدهای فاکتور"}
+              {filledFieldsCount > 0 && (
+                <span className="rounded-full bg-background px-1.5 text-[10px] font-bold text-primary">
+                  {formatNumber(filledFieldsCount)}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* پرینت / دانلود / ارسال — غیرفعال وقتی فاکتور خالیه */}
           {inv.items.length > 0 && (
-            <div className="flex gap-1.5 flex-1 justify-end">
+            <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
               <InvoiceActions
                 inv={{
-                  ...inv,
-                  customer,
+                  ...draftInvoice,
                   shopName: appSettings.shopName,
                   shopAddress: appSettings.storeAddress || undefined,
-                  shopPhone: appSettings.storePhones?.[0] || undefined,
+                  shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
                   shopLogoUrl: appSettings.logoUrl || undefined,
-                  notes: notes.trim() ? notes.trim() : undefined,
                   // فاکتور هنوز ثبت نهایی نشده — تاریخ/ساعت چاپ باید همین لحظه باشد،
                   // نه لحظه‌ی باز شدن این تب (که ممکن است قدیمی‌تر باشد)
                   createdAt: Date.now(),
@@ -476,13 +528,45 @@ export function InvoiceWorkspace() {
           <button
             onClick={checkout}
             disabled={inv.items.length === 0}
-            className="flex items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50"
+            className="flex w-full shrink-0 items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50 sm:w-auto"
           >
             <CheckCircle2 className="h-3.5 w-3.5" />
             ثبت فاکتور
           </button>
         </div>
       </section>
+
+      {/* خانه‌های سفارشی فاکتور — فقط اگر کاربر در «طراح فاکتور» تعریف کرده باشد */}
+      {showFields && askFields.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
+          <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+            <FileText className="h-4 w-4 text-primary" />
+            فیلدهای سفارشی فاکتور
+          </h3>
+          <p className="mb-3 text-[11px] text-muted-foreground">
+            این خانه‌ها را خودتان در «طراح فاکتور» تعریف کرده‌اید. هرچه اینجا بنویسید، روی
+            فاکتور چاپی همین فاکتور می‌نشیند. خالی بگذارید تا نمایش داده نشود.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {askFields.map((f) => (
+              <div key={f.id}>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  {f.label}
+                  {f.blockTitle ? <span className="opacity-60"> · {f.blockTitle}</span> : null}
+                </label>
+                <input
+                  value={customFields[f.id] ?? ""}
+                  onChange={(e) =>
+                    setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))
+                  }
+                  placeholder={f.label}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Customer info panel */}
       {showCustomer && (
@@ -623,10 +707,82 @@ export function InvoiceWorkspace() {
                 حذف تخفیف
               </button>
             </div>
-            {!!inv.discountAmount && (
-              <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-                <span>جمع اقلام: <b className="text-foreground">{formatToman(inv.subtotal ?? inv.total)}</b></span>
-                <span>تخفیف: <b className="text-primary">{formatToman(inv.discountAmount)}</b></span>
+            {totals.discount > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                <span>جمع اقلام: <b className="block text-foreground">{formatToman(totals.subtotal)}</b></span>
+                <span>
+                  تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
+                  <b className="block text-primary">{formatToman(totals.discount)}</b>
+                </span>
+                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
+              </div>
+            )}
+            </>)}
+          </div>
+        )}
+        {/* مالیات کل فاکتور — اختیاری، دقیقاً با همان الگوی تخفیف */}
+        {inv.items.length > 0 && (
+          <div className="mb-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={showTax}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setShowTax(on);
+                  if (!on) setInv((prev) => recalc({ ...prev, taxPercent: undefined }));
+                }}
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
+              <span className="text-xs font-semibold text-muted-foreground">اعمال مالیات روی کل فاکتور</span>
+            </label>
+            {showTax && (<>
+            <div className="mt-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] text-muted-foreground">درصد مالیات</span>
+                <input
+                  value={inv.taxPercent ? formatNumber(inv.taxPercent) : ""}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
+                    setInv((prev) => recalc({ ...prev, taxPercent: v || undefined }));
+                  }}
+                  placeholder="۰"
+                  inputMode="numeric"
+                  dir="ltr"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </label>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[9, 10].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: p }))}
+                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                >
+                  {formatNumber(p)}٪
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: undefined }))}
+                className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                حذف مالیات
+              </button>
+            </div>
+            {totals.tax > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                <span>
+                  {totals.discount > 0 ? "پس از تخفیف" : "جمع اقلام"}:{" "}
+                  <b className="block text-foreground">{formatToman(totals.subtotal - totals.discount)}</b>
+                </span>
+                <span>
+                  مالیات{totals.taxPercent ? ` (٪${formatNumber(totals.taxPercent)})` : ""}:{" "}
+                  <b className="block text-primary">{formatToman(totals.tax)}</b>
+                </span>
+                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
               </div>
             )}
             </>)}
@@ -671,8 +827,8 @@ export function InvoiceWorkspace() {
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b></span>
-              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(Math.max(0, inv.total - (paidAmount || 0)))}</b></span>
+              <span>جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b></span>
+              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(totals.remaining)}</b></span>
             </div>
           </div>
         )}
@@ -698,7 +854,7 @@ export function InvoiceWorkspace() {
                   value={
                     checkAmount
                       ? formatNumber(checkAmount)
-                      : formatNumber(Math.max(0, inv.total - (paidAmount || 0)))
+                      : formatNumber(Math.max(0, totals.total - totals.paid))
                   }
                   onChange={(e) => setCheckAmount(parseNumberInput(e.target.value))}
                   placeholder="۰"
@@ -724,12 +880,11 @@ export function InvoiceWorkspace() {
               />
             </div>
             <div className="text-[11px] text-muted-foreground">
-              جمع کل: <b className="text-foreground">{formatToman(inv.total)}</b> · بدهی مشتری (چک):{" "}
-              <b className="text-destructive">
-                {formatToman(
-                  checkAmount || Math.max(0, inv.total - (paidAmount || 0)),
-                )}
-              </b>
+              جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b> · بدهی مشتری (چک):{" "}
+              <b className="text-destructive">{formatToman(totals.checkAmount)}</b>
+              {totals.remaining > 0 && (
+                <> · مانده: <b className="text-destructive">{formatToman(totals.remaining)}</b></>
+              )}
             </div>
           </div>
         )}
@@ -842,7 +997,7 @@ export function InvoiceWorkspace() {
                       {item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}
                     </span>
                     <span className="font-semibold text-primary">
-                      = {formatToman(invoiceLineTotal(item))}
+                      = {formatToman(lineTotal(item))}
                     </span>
                     {wholesalePrice > 0 && !weight && (
                       <button

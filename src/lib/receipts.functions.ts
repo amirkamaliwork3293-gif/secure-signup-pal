@@ -11,6 +11,21 @@ import { z } from "zod";
  * keys) and uses the service-role admin client to mint an upload token,
  * which the client then consumes with `uploadToSignedUrl`.
  */
+/**
+ * ساخت متن «رسید دستی» از کد پیگیری + تاریخ واریز + ساعت و دقیقه‌ی واریز.
+ * جایگزین آپلود عکس است (هم ترافیک استوریج را کم می‌کند، هم برای کاربری که
+ * عکس رسید ندارد راه ثبت‌نام را باز می‌گذارد). ساعت و دقیقه الزامی است چون
+ * مدیر با آن می‌تواند صحت تراکنش را در صورت‌حساب بانکی تطبیق دهد. اگر هر سه
+ * فیلد پر نباشند null برمی‌گرداند تا مدیر هیچ‌وقت اطلاعات ناقص نبیند.
+ */
+export function receiptNote(ref: string, date: string, time = ""): string | null {
+  const r = ref.trim();
+  const d = date.trim();
+  const t = time.trim();
+  if (!r || !d || !t) return null;
+  return `کد پیگیری: ${r} — تاریخ واریز: ${d} — ساعت واریز: ${t}`.slice(0, 500);
+}
+
 export const createReceiptUploadUrl = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z

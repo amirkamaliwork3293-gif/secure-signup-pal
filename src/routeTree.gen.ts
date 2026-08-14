@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VoiceProductsRouteImport } from './routes/voice-products'
 import { Route as VoiceRouteImport } from './routes/voice'
 import { Route as StudentsRouteImport } from './routes/students'
 import { Route as StoreQrRouteImport } from './routes/store-qr'
@@ -39,6 +40,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as StoreStoreIdRouteImport } from './routes/store.$storeId'
 import { Route as MUserIdRouteImport } from './routes/m.$userId'
 
+const VoiceProductsRoute = VoiceProductsRouteImport.update({
+  id: '/voice-products',
+  path: '/voice-products',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VoiceRoute = VoiceRouteImport.update({
   id: '/voice',
   path: '/voice',
@@ -213,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -244,6 +251,7 @@ export interface FileRoutesByTo {
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -276,6 +284,7 @@ export interface FileRoutesById {
   '/store-qr': typeof StoreQrRoute
   '/students': typeof StudentsRoute
   '/voice': typeof VoiceRoute
+  '/voice-products': typeof VoiceProductsRoute
   '/m/$userId': typeof MUserIdRoute
   '/store/$storeId': typeof StoreStoreIdRoute
 }
@@ -309,6 +318,7 @@ export interface FileRouteTypes {
     | '/store-qr'
     | '/students'
     | '/voice'
+    | '/voice-products'
     | '/m/$userId'
     | '/store/$storeId'
   fileRoutesByTo: FileRoutesByTo
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/store-qr'
     | '/students'
     | '/voice'
+    | '/voice-products'
     | '/m/$userId'
     | '/store/$storeId'
   id:
@@ -371,6 +382,7 @@ export interface FileRouteTypes {
     | '/store-qr'
     | '/students'
     | '/voice'
+    | '/voice-products'
     | '/m/$userId'
     | '/store/$storeId'
   fileRoutesById: FileRoutesById
@@ -403,12 +415,20 @@ export interface RootRouteChildren {
   StoreQrRoute: typeof StoreQrRoute
   StudentsRoute: typeof StudentsRoute
   VoiceRoute: typeof VoiceRoute
+  VoiceProductsRoute: typeof VoiceProductsRoute
   MUserIdRoute: typeof MUserIdRoute
   StoreStoreIdRoute: typeof StoreStoreIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/voice-products': {
+      id: '/voice-products'
+      path: '/voice-products'
+      fullPath: '/voice-products'
+      preLoaderRoute: typeof VoiceProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/voice': {
       id: '/voice'
       path: '/voice'
@@ -643,9 +663,20 @@ const rootRouteChildren: RootRouteChildren = {
   StoreQrRoute: StoreQrRoute,
   StudentsRoute: StudentsRoute,
   VoiceRoute: VoiceRoute,
+  VoiceProductsRoute: VoiceProductsRoute,
   MUserIdRoute: MUserIdRoute,
   StoreStoreIdRoute: StoreStoreIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

@@ -3,6 +3,7 @@
  */
 import { jsPDF } from "jspdf";
 import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Purchase } from "@/lib/store";
+import { purchaseLineTotal } from "@/lib/invoice-math";
 
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
@@ -188,7 +189,7 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Purchase["items"][number]
     cols.qty.x - cols.qty.w / 2, cy,
   );
   ctx.fillText(formatAmount(item.buyPrice), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText(formatAmount(Math.round(item.buyPrice * item.quantity)), cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(formatAmount(purchaseLineTotal(item)), cols.total.x - cols.total.w / 2, cy);
 
   ctx.textAlign = "right";
   ctx.fillText(fitText(ctx, item.name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);

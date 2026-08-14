@@ -236,6 +236,7 @@ export type Database = {
           payment_confirmed: boolean
           phone: string | null
           plan: Database["public"]["Enums"]["subscription_plan"]
+          receipt_note: string | null
           receipt_url: string | null
           request_type: string
           reviewed_at: string | null
@@ -252,6 +253,7 @@ export type Database = {
           payment_confirmed?: boolean
           phone?: string | null
           plan: Database["public"]["Enums"]["subscription_plan"]
+          receipt_note?: string | null
           receipt_url?: string | null
           request_type?: string
           reviewed_at?: string | null
@@ -268,6 +270,7 @@ export type Database = {
           payment_confirmed?: boolean
           phone?: string | null
           plan?: Database["public"]["Enums"]["subscription_plan"]
+          receipt_note?: string | null
           receipt_url?: string | null
           request_type?: string
           reviewed_at?: string | null

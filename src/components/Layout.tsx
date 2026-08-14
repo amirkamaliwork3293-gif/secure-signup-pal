@@ -6,8 +6,6 @@ import { settings, students as studentsStore, studentStatus, reminders as remind
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { ReminderToast } from "@/components/ReminderToast";
-import { WelcomeTutorialDialog } from "@/components/WelcomeTutorialDialog";
-import { shouldShowWelcomeTutorial } from "@/lib/onboarding";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -57,22 +55,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const sync = useSyncState();
   const syncFailed = sync.failed && sync.pending > 0 && state.status === "authenticated";
   const [moreOpen, setMoreOpen] = useState(false);
-  const [welcomeOpen, setWelcomeOpen] = useState(false);
-
-  // پنجره خوش‌آمد + پیشنهاد ویدیو — فقط اولین ورود به حساب فعال (غیرادمین)
-  useEffect(() => {
-    if (state.status !== "authenticated" || state.isAdmin) {
-      setWelcomeOpen(false);
-      return;
-    }
-    if (pathname === "/tutorial") {
-      setWelcomeOpen(false);
-      return;
-    }
-    const uid = state.session.user.id;
-    setWelcomeOpen(shouldShowWelcomeTutorial(uid));
-  }, [state, pathname]);
-
   useEffect(() => { setMoreOpen(false); }, [pathname]);
   useEffect(() => {
     const on = () => setIsOnline(true);
@@ -151,15 +133,6 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* اعلان شناور یادآوری‌های سررسیدشده */}
       {state.status === "authenticated" && appSettings.showRemindersFeature !== false && <ReminderToast />}
-
-      {/* خوش‌آمدگویی + پیشنهاد ویدیوی آموزشی (اولین ورود) */}
-      {state.status === "authenticated" && !state.isAdmin && welcomeOpen && (
-        <WelcomeTutorialDialog
-          open={welcomeOpen}
-          userId={state.session.user.id}
-          onClose={() => setWelcomeOpen(false)}
-        />
-      )}
 
       {(() => {
         const badgeFor = (to: string) =>

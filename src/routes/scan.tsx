@@ -4,8 +4,7 @@ import { useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { Scanner } from "@/components/Scanner";
 import { products, invoice, addProductToInvoice, formatToman, stockStatus } from "@/lib/store";
-import { CheckCircle2, AlertCircle, Plus, Search, X, Package } from "lucide-react";
-import { VoiceMicIcon } from "@/components/VoiceMicIcon";
+import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
 export const Route = createFileRoute("/scan")({
   head: () => ({
@@ -82,7 +81,7 @@ function ScanPageInner() {
           to="/voice"
           className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
         >
-          <VoiceMicIcon iconClassName="h-3.5 w-3.5" />
+          <Mic className="h-3.5 w-3.5" />
           ثبت صوتی
         </Link>
       </div>

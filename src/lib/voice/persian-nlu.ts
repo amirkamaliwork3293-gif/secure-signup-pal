@@ -342,7 +342,7 @@ function extractNumbers(s: string): string[] {
   return s.match(/\d+/g) || [];
 }
 
-function scoreProduct(phrase: string, productName: string): number {
+export function scoreProduct(phrase: string, productName: string): number {
   const a = normalizeFa(phrase);
   const b = normalizeFa(productName);
   if (!a || !b) return 0;
@@ -378,7 +378,7 @@ function scoreProduct(phrase: string, productName: string): number {
   return score;
 }
 
-function matchProducts(phrase: string, products: Product[]): ParsedCandidate[] {
+export function matchProducts(phrase: string, products: Product[]): ParsedCandidate[] {
   const scored = products
     .map((product) => ({ product, score: scoreProduct(phrase, product.name) }))
     .filter((c) => c.score > 0.25)

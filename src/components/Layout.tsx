@@ -6,6 +6,7 @@ import { settings, students as studentsStore, studentStatus, reminders as remind
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { ReminderToast } from "@/components/ReminderToast";
+import { SmartAssistant } from "@/components/SmartAssistant";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -133,6 +134,9 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* اعلان شناور یادآوری‌های سررسیدشده */}
       {state.status === "authenticated" && appSettings.showRemindersFeature !== false && <ReminderToast />}
+
+      {/* دستیار هوشمند صوتی — دکمه‌ی شناور + شیت پایین (کاملاً محلی، بدون AI/API) */}
+      {state.status === "authenticated" && <SmartAssistant />}
 
       {(() => {
         const badgeFor = (to: string) =>

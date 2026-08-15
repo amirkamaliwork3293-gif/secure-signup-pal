@@ -9,7 +9,7 @@ import {
   formatJalaliDate,
   type Product, type Customer, type Invoice,
 } from "@/lib/store";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { Search, X, Package, Users, Receipt, Wallet, ChevronLeft } from "lucide-react";
 
 const LIMIT = 5;
@@ -61,7 +61,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
     const matchedCustomers = filterAndRankSearch(
       allCustomers,
       query,
-      (c) => [customerFullName(c), c.phone],
+      (c) => [...personNameSearchFields(c), c.phone],
     ).slice(0, LIMIT);
 
     const matchedDebtors = matchedCustomers.filter((c) => customerBalance(c) > 0);
@@ -71,7 +71,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
       query,
       (inv) => [
         inv.id,
-        [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+        ...personNameSearchFields(inv.customer),
         inv.customer?.phone,
         ...inv.items.map((i) => i.name),
       ],

@@ -1,18 +1,22 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseActions } from "@/components/PurchaseActions";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, namesReferToSamePerson, personNameSearchFields } from "@/lib/search";
 import {
   invoice,
   purchases,
   settings,
+  customers as customersStore,
+  customerFullName,
   formatToman,
   formatNumber,
   formatJalaliDateTime,
   PAYMENT_LABEL,
+  type Invoice,
+  type Customer,
 } from "@/lib/store";
 import {
   Receipt,
@@ -27,8 +31,12 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { z } from "zod";
+
+const searchSchema = z.object({ q: z.string().optional() });
 
 export const Route = createFileRoute("/invoices")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "فاکتورها | KAMIX" },
@@ -40,12 +48,34 @@ export const Route = createFileRoute("/invoices")({
 
 type Tab = "sales" | "purchases";
 
+function invoiceCustomerSearchFields(inv: Invoice, allCustomers: Customer[]): string[] {
+  const onInvoice = personNameSearchFields(inv.customer);
+  const phone = inv.customer?.phone?.trim();
+  const extra: string[] = [];
+  for (const c of allCustomers) {
+    if (phone && c.phone?.trim() === phone) {
+      extra.push(...personNameSearchFields(c), customerFullName(c));
+      continue;
+    }
+    if (inv.customer && namesReferToSamePerson(inv.customer, c)) {
+      extra.push(...personNameSearchFields(c), customerFullName(c));
+    }
+  }
+  return [...onInvoice, ...extra];
+}
+
 function InvoicesPageInner() {
+  const { q: incomingQuery } = Route.useSearch();
   const [tab, setTab] = useState<Tab>("sales");
   const [salesHistory] = invoice.useHistory();
   const [purchaseHistory] = purchases.useHistory();
+  const [allCustomers] = customersStore.useAll();
   const [appSettings] = settings.useAll();
-  const [searchQ, setSearchQ] = useState("");
+  const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+
+  useEffect(() => {
+    if (incomingQuery != null) setSearchQ(incomingQuery);
+  }, [incomingQuery]);
 
   const salesTotal = useMemo(() => salesHistory.reduce((s, i) => s + i.total, 0), [salesHistory]);
   const purchasesTotal = useMemo(
@@ -58,11 +88,11 @@ function InvoicesPageInner() {
     if (!q) return salesHistory;
     return filterAndRankSearch(salesHistory, q, (inv) => [
       inv.id,
-      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+      ...invoiceCustomerSearchFields(inv, allCustomers),
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);
-  }, [salesHistory, searchQ]);
+  }, [salesHistory, searchQ, allCustomers]);
 
   const filteredPurchases = useMemo(() => {
     const q = searchQ.trim();

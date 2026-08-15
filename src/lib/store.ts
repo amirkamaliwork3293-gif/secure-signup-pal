@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
+import { namesReferToSamePerson } from "@/lib/search";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -239,16 +240,14 @@ export function customerFullName(c: Customer): string {
   return [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
 }
 
-/** فاکتورهای فروشی که مشتری در آن‌ها (بر اساس تلفن یا نام) طرف حساب بوده */
+/** فاکتورهای فروشی که مشتری در آن‌ها (بر اساس تلفن یا نام/فامیل) طرف حساب بوده */
 export function invoicesOfCustomer(customer: Customer, allInvoices: Invoice[]): Invoice[] {
-  const name = customerFullName(customer);
   const phone = customer.phone?.trim();
   return allInvoices.filter((inv) => {
     const c = inv.customer;
     if (!c) return false;
     if (phone && c.phone?.trim() === phone) return true;
-    const invName = [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
-    return !!name && invName === name;
+    return namesReferToSamePerson(customer, c);
   });
 }
 

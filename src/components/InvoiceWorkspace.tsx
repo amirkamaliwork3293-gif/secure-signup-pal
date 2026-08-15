@@ -23,7 +23,7 @@ import {
 } from "@/lib/store";
 import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
 import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import {
   Minus,
   Plus,
@@ -238,7 +238,7 @@ export function InvoiceWorkspace() {
 
   const customerMatches =
     customerQ.trim().length > 0
-      ? filterAndRankSearch(allCustomers, customerQ, (c) => [customerFullName(c), c.phone]).slice(0, 6)
+      ? filterAndRankSearch(allCustomers, customerQ, (c) => [...personNameSearchFields(c), c.phone]).slice(0, 6)
       : [];
 
   // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست

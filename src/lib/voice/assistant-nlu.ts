@@ -5,10 +5,12 @@
  *
  * ورودی: متن رونویسی‌شده‌ی گفتار.
  * خروجی: یکی از نیت‌های زیر —
- *   customer_debt       بدهی/پرداخت مشتری
- *   expense             ثبت هزینه (با تشخیص تکرارشونده)
+ *   customer_debt       بدهکار / طلبکار / تسویه مشتری
+ *   expense             ثبت هزینه (با تاریخ شمسی اختیاری)
+ *   product_add         افزودن کالا به فهرست محصولات
  *   product_price_edit  ویرایش قیمت کالا
  *   reminder            یادآوری با تاریخ شمسی و ساعت
+ *   open_invoice        باز کردن فاکتورهای یک مشتری
  *   query               سؤال گزارشی (فقط خواندن)
  *   invoice_item        پیش‌فرض: همان رفتار فعلی «ثبت صوتی فاکتور»
  *   unknown             هیچ‌کدام
@@ -19,7 +21,9 @@
  */
 
 import {
+  customerBalance,
   customerFullName,
+  invoicesOfCustomer,
   jalaliToTimestamp,
   parseJalaliInput,
   toJalali,
@@ -36,6 +40,7 @@ import {
   type ParseResult,
   type ParsedCandidate,
 } from "@/lib/voice/persian-nlu";
+import { parseProductVoiceText, type ParsedProductItem } from "@/lib/voice/product-nlu";
 import { buildQueryAnswer, type QueryKind } from "@/lib/voice/assistant-queries";
 
 // ─── انواع ────────────────────────────────────────────────────────────────────
@@ -51,6 +56,14 @@ export type AssistantContext = {
 
 export type CustomerCandidate = { customer: Customer; score: number };
 
+/**
+ * نقش حساب مشتری در زبان فروشنده:
+ *   debtor   = مشتری به ما بدهکار است (مانده مثبت)
+ *   creditor = مشتری از ما طلبکار است (مانده منفی)
+ *   settle   = تسویه / پرداخت روی مانده‌ی موجود
+ */
+export type CustomerLedgerRole = "debtor" | "creditor" | "settle";
+
 export type AssistantIntent =
   | {
       kind: "customer_debt";
@@ -58,8 +71,11 @@ export type AssistantIntent =
       /** نامی که از جمله استخراج شد (برای نمایش و ساخت مشتری جدید) */
       customerName: string;
       amount: number;
-      /** debt = بدهی جدید، payment = پرداخت/تسویه */
-      txType: "debt" | "payment";
+      role: CustomerLedgerRole;
+      /** تسویه بدون مبلغ → کل مانده در لحظه‌ی اجرا */
+      settleAll: boolean;
+      /** اگر کاربر تاریخ گفته باشد، زمان تراکنش */
+      at?: number;
       /** نزدیک‌ترین مشتری‌های موجود، مرتب بر اساس امتیاز */
       candidates: CustomerCandidate[];
       /** یک تطبیق واضح وجود دارد → بدون پرسیدن ثبت شود */
@@ -72,6 +88,9 @@ export type AssistantIntent =
       amount: number;
       /** دوره‌ی تکرار به روز (۳۰ = ماهانه، ۷ = هفتگی، ۳۶۵ = سالانه) */
       recurringDays?: number;
+      /** اگر کاربر تاریخ گفته باشد، وگرنه «اکنون» */
+      at: number;
+      dateSpoken: boolean;
     }
   | {
       kind: "product_price_edit";
@@ -95,6 +114,19 @@ export type AssistantIntent =
       recurringDays?: number;
     }
   | { kind: "query"; raw: string; queryKind: QueryKind; answer: string }
+  | {
+      kind: "product_add";
+      raw: string;
+      items: ParsedProductItem[];
+    }
+  | {
+      kind: "open_invoice";
+      raw: string;
+      customerName: string;
+      candidates: CustomerCandidate[];
+      invoices: Invoice[];
+      clearWinner: boolean;
+    }
   | { kind: "invoice_item"; raw: string; result: ParseResult }
   | { kind: "unknown"; raw: string; reason: string };
 
@@ -327,10 +359,19 @@ function isClearWinner(scores: number[]): boolean {
 const RE_REMINDER = /یاداور|یادم بنداز|یادم باشه|به یادم/;
 const RE_PRICE_EDIT =
   /ویرایش قیمت|تغییر قیمت|قیمت جدید|قیمتش? ?(رو|را)? ?(عوض|اصلاح|تغییر)|قیمت.*(بشه|بشود|بکن|کن|بذار|بزن)|قیمتش? ?(بشه|بشود)/;
-const RE_DEBT = /طلبکار|بدهکار|بدهی|طلب|نسیه اش|تسویه|پرداخت کرد|واریز کرد/;
+/** طلبکار = مشتری از ما طلب دارد (مانده منفی). جدا از «بدهکار». */
+const RE_CREDITOR = /طلبکار|(بهش|به او|بهشون) بدهکارم|بدهکارم به|به .{1,40} بدهکارم|از من طلب/;
+const RE_DEBTOR = /بدهکار|بدهی|طلب داره|طلب دارد|نسیه اش|نسیه/;
+const RE_SETTLE = /تسویه|پرداخت کرد|واریز کرد|صاف کرد|حساب ?(رو|را)? ?داد|پس داد/;
+const RE_LEDGER = /طلبکار|بدهکار|بدهی|طلب|نسیه اش|تسویه|پرداخت کرد|واریز کرد/;
 const RE_EXPENSE = /هزینه|اجاره|قبض|حقوق|فیش|خرج/;
-const RE_PAYMENT = /پرداخت کرد|تسویه|واریز کرد|صاف کرد|حساب ?(رو|را)? ?داد|پس داد/;
 const RE_APPLY_ALL = /همه|همشون|همه شون|تمام|هرچی|هر چی|هرچه/;
+/** افزودن کالا به فهرست محصولات — نه به فاکتور جاری */
+const RE_PRODUCT_ADD =
+  /ثبت محصول|محصول جدید|به محصولات|تو محصولات|در محصولات|موجودی .*اضافه|اضافه شود|اضافه بشه|اضافه کن|اضافه بکن/;
+const RE_TO_INVOICE = /به فاکتور|روی فاکتور|تو فاکتور/;
+const RE_OPEN_INVOICE =
+  /فاکتور.{0,48}(باز کن|بازکن|نشون بده|نشان بده|بیار|بده ببینم|پیدا کن)|باز کن.{0,24}فاکتور|(برو( به)?|ببر( به)?) فاکتور/;
 
 const QUERY_PATTERNS: { kind: QueryKind; re: RegExp }[] = [
   { kind: "most_profitable", re: /پرسود|پر سود|بیشترین سود|سود اورترین|سوداورترین/ },
@@ -365,6 +406,51 @@ const HONORIFICS = new Set([
   "سرکار",
 ]);
 
+/** ماه‌های شمسی بعد از normalizeFa (آ → ا) */
+const JMONTH_INDEX: Record<string, number> = {
+  فروردین: 1,
+  اردیبهشت: 2,
+  خرداد: 3,
+  تیر: 4,
+  مرداد: 5,
+  شهریور: 6,
+  مهر: 7,
+  ابان: 8,
+  اذر: 9,
+  دی: 10,
+  بهمن: 11,
+  اسفند: 12,
+};
+
+const DAY_WORDS: Record<string, number> = {
+  ...NUMBER_WORDS,
+  اول: 1,
+  یکم: 1,
+  دوم: 2,
+  سوم: 3,
+  چهارم: 4,
+  پنجم: 5,
+  ششم: 6,
+  هفتم: 7,
+  هشتم: 8,
+  نهم: 9,
+  دهم: 10,
+  یازدهم: 11,
+  دوازدهم: 12,
+  سیزدهم: 13,
+  چهاردهم: 14,
+  پانزدهم: 15,
+  پونزدهم: 15,
+  شانزدهم: 16,
+  شونزدهم: 16,
+  هفدهم: 17,
+  هجدهم: 18,
+  هیجدهم: 18,
+  نوزدهم: 19,
+  بیستم: 20,
+  سیام: 30,
+};
+
 const DEBT_NOISE = new Set([
   "است",
   "هست",
@@ -395,7 +481,7 @@ const DEBT_NOISE = new Set([
 ]);
 
 function isDebtNoise(t: string): boolean {
-  if (HONORIFICS.has(t) || DEBT_NOISE.has(t)) return true;
+  if (HONORIFICS.has(t) || DEBT_NOISE.has(t) || isWhenNoise(t)) return true;
   return /^(بدهکار|طلبکار|بدهی|طلب|داره|دارد|دارم|پرداخت|تسویه|واریز|پس)/.test(t);
 }
 
@@ -435,7 +521,7 @@ const EXPENSE_NOISE = new Set([
 ]);
 
 function isExpenseNoise(t: string): boolean {
-  if (EXPENSE_NOISE.has(t)) return true;
+  if (EXPENSE_NOISE.has(t) || isWhenNoise(t)) return true;
   return /^(هزینه|خرج)/.test(t);
 }
 
@@ -532,8 +618,15 @@ const REMINDER_NOISE = new Set([
 ]);
 
 function isReminderNoise(t: string): boolean {
-  if (REMINDER_NOISE.has(t)) return true;
+  if (REMINDER_NOISE.has(t) || isWhenNoise(t)) return true;
   return /^(یاداور|یادم|یاد|بنداز|باشه)/.test(t) || /^\d+$/.test(t);
+}
+
+function isWhenNoise(t: string): boolean {
+  if (t in JMONTH_INDEX) return true;
+  return /^(تاریخ|ساعت|دقیقه|صبح|عصر|شب|ظهر|بعدازظهر|فردا|پسفردا|امروز|هفته|ماه|سال|روز|دیگه|اینده|نیم)$/.test(
+    t,
+  );
 }
 
 // ─── تکرارشونده ───────────────────────────────────────────────────────────────
@@ -546,9 +639,21 @@ function detectRecurringDays(norm: string): number | undefined {
   return undefined;
 }
 
-// ─── تاریخ و ساعت (فقط برای یادآوری) ─────────────────────────────────────────
+// ─── تاریخ و ساعت شمسی (روز، ماه، سال — به ترتیب ایرانی) ───────────────────────
 
 type TimePart = { h: number; min: number; matched: string };
+type DatePart = { jy: number; jm: number; jd: number; matched: string };
+
+type WhenPart = {
+  at: number;
+  date: DatePart | null;
+  time: TimePart | null;
+  offset: number | null;
+  dateSpoken: boolean;
+  timeSpoken: boolean;
+  /** متن بدون عبارت تاریخ/ساعت — برای استخراج نام/عنوان */
+  restNorm: string;
+};
 
 function extractTime(semi: string): TimePart | null {
   const evening = /عصر|شب|بعد از ظهر|بعدازظهر/.test(semi);
@@ -568,76 +673,228 @@ function extractTime(semi: string): TimePart | null {
     }
   }
 
-  // «ساعت ۹»، «ساعت ۸ و نیم»
-  const bare = semi.match(/ساعت\s*(\d{1,2})(\s*و\s*نیم)?/);
+  const bare = semi.match(
+    /ساعت\s*((?:\d{1,2})|(?:یک|یه|دو|سه|چهار|چار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده))(\s*و\s*نیم)?/,
+  );
   if (bare) {
-    const h = applyPeriod(parseInt(bare[1], 10));
+    const rawH = /^\d+$/.test(bare[1]) ? parseInt(bare[1], 10) : (NUMBER_WORDS[bare[1]] ?? -1);
+    const h = applyPeriod(rawH);
     const min = bare[2] ? 30 : 0;
     if (h >= 0 && h <= 23) return { h, min, matched: bare[0] };
   }
   return null;
 }
 
-type DatePart = { jy: number; jm: number; jd: number; matched: string };
-
 /**
- * تاریخ شمسی از متن. هم «۱۴۰۵/۴/۴» و هم «۴/۴/۱۴۰۵» پشتیبانی می‌شود: هر بخشی که
- * ۳–۴ رقمی باشد سال است. تبدیل نهایی با `parseJalaliInput` موجود در store انجام
- * می‌شود تا اعتبارسنجی یکسان بماند.
+ * تاریخ عددی. ترتیب ایرانی: روز / ماه / سال («۴/۴/۱۴۰۵»).
+ * اگر بخش اول ۳–۴ رقمی باشد سال فرض می‌شود («۱۴۰۵/۴/۴»).
  */
-function extractJalaliDate(semi: string): DatePart | null {
-  const m = semi.match(/(\d{1,4})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{1,4})/);
-  if (!m) return null;
-  const a = m[1];
-  const c = m[3];
-  let ymd: string | null = null;
-  if (a.length >= 3) ymd = `${a}/${m[2]}/${c}`;
-  else if (c.length >= 3) ymd = `${c}/${m[2]}/${a}`;
-  if (!ymd) return null;
-  const parsed = parseJalaliInput(ymd);
-  if (!parsed) return null;
-  if (parsed.jy < 1300 || parsed.jy > 1500) return null;
-  return { ...parsed, matched: m[0] };
+function extractNumericJalali(semi: string): DatePart | null {
+  const m = semi.match(/(?:تاریخ\s+)?(\d{1,4})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{1,4})/);
+  if (m) {
+    const a = m[1];
+    const b = m[2];
+    const c = m[3];
+    const ymd = a.length >= 3 ? `${a}/${b}/${c}` : `${c}/${b}/${a}`;
+    const parsed = parseJalaliInput(ymd);
+    if (parsed && parsed.jy >= 1300 && parsed.jy <= 1500) {
+      return { ...parsed, matched: m[0] };
+    }
+  }
+  const spaced = semi.match(/تاریخ\s+(\d{1,2})\s+(\d{1,2})\s+(\d{3,4})/);
+  if (spaced) {
+    const parsed = parseJalaliInput(`${spaced[3]}/${spaced[2]}/${spaced[1]}`);
+    if (parsed && parsed.jy >= 1300 && parsed.jy <= 1500) {
+      return { ...parsed, matched: spaced[0] };
+    }
+  }
+  return null;
 }
 
-function relativeDayOffset(norm: string): number | null {
-  if (/پس فردا|پسفردا/.test(norm)) return 2;
-  if (/فردا/.test(norm)) return 1;
-  if (/هفته (دیگه|بعد|اینده)/.test(norm)) return 7;
-  if (/ماه (دیگه|بعد|اینده)/.test(norm)) return 30;
-  if (/امروز/.test(norm)) return 0;
+function parseDayAtEnd(tokens: string[]): { day: number; used: number } | null {
+  if (tokens.length === 0) return null;
+  const last = tokens[tokens.length - 1];
+  if (tokens.length >= 3 && tokens[tokens.length - 2] === "و") {
+    const tens = DAY_WORDS[tokens[tokens.length - 3]];
+    const ones = DAY_WORDS[last];
+    if (tens && ones && tens >= 20 && ones <= 9) {
+      const n = tens + ones;
+      if (n >= 1 && n <= 31) return { day: n, used: 3 };
+    }
+  }
+  if (/^\d{1,2}$/.test(last)) {
+    const n = parseInt(last, 10);
+    if (n >= 1 && n <= 31) return { day: n, used: 1 };
+  }
+  const n = DAY_WORDS[last];
+  if (n !== undefined && n >= 1 && n <= 31) return { day: n, used: 1 };
   return null;
+}
+
+function parseYearPhrase(tokens: string[], fallbackYear: number): { year: number; used: number } {
+  let t = tokens;
+  let usedPrefix = 0;
+  if (t[0] === "سال") {
+    t = t.slice(1);
+    usedPrefix = 1;
+  }
+  if (t.length === 0) return { year: fallbackYear, used: 0 };
+  if (/^\d{3,4}$/.test(t[0])) {
+    const y = parseInt(t[0], 10);
+    if (y >= 1300 && y <= 1500) return { year: y, used: usedPrefix + 1 };
+  }
+  const runs = collectAmountRuns(t);
+  const y = runs[0]?.amount;
+  if (y && y >= 1300 && y <= 1500) return { year: y, used: usedPrefix + runs[0].to };
+  return { year: fallbackYear, used: 0 };
+}
+
+/**
+ * «چهار تیر ۱۴۰۵»، «پانزدهم فروردین»، «تاریخ بیست اردیبهشت هزار و چهارصد و پنج»
+ * ترتیب ایرانی: اول روز، بعد ماه، بعد سال (سال اگر گفته نشود سال جاری است).
+ */
+function extractSpokenJalali(norm: string, now: number): DatePart | null {
+  const tokens = tokensOf(norm);
+  const monthIdx = tokens.findIndex((t) => t in JMONTH_INDEX);
+  if (monthIdx < 0) return null;
+
+  const jm = JMONTH_INDEX[tokens[monthIdx]];
+  const today = toJalali(now);
+  const fallbackYear = today?.jy ?? 1405;
+
+  const lookback = tokens.slice(Math.max(0, monthIdx - 4), monthIdx);
+  const dayHit = parseDayAtEnd(lookback);
+  if (!dayHit) return null;
+  const jd = dayHit.day;
+
+  const yearHit = parseYearPhrase(tokens.slice(monthIdx + 1, monthIdx + 8), fallbackYear);
+
+  const dayTokenStart = monthIdx - dayHit.used;
+  const historyToken = dayTokenStart > 0 && tokens[dayTokenStart - 1] === "تاریخ" ? 1 : 0;
+  const from = dayTokenStart - historyToken;
+  const to = monthIdx + 1 + yearHit.used;
+  const matched = tokens.slice(from, to).join(" ");
+  return { jy: yearHit.year, jm, jd, matched };
+}
+
+function relativeDayOffset(norm: string): { days: number; matched: string } | null {
+  if (/پس فردا|پسفردا/.test(norm)) {
+    return { days: 2, matched: /پس ?فردا/.exec(norm)?.[0] ?? "پسفردا" };
+  }
+  if (/فردا/.test(norm)) return { days: 1, matched: "فردا" };
+  const week = norm.match(/هفته (دیگه|بعد|اینده)/);
+  if (week) return { days: 7, matched: week[0] };
+  const month = norm.match(/ماه (دیگه|بعد|اینده)/);
+  if (month) return { days: 30, matched: month[0] };
+  if (/امروز/.test(norm)) return { days: 0, matched: "امروز" };
+  return null;
+}
+
+function toTimestamp(
+  date: DatePart | null,
+  time: TimePart | null,
+  offset: number | null,
+  now: number,
+  defaultHour: number,
+): number {
+  const today = toJalali(now);
+  const h = time ? time.h : defaultHour;
+  const min = time ? time.min : 0;
+  try {
+    if (date) return jalaliToTimestamp(date.jy, date.jm, date.jd, h, min);
+    if (today) {
+      return jalaliToTimestamp(today.jy, today.jm, today.jd, h, min) + (offset ?? 0) * 86_400_000;
+    }
+  } catch {
+    return now;
+  }
+  return now;
+}
+
+/**
+ * استخراج تاریخ و ساعت از هر دستور (یادآوری، هزینه، تراکنش مشتری).
+ * defaultHour: یادآوری ۹ صبح؛ هزینه/تراکنش اگر فقط تاریخ گفته شد ۱۲ ظهر.
+ */
+function extractWhen(raw: string, now: number, defaultHour: number): WhenPart {
+  const semi = normalizeKeepSeparators(raw);
+  const norm = normalizeFa(raw);
+  const time = extractTime(semi);
+  const date = extractNumericJalali(semi) ?? extractSpokenJalali(norm, now);
+  const rel = date ? null : relativeDayOffset(norm);
+
+  let rest = semi;
+  if (date) rest = rest.replace(date.matched, " ");
+  if (time) rest = rest.replace(time.matched, " ");
+  if (rel) rest = rest.replace(rel.matched, " ");
+  rest = rest.replace(/تاریخ/g, " ");
+
+  return {
+    at: toTimestamp(date, time, rel?.days ?? null, now, defaultHour),
+    date,
+    time,
+    offset: rel?.days ?? null,
+    dateSpoken: !!(date || rel),
+    timeSpoken: !!time,
+    restNorm: normalizeFa(rest),
+  };
+}
+
+function detectLedgerRole(norm: string): CustomerLedgerRole {
+  if (RE_SETTLE.test(norm)) return "settle";
+  if (RE_CREDITOR.test(norm)) return "creditor";
+  return "debtor";
 }
 
 // ─── نیت‌ها ───────────────────────────────────────────────────────────────────
 
 function parseCustomerDebt(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
-  const { amount, restTokens } = extractAmount(tokensOf(norm));
-  if (amount <= 0) {
+  const now = ctx.now ?? Date.now();
+  const when = extractWhen(raw, now, 12);
+  const role = detectLedgerRole(norm);
+  const work = when.restNorm || norm;
+  const { amount, restTokens } = extractAmount(tokensOf(work));
+  const name = joinClean(restTokens, isDebtNoise);
+  const settleAll = role === "settle" && amount <= 0;
+
+  if (!settleAll && amount <= 0) {
     return {
       kind: "unknown",
       raw,
-      reason: "مبلغ را نفهمیدم. مثلاً بگویید «آقای شهریاری ۲۵۰ هزار تومان بدهکار است».",
+      reason:
+        role === "settle"
+          ? "مبلغ تسویه را نفهمیدم. مبلغ را بگویید یا بگویید «آقای … تسویه کرد» تا کل مانده صفر شود."
+          : "مبلغ را نفهمیدم. مثلاً بگویید «آقای شهریاری ۲۵۰ هزار تومان بدهکار است».",
     };
   }
-  const name = joinClean(restTokens, isDebtNoise);
   if (!name) {
     return { kind: "unknown", raw, reason: "نام مشتری را نفهمیدم. نام را همراه مبلغ بگویید." };
   }
   const candidates = matchCustomers(name, ctx.customers);
+  if (role === "settle" && candidates.length === 0) {
+    return {
+      kind: "unknown",
+      raw,
+      reason: `مشتری‌ای با نام «${name}» پیدا نشد؛ برای تسویه باید از قبل در فهرست باشد.`,
+    };
+  }
   return {
     kind: "customer_debt",
     raw,
     customerName: name,
-    amount,
-    txType: RE_PAYMENT.test(norm) ? "payment" : "debt",
+    amount: settleAll ? 0 : amount,
+    role,
+    settleAll,
+    at: when.dateSpoken || when.timeSpoken ? when.at : undefined,
     candidates,
     clearWinner: isClearWinner(candidates.map((c) => c.score)),
   };
 }
 
-function parseExpense(raw: string, norm: string): AssistantIntent {
-  const { amount, restTokens } = extractAmount(tokensOf(norm));
+function parseExpense(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
+  const now = ctx.now ?? Date.now();
+  const when = extractWhen(raw, now, 12);
+  const work = when.restNorm || norm;
+  const { amount, restTokens } = extractAmount(tokensOf(work));
   if (amount <= 0) {
     return {
       kind: "unknown",
@@ -647,7 +904,15 @@ function parseExpense(raw: string, norm: string): AssistantIntent {
   }
   const cleaned = joinClean(restTokens, isExpenseNoise);
   const title = cleaned || "هزینه";
-  return { kind: "expense", raw, title, amount, recurringDays: detectRecurringDays(norm) };
+  return {
+    kind: "expense",
+    raw,
+    title,
+    amount,
+    recurringDays: detectRecurringDays(norm),
+    at: when.dateSpoken || when.timeSpoken ? when.at : now,
+    dateSpoken: when.dateSpoken,
+  };
 }
 
 function parseProductPriceEdit(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
@@ -674,42 +939,115 @@ function parseProductPriceEdit(raw: string, norm: string, ctx: AssistantContext)
 
 function parseReminder(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
   const now = ctx.now ?? Date.now();
-  const semi = normalizeKeepSeparators(raw);
-
-  const date = extractJalaliDate(semi);
-  const time = extractTime(semi);
-
-  // متن باقی‌مانده برای عنوان — تاریخ و ساعت از آن حذف می‌شوند
-  let rest = semi;
-  if (date) rest = rest.replace(date.matched, " ");
-  if (time) rest = rest.replace(time.matched, " ");
-  const title = joinClean(tokensOf(normalizeFa(rest)), isReminderNoise) || "یادآوری";
-
-  const offset = date ? null : relativeDayOffset(norm);
-  const today = toJalali(now);
-  const h = time ? time.h : 9;
-  const min = time ? time.min : 0;
-
-  let dueAt = now;
-  try {
-    if (date) {
-      dueAt = jalaliToTimestamp(date.jy, date.jm, date.jd, h, min);
-    } else if (today) {
-      dueAt = jalaliToTimestamp(today.jy, today.jm, today.jd, h, min) + (offset ?? 0) * 86_400_000;
-    }
-  } catch {
-    // تاریخ شمسی نامعتبر (سال خارج از بازه‌ی تقویم) → امروز با ساعت گفته‌شده
-    dueAt = now;
-  }
-
+  const when = extractWhen(raw, now, 9);
+  const title = joinClean(tokensOf(when.restNorm), isReminderNoise) || "یادآوری";
   return {
     kind: "reminder",
     raw,
     title,
-    dueAt,
-    timeDefaulted: !time,
-    dateDefaulted: !date && offset === null,
+    dueAt: when.at,
+    timeDefaulted: !when.timeSpoken,
+    dateDefaulted: !when.dateSpoken,
     recurringDays: detectRecurringDays(norm),
+  };
+}
+
+const PRODUCT_ADD_NOISE =
+  /ثبت محصول|محصول جدید|به محصولات|تو محصولات|در محصولات|موجودی|اضافه شود|اضافه بشه|اضافه کن|اضافه بکن|اضافه/g;
+
+function parseProductAdd(raw: string, norm: string): AssistantIntent {
+  const cleaned = norm.replace(PRODUCT_ADD_NOISE, " ").replace(/\s+/g, " ").trim();
+  const result = parseProductVoiceText(cleaned || raw);
+  const items = result.items.filter((i) => i.name.trim());
+  if (items.length === 0) {
+    return {
+      kind: "unknown",
+      raw,
+      reason:
+        "مشخصات محصول را نفهمیدم. مثلاً بگویید «۱۵۰ عدد پیراهن با قیمت ۲۰۰ هزار تومان اضافه شود».",
+    };
+  }
+  return { kind: "product_add", raw, items };
+}
+
+const OPEN_INVOICE_NOISE = new Set([
+  "فاکتور",
+  "فاکتورش",
+  "فاکتورها",
+  "فاکتورهای",
+  "باز",
+  "کن",
+  "بازکن",
+  "نشون",
+  "نشان",
+  "بده",
+  "ببینم",
+  "بیار",
+  "برام",
+  "برایم",
+  "برو",
+  "ببر",
+  "پیدا",
+  "رو",
+  "را",
+  "به",
+  "از",
+  "تو",
+  "در",
+  "اون",
+  "این",
+  "مربوط",
+  "مال",
+  "و",
+]);
+
+function isOpenInvoiceNoise(t: string): boolean {
+  return HONORIFICS.has(t) || OPEN_INVOICE_NOISE.has(t);
+}
+
+function invoicesMatchingName(name: string, ctx: AssistantContext): Invoice[] {
+  const seen = new Set<string>();
+  const out: Invoice[] = [];
+  const add = (inv: Invoice) => {
+    if (seen.has(inv.id)) return;
+    seen.add(inv.id);
+    out.push(inv);
+  };
+  const customers = matchCustomers(name, ctx.customers);
+  for (const c of customers) {
+    for (const inv of invoicesOfCustomer(c.customer, ctx.invoices)) add(inv);
+  }
+  for (const inv of ctx.invoices) {
+    const c = inv.customer;
+    if (!c) continue;
+    const score = Math.max(
+      scoreProduct(name, [c.firstName, c.lastName].filter(Boolean).join(" ")),
+      scoreProduct(name, c.firstName || ""),
+      scoreProduct(name, c.lastName || ""),
+    );
+    if (score > 0.45) add(inv);
+  }
+  return out;
+}
+
+function parseOpenInvoice(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
+  const name = joinClean(tokensOf(norm), isOpenInvoiceNoise);
+  if (!name) {
+    return {
+      kind: "unknown",
+      raw,
+      reason: "نام مشتری را نفهمیدم. مثلاً بگویید «فاکتور آقای کمالی را باز کن».",
+    };
+  }
+  const candidates = matchCustomers(name, ctx.customers);
+  const invoices = invoicesMatchingName(name, ctx);
+  return {
+    kind: "open_invoice",
+    raw,
+    customerName: name,
+    candidates,
+    invoices,
+    clearWinner: isClearWinner(candidates.map((c) => c.score)) || invoices.length > 0,
   };
 }
 
@@ -722,12 +1060,14 @@ function detectQueryKind(norm: string): QueryKind | null {
 
 /**
  * تشخیص نیت یک دستور صوتی. ترتیب بررسی مهم است:
- *   ۱) یادآوری   — کلیدواژه‌ی اختصاصی، هیچ تداخلی ندارد
- *   ۲) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» فقط یک سؤال است
- *   ۳) ویرایش قیمت — پیش از هزینه/بدهی، چون جمله‌اش مبلغ‌دار است
- *   ۴) بدهی مشتری
- *   ۵) هزینه
- *   ۶) در نهایت: همان موتور فعلی فاکتور (رفتار پیش‌فرض دست‌نخورده)
+ *   ۱) یادآوری
+ *   ۲) باز کردن فاکتور — پیش از بدهی، چون «فاکتور آقای …» نام مشتری دارد
+ *   ۳) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» فقط یک سؤال است
+ *   ۴) ویرایش قیمت
+ *   ۵) افزودن محصول به فهرست کالاها
+ *   ۶) بدهی / طلبکاری / تسویه مشتری
+ *   ۷) هزینه
+ *   ۸) در نهایت: همان موتور فعلی فاکتور (رفتار پیش‌فرض دست‌نخورده)
  */
 export function parseAssistantCommand(text: string, context: AssistantContext): AssistantIntent {
   const raw = (text ?? "").trim();
@@ -735,6 +1075,7 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   if (!norm) return { kind: "unknown", raw, reason: "چیزی شنیده نشد." };
 
   if (RE_REMINDER.test(norm)) return parseReminder(raw, norm, context);
+  if (RE_OPEN_INVOICE.test(norm)) return parseOpenInvoice(raw, norm, context);
 
   const queryKind = detectQueryKind(norm);
   if (queryKind) {
@@ -753,8 +1094,16 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   }
 
   if (RE_PRICE_EDIT.test(norm)) return parseProductPriceEdit(raw, norm, context);
-  if (RE_DEBT.test(norm)) return parseCustomerDebt(raw, norm, context);
-  if (RE_EXPENSE.test(norm)) return parseExpense(raw, norm);
+  if (RE_PRODUCT_ADD.test(norm) && !RE_TO_INVOICE.test(norm)) return parseProductAdd(raw, norm);
+  if (
+    RE_LEDGER.test(norm) ||
+    RE_CREDITOR.test(norm) ||
+    RE_SETTLE.test(norm) ||
+    RE_DEBTOR.test(norm)
+  ) {
+    return parseCustomerDebt(raw, norm, context);
+  }
+  if (RE_EXPENSE.test(norm)) return parseExpense(raw, norm, context);
 
   // پیش‌فرض: افزودن کالا به فاکتور — دقیقاً همان موتور صفحه‌ی /voice
   const result = parseVoiceText(raw, context.products);
@@ -765,4 +1114,37 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
     raw,
     reason: "متوجه نشدم. می‌توانید متن را ویرایش کنید و دوباره بفرستید.",
   };
+}
+
+/**
+ * تبدیل نقش زبانی به نوع تراکنش store:
+ *   بدهکار → debt (مانده مثبت)
+ *   طلبکار → payment (مانده منفی، یعنی ما به مشتری بدهکاریم)
+ *   تسویه روی ماندهٔ مثبت → payment ؛ روی ماندهٔ منفی → debt
+ */
+export function resolveCustomerTx(
+  role: CustomerLedgerRole,
+  amount: number,
+  settleAll: boolean,
+  customer?: Customer,
+): { type: "debt" | "payment"; amount: number; note: string } | { error: string } {
+  if (role === "debtor") {
+    if (amount <= 0) return { error: "مبلغ بدهی نامعتبر است." };
+    return { type: "debt", amount, note: "ثبت طلب (دستیار صوتی)" };
+  }
+  if (role === "creditor") {
+    if (amount <= 0) return { error: "مبلغ طلبکاری نامعتبر است." };
+    return { type: "payment", amount, note: "بدهی ما به مشتری (دستیار صوتی)" };
+  }
+  if (!customer) return { error: "برای تسویه باید مشتری از قبل در فهرست باشد." };
+  const balance = customerBalance(customer);
+  if (settleAll) {
+    if (balance > 0) return { type: "payment", amount: balance, note: "تسویه کامل (دستیار صوتی)" };
+    if (balance < 0)
+      return { type: "debt", amount: -balance, note: "تسویه طلب مشتری (دستیار صوتی)" };
+    return { error: `حساب «${customerFullName(customer)}» از قبل تسویه است.` };
+  }
+  if (amount <= 0) return { error: "مبلغ تسویه نامعتبر است." };
+  if (balance < 0) return { type: "debt", amount, note: "تسویه طلب مشتری (دستیار صوتی)" };
+  return { type: "payment", amount, note: "تسویه / پرداخت (دستیار صوتی)" };
 }

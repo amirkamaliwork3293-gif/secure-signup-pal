@@ -101,6 +101,46 @@ function speak(text: string) {
   }
 }
 
+/**
+ * نشان دستیار — صورت رباتی ساده با آنتن؛ چشم‌ها با انیمیشن CSS پلک می‌زنند
+ * (کلاس‌های ai-mark-* در styles.css). فقط ظاهری است و هیچ رفتاری ندارد.
+ */
+function AssistantMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="12" cy="2.7" r="1.4" fill="currentColor" className="ai-mark-antenna" />
+      <path d="M12 4.1v2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <rect
+        x="3.4"
+        y="6.1"
+        width="17.2"
+        height="13.4"
+        rx="5.2"
+        fill="currentColor"
+        fillOpacity="0.16"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M2 11.5v3.1M22 11.5v3.1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <g className="ai-mark-eyes" fill="currentColor">
+        <circle cx="8.9" cy="11.9" r="1.55" />
+        <circle cx="15.1" cy="11.9" r="1.55" />
+      </g>
+      <path
+        d="M9 15.6c1.8 1.3 4.2 1.3 6 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function recurringLabel(days?: number): string {
   if (!days || days <= 0) return "";
   if (days === 1) return " — تکرار روزانه";
@@ -550,14 +590,23 @@ export function SmartAssistant() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="دستیار هوشمند صوتی"
-        className="fixed left-4 z-30 grid h-14 w-14 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-elegant transition-all active:scale-95"
+        title="دستیار هوشمند"
+        className="ai-fab fixed left-4 z-30 h-14 w-14"
         style={{
           bottom: reminderToastVisible
             ? "calc(12rem + var(--safe-bottom))"
             : "calc(5.25rem + var(--safe-bottom))",
         }}
       >
-        <Sparkles className="h-6 w-6" />
+        <span className="ai-fab-glow" aria-hidden="true" />
+        <span className="ai-fab-aura" aria-hidden="true" />
+        <span className="ai-fab-orbit" aria-hidden="true" />
+        <span className="ai-fab-core">
+          <AssistantMark className="ai-fab-mark" />
+        </span>
+        <span className="ai-fab-spark" aria-hidden="true">
+          <Sparkles className="h-2.5 w-2.5" />
+        </span>
       </button>
 
       <Drawer
@@ -570,7 +619,9 @@ export function SmartAssistant() {
         <DrawerContent dir="rtl" className="max-h-[88svh]">
           <DrawerHeader className="pb-2 text-right">
             <DrawerTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="h-5 w-5 text-primary" />
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-primary text-primary-foreground shadow-elegant">
+                <AssistantMark className="h-5 w-5" />
+              </span>
               دستیار هوشمند
             </DrawerTitle>
             <DrawerDescription className="text-xs">

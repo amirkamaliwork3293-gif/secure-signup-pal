@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Drawer,
   DrawerContent,
@@ -29,14 +29,18 @@ import {
   Mic,
   MicOff,
   Pencil,
+  Receipt,
   Sparkles,
   Volume2,
   X,
 } from "lucide-react";
 import {
   addProductToInvoiceQty,
+  customerBalance,
   customerFullName,
   customers as customersStore,
+  cryptoId,
+  COUNT_UNIT,
   dueReminderCount,
   emptyExpense,
   expenses as expensesStore,
@@ -51,9 +55,16 @@ import {
   type Customer,
   type Product,
 } from "@/lib/store";
-import { parseAssistantCommand, type AssistantIntent } from "@/lib/voice/assistant-nlu";
+import { generateUniqueCode } from "@/lib/barcode-code";
+import {
+  parseAssistantCommand,
+  resolveCustomerTx,
+  type AssistantIntent,
+  type CustomerLedgerRole,
+} from "@/lib/voice/assistant-nlu";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import type { ParsedCandidate, ParsedItem } from "@/lib/voice/persian-nlu";
+import type { ParsedProductItem } from "@/lib/voice/product-nlu";
 
 /** صفحه‌هایی که خودشان میکروفون اختصاصی دارند — دکمه‌ی شناور در آن‌ها پنهان است */
 const HIDDEN_ON = ["/voice", "/voice-products"];
@@ -63,11 +74,14 @@ type ChoosePayload =
       type: "customer";
       options: Customer[];
       amount: number;
-      txType: "debt" | "payment";
+      role: CustomerLedgerRole;
+      settleAll: boolean;
       name: string;
+      at?: number;
     }
   | { type: "product-price"; options: ParsedCandidate[]; price: number; phrase: string }
-  | { type: "invoice-item"; options: ParsedCandidate[]; item: ParsedItem };
+  | { type: "invoice-item"; options: ParsedCandidate[]; item: ParsedItem }
+  | { type: "open-invoice"; options: Customer[]; name: string };
 
 type Card = {
   key: string;
@@ -150,8 +164,20 @@ function recurringLabel(days?: number): string {
   return ` — تکرار هر ${formatNumber(days)} روز`;
 }
 
+function ledgerLabel(role: CustomerLedgerRole): string {
+  if (role === "debtor") return "بدهی";
+  if (role === "creditor") return "طلبکاری";
+  return "تسویه";
+}
+
+function productUnitLabel(item: ParsedProductItem): string {
+  const unit = item.unit;
+  return unit === COUNT_UNIT ? " عدد" : ` ${unit}`;
+}
+
 export function SmartAssistant() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const [allProducts] = productsStore.useAll();
   const [allCustomers] = customersStore.useAll();
   const [allExpenses] = expensesStore.useAll();
@@ -200,8 +226,14 @@ export function SmartAssistant() {
 
   // ─── عملیات نوشتن در store (همه با امضای موجود خودِ store) ─────────────────
 
-  const addCustomerTx = (c: Customer, amount: number, txType: "debt" | "payment") => {
-    customersStore.addTx(c.id, { type: txType, amount, note: "ثبت با دستیار صوتی" });
+  const addCustomerTx = (
+    c: Customer,
+    amount: number,
+    txType: "debt" | "payment",
+    note: string,
+    at?: number,
+  ) => {
+    customersStore.addTx(c.id, { type: txType, amount, note, at });
     vibrate(40);
   };
 
@@ -209,6 +241,8 @@ export function SmartAssistant() {
     name: string,
     amount: number,
     txType: "debt" | "payment",
+    note: string,
+    at?: number,
   ): Customer => {
     const parts = name.split(" ").filter(Boolean);
     const created = customersStore.add({
@@ -216,8 +250,54 @@ export function SmartAssistant() {
       lastName: parts.slice(1).join(" ") || undefined,
       note: "ساخته‌شده با دستیار صوتی",
     });
-    addCustomerTx(created, amount, txType);
+    addCustomerTx(created, amount, txType, note, at);
     return created;
+  };
+
+  const applyLedger = (
+    customer: Customer | undefined,
+    role: CustomerLedgerRole,
+    amount: number,
+    settleAll: boolean,
+    name: string,
+    at?: number,
+  ): Card => {
+    const resolved = resolveCustomerTx(role, amount, settleAll, customer);
+    if ("error" in resolved) {
+      return { key: newKey(), heard: name, status: "unknown", title: resolved.error };
+    }
+    let target = customer;
+    let createdNew = false;
+    if (!target) {
+      if (role === "settle") {
+        return {
+          key: newKey(),
+          heard: name,
+          status: "unknown",
+          title: `مشتری‌ای با نام «${name}» پیدا نشد؛ برای تسویه باید از قبل در فهرست باشد.`,
+        };
+      }
+      target = createCustomerWithTx(name, resolved.amount, resolved.type, resolved.note, at);
+      createdNew = true;
+    } else {
+      addCustomerTx(target, resolved.amount, resolved.type, resolved.note, at);
+    }
+    const who = customerFullName(target);
+    const dateBit = at ? ` — ${formatJalaliDateTime(at)}` : "";
+    return {
+      key: newKey(),
+      heard: name,
+      status: "done",
+      title: `${formatToman(resolved.amount)} ${ledgerLabel(role)} برای «${who}» ثبت شد${dateBit}`,
+      detail: createdNew
+        ? "این مشتری در فهرست نبود — مشتری جدید ساخته شد."
+        : role === "settle"
+          ? customerBalance(customersStore.getAll().find((x) => x.id === target!.id) ?? target) ===
+            0
+            ? "حساب تسویه شد."
+            : undefined
+          : undefined,
+    };
   };
 
   const applyPriceTo = (ids: string[], price: number): number => {
@@ -233,6 +313,33 @@ export function SmartAssistant() {
       vibrate(40);
     }
     return changed;
+  };
+
+  const addNewProducts = (items: ParsedProductItem[]): Product[] => {
+    const valid = items.filter((i) => i.name.trim() && i.price && i.price > 0);
+    if (valid.length === 0) return [];
+    const list = productsStore.getAll();
+    const taken = new Set(list.map((p) => p.code).filter(Boolean));
+    const created: Product[] = valid.map((item) => ({
+      id: cryptoId(),
+      name: item.name.trim(),
+      price: item.price!,
+      stock: item.stock,
+      unit: item.unit || COUNT_UNIT,
+      category: "",
+      code: generateUniqueCode(taken),
+    }));
+    productsStore.save([...created, ...list]);
+    vibrate(40);
+    return created;
+  };
+
+  const openCustomerInvoices = (name: string) => {
+    void recognizerRef.current?.stop();
+    setOpen(false);
+    setCards([]);
+    setTranscript("");
+    navigate({ to: "/invoices", search: { q: name } });
   };
 
   const addToInvoice = (product: Product, quantity: number): "ok" | "out" => {
@@ -288,29 +395,28 @@ export function SmartAssistant() {
     const heard = intent.raw;
     switch (intent.kind) {
       case "customer_debt": {
-        const label = intent.txType === "debt" ? "بدهی" : "پرداخت";
         if (intent.candidates.length === 0) {
-          const created = createCustomerWithTx(intent.customerName, intent.amount, intent.txType);
           return [
-            {
-              key: newKey(),
-              heard,
-              status: "done",
-              title: `${formatToman(intent.amount)} ${label} برای «${customerFullName(created)}» ثبت شد`,
-              detail: "این مشتری در فهرست نبود — مشتری جدید ساخته شد.",
-            },
+            applyLedger(
+              undefined,
+              intent.role,
+              intent.amount,
+              intent.settleAll,
+              intent.customerName,
+              intent.at,
+            ),
           ];
         }
         if (intent.clearWinner) {
-          const target = intent.candidates[0].customer;
-          addCustomerTx(target, intent.amount, intent.txType);
           return [
-            {
-              key: newKey(),
-              heard,
-              status: "done",
-              title: `${formatToman(intent.amount)} ${label} برای «${customerFullName(target)}» ثبت شد`,
-            },
+            applyLedger(
+              intent.candidates[0].customer,
+              intent.role,
+              intent.amount,
+              intent.settleAll,
+              intent.customerName,
+              intent.at,
+            ),
           ];
         }
         return [
@@ -318,13 +424,17 @@ export function SmartAssistant() {
             key: newKey(),
             heard,
             status: "choose",
-            title: `کدام مشتری؟ «${intent.customerName}» — ${formatToman(intent.amount)} ${label}`,
+            title: `کدام مشتری؟ «${intent.customerName}» — ${
+              intent.settleAll ? "تسویه کامل" : formatToman(intent.amount)
+            } ${ledgerLabel(intent.role)}`,
             choose: {
               type: "customer",
               options: intent.candidates.map((c) => c.customer),
               amount: intent.amount,
-              txType: intent.txType,
+              role: intent.role,
+              settleAll: intent.settleAll,
               name: intent.customerName,
+              at: intent.at,
             },
           },
         ];
@@ -336,7 +446,7 @@ export function SmartAssistant() {
           title: intent.title,
           amount: intent.amount,
           recurringDays: intent.recurringDays,
-          at: Date.now(),
+          at: intent.at,
         });
         vibrate(40);
         return [
@@ -345,7 +455,96 @@ export function SmartAssistant() {
             heard,
             status: "done",
             title: `هزینه «${intent.title}» به مبلغ ${formatToman(intent.amount)} ثبت شد`,
-            detail: recurringLabel(intent.recurringDays).replace(/^ — /, "") || undefined,
+            detail:
+              [
+                intent.dateSpoken ? formatJalaliDateTime(intent.at) : "",
+                recurringLabel(intent.recurringDays).replace(/^ — /, ""),
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined,
+          },
+        ];
+      }
+
+      case "product_add": {
+        const ready = intent.items.filter((i) => i.name.trim() && i.price && i.price > 0);
+        const weak = intent.items.filter((i) => !i.name.trim() || !i.price || i.price <= 0);
+        const created = addNewProducts(ready);
+        const cards: Card[] = created.map((p, idx) => {
+          const src = ready[idx];
+          return {
+            key: newKey(),
+            heard,
+            status: "done" as const,
+            title: `محصول «${p.name}» اضافه شد`,
+            detail: [
+              src?.stock ? `${formatNumber(src.stock)}${productUnitLabel(src)}` : "",
+              formatToman(p.price),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          };
+        });
+        for (const item of weak) {
+          cards.push({
+            key: newKey(),
+            heard,
+            status: "unknown",
+            title: `برای «${item.name || heard}» قیمت یا نام کامل نبود`,
+            detail: "متن را ویرایش کنید؛ مثلاً «۱۵۰ عدد پیراهن با قیمت ۲۰۰ هزار تومان اضافه شود».",
+          });
+        }
+        return cards.length > 0
+          ? cards
+          : [
+              {
+                key: newKey(),
+                heard,
+                status: "unknown",
+                title: "مشخصات محصول را نفهمیدم.",
+              },
+            ];
+      }
+
+      case "open_invoice": {
+        if (intent.candidates.length > 1 && !intent.clearWinner) {
+          return [
+            {
+              key: newKey(),
+              heard,
+              status: "choose",
+              title: `فاکتور کدام مشتری باز شود؟ «${intent.customerName}»`,
+              choose: {
+                type: "open-invoice",
+                options: intent.candidates.map((c) => c.customer),
+                name: intent.customerName,
+              },
+            },
+          ];
+        }
+        const name =
+          intent.clearWinner && intent.candidates[0]
+            ? customerFullName(intent.candidates[0].customer)
+            : intent.customerName;
+        if (intent.invoices.length === 0) {
+          return [
+            {
+              key: newKey(),
+              heard,
+              status: "unknown",
+              title: `فاکتوری برای «${name}» پیدا نشد`,
+              detail: "می‌توانید در بخش فاکتورها با همین نام جستجو کنید.",
+            },
+          ];
+        }
+        openCustomerInvoices(name);
+        return [
+          {
+            key: newKey(),
+            heard,
+            status: "done",
+            title: `فاکتورهای «${name}» باز شد`,
+            detail: `${formatNumber(intent.invoices.length)} فاکتور پیدا شد.`,
           },
         ];
       }
@@ -522,24 +721,35 @@ export function SmartAssistant() {
 
   const pickCustomer = (card: Card, customer: Customer) => {
     if (card.choose?.type !== "customer") return;
-    const { amount, txType } = card.choose;
-    addCustomerTx(customer, amount, txType);
+    const { amount, role, settleAll, name, at } = card.choose;
+    const result = applyLedger(customer, role, amount, settleAll, name, at);
     replaceCard(card.key, {
-      status: "done",
-      title: `${formatToman(amount)} ${txType === "debt" ? "بدهی" : "پرداخت"} برای «${customerFullName(customer)}» ثبت شد`,
-      detail: undefined,
+      status: result.status,
+      title: result.title,
+      detail: result.detail,
     });
   };
 
   const pickNewCustomer = (card: Card) => {
     if (card.choose?.type !== "customer") return;
-    const { amount, txType, name } = card.choose;
-    const created = createCustomerWithTx(name, amount, txType);
+    const { amount, role, settleAll, name, at } = card.choose;
+    if (role === "settle") return;
+    const result = applyLedger(undefined, role, amount, settleAll, name, at);
+    replaceCard(card.key, {
+      status: result.status,
+      title: result.title,
+      detail: result.detail,
+    });
+  };
+
+  const pickOpenInvoice = (card: Card, customer: Customer) => {
+    if (card.choose?.type !== "open-invoice") return;
+    const name = customerFullName(customer);
     replaceCard(card.key, {
       status: "done",
-      title: `${formatToman(amount)} ${txType === "debt" ? "بدهی" : "پرداخت"} برای «${customerFullName(created)}» ثبت شد`,
-      detail: "مشتری جدید ساخته شد.",
+      title: `فاکتورهای «${name}» باز شد`,
     });
+    openCustomerInvoices(name);
   };
 
   const pickProductPrice = (card: Card, product: Product) => {
@@ -625,8 +835,9 @@ export function SmartAssistant() {
               دستیار هوشمند
             </DrawerTitle>
             <DrawerDescription className="text-xs">
-              یک دستور بگویید — مثلاً «آقای شهریاری ۲۵۰ هزار تومان بدهکار است»، «ماهانه ۴۵ میلیون
-              هزینه اجاره خانه»، «یادآوری پرداخت بدهی ساعت ۱۳:۳۰» یا «پرسودترین کالای من چیه؟»
+              یک دستور بگویید — مثلاً «۱۵۰ عدد پیراهن با قیمت ۲۰۰ هزار تومان اضافه شود»، «آقای
+              شهریاری طلبکار است»، «خانم کمالی ۲۵۰ هزار تومان را تسویه کرد»، «فاکتور آقای کمالی را
+              باز کن» یا «یادآوری پرداخت بدهی ساعت ۱۳:۳۰ تاریخ ۴ تیر ۱۴۰۵».
             </DrawerDescription>
           </DrawerHeader>
 
@@ -779,7 +990,7 @@ export function SmartAssistant() {
                               {customerFullName(c) || "مشتری"}
                             </button>
                           ))}
-                        {card.choose.type === "customer" && (
+                        {card.choose.type === "customer" && card.choose.role !== "settle" && (
                           <button
                             onClick={() => pickNewCustomer(card)}
                             className="rounded-xl border border-dashed border-primary/50 px-3 py-2 text-sm text-primary"
@@ -787,6 +998,17 @@ export function SmartAssistant() {
                             مشتری جدید «{card.choose.name}»
                           </button>
                         )}
+
+                        {card.choose.type === "open-invoice" &&
+                          card.choose.options.map((c) => (
+                            <button
+                              key={c.id}
+                              onClick={() => pickOpenInvoice(card, c)}
+                              className="rounded-xl border border-border bg-background px-3 py-2 text-sm hover:bg-accent"
+                            >
+                              {customerFullName(c) || "مشتری"}
+                            </button>
+                          ))}
 
                         {card.choose.type === "product-price" &&
                           card.choose.options.map((o) => (
@@ -856,6 +1078,15 @@ export function SmartAssistant() {
                             className="rounded-lg border border-border px-3 py-1.5 text-xs"
                           >
                             بخش محصولات
+                          </Link>
+                          <Link
+                            to="/invoices"
+                            search={{ q: card.heard }}
+                            onClick={closeSheet}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            فاکتورها
                           </Link>
                           <button
                             onClick={() => discard(card.key)}

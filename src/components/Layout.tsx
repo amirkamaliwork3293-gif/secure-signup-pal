@@ -1,12 +1,13 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { ReminderToast } from "@/components/ReminderToast";
 import { SmartAssistant } from "@/components/SmartAssistant";
+import { OnboardingTour } from "@/components/OnboardingTour";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -56,6 +57,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const sync = useSyncState();
   const syncFailed = sync.failed && sync.pending > 0 && state.status === "authenticated";
   const [moreOpen, setMoreOpen] = useState(false);
+  const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
   useEffect(() => {
     const on = () => setIsOnline(true);
@@ -84,6 +86,17 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           </div>
           <div className="flex items-center gap-1.5">
+            {state.status === "authenticated" && (
+              <button
+                type="button"
+                onClick={() => setTourReplay((n) => n + 1)}
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+                title="راهنمای شروع کار"
+                aria-label="راهنمای شروع کار"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </button>
+            )}
             <GlobalSearch />
             <UserMenu />
             {state.status === "authenticated" && state.isAdmin && (
@@ -137,6 +150,9 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* دستیار هوشمند صوتی — دکمه‌ی شناور + شیت پایین (کاملاً محلی، بدون AI/API) */}
       {state.status === "authenticated" && <SmartAssistant />}
+
+      {/* تور شروع کار — لایه‌ی spotlight روی UI موجود، بدون تغییر منطق صفحات */}
+      {state.status === "authenticated" && <OnboardingTour replayNonce={tourReplay} />}
 
       {(() => {
         const badgeFor = (to: string) =>

@@ -269,6 +269,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
           {/* ویرایش */}
           <button
             type="button"
+            data-tour="history-edit"
             onClick={startEdit}
             className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
             title="ویرایش فاکتور"
@@ -740,7 +741,7 @@ export function HistoryPageInner() {
 
   return (
     <Layout>
-      <h1 className="mb-3 text-lg font-bold">تاریخچه فاکتورها</h1>
+      <h1 data-tour="history-intro" className="mb-3 text-lg font-bold">تاریخچه فاکتورها</h1>
 
       {/* دسته‌بندی: فاکتور فروش / فاکتور خرید */}
       <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">

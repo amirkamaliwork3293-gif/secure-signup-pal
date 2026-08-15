@@ -343,6 +343,14 @@ export type AppSettings = {
   invoiceTemplate?: { [key: string]: JsonValue };
   /** دسته‌بندی‌های هزینه‌ی سفارشی کاربر (علاوه بر EXPENSE_CATEGORIES پیش‌فرض) */
   expenseCategories?: string[];
+  /** مرحله‌ی فعلی تور شروع کار (۰ = هنوز تصمیم گرفته نشده / شروع نشده) */
+  onboardingStep?: number;
+  /** اگر کاربر «رد کردن آموزش» را زده باشد، تور خودکار دیگر نشان داده نمی‌شود */
+  onboardingDismissed?: boolean;
+  /** شناسه‌ی مراحلی که قبلاً دیده شده‌اند تا با برگشت به همان صفحه تکرار نشوند */
+  onboardingCompletedSteps?: string[];
+  /** دستیار هوشمند حداقل یک‌بار باز شده — فقط برای چک‌لیست شروع کار */
+  assistantOpened?: boolean;
 };
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
@@ -424,6 +432,18 @@ let cloudUserId: string | null = null;
 // with empty arrays. Restored offline edits are flushed explicitly after
 // hydration finishes.
 let cloudHydrated = false;
+
+function markCloudHydrated() {
+  cloudHydrated = true;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("store-hydrated"));
+  }
+}
+
+/** آیا داده‌ی ابری این نشست خوانده شده (یا تلاش اول تمام شده) — برای تور شروع کار */
+export function isCloudHydrated() {
+  return cloudHydrated;
+}
 const pendingPush: Record<string, unknown> = {};
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -671,7 +691,7 @@ export async function hydrateFromCloud(userId: string) {
           markDirty([field]);
         } catch { /* مقدار خراب — نادیده */ }
       }
-      cloudHydrated = true;
+      markCloudHydrated();
       return; // بلوک finally صف را flush می‌کند
     }
     // Overwrite local cache with cloud data — but NEVER for fields that have
@@ -698,7 +718,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
     overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
     overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
-    cloudHydrated = true;
+    markCloudHydrated();
   } catch (e) {
     console.error("[store] hydrate failed", e);
     publishSyncState({

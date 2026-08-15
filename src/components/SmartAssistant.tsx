@@ -51,6 +51,7 @@ import {
   type Customer,
   type Product,
 } from "@/lib/store";
+import { markAssistantOpened } from "@/lib/onboarding";
 import { parseAssistantCommand, type AssistantIntent } from "@/lib/voice/assistant-nlu";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import type { ParsedCandidate, ParsedItem } from "@/lib/voice/persian-nlu";
@@ -548,7 +549,11 @@ export function SmartAssistant() {
       {/* دکمه‌ی شناور — بالای نوار پایین موبایل */}
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        data-tour="smart-assistant"
+        onClick={() => {
+          markAssistantOpened();
+          setOpen(true);
+        }}
         aria-label="دستیار هوشمند صوتی"
         className="fixed left-4 z-30 grid h-14 w-14 place-items-center rounded-full bg-gradient-primary text-primary-foreground shadow-elegant transition-all active:scale-95"
         style={{
@@ -563,8 +568,10 @@ export function SmartAssistant() {
       <Drawer
         open={open}
         onOpenChange={(v) => {
-          if (v) setOpen(true);
-          else closeSheet();
+          if (v) {
+            markAssistantOpened();
+            setOpen(true);
+          } else closeSheet();
         }}
       >
         <DrawerContent dir="rtl" className="max-h-[88svh]">

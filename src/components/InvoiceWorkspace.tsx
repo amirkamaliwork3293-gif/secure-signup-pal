@@ -43,6 +43,7 @@ import {
   NotebookPen,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 export function InvoiceWorkspace() {
@@ -275,6 +276,8 @@ export function InvoiceWorkspace() {
 
   return (
     <Layout>
+      <GettingStartedChecklist />
+
       {/* Invoice tabs */}
       <div className="mb-3 flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-card">
         {board.open.map((it, idx) => {
@@ -341,7 +344,10 @@ export function InvoiceWorkspace() {
       </div>
 
       {/* Invoice header card */}
-      <section className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant">
+      <section
+        data-tour="invoice-intro"
+        className="mb-4 rounded-2xl bg-gradient-primary p-4 text-primary-foreground shadow-elegant"
+      >
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs/5 opacity-80">جمع کل فاکتور</div>
@@ -355,6 +361,7 @@ export function InvoiceWorkspace() {
         <div className="mt-3 grid grid-cols-3 gap-2">
           <Link
             to="/scan"
+            data-tour="invoice-scan"
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <ScanLine className="h-4 w-4" />
@@ -362,6 +369,7 @@ export function InvoiceWorkspace() {
           </Link>
           <Link
             to="/voice"
+            data-tour="invoice-voice"
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <Mic className="h-4 w-4" />

@@ -32,7 +32,7 @@ import {
   type UnitDef,
 } from "@/lib/store";
 import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
   ChevronDown, ChevronUp, Truck, History as HistoryIcon,
@@ -579,7 +579,7 @@ export function PurchasesPageInner() {
   const matchingCustomers = useMemo(() => {
     const q = customerQuery.trim();
     if (!q) return customerList.slice(0, 8);
-    return filterAndRankSearch(customerList, q, (c) => [customerFullName(c), c.phone ?? ""]).slice(0, 8);
+    return filterAndRankSearch(customerList, q, (c) => [...personNameSearchFields(c), c.phone ?? ""]).slice(0, 8);
   }, [customerList, customerQuery]);
 
   const totals = purchaseTotals(draft);

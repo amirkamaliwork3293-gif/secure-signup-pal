@@ -11,7 +11,7 @@ import {
   type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import {
   History as HistoryIcon,
@@ -712,7 +712,7 @@ export function HistoryPageInner() {
     if (!q) return base;
     return filterAndRankSearch(base, q, (inv) => [
       inv.id,
-      [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
+      ...personNameSearchFields(inv.customer),
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);

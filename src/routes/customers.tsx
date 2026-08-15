@@ -28,7 +28,7 @@ import {
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
 import { invoiceTotals } from "@/lib/invoice-math";
-import { filterAndRankSearch } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
 import { isWebView } from "@/lib/isWebView";
 import { InvoiceActions } from "@/components/InvoiceActions";
@@ -161,7 +161,7 @@ function CustomersPageInner() {
         return true;
       })
       .sort((a, b) => customerBalance(b) - customerBalance(a));
-    return q ? filterAndRankSearch(statusFiltered, q, (c) => [customerFullName(c), c.phone]) : statusFiltered;
+    return q ? filterAndRankSearch(statusFiltered, q, (c) => [...personNameSearchFields(c), c.phone]) : statusFiltered;
   }, [list, searchQ, filter]);
 
   /** اعمال نمایش انتخابی (پرخریدترین، کم‌خریدترین و…) */
@@ -1021,7 +1021,7 @@ function QuickEntryModal({
 
   const matches =
     query.trim() && !selected
-      ? filterAndRankSearch(list, query, (c) => [customerFullName(c), c.phone]).slice(0, 6)
+      ? filterAndRankSearch(list, query, (c) => [...personNameSearchFields(c), c.phone]).slice(0, 6)
       : [];
 
   const submit = (e: React.FormEvent) => {

@@ -1018,8 +1018,14 @@ function invoicesMatchingName(name: string, ctx: AssistantContext): Invoice[] {
     for (const inv of invoicesOfCustomer(c.customer, ctx.invoices)) add(inv);
   }
   for (const inv of ctx.invoices) {
-    const invName = [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ");
-    if (invName && scoreProduct(name, invName) > 0.45) add(inv);
+    const c = inv.customer;
+    if (!c) continue;
+    const score = Math.max(
+      scoreProduct(name, [c.firstName, c.lastName].filter(Boolean).join(" ")),
+      scoreProduct(name, c.firstName || ""),
+      scoreProduct(name, c.lastName || ""),
+    );
+    if (score > 0.45) add(inv);
   }
   return out;
 }

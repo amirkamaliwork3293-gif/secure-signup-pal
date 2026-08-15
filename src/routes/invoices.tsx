@@ -1,6 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseActions } from "@/components/PurchaseActions";
@@ -27,8 +27,12 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { z } from "zod";
+
+const searchSchema = z.object({ q: z.string().optional() });
 
 export const Route = createFileRoute("/invoices")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "فاکتورها | KAMIX" },
@@ -41,11 +45,16 @@ export const Route = createFileRoute("/invoices")({
 type Tab = "sales" | "purchases";
 
 function InvoicesPageInner() {
+  const { q: incomingQuery } = Route.useSearch();
   const [tab, setTab] = useState<Tab>("sales");
   const [salesHistory] = invoice.useHistory();
   const [purchaseHistory] = purchases.useHistory();
   const [appSettings] = settings.useAll();
-  const [searchQ, setSearchQ] = useState("");
+  const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
+
+  useEffect(() => {
+    if (incomingQuery != null) setSearchQ(incomingQuery);
+  }, [incomingQuery]);
 
   const salesTotal = useMemo(() => salesHistory.reduce((s, i) => s + i.total, 0), [salesHistory]);
   const purchasesTotal = useMemo(

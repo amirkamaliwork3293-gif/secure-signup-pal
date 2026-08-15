@@ -6,10 +6,13 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, ChevronDown, ChevronUp, Circle, ListChecks } from "lucide-react";
 import { invoice, products, settings } from "@/lib/store";
+import { useAuth } from "@/lib/AuthContext";
 import {
   checklistHidden,
   isShopSetupDone,
   markChecklistHidden,
+  resolveOnboardingEligibility,
+  waitForStoreHydration,
 } from "@/lib/onboarding";
 
 type Item = {
@@ -20,6 +23,7 @@ type Item = {
 };
 
 export function GettingStartedChecklist() {
+  const { state: authState } = useAuth();
   const [appSettings] = settings.useAll();
   const [allProducts] = products.useAll();
   const [history] = invoice.useHistory();
@@ -54,7 +58,18 @@ export function GettingStartedChecklist() {
 
   const doneCount = items.filter((i) => i.done).length;
   const allDone = doneCount === items.length;
-  const hidden = checklistHidden(appSettings);
+  const hidden = checklistHidden(appSettings) || appSettings.onboardingEligible !== true;
+
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
+    let cancelled = false;
+    void waitForStoreHydration().then(() => {
+      if (!cancelled) resolveOnboardingEligibility(authState.profile);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
 
   useEffect(() => {
     if (hidden || !allDone) return;

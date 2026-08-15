@@ -6,9 +6,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { formatNumber, settings } from "@/lib/store";
+import { useAuth } from "@/lib/AuthContext";
 import {
-  hasExistingShopData,
   patchSettings,
+  resolveOnboardingEligibility,
   stageForPath,
   stageIndex,
   TOUR_STAGE_COUNT,
@@ -144,6 +145,7 @@ function clampCard(rect: Rect | null, cardW: number, cardH: number) {
 export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
+  const { state: authState } = useAuth();
   const [appSettings] = settings.useAll();
   const [active, setActive] = useState(false);
   const [replay, setReplay] = useState(false);
@@ -237,8 +239,10 @@ export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
         setActive(true);
         return;
       }
+      const profile = authState.status === "authenticated" ? authState.profile : null;
+      const eligible = resolveOnboardingEligibility(profile);
       const s = settings.get();
-      if (s.onboardingDismissed) {
+      if (!eligible || s.onboardingDismissed) {
         setActive(false);
         return;
       }
@@ -251,9 +255,7 @@ export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
         setActive(false);
         return;
       }
-      const alreadyStarted = (s.onboardingStep ?? 0) > 0;
-      if (!alreadyStarted && hasExistingShopData()) return;
-      if (!alreadyStarted) {
+      if ((s.onboardingStep ?? 0) <= 0) {
         patchSettings({ onboardingStep: 1 });
       }
       setReplay(false);
@@ -264,7 +266,7 @@ export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, dismissed, started, completed.join("|")]);
+  }, [pathname, dismissed, started, completed.join("|"), authState.status]);
 
   // بازپخش از آیکن «؟» — مرحله‌ی همین صفحه، حتی اگر قبلاً رد شده باشد
   useEffect(() => {

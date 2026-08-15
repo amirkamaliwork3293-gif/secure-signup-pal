@@ -8,6 +8,7 @@ import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } fro
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
+import { markPendingOnboarding } from "@/lib/onboarding";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
@@ -203,6 +204,7 @@ function RegisterPage() {
           phone: phone.trim() || undefined,
         },
       });
+      markPendingOnboarding(usernameField);
       setSuccess(true);
     } catch (e: any) {
       setError(e?.message || "خطا در ارسال درخواست.");

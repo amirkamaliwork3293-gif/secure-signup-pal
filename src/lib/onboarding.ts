@@ -6,6 +6,43 @@ import {
   type AppSettings,
 } from "@/lib/store";
 
+/**
+ * تور فقط برای حساب‌هایی که از این تاریخ به بعد ساخته شده‌اند.
+ * کاربران قدیمی — حتی بدون محصول/فاکتور — مشمول نیستند.
+ */
+export const ONBOARDING_LAUNCH_AT = Date.parse("2026-08-16T00:00:00+03:30");
+
+const PENDING_SIGNUP_KEY = "kamix.onboarding.pendingUsername";
+
+export function markPendingOnboarding(username: string) {
+  if (typeof window === "undefined") return;
+  const u = username.trim().toLowerCase();
+  if (!u) return;
+  try {
+    localStorage.setItem(PENDING_SIGNUP_KEY, u);
+  } catch {
+    /* نادیده */
+  }
+}
+
+function readPendingOnboarding(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(PENDING_SIGNUP_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingOnboarding() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(PENDING_SIGNUP_KEY);
+  } catch {
+    /* نادیده */
+  }
+}
+
 /** شناسه‌ی سه مرحله‌ی تور (هر کدام روی صفحه‌ی خودش) */
 export const TOUR_STAGES = ["invoice", "products", "history"] as const;
 export type TourStageId = (typeof TOUR_STAGES)[number];
@@ -18,6 +55,40 @@ export function patchSettings(patch: Partial<AppSettings>) {
 
 export function hasExistingShopData(): boolean {
   return products.getAll().length > 0 || invoice.getHistory().length > 0;
+}
+
+type EligibilityProfile = { username?: string | null; created_at?: string | null };
+
+/**
+ * تصمیم قطعی: تور خودکار فقط برای ثبت‌نام جدید از الان.
+ * نتیجه در settings ذخیره می‌شود تا با رفرش/ورود دوباره عوض نشود.
+ */
+export function resolveOnboardingEligibility(profile?: EligibilityProfile | null): boolean {
+  const s = settings.get();
+  if (s.onboardingEligible === true) return true;
+  if (s.onboardingEligible === false) return false;
+  // قبل از خواندن ابر تصمیم نگیر — کاربر قدیمی روی دستگاه جدید دادهٔ خالی محلی دارد
+  if (!isCloudHydrated()) return false;
+  if (!profile?.created_at && !profile?.username) return false;
+
+  const username = (profile.username || "").trim().toLowerCase();
+  const pending = readPendingOnboarding();
+  const fromThisSignup = !!username && pending === username;
+  const created = Date.parse(profile.created_at || "");
+  const newAccount = Number.isFinite(created) && created >= ONBOARDING_LAUNCH_AT;
+  const eligible = (fromThisSignup || newAccount) && !hasExistingShopData();
+
+  if (fromThisSignup) clearPendingOnboarding();
+
+  patchSettings({
+    onboardingEligible: eligible,
+    ...(eligible ? {} : { onboardingDismissed: true }),
+  });
+  return eligible;
+}
+
+export function isOnboardingEligible(): boolean {
+  return settings.get().onboardingEligible === true;
 }
 
 export function isShopSetupDone(s: AppSettings): boolean {

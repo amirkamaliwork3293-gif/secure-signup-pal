@@ -34,7 +34,7 @@ import {
   Mic,
   type LucideIcon,
 } from "lucide-react";
-import { SmartBusinessGuide } from "@/components/SmartBusinessGuide";
+import { LiveFeatureShowcase } from "@/components/LiveFeatureShowcase";
 import { StoriesBar } from "@/components/StoriesBar";
 
 const FEATURE_ICONS = [Receipt, ScanLine, Package, BarChart3, Users, ShieldCheck];
@@ -181,7 +181,7 @@ export function LandingPage() {
     hasPricing && { id: "pricing", label: "قیمت‌ها" },
     hasVideos && { id: "videos", label: "ویدیوها" },
     { id: "why-kamix", label: "امکانات" },
-    { id: "smart-guide", label: "صنف من" },
+    { id: "live-showcase", label: "نمایش زنده" },
     socials.length > 0 && { id: "contact", label: "تماس" },
   ].filter(Boolean) as { id: string; label: string }[];
 
@@ -428,7 +428,7 @@ export function LandingPage() {
         </section>
 
         <div className="lp-reveal">
-          <SmartBusinessGuide />
+          <LiveFeatureShowcase />
         </div>
 
         {hasPricing && (

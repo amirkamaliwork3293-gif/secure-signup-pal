@@ -14,7 +14,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowRight, ArrowLeft, CheckCircle2, TrendingUp, XCircle,
   Package, Users, FileText, BarChart3, ShieldCheck, Rocket, Clock,
-  Mic, Globe, ChevronLeft, ChevronRight, Receipt,
+  Mic, Globe, ChevronLeft, ChevronRight, Receipt, Store,
 } from "lucide-react";
 
 type Benefit = {
@@ -282,6 +282,32 @@ const GUIDES: Guide[] = [
     ],
     roi: "یک مهرماه بدون کمبود کالا، سود چند ماه برنامه است.",
   },
+  {
+    key: "students",
+    label: "آموزشگاه / کلاس",
+    emoji: "🎓",
+    keywords: ["آموزشگاه", "کلاس", "هنرجو", "شهریه", "معلم", "آموزش"],
+    intro:
+      "آموزشگاه با ده‌ها هنرجو و تاریخ شهریه، روی کاغذ گم می‌شود. KAMIX سررسید هر نفر را نگه می‌دارد و یادآوری می‌کند تا شهریه عقب نیفتد.",
+    problems: [
+      "نمی‌دونی شهریه کی تمام شده و کی باید تمدید کند",
+      "لیست هنرجوها روی دفتر است و پیگیری سخت",
+      "یادآوری تماس را فراموش می‌کنی",
+    ],
+    benefits: [
+      { icon: "users", title: "پرونده هر هنرجو با تاریخ شهریه",
+        detail: "نام، دوره و سررسید در یک صفحه؛ ببین امروز کی باید تمدید کند." },
+      { icon: "check", title: "یادآوری سررسید روی گوشی",
+        detail: "همان روز که شهریه تمام می‌شود، برنامه خبرت می‌کند." },
+      { icon: "file", title: "فاکتور شهریه با صدا یا لمس",
+        detail: "بگو شهریه دریافت شد؛ فاکتور ثبت می‌شود و برای خانواده می‌فرستی." },
+      { icon: "chart", title: "گزارش دریافتی ماهانه",
+        detail: "بفهم این ماه چند شهریه آمده و چند نفر عقب افتاده‌اند." },
+      { icon: "shield", title: "پشتیبان ابری لیست هنرجوها",
+        detail: "اگر گوشی عوض شد، لیست و تاریخ‌ها از بین نمی‌رود." },
+    ],
+    roi: "یک شهریه فراموش‌شده که به‌موقع گرفته شود، چند ماه اشتراک را جبران می‌کند.",
+  },
 ];
 
 const GENERIC: Benefit[] = [
@@ -349,6 +375,559 @@ function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+type ScreenId = "invoice" | "voice" | "scan" | "debt" | "menu" | "gold" | "report" | "stock" | "store" | "students";
+
+type Showcase = {
+  shop: string;
+  workflow: [string, string, string];
+  modules: { id: ScreenId; label: string }[];
+  tools: string[];
+  lines: { name: string; qty: string; price: string }[];
+  heard: string;
+  scan: string;
+  debtors: { name: string; amount: string }[];
+  menu?: { name: string; price: string }[];
+  stock?: { name: string; left: string }[];
+  bars?: { label: string; h: number }[];
+  students?: { name: string; due: string }[];
+};
+
+const SHOWCASE: Record<string, Showcase> = {
+  clothing: {
+    shop: "بوتیک امید",
+    workflow: [
+      "پشت صندوق بگو: «۲ پیراهن مردانه سایز لارج» — فاکتور همان لحظه ردیف می‌شود.",
+      "بارکد سایز/رنگ را با دوربین بزن؛ موجودی همان تنوع کم می‌شود.",
+      "شب گزارش را باز کن و ببین این هفته کدام مدل سود واقعی داد.",
+    ],
+    modules: [
+      { id: "voice", label: "فاکتور با صدا" },
+      { id: "scan", label: "اسکن بارکد" },
+      { id: "stock", label: "انبار سایز" },
+      { id: "debt", label: "نسیه مشتری" },
+      { id: "report", label: "سود مدل‌ها" },
+    ],
+    tools: ["فاکتور", "صدا", "اسکن", "انبار", "بدهکاران", "گزارش", "فاکتور PDF", "سایت فروشگاه"],
+    lines: [
+      { name: "پیراهن لارج آبی", qty: "۲", price: "۵۰۰٬۰۰۰" },
+      { name: "شلوار جین ۳۲", qty: "۱", price: "۴۲۰٬۰۰۰" },
+    ],
+    heard: "۲ عدد پیراهن لارج ۲۵۰ هزار",
+    scan: "پیراهن مردانه · سایز L · آبی",
+    debtors: [
+      { name: "خانم رضایی", amount: "۱٬۲۰۰٬۰۰۰" },
+      { name: "آقای کریمی", amount: "۳۵۰٬۰۰۰" },
+    ],
+    stock: [
+      { name: "پیراهن L آبی", left: "۳ عدد" },
+      { name: "پیراهن M مشکی", left: "۰ — تمام" },
+      { name: "شلوار ۳۲", left: "۷ عدد" },
+    ],
+    bars: [
+      { label: "پیراهن", h: 78 },
+      { label: "شلوار", h: 54 },
+      { label: "کیف", h: 32 },
+    ],
+  },
+  cafe: {
+    shop: "کافه نوژا",
+    workflow: [
+      "روی میز QR بچسبان؛ مشتری منو را با قیمت به‌روز می‌بیند.",
+      "سفارش میز را با صدا یا لمس فاکتور کن — مالیات و سرویس خودش حساب می‌شود.",
+      "گزارش ساعت اوج را ببین تا شیفت و خرید مواد را دقیق بچینی.",
+    ],
+    modules: [
+      { id: "menu", label: "منوی QR" },
+      { id: "voice", label: "فاکتور میز" },
+      { id: "invoice", label: "صورتحساب" },
+      { id: "stock", label: "مواد اولیه" },
+      { id: "report", label: "ساعت اوج" },
+    ],
+    tools: ["منوی دیجیتال", "QR میز", "فاکتور", "صدا", "انبار", "گزارش", "هزینه‌ها"],
+    lines: [
+      { name: "لاته", qty: "۲", price: "۲۴۰٬۰۰۰" },
+      { name: "چیزکیک", qty: "۱", price: "۱۸۵٬۰۰۰" },
+    ],
+    heard: "دو تا لاته و یک چیزکیک",
+    scan: "QR میز ۴ — منوی امروز",
+    debtors: [
+      { name: "شرکت همکار", amount: "۲٬۴۰۰٬۰۰۰" },
+    ],
+    menu: [
+      { name: "اسپرسو", price: "۹۵٬۰۰۰" },
+      { name: "لاته", price: "۱۲۰٬۰۰۰" },
+      { name: "چیزکیک", price: "۱۸۵٬۰۰۰" },
+    ],
+    stock: [
+      { name: "شیر", left: "کم — هشدار" },
+      { name: "دانه قهوه", left: "۴ کیلو" },
+    ],
+    bars: [
+      { label: "۱۰–۱۲", h: 40 },
+      { label: "۱۶–۱۸", h: 82 },
+      { label: "۲۰–۲۲", h: 60 },
+    ],
+  },
+  supermarket: {
+    shop: "سوپر محله",
+    workflow: [
+      "بارکد کالا را با دوربین گوشی بخوان — دستگاه جدا نمی‌خواهد.",
+      "نسیه همسایه را همان‌جا روی فاکتور بزن؛ دفتر بدهکاران گم نمی‌شود.",
+      "هشدار کمبود را ببین و فردا همان کالا را سفارش بده.",
+    ],
+    modules: [
+      { id: "scan", label: "اسکن بارکد" },
+      { id: "invoice", label: "فاکتور فروش" },
+      { id: "debt", label: "دفتر نسیه" },
+      { id: "stock", label: "هشدار کمبود" },
+      { id: "report", label: "سود روزانه" },
+    ],
+    tools: ["اسکن دوربین", "فاکتور", "صدا", "بدهکاران", "انبار", "ورود اکسل", "هزینه‌ها", "گزارش"],
+    lines: [
+      { name: "روغن ۱٫۸", qty: "۱", price: "۱۸۵٬۰۰۰" },
+      { name: "برنج ۱۰ کیلویی", qty: "۱", price: "۸۹۰٬۰۰۰" },
+    ],
+    heard: "یک روغن و دو ماست",
+    scan: "۶۲۶۰۰۰۱۲۳۴۵۶۷ — روغن لادن",
+    debtors: [
+      { name: "آقای حسینی", amount: "۴۸۰٬۰۰۰" },
+      { name: "خانم مرادی", amount: "۹۵٬۰۰۰" },
+    ],
+    stock: [
+      { name: "روغن ۱٫۸", left: "۲ — کمبود" },
+      { name: "شیر کیسه‌ای", left: "۱۸" },
+    ],
+    bars: [
+      { label: "خوراکی", h: 70 },
+      { label: "شوینده", h: 38 },
+      { label: "تنقلات", h: 55 },
+    ],
+  },
+  pharmacy: {
+    shop: "آرایشی بهار",
+    workflow: [
+      "بارکد برند را اسکن کن یا برای کالای بدون بارکد، بارکد اختصاصی چاپ کن.",
+      "تاریخچه خرید مشتری را باز کن و همان برند قبلی را پیشنهاد بده.",
+      "گزارش پرفروش‌ترین برند را ببین و سفارش بعدی را حدسی نده.",
+    ],
+    modules: [
+      { id: "scan", label: "بارکد برند" },
+      { id: "debt", label: "تاریخچه مشتری" },
+      { id: "invoice", label: "فاکتور" },
+      { id: "report", label: "برند پرفروش" },
+      { id: "store", label: "صفحه فروشگاه" },
+    ],
+    tools: ["اسکن", "بارکد اختصاصی", "مشتریان", "فاکتور PDF", "گزارش", "پشتیبان ابری"],
+    lines: [
+      { name: "کرم برند آ", qty: "۱", price: "۳۲۰٬۰۰۰" },
+      { name: "عطر ۳۰ میل", qty: "۱", price: "۱٬۱۵۰٬۰۰۰" },
+    ],
+    heard: "یک کرم آبرسان برند آ",
+    scan: "کرم روز · کد ۱۲۸۴",
+    debtors: [
+      { name: "مینا احمدی", amount: "۰ — خرید قبلی: کرم شب" },
+    ],
+    bars: [
+      { label: "برند آ", h: 80 },
+      { label: "برند ب", h: 45 },
+      { label: "عطر", h: 58 },
+    ],
+  },
+  mobile: {
+    shop: "موبایل راد",
+    workflow: [
+      "سریال گوشی را روی فاکتور ثبت کن؛ گارانتی دیگر روی کاغذ نیست.",
+      "موجودی هر رنگ را جدا ببین تا رنگ تمام‌شده را نفروشی.",
+      "مشتری با سریال یا شماره پیدا می‌شود — پیگیری در ثانیه.",
+    ],
+    modules: [
+      { id: "invoice", label: "فاکتور سریال" },
+      { id: "stock", label: "رنگ و مدل" },
+      { id: "debt", label: "گارانتی" },
+      { id: "scan", label: "بارکد کالا" },
+      { id: "report", label: "سود هر مدل" },
+    ],
+    tools: ["فاکتور", "سریال", "اسکن", "انبار", "مشتریان", "گزارش", "فاکتور PDF"],
+    lines: [
+      { name: "قاب S۲۴ مشکی", qty: "۱", price: "۱۸۰٬۰۰۰" },
+      { name: "شارژر ۲۰ وات", qty: "۱", price: "۲۴۰٬۰۰۰" },
+    ],
+    heard: "یک قاب اس ۲۴ مشکی",
+    scan: "سریال · SN ۸۴۲۹۱",
+    debtors: [
+      { name: "علی محمدی", amount: "گارانتی تا ۱۴۰۴/۰۹" },
+    ],
+    stock: [
+      { name: "قاب مشکی", left: "۶" },
+      { name: "قاب آبی", left: "۰" },
+    ],
+    bars: [
+      { label: "قاب", h: 72 },
+      { label: "شارژر", h: 50 },
+      { label: "گلس", h: 34 },
+    ],
+  },
+  gold: {
+    shop: "طلای پاسارگاد",
+    workflow: [
+      "نرخ گرم ۱۸ عیار را وارد کن یا از نرخ روز استفاده کن.",
+      "وزن و اجرت را با صدا بگو؛ مالیات و سود خودش حساب می‌شود.",
+      "فاکتور طلا را برای مشتری VIP بفرست — اطلاعات روی ابر می‌ماند.",
+    ],
+    modules: [
+      { id: "gold", label: "ماشین‌حساب طلا" },
+      { id: "voice", label: "ثبت با صدا" },
+      { id: "invoice", label: "فاکتور طلا" },
+      { id: "debt", label: "مشتری VIP" },
+      { id: "report", label: "سود روز" },
+    ],
+    tools: ["نرخ طلا", "فاکتور طلا", "صدا", "وزن و اجرت", "مشتریان VIP", "پشتیبان امن"],
+    lines: [
+      { name: "انگشتر ۱۸ عیار", qty: "۴٫۲۰ گرم", price: "—" },
+    ],
+    heard: "انگشتر چهار گرم و بیست سوت اجرت هفت درصد",
+    scan: "قطعه · بارکد وزن و عیار",
+    debtors: [
+      { name: "خانم نوری", amount: "VIP · خرید سوم" },
+    ],
+    bars: [
+      { label: "انگشتر", h: 64 },
+      { label: "گردنبند", h: 48 },
+      { label: "سکه", h: 80 },
+    ],
+  },
+  bakery: {
+    shop: "شیرینی نور",
+    workflow: [
+      "سفارش کیک را با تاریخ تحویل ثبت کن؛ روزش یادآوری می‌آید.",
+      "منوی عکس‌دار را با QR به مشتری نشان بده.",
+      "قبل از تمام‌شدن شکر و آرد، هشدار بگیر.",
+    ],
+    modules: [
+      { id: "menu", label: "منوی عکس‌دار" },
+      { id: "invoice", label: "فروش روزانه" },
+      { id: "students", label: "سفارش کیک" },
+      { id: "stock", label: "مواد اولیه" },
+      { id: "report", label: "شب یلدا" },
+    ],
+    tools: ["منوی QR", "فاکتور", "یادآوری تحویل", "انبار", "هزینه‌ها", "گزارش فصلی"],
+    lines: [
+      { name: "شیرینی مخلوط", qty: "۱ کیلو", price: "۴۸۰٬۰۰۰" },
+      { name: "نان بربری", qty: "۴", price: "۸۰٬۰۰۰" },
+    ],
+    heard: "یک کیلو مخلوط و چهار بربری",
+    scan: "QR ویترین — منوی امروز",
+    debtors: [
+      { name: "سفارش کیک تولد", amount: "تحویل جمعه" },
+    ],
+    menu: [
+      { name: "باقلوا", price: "۵۲۰٬۰۰۰" },
+      { name: "کیک خانگی", price: "۱٬۸۰۰٬۰۰۰" },
+    ],
+    stock: [
+      { name: "شکر", left: "کم" },
+      { name: "آرد", left: "۱۲ کیلو" },
+    ],
+    students: [
+      { name: "کیک تولد سارا", due: "جمعه ۱۸" },
+      { name: "شیرینی نامزدی", due: "یکشنبه" },
+    ],
+    bars: [
+      { label: "یلدا", h: 88 },
+      { label: "عید", h: 70 },
+      { label: "عادی", h: 36 },
+    ],
+  },
+  hardware: {
+    shop: "یراق نو",
+    workflow: [
+      "برای پیچ و قطعه کوچک هم بارکد بگذار؛ قیمت دیگر گم نمی‌شود.",
+      "فاکتور عمده را با تخفیف بزن و بدهی مشتری را همان‌جا ثبت کن.",
+      "گزارش پرفروش را ببین و خرید بعدی را دقیق سفارش بده.",
+    ],
+    modules: [
+      { id: "scan", label: "بارکد قطعه" },
+      { id: "invoice", label: "فاکتور عمده" },
+      { id: "debt", label: "اعتبار مشتری" },
+      { id: "stock", label: "موجودی اندازه" },
+      { id: "report", label: "سفارش هوشمند" },
+    ],
+    tools: ["بارکد", "اسکن", "فاکتور عمده", "بدهکاران", "انبار", "گزارش"],
+    lines: [
+      { name: "پیچ ۶ سانت", qty: "۲۰۰", price: "۱۶۰٬۰۰۰" },
+      { name: "قفل در", qty: "۴", price: "۱٬۲۰۰٬۰۰۰" },
+    ],
+    heard: "دویست پیچ شش سانت",
+    scan: "پیچ ۶ · برند الف",
+    debtors: [
+      { name: "پیمانکار ساختمان", amount: "۸٬۵۰۰٬۰۰۰" },
+    ],
+    stock: [
+      { name: "پیچ ۶", left: "۴۵۰" },
+      { name: "قفل برقی", left: "۲" },
+    ],
+    bars: [
+      { label: "یراق", h: 66 },
+      { label: "برق", h: 44 },
+      { label: "ابزار", h: 52 },
+    ],
+  },
+  book: {
+    shop: "کتاب مهر",
+    workflow: [
+      "ISBN پشت کتاب را اسکن کن؛ عنوان همان لحظه می‌آید.",
+      "برای مدرسه فاکتور عمده بزن — لیست کامل در PDF.",
+      "قبل از مهر، کمبود دفتر و کتاب کمک‌درسی را ببین.",
+    ],
+    modules: [
+      { id: "scan", label: "اسکن ISBN" },
+      { id: "invoice", label: "فاکتور مدرسه" },
+      { id: "stock", label: "آمادگی مهر" },
+      { id: "debt", label: "مدارس طرف‌حساب" },
+      { id: "report", label: "گزارش فصل" },
+    ],
+    tools: ["اسکن ISBN", "فاکتور", "انبار", "بدهکاران", "گزارش مهر"],
+    lines: [
+      { name: "دفتر ۶۰ برگ", qty: "۴۰", price: "۱٬۲۰۰٬۰۰۰" },
+      { name: "کتاب کمک‌درسی", qty: "۱۲", price: "۲٬۴۰۰٬۰۰۰" },
+    ],
+    heard: "چهل دفتر شصت برگ",
+    scan: "ISBN ۹۷۸۶۰۰…",
+    debtors: [
+      { name: "دبستان آزادگان", amount: "۴٬۸۰۰٬۰۰۰" },
+    ],
+    stock: [
+      { name: "دفتر ۶۰", left: "۲۲۰" },
+      { name: "خودکار آبی", left: "کم" },
+    ],
+    bars: [
+      { label: "مهر", h: 90 },
+      { label: "دی", h: 40 },
+      { label: "خرداد", h: 55 },
+    ],
+  },
+  students: {
+    shop: "آموزشگاه نوا",
+    workflow: [
+      "هنرجو را با تاریخ پایان شهریه ثبت کن.",
+      "همان روز سررسید، یادآوری روی گوشی می‌آید.",
+      "شهریه را فاکتور کن و برای خانواده بفرست.",
+    ],
+    modules: [
+      { id: "students", label: "هنرجویان" },
+      { id: "invoice", label: "فاکتور شهریه" },
+      { id: "voice", label: "ثبت با صدا" },
+      { id: "debt", label: "عقب‌افتاده‌ها" },
+      { id: "report", label: "دریافتی ماه" },
+    ],
+    tools: ["هنرجویان", "یادآوری شهریه", "فاکتور", "صدا", "گزارش", "پشتیبان ابری"],
+    lines: [
+      { name: "شهریه پیانو — مهر", qty: "۱", price: "۲٬۵۰۰٬۰۰۰" },
+    ],
+    heard: "شهریه پیانو سارا دو میلیون و پانصد",
+    scan: "کارت هنرجو · کد ۰۴۱۸",
+    debtors: [
+      { name: "سارا محمدی", amount: "سررسید امروز" },
+      { name: "کیان رضایی", amount: "۳ روز تأخیر" },
+    ],
+    students: [
+      { name: "سارا محمدی", due: "امروز" },
+      { name: "کیان رضایی", due: "۳ روز پیش" },
+      { name: "نیکا احمدی", due: "۵ روز دیگر" },
+    ],
+    bars: [
+      { label: "گرفته", h: 70 },
+      { label: "عقب", h: 28 },
+    ],
+  },
+};
+
+const GENERIC_SHOW: Showcase = {
+  shop: "فروشگاه شما",
+  workflow: [
+    "فاکتور را با صدا یا اسکن بارکد بزن — بدون کامپیوتر.",
+    "نسیه و موجودی روی گوشی می‌ماند، حتی اگر اینترنت قطع شود.",
+    "شب سود واقعی را ببین و فردا همان را بفروش که می‌صرفد.",
+  ],
+  modules: [
+    { id: "voice", label: "فاکتور با صدا" },
+    { id: "scan", label: "اسکن بارکد" },
+    { id: "invoice", label: "فاکتور" },
+    { id: "debt", label: "بدهکاران" },
+    { id: "report", label: "گزارش سود" },
+    { id: "store", label: "سایت فروشگاه" },
+  ],
+  tools: ["فاکتور", "صدا", "اسکن", "انبار", "مشتریان", "گزارش", "هزینه‌ها", "یادآورها", "سایت فروشگاه", "پشتیبان ابری", "آفلاین"],
+  lines: [
+    { name: "کالای نمونه", qty: "۲", price: "۲۵۰٬۰۰۰" },
+  ],
+  heard: "دو تا کالای نمونه ۲۵۰ هزار",
+  scan: "بارکد کالا با دوربین گوشی",
+  debtors: [{ name: "مشتری محلی", amount: "۴۲۰٬۰۰۰" }],
+  bars: [
+    { label: "فروش", h: 72 },
+    { label: "سود", h: 48 },
+  ],
+};
+
+function PhonePreview({
+  show,
+  screen,
+  caption,
+}: {
+  show: Showcase;
+  screen: ScreenId;
+  caption: string;
+}) {
+  const menu = show.menu ?? [
+    { name: "آیتم ۱", price: "۹۵٬۰۰۰" },
+    { name: "آیتم ۲", price: "۱۴۰٬۰۰۰" },
+  ];
+  const stock = show.stock ?? [
+    { name: "کالای پرفروش", left: "۴ عدد" },
+    { name: "کالای کم‌موجود", left: "هشدار" },
+  ];
+  const students = show.students ?? [
+    { name: "سارا محمدی", due: "امروز" },
+    { name: "کیان رضایی", due: "۳ روز پیش" },
+  ];
+  const bars = show.bars ?? [
+    { label: "فروش", h: 72 },
+    { label: "سود", h: 48 },
+  ];
+
+  return (
+    <div className="sg-phone" aria-hidden="true">
+      <div className="sg-phone-ear" />
+      <div className="sg-phone-notch">
+        <span>{show.shop}</span>
+        <span>KAMIX</span>
+      </div>
+      <div className="sg-phone-body">
+        <div key={screen} className="sg-scr">
+          <div className="sg-scr-title">{caption}</div>
+
+          {screen === "invoice" && (
+            <>
+              {show.lines.map((l) => (
+                <div key={l.name} className="sg-row">
+                  <span>{l.name}</span>
+                  <span className="sg-muted">×{l.qty}</span>
+                  <b>{l.price}</b>
+                </div>
+              ))}
+              <div className="sg-total">
+                <span>جمع فاکتور</span>
+                <b>ثبت با یک لمس</b>
+              </div>
+            </>
+          )}
+
+          {screen === "voice" && (
+            <div className="sg-voice">
+              <div className="sg-mic-ring">
+                <Mic className="h-6 w-6" />
+              </div>
+              <p className="sg-heard">«{show.heard}»</p>
+              <p className="sg-muted">فاکتور از روی صدا نوشته می‌شود</p>
+            </div>
+          )}
+
+          {screen === "scan" && (
+            <>
+              <div className="sg-finder">
+                <i />
+                <span className="sg-laser" />
+              </div>
+              <p className="sg-heard">{show.scan}</p>
+            </>
+          )}
+
+          {screen === "debt" &&
+            show.debtors.map((d) => (
+              <div key={d.name} className="sg-row">
+                <span>{d.name}</span>
+                <b className="sg-amt">{d.amount}</b>
+              </div>
+            ))}
+
+          {screen === "menu" && (
+            <>
+              <div className="sg-qr" />
+              {menu.map((m) => (
+                <div key={m.name} className="sg-row">
+                  <span>{m.name}</span>
+                  <b className="sg-amt">{m.price}</b>
+                </div>
+              ))}
+            </>
+          )}
+
+          {screen === "gold" && (
+            <>
+              <div className="sg-gold-rate">نرخ گرم ۱۸ عیار · لحظه‌ای</div>
+              <div className="sg-gold-grid">
+                <div>وزن ۴٫۲۰ گرم</div>
+                <div>اجرت ۷٪</div>
+                <div>سود ۷٪</div>
+                <div>مالیات روشن</div>
+              </div>
+              <div className="sg-total">
+                <span>جمع فاکتور طلا</span>
+                <b>خودکار</b>
+              </div>
+            </>
+          )}
+
+          {screen === "report" && (
+            <div className="sg-bars">
+              {bars.map((b) => (
+                <div key={b.label} className="sg-bar">
+                  <i style={{ height: `${b.h}%` }} />
+                  <span>{b.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {screen === "stock" &&
+            stock.map((s) => (
+              <div key={s.name} className="sg-row">
+                <span>{s.name}</span>
+                <b className={/کم|هشدار|تمام|۰/.test(s.left) ? "sg-warn" : "sg-amt"}>{s.left}</b>
+              </div>
+            ))}
+
+          {screen === "store" && (
+            <div className="sg-store">
+              <div className="sg-store-mark">
+                <Store className="h-5 w-5" />
+              </div>
+              <strong>{show.shop}</strong>
+              <p>صفحهٔ یک‌صفحه‌ای فروشگاه — لینک را برای مشتری بفرست</p>
+              <div className="sg-store-btn">مشاهده کالاها</div>
+            </div>
+          )}
+
+          {screen === "students" &&
+            students.map((s) => (
+              <div key={s.name} className="sg-row">
+                <span>{s.name}</span>
+                <b className={/امروز|پیش/.test(s.due) ? "sg-warn" : "sg-amt"}>{s.due}</b>
+              </div>
+            ))}
+        </div>
+      </div>
+      <div className="sg-phone-nav">
+        <span>فاکتور</span>
+        <span>کالا</span>
+        <span>مشتری</span>
+        <span>گزارش</span>
+      </div>
+    </div>
+  );
+}
+
 export function SmartBusinessGuide() {
   const [selected, setSelected] = useState<Guide | null>(null);
   const [customText, setCustomText] = useState("");
@@ -357,6 +936,8 @@ export function SmartBusinessGuide() {
   const [activeIdx, setActiveIdx] = useState(-1);
   const [indicator, setIndicator] = useState({ left: 0, width: 0, on: false });
   const [canScroll, setCanScroll] = useState(false);
+
+  const [screen, setScreen] = useState<ScreenId>("invoice");
 
   const shelfRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -376,6 +957,11 @@ export function SmartBusinessGuide() {
     ? `${activeGuide.emoji} ${activeGuide.label}`
     : `${customText.trim() || "کسب‌وکار شما"}`;
   const printKey = selected?.key ?? (showCustomResult ? `custom:${customText.trim()}` : "");
+  const showcase = (activeGuide && SHOWCASE[activeGuide.key]) || GENERIC_SHOW;
+
+  useEffect(() => {
+    setScreen(showcase.modules[0]?.id ?? "invoice");
+  }, [printKey]);
 
   const pickGuide = (g: Guide) => {
     setSelected(g);
@@ -505,10 +1091,10 @@ export function SmartBusinessGuide() {
             فاکتور مخصوص صنف خودت
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-            مغازه‌ت کدام قفسه است؟
+            ببین برنامه برای مغازهٔ تو چه شکلی کار می‌کند
           </h2>
           <p className="lp-body mt-3 text-sm leading-7 text-muted-foreground sm:text-base">
-            صنف را از روی قفسه بردار — رسید تحلیل همان لحظه از چاپگر بیرون می‌آید.
+            صنف را بردار. همان لحظه صفحهٔ واقعی KAMIX — فاکتور، اسکن، نسیه، منو یا طلا — مخصوص همان کار روی گوشی ظاهر می‌شود.
           </p>
         </div>
 
@@ -651,46 +1237,98 @@ export function SmartBusinessGuide() {
               <div key={printKey} className="sg-print rounded-b-2xl px-4 py-5 sm:px-7 sm:py-7">
                 <div className="sg-stagger sg-d1">
                   <div className="text-xl font-extrabold text-primary sm:text-2xl">{activeTitle}</div>
-                  <p className="lp-body mt-2 max-w-xl text-sm leading-7 text-[color:var(--lp-ink)]/80 sm:text-[15px]">
+                  <p className="lp-body mt-1 text-[12px] font-bold text-muted-foreground">
+                    نمونهٔ زنده از «{showcase.shop}» — همان بخش‌هایی که در KAMIX برای این کار روشن است
+                  </p>
+                  <p className="lp-body mt-2 max-w-2xl text-sm leading-7 text-[color:var(--lp-ink)]/80 sm:text-[15px]">
                     {activeIntro}
                   </p>
                 </div>
 
-                <div className="sg-stagger sg-d2 mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="sg-ledger px-4 py-4 pr-5">
-                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-[#8a3b2a]">
-                      <XCircle className="h-4 w-4" />
-                      امروز، روی دفتر کاغذی
-                    </div>
-                    <ul className="space-y-2">
-                      {problemLines.map((p, i) => (
-                        <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#c23b2e]" />
-                          <span>{p}</span>
-                        </li>
+                <div className="sg-stagger sg-d2 sg-stage mt-6">
+                  <div>
+                    <PhonePreview
+                      show={showcase}
+                      screen={screen}
+                      caption={showcase.modules.find((m) => m.id === screen)?.label ?? "برنامه"}
+                    />
+                    <p className="lp-body mt-2 text-center text-[11px] text-muted-foreground">
+                      صفحهٔ واقعی برنامه — هر دکمه یک بخش مناسب همین صنف است
+                    </p>
+                    <div className="sg-mod mt-3" role="tablist" aria-label="بخش‌های برنامه برای این صنف">
+                      {showcase.modules.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={screen === m.id}
+                          className={screen === m.id ? "is-on" : ""}
+                          onClick={() => setScreen(m.id)}
+                        >
+                          {m.label}
+                        </button>
                       ))}
-                    </ul>
+                    </div>
                   </div>
 
-                  <div className="sg-digital p-4">
-                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-primary">
-                      <CheckCircle2 className="h-4 w-4" />
-                      از فردا، روی گوشی با KAMIX
+                  <div className="min-w-0 space-y-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="sg-ledger px-4 py-4 pr-5">
+                        <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-[#8a3b2a]">
+                          <XCircle className="h-4 w-4" />
+                          امروز، روی دفتر کاغذی
+                        </div>
+                        <ul className="space-y-2">
+                          {problemLines.map((p, i) => (
+                            <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6">
+                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#c23b2e]" />
+                              <span>{p}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="sg-digital p-4">
+                        <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-primary">
+                          <CheckCircle2 className="h-4 w-4" />
+                          از فردا، روی گوشی
+                        </div>
+                        <ul className="space-y-2">
+                          {activeBenefits.slice(0, 3).map((b, i) => (
+                            <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6 text-foreground/85">
+                              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                              <span>{b.title}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                    <ul className="space-y-2">
-                      {activeBenefits.slice(0, 3).map((b, i) => (
-                        <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6 text-foreground/85">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                          <span>{b.title}</span>
-                        </li>
-                      ))}
-                    </ul>
+
+                    <div>
+                      <div className="mb-2 text-xs font-extrabold text-foreground">یک روز واقعی پشت پیشخوان</div>
+                      <ol className="sg-flow lp-body">
+                        {showcase.workflow.map((step, i) => (
+                          <li key={i}>
+                            <b>{i + 1}</b>
+                            <span className="text-[13px] leading-6">{step}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs font-extrabold text-foreground">چه بخش‌هایی از KAMIX برای این کار روشن است</div>
+                      <div className="sg-chiprow lp-body">
+                        {showcase.tools.map((t) => (
+                          <span key={t}>{t}</span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="sg-stagger sg-d3 mt-5">
                   <div className="mb-2 text-xs font-bold text-muted-foreground">
-                    همه‌ی امکاناتی که روی فاکتور این صنف می‌آید:
+                    جزئیات همان بخش‌هایی که در برنامه برای این صنف فعال است:
                   </div>
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {activeBenefits.map((b, i) => {

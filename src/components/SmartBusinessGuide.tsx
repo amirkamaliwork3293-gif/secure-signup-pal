@@ -9,12 +9,12 @@
  *   معرفی است تا بازدیدکننده قبل از ثبت‌نام، ارزش برنامه را برای
  *   کسب‌وکار خودش دقیقاً ببیند.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import {
-  Sparkles, ArrowRight, ArrowLeft, CheckCircle2, TrendingUp, XCircle,
+  ArrowRight, ArrowLeft, CheckCircle2, TrendingUp, XCircle,
   Package, Users, FileText, BarChart3, ShieldCheck, Rocket, Clock,
-  Mic, Globe,
+  Mic, Globe, ChevronLeft, ChevronRight, Receipt,
 } from "lucide-react";
 
 type Benefit = {
@@ -315,12 +315,56 @@ function matchGuide(text: string): Guide | null {
   return null;
 }
 
+function suggestGuides(text: string): Guide[] {
+  const t = text.trim().toLowerCase();
+  if (!t) return [];
+  const ranked: Array<{ g: Guide; score: number }> = [];
+  for (const g of GUIDES) {
+    const label = g.label.toLowerCase();
+    if (label.includes(t) || t.includes(label)) {
+      ranked.push({ g, score: 3 });
+      continue;
+    }
+    const hit = g.keywords.find((k) => k.toLowerCase().includes(t) || t.includes(k.toLowerCase()));
+    if (hit) ranked.push({ g, score: hit.length === t.length ? 2 : 1 });
+  }
+  return ranked.sort((a, b) => b.score - a.score).slice(0, 5).map((x) => x.g);
+}
+
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark>{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function SmartBusinessGuide() {
   const [selected, setSelected] = useState<Guide | null>(null);
   const [customText, setCustomText] = useState("");
   const [showCustomResult, setShowCustomResult] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, on: false });
+  const [canScroll, setCanScroll] = useState(false);
+
+  const shelfRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const suggestBoxId = "sg-suggest-list";
 
   const customGuide = useMemo(() => matchGuide(customText), [customText]);
+  const suggestions = useMemo(() => suggestGuides(customText), [customText]);
   const activeGuide: Guide | null = selected ?? (showCustomResult ? customGuide : null);
   const showResult = selected != null || showCustomResult;
 
@@ -330,120 +374,313 @@ export function SmartBusinessGuide() {
   const activeRoi: string | null = activeGuide?.roi ?? null;
   const activeTitle: string = activeGuide
     ? `${activeGuide.emoji} ${activeGuide.label}`
-    : `✨ ${customText.trim() || "کسب‌وکار شما"}`;
+    : `${customText.trim() || "کسب‌وکار شما"}`;
+  const printKey = selected?.key ?? (showCustomResult ? `custom:${customText.trim()}` : "");
+
+  const pickGuide = (g: Guide) => {
+    setSelected(g);
+    setShowCustomResult(false);
+    setSuggestOpen(false);
+    setActiveIdx(-1);
+  };
+
+  const submitCustom = () => {
+    if (!customText.trim()) return;
+    if (activeIdx >= 0 && suggestions[activeIdx]) {
+      pickGuide(suggestions[activeIdx]);
+      setCustomText("");
+      return;
+    }
+    const hit = matchGuide(customText);
+    if (hit) {
+      pickGuide(hit);
+      return;
+    }
+    setSelected(null);
+    setShowCustomResult(true);
+    setSuggestOpen(false);
+  };
 
   const reset = () => {
     setSelected(null);
     setShowCustomResult(false);
     setCustomText("");
+    setSuggestOpen(false);
+    setActiveIdx(-1);
+    shelfRef.current?.scrollTo({ left: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   };
 
-  return (
-    <section id="smart-guide" className="relative overflow-hidden py-14 sm:py-20">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-primary/5 via-background to-background" />
-      <div className="pointer-events-none absolute -left-32 top-10 h-80 w-80 rounded-full bg-primary/15 blur-3xl" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 h-72 w-72 rounded-full bg-primary-glow/15 blur-3xl" />
+  const measureIndicator = () => {
+    const key = selected?.key;
+    const card = key ? cardRefs.current[key] : null;
+    const track = trackRef.current;
+    if (!card || !track) {
+      setIndicator((s) => ({ ...s, on: false }));
+      return;
+    }
+    setIndicator({ left: card.offsetLeft, width: card.offsetWidth, on: true });
+  };
 
-      <div className="relative mx-auto max-w-4xl px-4">
-        {/* Header */}
+  useLayoutEffect(() => {
+    measureIndicator();
+  }, [selected]);
+
+  useEffect(() => {
+    const shelf = shelfRef.current;
+    if (!shelf) return;
+    const update = () => {
+      setCanScroll(shelf.scrollWidth > shelf.clientWidth + 8);
+      measureIndicator();
+    };
+    update();
+    shelf.addEventListener("scroll", measureIndicator, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      shelf.removeEventListener("scroll", measureIndicator);
+      window.removeEventListener("resize", update);
+    };
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const card = cardRefs.current[selected.key];
+    card?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [selected]);
+
+  const scrollShelf = (dir: 1 | -1) => {
+    const el = shelfRef.current;
+    if (!el) return;
+    el.scrollBy({
+      left: dir * 220,
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+  };
+
+  const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && suggestions.length > 0) {
+      e.preventDefault();
+      setSuggestOpen(true);
+      setActiveIdx((i) => (i + 1) % suggestions.length);
+      return;
+    }
+    if (e.key === "ArrowUp" && suggestions.length > 0) {
+      e.preventDefault();
+      setSuggestOpen(true);
+      setActiveIdx((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+      return;
+    }
+    if (e.key === "Escape") {
+      setSuggestOpen(false);
+      setActiveIdx(-1);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitCustom();
+    }
+  };
+
+  const problemLines =
+    activeProblems.length > 0
+      ? activeProblems
+      : ["مدیریت دستی و کاغذی، خطای انسانی زیاد", "بی‌خبری از سود و زیان واقعی هر ماه", "وقت زیادی صرف کارهای تکراری می‌شود"];
+
+  return (
+    <section id="smart-guide" className="relative overflow-x-clip py-14 sm:py-20">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-70"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--primary) 12%, transparent) 1px, transparent 0)",
+          backgroundSize: "22px 22px",
+        }}
+      />
+
+      <div className="relative mx-auto max-w-6xl px-4">
         <div className="mx-auto mb-8 max-w-2xl text-center">
-          <div className="mx-auto mb-4 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-1.5 text-xs font-bold text-primary">
-            <Sparkles className="h-3.5 w-3.5" />
-            راهنمای هوشمند اختصاصی کسب‌وکار شما
-          </div>
+          <p className="mb-3 inline-flex items-center gap-2 text-[13px] font-bold text-primary">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/10">
+              <Receipt className="h-3.5 w-3.5" />
+            </span>
+            فاکتور مخصوص صنف خودت
+          </p>
           <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-            کسب‌وکار شما دقیقاً همین‌جاست؟
+            مغازه‌ت کدام قفسه است؟
           </h2>
-          <p className="mt-3 text-sm leading-7 text-muted-foreground sm:text-base">
-            صنف خودتان را انتخاب کنید تا در چند ثانیه ببینید KAMIX دقیقاً چه
-            مشکلی از فروشگاه شما را حل می‌کند و چقدر برایتان سودآور است.
+          <p className="lp-body mt-3 text-sm leading-7 text-muted-foreground sm:text-base">
+            صنف را از روی قفسه بردار — رسید تحلیل همان لحظه از چاپگر بیرون می‌آید.
           </p>
         </div>
 
-        <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-elegant">
-          {!showResult && (
-            <div className="p-5 sm:p-8">
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                {GUIDES.map((g) => (
+        <div className="rounded-3xl border border-border bg-card/80 p-4 shadow-elegant sm:p-6">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="lp-body text-xs font-bold text-muted-foreground">قفسه صنوف</p>
+            {canScroll && (
+              <div className="hidden items-center gap-1 sm:flex">
+                <button
+                  type="button"
+                  onClick={() => scrollShelf(1)}
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-background text-foreground hover:bg-accent"
+                  aria-label="اسکرول به راست"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollShelf(-1)}
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-border bg-background text-foreground hover:bg-accent"
+                  aria-label="اسکرول به چپ"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div ref={shelfRef} className="sg-shelf" role="listbox" aria-label="انتخاب صنف">
+            <div ref={trackRef} className="sg-track">
+              {GUIDES.map((g) => {
+                const on = selected?.key === g.key;
+                return (
                   <button
                     key={g.key}
                     type="button"
-                    onClick={() => setSelected(g)}
-                    className="flex items-center gap-2 rounded-2xl border border-border bg-background px-3 py-3 text-right text-sm font-semibold text-foreground transition hover:-translate-y-0.5 hover:border-primary/50 hover:bg-primary/5 hover:shadow-card"
+                    role="option"
+                    aria-selected={on}
+                    data-kind={g.key}
+                    ref={(el) => {
+                      cardRefs.current[g.key] = el;
+                    }}
+                    onClick={() => pickGuide(g)}
+                    className={`sg-trade ${on ? "is-on" : ""}`}
                   >
-                    <span className="text-xl">{g.emoji}</span>
-                    <span>{g.label}</span>
+                    <span className="block text-xl leading-none" aria-hidden="true">
+                      {g.emoji}
+                    </span>
+                    <span className="mt-2 block text-[13px] font-extrabold leading-6">{g.label}</span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
+              <span
+                className="sg-indicator"
+                style={{
+                  left: indicator.left,
+                  width: indicator.width,
+                  opacity: indicator.on ? 1 : 0,
+                }}
+                aria-hidden="true"
+              />
+            </div>
+          </div>
 
-              <div className="mt-5 flex flex-col gap-2 border-t border-border pt-5 sm:flex-row">
+          <div className="relative mt-4 border-t border-dashed border-border pt-4">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative min-w-0 flex-1">
                 <input
                   value={customText}
-                  onChange={(e) => setCustomText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && customText.trim()) setShowCustomResult(true);
+                  onChange={(e) => {
+                    setCustomText(e.target.value);
+                    setShowCustomResult(false);
+                    setSuggestOpen(true);
+                    setActiveIdx(-1);
                   }}
-                  placeholder="صنف شما در لیست نبود؟ اینجا بنویسید... (مثلاً: گل‌فروشی، اسباب‌بازی)"
-                  className="flex-1 rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:border-primary"
+                  onFocus={() => setSuggestOpen(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setSuggestOpen(false), 140);
+                  }}
+                  onKeyDown={onSearchKeyDown}
+                  placeholder="صنف شما در قفسه نبود؟ اینجا بنویس… (مثلاً: گل‌فروشی)"
+                  className="lp-body w-full rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus-visible:border-primary"
+                  role="combobox"
+                  aria-expanded={suggestOpen && suggestions.length > 0}
+                  aria-controls={suggestBoxId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={
+                    activeIdx >= 0 && suggestions[activeIdx]
+                      ? `sg-opt-${suggestions[activeIdx].key}`
+                      : undefined
+                  }
                 />
-                <button
-                  type="button"
-                  disabled={!customText.trim()}
-                  onClick={() => setShowCustomResult(true)}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
-                >
-                  <ArrowRight className="h-4 w-4" />
-                  نمایش تحلیل من
-                </button>
+                {suggestOpen && suggestions.length > 0 && (
+                  <ul
+                    id={suggestBoxId}
+                    role="listbox"
+                    className="sg-suggest absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-card py-1 shadow-elegant"
+                  >
+                    {suggestions.map((g, i) => (
+                      <li key={g.key} role="presentation">
+                        <button
+                          type="button"
+                          id={`sg-opt-${g.key}`}
+                          role="option"
+                          aria-selected={i === activeIdx}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            pickGuide(g);
+                            setCustomText("");
+                          }}
+                          className={`flex w-full items-center gap-2 px-3 py-2.5 text-right text-sm ${
+                            i === activeIdx ? "bg-primary/10 text-foreground" : "text-foreground hover:bg-accent"
+                          }`}
+                        >
+                          <span aria-hidden="true">{g.emoji}</span>
+                          <span className="font-semibold">
+                            <HighlightMatch text={g.label} query={customText} />
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
+              <button
+                type="button"
+                disabled={!customText.trim()}
+                onClick={submitCustom}
+                className="lp-btn lp-btn-primary inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-primary-foreground disabled:opacity-50"
+              >
+                <ArrowRight className="h-4 w-4" />
+                نمایش تحلیل من
+              </button>
             </div>
-          )}
+          </div>
 
           {showResult && (
-            <div>
-              {/* Result header */}
-              <div className="bg-gradient-to-l from-primary/15 via-primary/5 to-transparent px-5 py-6 sm:px-8">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xl font-extrabold text-primary sm:text-2xl">{activeTitle}</div>
-                    <p className="mt-2 max-w-xl text-sm leading-7 text-foreground/90 sm:text-[15px]">
-                      {activeIntro}
-                    </p>
-                  </div>
+            <div className="mt-6">
+              <div className="sg-printer" aria-hidden="true" />
+              <div key={printKey} className="sg-print rounded-b-2xl px-4 py-5 sm:px-7 sm:py-7">
+                <div className="sg-stagger sg-d1">
+                  <div className="text-xl font-extrabold text-primary sm:text-2xl">{activeTitle}</div>
+                  <p className="lp-body mt-2 max-w-xl text-sm leading-7 text-[color:var(--lp-ink)]/80 sm:text-[15px]">
+                    {activeIntro}
+                  </p>
                 </div>
-              </div>
 
-              <div className="px-5 py-6 sm:px-8">
-                {/* Before / After comparison — strongest persuasion element */}
-                <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-destructive/25 bg-destructive/5 p-4">
-                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-bold text-destructive">
+                <div className="sg-stagger sg-d2 mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="sg-ledger px-4 py-4 pr-5">
+                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-[#8a3b2a]">
                       <XCircle className="h-4 w-4" />
-                      امروز، بدون KAMIX
+                      امروز، روی دفتر کاغذی
                     </div>
                     <ul className="space-y-2">
-                      {(activeProblems.length > 0
-                        ? activeProblems
-                        : ["مدیریت دستی و کاغذی، خطای انسانی زیاد", "بی‌خبری از سود و زیان واقعی هر ماه", "وقت زیادی صرف کارهای تکراری می‌شود"]
-                      ).map((p, i) => (
-                        <li key={i} className="flex items-start gap-2 text-[13px] leading-6 text-foreground/80">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-destructive/60" />
+                      {problemLines.map((p, i) => (
+                        <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#c23b2e]" />
                           <span>{p}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
 
-                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                  <div className="sg-digital p-4">
+                    <div className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-primary">
                       <CheckCircle2 className="h-4 w-4" />
-                      از فردا، با KAMIX
+                      از فردا، روی گوشی با KAMIX
                     </div>
                     <ul className="space-y-2">
                       {activeBenefits.slice(0, 3).map((b, i) => (
-                        <li key={i} className="flex items-start gap-2 text-[13px] leading-6 text-foreground/80">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                        <li key={i} className="lp-body flex items-start gap-2 text-[13px] leading-6 text-foreground/85">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
                           <span>{b.title}</span>
                         </li>
                       ))}
@@ -451,62 +688,66 @@ export function SmartBusinessGuide() {
                   </div>
                 </div>
 
-                {/* Full benefits grid */}
-                <div className="mb-2 text-xs font-bold text-muted-foreground">
-                  همه‌ی امکاناتی که KAMIX برای شما فعال می‌کند:
-                </div>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  {activeBenefits.map((b, i) => {
-                    const Icon = iconMap[b.icon];
-                    return (
-                      <div
-                        key={i}
-                        className="flex items-start gap-3 rounded-2xl border border-border bg-background p-3.5 transition hover:border-primary/40"
-                      >
-                        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                          <Icon className="h-4.5 w-4.5" />
+                <div className="sg-stagger sg-d3 mt-5">
+                  <div className="mb-2 text-xs font-bold text-muted-foreground">
+                    همه‌ی امکاناتی که روی فاکتور این صنف می‌آید:
+                  </div>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    {activeBenefits.map((b, i) => {
+                      const Icon = iconMap[b.icon];
+                      return (
+                        <div
+                          key={i}
+                          className="flex items-start gap-3 rounded-2xl border border-border/80 bg-background/80 p-3.5"
+                        >
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-bold text-foreground">{b.title}</div>
+                            <div className="lp-body mt-0.5 text-xs leading-6 text-muted-foreground">{b.detail}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-[13px] font-bold text-foreground">{b.title}</div>
-                          <div className="mt-0.5 text-xs leading-6 text-muted-foreground">{b.detail}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {activeRoi && (
-                  <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
-                    <TrendingUp className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                    <p className="text-[13px] leading-7 text-emerald-800 dark:text-emerald-200">
-                      <strong>برگشت سرمایه: </strong>{activeRoi}
+                  <div className="sg-stagger sg-d4 sg-roi mt-4 flex items-start gap-3 rounded-2xl px-4 py-3.5">
+                    <span className="sg-roi-seal" aria-hidden="true">
+                      مهر
+                      <br />
+                      سود
+                    </span>
+                    <p className="lp-body min-w-0 text-[13px] leading-7">
+                      <strong className="ml-1 inline-flex items-center gap-1">
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        برگشت سرمایه:
+                      </strong>
+                      {activeRoi}
                     </p>
                   </div>
                 )}
 
                 {showCustomResult && !customGuide && (
-                  <p className="mt-4 rounded-2xl bg-muted/60 px-4 py-3 text-xs leading-7 text-muted-foreground">
+                  <p className="sg-stagger sg-d4 lp-body mt-4 rounded-2xl bg-muted/60 px-4 py-3 text-xs leading-7 text-muted-foreground">
                     برای «{customText.trim()}» دسته‌ی اختصاصی نداشتیم، ولی موارد بالا برای هر فروشگاهی کاربردی است — تیم پشتیبانی ما هم می‌تواند راهنمایی دقیق‌تری بدهد.
                   </p>
                 )}
 
-                {/* Strong conversion block */}
-                <div className="mt-7 overflow-hidden rounded-3xl bg-gradient-primary p-6 text-center text-primary-foreground shadow-elegant sm:p-8">
-                  <div className="mx-auto mb-3 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    مخصوص کسب‌وکار شما آماده است
-                  </div>
-                  <h3 className="text-xl font-extrabold sm:text-2xl">
-                    همین حالا KAMIX را برای «{activeGuide ? activeGuide.label : customText.trim() || "کسب‌وکار شما"}» راه‌اندازی کنید
+                <div className="sg-stagger sg-d5 lp-cta-slip mt-7 rounded-3xl p-6 text-center text-primary-foreground sm:p-8">
+                  <p className="relative text-[11px] font-bold opacity-90">مخصوص همین صنف آماده است</p>
+                  <h3 className="relative mt-1 text-xl font-extrabold sm:text-2xl">
+                    KAMIX را برای «{activeGuide ? activeGuide.label : customText.trim() || "کسب‌وکار شما"}» راه بینداز
                   </h3>
-                  <p className="mx-auto mt-2 max-w-md text-sm opacity-90">
-                    ثبت‌نام کمتر از دو دقیقه طول می‌کشد. با پلن‌های ۱، ۳، ۶ یا
-                    ۱۲ ماهه، همین امروز اشتراک خود را فعال کنید.
+                  <p className="lp-body relative mx-auto mt-2 max-w-md text-sm leading-7 opacity-90">
+                    ثبت‌نام کمتر از دو دقیقه طول می‌کشد. با پلن‌های ۱، ۳، ۶ یا ۱۲ ماهه، همین امروز از روی گوشی فاکتور بزن.
                   </p>
-                  <div className="mt-5 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
+                  <div className="relative mt-5 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
                     <Link
                       to="/register"
-                      className="flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-background px-7 py-3.5 text-sm font-extrabold text-primary transition hover:opacity-90 sm:w-auto"
+                      className="lp-btn lp-btn-primary flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-background px-7 py-3.5 text-sm font-extrabold text-primary sm:w-auto"
                     >
                       خرید اشتراک و شروع
                       <ArrowLeft className="h-4 w-4" />
@@ -514,12 +755,12 @@ export function SmartBusinessGuide() {
                     <button
                       type="button"
                       onClick={reset}
-                      className="flex w-full max-w-xs items-center justify-center rounded-2xl border border-primary-foreground/40 px-7 py-3.5 text-sm font-bold text-primary-foreground transition hover:bg-primary-foreground/10 sm:w-auto"
+                      className="lp-btn flex w-full max-w-xs items-center justify-center rounded-2xl border border-primary-foreground/40 px-7 py-3.5 text-sm font-bold text-primary-foreground hover:bg-primary-foreground/10 sm:w-auto"
                     >
                       بررسی صنف دیگر
                     </button>
                   </div>
-                  <p className="mt-4 flex items-center justify-center gap-1.5 text-[11px] opacity-80">
+                  <p className="relative mt-4 flex items-center justify-center gap-1.5 text-[11px] opacity-80">
                     <Clock className="h-3.5 w-3.5" />
                     فعال‌سازی سریع پس از پرداخت — همین امروز شروع کنید
                   </p>
@@ -532,3 +773,4 @@ export function SmartBusinessGuide() {
     </section>
   );
 }
+

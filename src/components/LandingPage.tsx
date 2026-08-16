@@ -63,6 +63,18 @@ function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function LandingDivider() {
+  return (
+    <div className="lp-divider" role="separator" aria-hidden="true">
+      <span className="lp-divider-line" />
+      <span className="lp-divider-mark">
+        <Receipt />
+      </span>
+      <span className="lp-divider-line" />
+    </div>
+  );
+}
+
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -283,8 +295,9 @@ export function LandingPage() {
                   </span>
                   فاکتور را بگو — نه بنویس
                 </p>
-                <h1 className="lp-enter lp-enter-2 max-w-xl text-[1.7rem] font-extrabold leading-[1.35] sm:text-4xl lg:text-[2.6rem] lg:leading-[1.3]">
-                  وقتی مشتری جلوی پیشخوانه، فاکتور همون لحظه آماده‌ست
+                <h1 className="lp-enter lp-enter-2 lp-hero-title max-w-xl text-[1.7rem] font-extrabold leading-[1.35] sm:text-4xl lg:text-[2.65rem] lg:leading-[1.28]">
+                  <span className="lp-hero-title-line">راحتی کسب‌وکار</span>
+                  <span className="lp-hero-title-brand">با کامیکس</span>
                 </h1>
                 <p className="lp-enter lp-enter-2 mt-2 text-sm font-bold kamali-brand">{content.headline}</p>
               </div>
@@ -307,7 +320,7 @@ export function LandingPage() {
                     preload={false}
                     className="lp-btn lp-btn-primary inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-7 py-3.5 text-base font-extrabold text-primary-foreground shadow-elegant"
                   >
-                    ثبت‌نام و شروع از روی گوشی
+                    ثبت‌نام و شروع
                     <ArrowLeft className="h-5 w-5" />
                   </Link>
                   <Link
@@ -342,10 +355,17 @@ export function LandingPage() {
           </div>
         </section>
 
-        <StoriesBar stories={content.stories} />
+        {content.stories.length > 0 && (
+          <>
+            <LandingDivider />
+            <StoriesBar stories={content.stories} />
+          </>
+        )}
 
         {hasVideos && (
-          <section id="videos" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
+          <>
+            <LandingDivider />
+            <section id="videos" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
             <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
               از نزدیک ببین صندوق چطور جمع می‌شود
             </h2>
@@ -388,7 +408,10 @@ export function LandingPage() {
               })}
             </div>
           </section>
+          </>
         )}
+
+        <LandingDivider />
 
         <section id="why-kamix" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
           <h2 className="max-w-xl text-2xl font-extrabold tracking-tight sm:text-3xl">
@@ -427,17 +450,21 @@ export function LandingPage() {
           </div>
         </section>
 
+        <LandingDivider />
+
         <div className="lp-reveal">
           <LiveFeatureShowcase />
         </div>
 
         {hasPricing && (
+          <>
+          <LandingDivider />
           <section id="pricing" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
             <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
-              یک اشتراک؛ کل پیشخوان
+              خرید اشتراک با کمترین قیمت
             </h2>
             <p className="lp-body mx-auto mt-2 max-w-xl text-center text-sm leading-7 text-muted-foreground">
-              قیمت همان است که می‌بینی. بعد از پرداخت، همان روز از روی گوشی فاکتور می‌زنی.
+              قیمت نهایی همان است که می‌بینی — بدون رقم پنهان. پرداخت که تمام شد، همان روز فروشت راه می‌افتد.
             </p>
 
             <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -446,7 +473,10 @@ export function LandingPage() {
               ))}
             </div>
           </section>
+          </>
         )}
+
+        <LandingDivider />
 
         <section className="lp-reveal mx-auto max-w-6xl px-4 pb-16">
           <div className="lp-cta-slip rounded-3xl p-8 text-center text-primary-foreground sm:p-12">
@@ -478,6 +508,8 @@ export function LandingPage() {
         </section>
 
         {socials.length > 0 && (
+          <>
+          <LandingDivider />
           <section id="contact" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 pb-14">
             <div className="rounded-3xl border border-dashed border-primary/30 bg-card p-6 shadow-card sm:p-8">
               <h3 className="text-center text-xl font-extrabold sm:text-2xl">سوال داری؟ مستقیم زنگ بزن</h3>
@@ -504,7 +536,10 @@ export function LandingPage() {
               </div>
             </div>
           </section>
+          </>
         )}
+
+        <LandingDivider />
 
         <section className="lp-reveal mx-auto max-w-6xl px-4 pb-10">
           <ActiveUsersBadge />

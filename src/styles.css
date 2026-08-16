@@ -460,6 +460,68 @@ html[data-app="1"] .landing-page {
 .lp-hero-demo   { grid-area: demo; min-width: 0; }
 .lp-hero-rest   { grid-area: rest; }
 
+.lp-hero-title {
+  letter-spacing: -0.02em;
+  isolation: isolate;
+}
+.lp-hero-title-line {
+  display: block;
+}
+.lp-hero-title-brand {
+  display: inline-block;
+  margin-top: 0.12em;
+  background: linear-gradient(135deg, var(--primary), var(--primary-glow, var(--primary)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  position: relative;
+}
+.lp-hero-title-brand::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 8%;
+  bottom: 0.06em;
+  height: 0.2em;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 32%, transparent);
+  z-index: -1;
+}
+
+.lp-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  max-width: 72rem;
+  margin: 0.25rem auto;
+  padding: 0.35rem 1rem;
+}
+.lp-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    color-mix(in oklab, var(--primary) 38%, var(--border)),
+    transparent
+  );
+}
+.lp-divider-mark {
+  display: grid;
+  place-items: center;
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--primary) 28%, var(--border));
+  background: color-mix(in oklab, var(--card) 88%, var(--primary));
+  color: var(--primary);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--primary) 12%, transparent);
+}
+.lp-divider-mark svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
 @media (min-width: 1024px) {
   .lp-hero-grid {
     grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);

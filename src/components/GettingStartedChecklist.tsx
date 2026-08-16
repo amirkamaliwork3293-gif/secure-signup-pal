@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Check, ChevronDown, ChevronUp, Circle, ListChecks } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Circle, ListChecks, X } from "lucide-react";
 import { invoice, products, settings } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -71,11 +71,14 @@ export function GettingStartedChecklist() {
     };
   }, [authState]);
 
+  const hideCard = () => {
+    setLeaving(true);
+    window.setTimeout(() => markChecklistHidden(), 450);
+  };
+
   useEffect(() => {
     if (hidden || !allDone) return;
-    setLeaving(true);
-    const t = window.setTimeout(() => markChecklistHidden(), 450);
-    return () => window.clearTimeout(t);
+    hideCard();
   }, [allDone, hidden]);
 
   if (hidden) return null;
@@ -86,25 +89,36 @@ export function GettingStartedChecklist() {
         leaving ? "max-h-0 mb-0 border-transparent p-0 opacity-0" : "max-h-[28rem] opacity-100"
       }`}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3.5 py-3 text-right"
-        aria-expanded={open}
-      >
-        <ListChecks className="h-4 w-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-bold">شروع کار با کامیکس</div>
-          <div className="text-[11px] text-muted-foreground">
-            {doneCount} از {items.length} مورد انجام شده
+      <div className="flex items-center gap-1 px-2 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1.5 py-1 text-right"
+          aria-expanded={open}
+        >
+          <ListChecks className="h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-bold">شروع کار با کامیکس</div>
+            <div className="text-[11px] text-muted-foreground">
+              {doneCount} از {items.length} مورد انجام شده
+            </div>
           </div>
-        </div>
-        {open ? (
-          <ChevronUp className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        )}
-      </button>
+          {open ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={hideCard}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="دیگر نمایش داده نشود"
+          aria-label="دیگر نمایش داده نشود"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
 
       {open && !leaving && (
         <ul className="space-y-1.5 border-t border-border px-3.5 py-3">
@@ -142,6 +156,15 @@ export function GettingStartedChecklist() {
               </li>
             );
           })}
+          <li>
+            <button
+              type="button"
+              onClick={hideCard}
+              className="mt-1 w-full rounded-xl py-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              دیگر نمایش داده نشود
+            </button>
+          </li>
         </ul>
       )}
     </section>

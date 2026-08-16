@@ -281,10 +281,18 @@ function RenewPage() {
               </button>
             </div>
           ) : (
-            <button type="button" onClick={() => fileRef.current?.click()}
-              className="flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border bg-background py-6 text-xs text-muted-foreground hover:border-primary hover:text-primary">
-              <Upload className="h-5 w-5" />
-              <span>برای انتخاب عکس رسید کلیک کنید</span>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="receipt-pick flex w-full flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed py-6 text-xs hover:border-primary hover:text-primary"
+            >
+              <span className="receipt-pick-shine" aria-hidden="true" />
+              <span className="receipt-pick-icon" aria-hidden="true">
+                <span className="receipt-pick-ring" />
+                <span className="receipt-pick-ring receipt-pick-ring--2" />
+                <Upload className="h-5 w-5" />
+              </span>
+              <span className="receipt-pick-label">برای انتخاب عکس رسید کلیک کنید</span>
               <span className="text-[10px] opacity-70">عکس به‌صورت خودکار فشرده می‌شود</span>
             </button>
           )}

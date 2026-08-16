@@ -1905,3 +1905,88 @@ html[data-app="1"] .landing-page {
   cursor: pointer;
 }
 
+/* ─── دکمه انتخاب عکس رسید (ثبت‌نام / تمدید) ─────────────────────────────── */
+@keyframes receipt-pick-breathe {
+  0%, 100% {
+    border-color: color-mix(in oklab, var(--primary) 42%, var(--border));
+    background-color: color-mix(in oklab, var(--primary) 6%, var(--background));
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 30%, transparent);
+  }
+  50% {
+    border-color: var(--primary);
+    background-color: color-mix(in oklab, var(--primary) 12%, var(--background));
+    box-shadow: 0 0 0 7px color-mix(in oklab, var(--primary) 0%, transparent);
+  }
+}
+@keyframes receipt-pick-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes receipt-pick-ring {
+  0% { transform: scale(0.65); opacity: 0.5; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+@keyframes receipt-pick-shine {
+  0% { transform: translateX(120%) skewX(-18deg); }
+  100% { transform: translateX(-180%) skewX(-18deg); }
+}
+
+.receipt-pick {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
+  color: var(--foreground);
+  animation: receipt-pick-breathe 2.6s ease-in-out infinite;
+}
+.receipt-pick-shine {
+  pointer-events: none;
+  position: absolute;
+  inset: -20% -40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--primary) 22%, transparent),
+    transparent
+  );
+  animation: receipt-pick-shine 3.2s ease-in-out infinite;
+}
+.receipt-pick-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 14%, transparent);
+  color: var(--primary);
+  animation: receipt-pick-float 2.2s ease-in-out infinite;
+}
+.receipt-pick-icon svg {
+  position: relative;
+  z-index: 1;
+}
+.receipt-pick-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1.5px solid color-mix(in oklab, var(--primary) 55%, transparent);
+  animation: receipt-pick-ring 2.2s ease-out infinite;
+}
+.receipt-pick-ring--2 {
+  animation-delay: 1.1s;
+}
+.receipt-pick-label {
+  font-weight: 800;
+  color: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receipt-pick,
+  .receipt-pick-shine,
+  .receipt-pick-icon,
+  .receipt-pick-ring {
+    animation: none !important;
+  }
+}
+
+

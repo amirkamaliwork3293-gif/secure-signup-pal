@@ -37,7 +37,7 @@ export function StoriesBar({ stories }: { stories: LandingStory[] }) {
               key={i}
               type="button"
               onClick={() => setActive(i)}
-              className="group flex w-20 shrink-0 flex-col items-center gap-1.5 text-center focus:outline-none"
+              className="group flex w-20 shrink-0 flex-col items-center gap-1.5 rounded-lg text-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               aria-label={s.caption || `استوری ${i + 1}`}
             >
               <span className="relative block rounded-full bg-gradient-to-tr from-primary via-primary-glow to-primary p-[2.5px] shadow-elegant transition group-hover:scale-105">

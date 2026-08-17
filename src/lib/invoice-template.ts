@@ -16,6 +16,7 @@ import {
   type Invoice,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import { printFitAssets, type PaperSize } from "@/lib/print";
 
 // ─── مدل داده ───────────────────────────────────────────────────────────────
 
@@ -364,6 +365,7 @@ export function buildTemplatedInvoiceHTML(
   inv: Invoice,
   tpl: InvoiceTemplate,
   fontSize = 13,
+  paper: PaperSize = "A4",
 ): string {
   const t = normalizeTemplate(tpl);
   const accent = t.accent || "#1e3a8a";
@@ -420,6 +422,9 @@ export function buildTemplatedInvoiceHTML(
     .join("");
 
   const fs = fontSize;
+  const compact = paper === "A5";
+  const pad = compact ? 8 : 12;
+  const fit = printFitAssets(paper);
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"/>
@@ -427,44 +432,45 @@ export function buildTemplatedInvoiceHTML(
 <title>${esc(t.title)} ${inv.id.toUpperCase()}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
+  ${fit.css}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;font-size:${fs}px;color:#111;direction:rtl;padding:18px 20px;background:#fff}
+  body{font-family:'Vazirmatn',Tahoma,sans-serif;font-size:${fs}px;color:#111;direction:rtl;padding:${pad}px;background:#fff}
   .sheet{border:1.5px solid ${accent};border-radius:10px;overflow:hidden}
-  .top{display:flex;align-items:center;gap:12px;padding:12px 14px;background:linear-gradient(90deg, ${accent}14, transparent)}
-  .top .logo{width:58px;height:58px;object-fit:contain;border-radius:8px;background:#fff}
+  .top{display:flex;align-items:center;gap:10px;padding:${compact ? 8 : 12}px ${compact ? 10 : 14}px;background:linear-gradient(90deg, ${accent}14, transparent)}
+  .top .logo{width:${compact ? 44 : 58}px;height:${compact ? 44 : 58}px;object-fit:contain;border-radius:8px;background:#fff;flex-shrink:0}
   .top .who{flex:1;min-width:0}
-  .top .who h1{font-size:${Math.round(fs * 1.5)}px;font-weight:700;color:${accent}}
-  .top .who p{font-size:${Math.round(fs * 0.85)}px;color:#555;margin-top:2px}
-  .top .title{text-align:center;border:1.5px solid ${accent};border-radius:8px;padding:8px 14px;font-weight:700;color:${accent};font-size:${Math.round(fs * 1.05)}px;white-space:nowrap}
+  .top .who h1{font-size:${Math.round(fs * 1.35)}px;font-weight:700;color:${accent};line-height:1.25;word-break:break-word}
+  .top .who p{font-size:${Math.round(fs * 0.82)}px;color:#555;margin-top:2px;word-break:break-word}
+  .top .title{text-align:center;border:1.5px solid ${accent};border-radius:8px;padding:6px 10px;font-weight:700;color:${accent};font-size:${Math.round(fs * 0.95)}px;white-space:normal;max-width:42%;line-height:1.3}
   .block{border-top:1px solid ${accent}55}
-  .block h2{font-size:${Math.round(fs * 0.9)}px;font-weight:700;color:#fff;background:${accent};padding:5px 12px}
+  .block h2{font-size:${Math.round(fs * 0.85)}px;font-weight:700;color:#fff;background:${accent};padding:4px 10px}
   .grid{display:grid}
-  .grid.cols-1{grid-template-columns:1fr}
-  .grid.cols-2{grid-template-columns:1fr 1fr}
-  .grid.cols-3{grid-template-columns:1fr 1fr 1fr}
-  .cell{display:flex;align-items:stretch;border-left:1px solid #dcdcdc;border-bottom:1px solid #dcdcdc;min-height:${Math.round(fs * 2.1)}px}
-  .cell:last-child{border-left:0}
-  .cell .lbl{background:#f5f6f8;color:#444;font-size:${Math.round(fs * 0.82)}px;padding:5px 8px;min-width:92px;display:flex;align-items:center;border-left:1px solid #e6e6e6;font-weight:500}
-  .cell .val{padding:5px 8px;font-weight:600;font-size:${Math.round(fs * 0.9)}px;display:flex;align-items:center;flex:1;word-break:break-word}
-  table{width:100%;border-collapse:collapse}
-  thead th{background:${accent};color:#fff;font-weight:600;padding:7px 8px;font-size:${Math.round(fs * 0.88)}px;border:1px solid ${accent}}
-  tbody td{padding:6px 8px;border:1px solid #d5d5d5;font-size:${Math.round(fs * 0.88)}px;text-align:center}
+  .grid.cols-1{grid-template-columns:minmax(0,1fr)}
+  .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cell{display:flex;align-items:stretch;border-left:1px solid #dcdcdc;border-bottom:1px solid #dcdcdc;min-height:${Math.round(fs * 1.85)}px;min-width:0}
+  .cell .lbl{background:#f5f6f8;color:#444;font-size:${Math.round(fs * 0.78)}px;padding:4px 6px;flex:0 1 auto;max-width:46%;min-width:0;display:flex;align-items:center;border-left:1px solid #e6e6e6;font-weight:500;word-break:break-word;line-height:1.3}
+  .cell .val{padding:4px 6px;font-weight:600;font-size:${Math.round(fs * 0.86)}px;display:flex;align-items:center;flex:1;min-width:0;word-break:break-word;overflow-wrap:anywhere;line-height:1.35}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  thead th{background:${accent};color:#fff;font-weight:600;padding:5px 6px;font-size:${Math.round(fs * 0.82)}px;border:1px solid ${accent};word-break:break-word}
+  tbody td{padding:4px 6px;border:1px solid #d5d5d5;font-size:${Math.round(fs * 0.82)}px;text-align:center;word-break:break-word;overflow-wrap:anywhere}
   tbody td.c-name{text-align:right}
+  tbody td.c-index, tbody td.c-qty, tbody td.c-unit{white-space:nowrap}
   tbody tr:nth-child(even) td{background:#fafbfc}
-  .totals{display:flex;justify-content:flex-start;padding:10px 12px;gap:14px;flex-wrap:wrap}
-  .totals table{width:auto;min-width:260px;margin-right:auto}
-  .totals td{border:1px solid #dcdcdc;padding:6px 10px;font-size:${Math.round(fs * 0.9)}px}
+  .totals{display:flex;justify-content:flex-start;padding:8px 10px;gap:10px;flex-wrap:wrap}
+  .totals table{width:auto;min-width:0;max-width:100%;margin-right:auto;table-layout:auto}
+  .totals td{border:1px solid #dcdcdc;padding:5px 8px;font-size:${Math.round(fs * 0.86)}px;word-break:break-word}
   .totals td:first-child{background:#f5f6f8;color:#444}
   .totals tr.grand td{font-weight:700;color:${accent}}
   .totals tr.due td{color:#b91c1c;font-weight:700}
-  .note{padding:8px 12px;border-top:1px dashed #ccc;font-size:${Math.round(fs * 0.85)}px;color:#444}
+  .note{padding:6px 10px;border-top:1px dashed #ccc;font-size:${Math.round(fs * 0.82)}px;color:#444;word-break:break-word}
   .signs{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid ${accent}55}
-  .signs div{padding:10px 12px 34px;font-size:${Math.round(fs * 0.85)}px;color:#444}
+  .signs div{padding:8px 10px 28px;font-size:${Math.round(fs * 0.82)}px;color:#444;word-break:break-word}
   .signs div:first-child{border-left:1px solid #dcdcdc}
-  .foot{text-align:center;font-size:${Math.round(fs * 0.8)}px;color:#888;margin-top:10px}
-  @media print{body{padding:0}}
+  .foot{text-align:center;font-size:${Math.round(fs * 0.78)}px;color:#888;margin-top:8px}
 </style></head>
 <body>
+<div id="print-root">
 <div class="sheet">
   <div class="top">
     ${t.showLogo && inv.shopLogoUrl ? `<img class="logo" src="${esc(inv.shopLogoUrl)}" alt="لوگو"/>` : ""}
@@ -486,5 +492,7 @@ export function buildTemplatedInvoiceHTML(
   }
 </div>
 <div class="foot">با تشکر از خرید شما — ${esc(shopName)}</div>
+</div>
+${fit.script}
 </body></html>`;
 }

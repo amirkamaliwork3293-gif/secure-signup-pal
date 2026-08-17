@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { settings, storePublicUrl } from "@/lib/store";
+import { PAPER_SIZES, type PaperSize } from "@/lib/print";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/AuthContext";
 import {
@@ -51,6 +52,11 @@ function SettingsPageInner() {
   const [appSettings, setSettings] = settings.useAll();
   const [shopName, setShopName] = useState(appSettings.shopName);
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
+  const [invoicePaperSize, setInvoicePaperSize] = useState<PaperSize>(
+    appSettings.invoicePaperSize === "A5" || appSettings.invoicePaperSize === "Letter"
+      ? appSettings.invoicePaperSize
+      : "A4",
+  );
   const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
@@ -66,6 +72,7 @@ function SettingsPageInner() {
       ...appSettings,
       shopName: nextName,
       invoiceFontSize,
+      invoicePaperSize,
       showMenuFeature,
       showStudentsFeature,
       showGoldFeature,
@@ -179,6 +186,31 @@ function SettingsPageInner() {
           >
             نمونه متن فاکتور — ۱۲۵,۰۰۰ تومان
           </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            اندازه کاغذ چاپ فاکتور
+          </label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {PAPER_SIZES.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setInvoicePaperSize(p.id)}
+                className={`rounded-xl px-2 py-2 text-[11px] font-medium transition ${
+                  invoicePaperSize === p.id
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-card text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {p.id}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">
+            هنگام پرینت هم می‌توانید کاغذ را عوض کنید. متن فاکتور روی برگه انتخابی در یک صفحه جا می‌گیرد.
+          </p>
         </div>
 
         {/* طراح فاکتور */}

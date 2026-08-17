@@ -37,6 +37,67 @@ declare global {
   }
 }
 
+/** اندازه کاغذ چاپ فاکتور — با @page و مقیاس خودکار روی یک صفحه جا می‌شود */
+export type PaperSize = "A4" | "A5" | "Letter";
+
+export const PAPER_SIZES: { id: PaperSize; label: string; wMm: number; hMm: number }[] = [
+  { id: "A4", label: "A4 — ۲۱۰×۲۹۷ میلی‌متر", wMm: 210, hMm: 297 },
+  { id: "A5", label: "A5 — ۱۴۸×۲۱۰ میلی‌متر", wMm: 148, hMm: 210 },
+  { id: "Letter", label: "Letter — ۲۱۶×۲۷۹ میلی‌متر", wMm: 215.9, hMm: 279.4 },
+];
+
+export function normalizePaperSize(v?: string | null): PaperSize {
+  if (v === "A5" || v === "Letter" || v === "A4") return v;
+  return "A4";
+}
+
+/** CSS اندازه صفحه + اسکریپت مقیاس تا کل فاکتور در یک برگه جا شود */
+export function printFitAssets(paper: PaperSize, marginMm = 7): { css: string; script: string } {
+  const spec = PAPER_SIZES.find((p) => p.id === paper) ?? PAPER_SIZES[0];
+  const cssSize = paper === "Letter" ? "letter" : paper;
+  const css = `
+  @page { size: ${cssSize} portrait; margin: ${marginMm}mm; }
+  html, body { margin: 0 !important; }
+  #print-root { width: 100%; }
+  @media print {
+    body { padding: 0 !important; background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    #print-root { box-shadow: none !important; }
+  }
+  `;
+  const script = `<script>
+(function(){
+  var PAGE_W = ${spec.wMm};
+  var PAGE_H = ${spec.hMm};
+  var MARGIN = ${marginMm};
+  function fit(){
+    var root = document.getElementById('print-root');
+    if (!root) return;
+    root.style.zoom = '1';
+    root.style.transform = 'none';
+    var availW = (PAGE_W - MARGIN * 2) * 96 / 25.4;
+    var availH = (PAGE_H - MARGIN * 2) * 96 / 25.4;
+    var w = Math.max(root.scrollWidth, root.offsetWidth);
+    var h = Math.max(root.scrollHeight, root.offsetHeight);
+    var s = Math.min(1, availW / Math.max(1, w), availH / Math.max(1, h));
+    if (s < 0.995) {
+      s = Math.max(0.42, s);
+      if ('zoom' in root.style) root.style.zoom = String(s);
+      else {
+        root.style.transformOrigin = 'top center';
+        root.style.transform = 'scale(' + s + ')';
+      }
+    }
+  }
+  window.addEventListener('load', fit);
+  window.addEventListener('beforeprint', fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit).catch(function(){});
+  setTimeout(fit, 250);
+  setTimeout(fit, 700);
+})();
+</script>`;
+  return { css, script };
+}
+
 /** آیا داخل اپلیکیشن نیتیو (APK) هستیم؟ */
 export function isNativeApp(): boolean {
   if (typeof window === "undefined") return false;
@@ -75,20 +136,29 @@ export async function printHtml(html: string, title = "چاپ"): Promise<boolean
   return iframePrint(html);
 }
 
+function inferIframeSize(html: string): { width: string; height: string } {
+  if (/size:\s*80mm/i.test(html)) return { width: "80mm", height: "240mm" };
+  if (/size:\s*A5/i.test(html)) return { width: "148mm", height: "210mm" };
+  if (/size:\s*letter/i.test(html)) return { width: "215.9mm", height: "279.4mm" };
+  return { width: "210mm", height: "297mm" };
+}
+
 function iframePrint(html: string): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const iframe = document.createElement("iframe");
       iframe.setAttribute("title", "print-frame");
+      const size = inferIframeSize(html);
       Object.assign(iframe.style, {
         position: "fixed",
         right: "0",
         bottom: "0",
-        width: "1px",
-        height: "1px",
+        width: size.width,
+        height: size.height,
         border: "0",
         opacity: "0",
         pointerEvents: "none",
+        zIndex: "-1",
       });
       document.body.appendChild(iframe);
 
@@ -102,7 +172,7 @@ function iframePrint(html: string): Promise<boolean> {
       const doPrint = () => {
         if (fired) return;
         fired = true;
-        // فرصت کوتاه برای بارگذاری فونت/تصاویر داخل iframe
+        // فرصت برای بارگذاری فونت/تصاویر و اجرای اسکریپت مقیاس داخل iframe
         setTimeout(() => {
           try {
             const win = iframe.contentWindow;
@@ -116,7 +186,7 @@ function iframePrint(html: string): Promise<boolean> {
             cleanup();
             resolve(fallbackWindowPrint(html));
           }
-        }, 350);
+        }, 850);
       };
 
       iframe.onload = doPrint;
@@ -138,7 +208,7 @@ function fallbackWindowPrint(html: string): boolean {
     win.document.write(html);
     win.document.close();
     win.focus();
-    setTimeout(() => { try { win.print(); } catch { /* ignore */ } }, 400);
+    setTimeout(() => { try { win.print(); } catch { /* ignore */ } }, 850);
     return true;
   } catch {
     return false;

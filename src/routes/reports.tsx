@@ -26,10 +26,10 @@ export const Route = createFileRoute("/reports")({
 
 type Range = "today" | "month" | "year" | "all" | "custom";
 
-function startOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x.getTime();
+function startOfDay() {
+  const j = toJalali(Date.now());
+  if (!j) return 0;
+  return jalaliToTimestamp(j.jy, j.jm, j.jd, 0, 0);
 }
 // بازه‌ی ماه/سال بر اساس تقویم شمسی محاسبه می‌شود (نه میلادی) چون تاریخ‌ها در کل
 // برنامه شمسی نمایش داده و ذخیره می‌شوند.
@@ -121,8 +121,7 @@ function computeProfit(list: Invoice[]): ProfitSummary {
 function daysInMonthBreakdown(list: Invoice[]) {
   const map = new Map<string, number>();
   for (const inv of list) {
-    const d = new Date(inv.createdAt);
-    const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    const key = formatJalaliDate(inv.createdAt);
     map.set(key, (map.get(key) ?? 0) + invoiceTotals(inv).total);
   }
   return Array.from(map.entries())
@@ -417,9 +416,7 @@ function ReportsPageInner() {
         ) : (
           <ul className="space-y-2">
             {daily.map(([key, value]) => {
-              const [y, m, d] = key.split("-").map(Number);
-              // key از new Date().getFullYear/Month/Date ساخته شده (میلادی) — تبدیل به شمسی از طریق timestamp
-              const dateLabel = formatJalaliDate(new Date(y, m - 1, d).getTime());
+              const dateLabel = key;
               const pct = (value / maxDay) * 100;
               return (
                 <li key={key} className="space-y-1">

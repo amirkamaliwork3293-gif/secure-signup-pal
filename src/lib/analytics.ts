@@ -5,7 +5,7 @@
  * قیمت فروش و قیمت خرید (ذخیره‌شده روی خود آیتم یا قیمت خرید فعلی کالا) به‌دست می‌آید.
  */
 import type { Invoice, Product } from "@/lib/store";
-import { discountFactor, lineTotal } from "@/lib/invoice-math";
+import { discountFactor, lineTotal, invoiceTotals } from "@/lib/invoice-math";
 
 export type ProductStat = {
   productId: string;
@@ -104,7 +104,7 @@ export function customerStats(list: Invoice[], allProducts: Product[]): Customer
       key, name, phone: phone || undefined, invoices: 0, revenue: 0, profit: 0, avg: 0, lastAt: 0,
     };
     const invoices = prev.invoices + 1;
-    const revenue = prev.revenue + inv.total;
+    const revenue = prev.revenue + invoiceTotals(inv).total;
     map.set(key, {
       ...prev,
       name: name !== "مشتری متفرقه" ? name : prev.name,

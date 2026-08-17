@@ -340,6 +340,8 @@ export type AppSettings = {
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
   invoiceTemplate?: { [key: string]: JsonValue };
+  /** اندازه کاغذ چاپ فاکتور فروش — محتوا روی همین برگه مقیاس می‌شود تا دو صفحه نشود */
+  invoicePaperSize?: "A4" | "A5" | "Letter";
   /** دسته‌بندی‌های هزینه‌ی سفارشی کاربر (علاوه بر EXPENSE_CATEGORIES پیش‌فرض) */
   expenseCategories?: string[];
   /** مرحله‌ی فعلی تور شروع کار (۰ = هنوز تصمیم گرفته نشده / شروع نشده) */
@@ -364,6 +366,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 const DEFAULT_SETTINGS: AppSettings = {
   shopName: "فروشگاه من",
   invoiceFontSize: 13,
+  invoicePaperSize: "A4",
   weightUnits: false,
   showMenuFeature: false,
   showStudentsFeature: false,
@@ -945,6 +948,32 @@ function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: Invoice
   if (changed) products.save(next);
 }
 
+/**
+ * ویرایش فاکتور خرید: موجودی انبار باید با اختلاف تعداد (جدید − قدیم) زیاد/کم شود
+ * چون هنگام ثبت اولیه، موجودی اضافه شده بود.
+ */
+function reconcileStockForPurchaseEdit(oldItems: PurchaseItem[], newItems: PurchaseItem[]) {
+  const deltaByProduct = new Map<string, number>();
+  for (const it of oldItems) {
+    if (!it.productId) continue;
+    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) - it.quantity);
+  }
+  for (const it of newItems) {
+    if (!it.productId) continue;
+    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) + it.quantity);
+  }
+  if (deltaByProduct.size === 0) return;
+  const list = read<Product[]>(PRODUCTS_KEY, []);
+  let changed = false;
+  const next = list.map((p) => {
+    const delta = deltaByProduct.get(p.id);
+    if (!delta) return p;
+    changed = true;
+    return { ...p, stock: Math.max(0, (p.stock || 0) + delta) };
+  });
+  if (changed) products.save(next);
+}
+
 export const invoice = {
   // Active (current) invoice — keeps legacy API surface
   useCurrent: (): [Invoice, (v: Invoice | ((p: Invoice) => Invoice)) => void] => {
@@ -1020,7 +1049,9 @@ export const invoice = {
   getHistory: () => read<Invoice[]>(HISTORY_KEY, []),
   archive: (inv: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
-    inv.items.forEach((item) => products.decreaseStock(item.productId, item.quantity));
+    // کسر موجودی در یک نوشتن اتمی — تا تعداد در «محصولات» و «انبار» یکی بماند
+    // و اگر یک کالا چند ردیف داشته باشد، موجودی دوبار از روی دادهٔ کهنه کم نشود.
+    reconcileStockForInvoiceEdit([], inv.items);
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
     // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
     // همین تاریخ را ببینند و بین «تاریخچه» و «دفتر بدهی مشتری» اختلاف نیفتد.
@@ -1127,12 +1158,13 @@ export const purchases = {
   useHistory: () => useStore<Purchase[]>(PURCHASES_KEY, []),
   getHistory: () => read<Purchase[]>(PURCHASES_KEY, []),
   /**
-   * ویرایش فاکتور خرید از تاریخچه (تامین‌کننده، تاریخ، یادداشت، اقلام و...).
-   * مشابه invoice.updateHistory — فقط رکورد فاکتور را جایگزین می‌کند و موجودی
-   * انبار را دوباره تنظیم نمی‌کند (تغییرات موجودی فقط هنگام ثبت اولیه اعمال می‌شود).
+   * ویرایش فاکتور خرید از تاریخچه. اختلاف تعداد اقلام روی موجودی انبار اعمال
+   * می‌شود تا «محصولات» و «انبار» با فاکتور ویرایش‌شده هم‌خوان بمانند.
    */
   updateHistory: (updated: Purchase) => {
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
+    const prev = hist.find((p) => p.id === updated.id);
+    if (prev) reconcileStockForPurchaseEdit(prev.items, updated.items);
     write(
       PURCHASES_KEY,
       hist.map((p) => (p.id === updated.id ? updated : p)),
@@ -1472,6 +1504,11 @@ export const accountTxs = {
     const created: AccountTx = { ...t, id: cryptoId(), createdAt: Date.now() };
     write(ACCOUNT_TXS_KEY, [created, ...read<AccountTx[]>(ACCOUNT_TXS_KEY, [])]);
     return created;
+  },
+
+  update: (updated: AccountTx) => {
+    const list = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
+    write(ACCOUNT_TXS_KEY, list.map((t) => (t.id === updated.id ? updated : t)));
   },
 
   remove: (id: string) => {

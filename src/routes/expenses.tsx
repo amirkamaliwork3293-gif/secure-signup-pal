@@ -25,10 +25,16 @@ import {
   accountTxs as accountTxsStore,
   accountBalance,
   maskCardNumber,
+  toJalaliInputDate,
+  toJalaliInputTime,
+  parseJalaliInput,
+  parseTimeInput,
   type Expense,
   type PaymentMethod,
   type Account,
+  type AccountTx,
 } from "@/lib/store";
+import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import {
   Wallet, Plus, Trash2, Pencil, Check, X, Search, Repeat, CalendarClock, PieChart,
   Landmark, ArrowDownCircle, ArrowUpCircle, CreditCard,
@@ -659,7 +665,9 @@ function AccountsPanel() {
   const [accountsList] = accountsStore.useAll();
   const [txsList] = accountTxsStore.useAll();
   const [showAccountForm, setShowAccountForm] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [txFormFor, setTxFormFor] = useState<string | null>(null);
+  const [editingTx, setEditingTx] = useState<AccountTx | null>(null);
   const [openHistoryFor, setOpenHistoryFor] = useState<string | null>(null);
 
   const totalBalance = accountsList.reduce((s, a) => s + accountBalance(a, txsList), 0);
@@ -672,7 +680,7 @@ function AccountsPanel() {
         <div className="mt-0.5 text-xs opacity-80">{formatNumber(accountsList.length)} حساب</div>
       </section>
 
-      {!showAccountForm && (
+      {!showAccountForm && !editingAccount && (
         <button
           onClick={() => setShowAccountForm(true)}
           className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-foreground"
@@ -682,14 +690,14 @@ function AccountsPanel() {
         </button>
       )}
 
-      {showAccountForm && (
+      {showAccountForm && !editingAccount && (
         <AccountForm
           onCancel={() => setShowAccountForm(false)}
           onSave={(a) => { accountsStore.add(a); setShowAccountForm(false); }}
         />
       )}
 
-      {accountsList.length === 0 ? (
+      {accountsList.length === 0 && !showAccountForm ? (
         <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
           هنوز حساب یا کارتی ثبت نشده است. صندوق فروشگاه یا کارت بانکی خود را اضافه کنید.
         </div>
@@ -700,6 +708,20 @@ function AccountsPanel() {
             const accountTxs = txsList
               .filter((t) => t.accountId === a.id)
               .sort((x, y) => y.at - x.at);
+            if (editingAccount?.id === a.id) {
+              return (
+                <li key={a.id}>
+                  <AccountForm
+                    initial={a}
+                    onCancel={() => setEditingAccount(null)}
+                    onSave={(updated) => {
+                      accountsStore.update({ ...a, ...updated });
+                      setEditingAccount(null);
+                    }}
+                  />
+                </li>
+              );
+            }
             return (
               <li key={a.id} className="rounded-2xl border border-border bg-card p-3 shadow-card">
                 <div className="flex items-start justify-between gap-2">
@@ -717,18 +739,30 @@ function AccountsPanel() {
                       {formatToman(balance)}
                     </div>
                   </div>
-                  <button
-                    onClick={() => { if (confirm(`حساب «${a.name}» و تراکنش‌های آن حذف شود؟`)) accountsStore.remove(a.id); }}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
-                    title="حذف حساب"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      onClick={() => { setEditingAccount(a); setShowAccountForm(false); }}
+                      className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
+                      title="ویرایش حساب"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => { if (confirm(`حساب «${a.name}» و تراکنش‌های آن حذف شود؟`)) accountsStore.remove(a.id); }}
+                      className="grid h-7 w-7 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
+                      title="حذف حساب"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-2 flex gap-1.5">
                   <button
-                    onClick={() => setTxFormFor(txFormFor === a.id ? null : a.id)}
+                    onClick={() => {
+                      setTxFormFor(txFormFor === a.id && !editingTx ? null : a.id);
+                      setEditingTx(null);
+                    }}
                     className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-[11px] font-medium hover:bg-accent"
                   >
                     <ArrowDownCircle className="h-3.5 w-3.5 text-success" />
@@ -747,8 +781,10 @@ function AccountsPanel() {
 
                 {txFormFor === a.id && (
                   <AccountTxForm
+                    key={editingTx?.id ?? "new"}
                     accountId={a.id}
-                    onDone={() => setTxFormFor(null)}
+                    initial={editingTx && editingTx.accountId === a.id ? editingTx : undefined}
+                    onDone={() => { setTxFormFor(null); setEditingTx(null); }}
                   />
                 )}
 
@@ -756,22 +792,38 @@ function AccountsPanel() {
                   <ul className="mt-2 space-y-1 border-t border-border pt-2">
                     {accountTxs.map((t) => (
                       <li key={t.id} className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="flex items-center gap-1 text-muted-foreground">
+                        <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
                           {t.type === "deposit" ? (
-                            <ArrowDownCircle className="h-3 w-3 text-success" />
+                            <ArrowDownCircle className="h-3 w-3 shrink-0 text-success" />
                           ) : (
-                            <ArrowUpCircle className="h-3 w-3 text-destructive" />
+                            <ArrowUpCircle className="h-3 w-3 shrink-0 text-destructive" />
                           )}
-                          {formatJalaliDate(t.at)}
-                          {t.note ? ` — ${t.note}` : ""}
+                          <span className="min-w-0 truncate">
+                            {formatJalaliDate(t.at)}
+                            {t.note ? ` — ${t.note}` : t.expenseId ? " — هزینه" : ""}
+                          </span>
                         </span>
-                        <span className="flex shrink-0 items-center gap-2">
+                        <span className="flex shrink-0 items-center gap-1.5">
                           <span className={t.type === "deposit" ? "font-semibold text-success" : "font-semibold text-destructive"}>
                             {t.type === "deposit" ? "+" : "−"}{formatToman(t.amount)}
                           </span>
+                          {!t.expenseId && (
+                            <button
+                              onClick={() => {
+                                setEditingTx(t);
+                                setTxFormFor(a.id);
+                                setOpenHistoryFor(a.id);
+                              }}
+                              className="text-muted-foreground hover:text-foreground"
+                              title="ویرایش تراکنش"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
                           <button
                             onClick={() => { if (confirm("این تراکنش حذف شود؟")) accountTxsStore.remove(t.id); }}
                             className="text-muted-foreground hover:text-destructive"
+                            title="حذف تراکنش"
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -790,15 +842,17 @@ function AccountsPanel() {
 }
 
 function AccountForm({
+  initial,
   onSave,
   onCancel,
 }: {
+  initial?: Account;
   onSave: (a: Omit<Account, "id" | "createdAt">) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [openingBalance, setOpeningBalance] = useState(0);
+  const [name, setName] = useState(initial?.name ?? "");
+  const [cardNumber, setCardNumber] = useState(initial?.cardNumber ?? "");
+  const [openingBalance, setOpeningBalance] = useState(initial?.openingBalance ?? 0);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = () => {
@@ -836,7 +890,7 @@ function AccountForm({
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
         >
           <Check className="h-4 w-4" />
-          ذخیره حساب
+          {initial ? "ذخیره تغییرات" : "ذخیره حساب"}
         </button>
         <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm">
           <X className="h-4 w-4" />
@@ -847,15 +901,41 @@ function AccountForm({
   );
 }
 
-function AccountTxForm({ accountId, onDone }: { accountId: string; onDone: () => void }) {
-  const [type, setType] = useState<"deposit" | "withdraw">("deposit");
-  const [amount, setAmount] = useState(0);
-  const [note, setNote] = useState("");
+function AccountTxForm({
+  accountId,
+  initial,
+  onDone,
+}: {
+  accountId: string;
+  initial?: AccountTx;
+  onDone: () => void;
+}) {
+  const [type, setType] = useState<"deposit" | "withdraw">(initial?.type ?? "deposit");
+  const [amount, setAmount] = useState(initial?.amount ?? 0);
+  const [note, setNote] = useState(initial?.note ?? "");
+  const [dateStr, setDateStr] = useState(toJalaliInputDate(initial?.at ?? Date.now()));
+  const [timeStr, setTimeStr] = useState(toJalaliInputTime(initial?.at ?? Date.now()));
   const [err, setErr] = useState<string | null>(null);
 
   const submit = () => {
     if (amount <= 0) { setErr("مبلغ را وارد کنید."); return; }
-    accountTxsStore.add({ accountId, type, amount, note: note.trim() || undefined, at: Date.now() });
+    const jd = parseJalaliInput(dateStr);
+    const prev = initial ? toJalali(initial.at) : toJalali(Date.now());
+    const tm = parseTimeInput(timeStr) ?? (prev ? { h: prev.h, min: prev.min } : { h: 0, min: 0 });
+    const at = jd
+      ? jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min)
+      : (initial?.at ?? Date.now());
+    if (initial) {
+      accountTxsStore.update({
+        ...initial,
+        type,
+        amount,
+        note: note.trim() || undefined,
+        at,
+      });
+    } else {
+      accountTxsStore.add({ accountId, type, amount, note: note.trim() || undefined, at });
+    }
     onDone();
   };
 
@@ -890,6 +970,12 @@ function AccountTxForm({ accountId, onDone }: { accountId: string; onDone: () =>
         placeholder="مبلغ (تومان)"
         className={INPUT}
       />
+      <Field label="تاریخ (اختیاری — پیش‌فرض امروز)">
+        <JalaliDateSelect value={dateStr} onChange={setDateStr} yearsBack={3} />
+      </Field>
+      <Field label="ساعت">
+        <TimeSelect value={timeStr} onChange={setTimeStr} />
+      </Field>
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="توضیحات (اختیاری)" className={INPUT} />
       {err && <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{err}</div>}
       <button
@@ -897,7 +983,7 @@ function AccountTxForm({ accountId, onDone }: { accountId: string; onDone: () =>
         className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-semibold text-primary-foreground"
       >
         <Check className="h-3.5 w-3.5" />
-        ثبت تراکنش
+        {initial ? "ذخیره تغییرات" : "ثبت تراکنش"}
       </button>
     </div>
   );

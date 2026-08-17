@@ -242,56 +242,53 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
-      {/* هدر */}
-      <button
-        onClick={() => !editing && setIsOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-right"
-      >
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-primary">{formatToman(saved.total)}</span>
-            {hasCustomer && <User className="h-3.5 w-3.5 text-muted-foreground" />}
-            {saved.paymentMethod && (
-              <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {PAYMENT_LABEL[saved.paymentMethod]}
-              </span>
-            )}
+      <div className="px-3 py-3 sm:px-4">
+        <button
+          onClick={() => !editing && setIsOpen((v) => !v)}
+          className="flex w-full min-w-0 items-start justify-between gap-2 text-right"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="break-words text-sm font-semibold text-primary">{formatToman(saved.total)}</span>
+              {hasCustomer && <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+              {saved.paymentMethod && (
+                <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {PAYMENT_LABEL[saved.paymentMethod]}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {formatJalaliDateTime(saved.createdAt)} · {saved.items.length} قلم
+            </div>
           </div>
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {formatJalaliDateTime(saved.createdAt)} · {saved.items.length} قلم
-          </div>
-        </div>
+          {isOpen
+            ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+        </button>
 
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          {/* اکشن‌های فاکتور */}
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
           <InvoiceActions inv={printInv} size="sm" />
 
-          {/* ویرایش */}
           <button
             type="button"
             data-tour="history-edit"
             onClick={startEdit}
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
             title="ویرایش فاکتور"
           >
             <Pencil className="h-4 w-4" />
           </button>
 
-          {/* حذف */}
           <button
             type="button"
             onClick={handleDelete}
-            className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
             title="حذف فاکتور"
           >
             <Trash2 className="h-4 w-4" />
           </button>
-
-          {isOpen
-            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-            : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
         </div>
-      </button>
+      </div>
 
       {/* محتوا */}
       {isOpen && (

@@ -85,8 +85,14 @@ function InvoiceDesignPage() {
   );
 
   const previewHtml = useMemo(
-    () => buildTemplatedInvoiceHTML(sample, tpl, appSettings.invoiceFontSize ?? 13),
-    [sample, tpl, appSettings.invoiceFontSize],
+    () =>
+      buildTemplatedInvoiceHTML(
+        sample,
+        tpl,
+        appSettings.invoiceFontSize ?? 13,
+        (appSettings.invoicePaperSize as "A4" | "A5" | "Letter") || "A4",
+      ),
+    [sample, tpl, appSettings.invoiceFontSize, appSettings.invoicePaperSize],
   );
 
   const patch = (p: Partial<InvoiceTemplate>) => setTpl((t) => ({ ...t, ...p }));

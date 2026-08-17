@@ -204,38 +204,38 @@ export function LandingPage() {
       : null;
 
   return (
-    <div dir="rtl" className="landing-page min-h-screen bg-background text-foreground">
-      <header
-        className={`sticky top-0 z-30 pt-safe border-b transition-[background-color,box-shadow,border-color] duration-200 ${
-          scrolled
-            ? "border-border/80 bg-background/92 shadow-sm backdrop-blur-md"
-            : "border-transparent bg-background/75 backdrop-blur-md"
-        }`}
-      >
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-primary shadow-elegant" aria-hidden="true">
-              <Receipt className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <span className="truncate text-[1.05rem] font-extrabold tracking-tight kamali-brand">
-              {content.brand_name}
+    <div dir="rtl" id="top" className="landing-page min-h-screen bg-background text-foreground">
+      <header className={`lp-head pt-safe ${scrolled ? "is-scrolled" : ""}`}>
+        <div className="lp-head-inner">
+          <a
+            href="#top"
+            className="lp-head-brand"
+            aria-label={`${content.brand_name}، بازگشت به بالای صفحه`}
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+            }}
+          >
+            <span className="lp-head-mark" aria-hidden="true">
+              <Receipt />
             </span>
-          </div>
+            <span className="lp-head-name">
+              <strong>{content.brand_name}</strong>
+              <small>حسابداری مغازه، از روی گوشی</small>
+            </span>
+          </a>
 
           {quickLinks.length > 0 && (
-            <nav
-              className="hidden min-w-0 flex-1 items-center justify-center gap-1 md:flex"
-              aria-label="بخش‌های صفحه"
-            >
+            <nav className="lp-head-nav" aria-label="بخش‌های صفحه">
               {quickLinks.map((l) => (
                 <a
                   key={l.id}
                   href={`#${l.id}`}
+                  className="lp-head-link"
                   onClick={(e) => {
                     e.preventDefault();
                     scrollToSection(l.id);
                   }}
-                  className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   {l.label}
                 </a>
@@ -243,42 +243,35 @@ export function LandingPage() {
             </nav>
           )}
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Link
-              to="/login"
-              preload={false}
-              className="rounded-xl px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accent"
-            >
+          <div className="lp-head-actions">
+            <p className="lp-head-hint">کمتر از ۲ دقیقه تا فاکتور اول</p>
+            <Link to="/login" preload={false} className="lp-head-login">
               ورود
             </Link>
-            <Link
-              to="/register"
-              preload={false}
-              className="lp-btn lp-btn-primary rounded-xl bg-primary px-3.5 py-2 text-sm font-bold text-primary-foreground shadow-elegant sm:px-4"
-            >
-              ثبت‌نام
+            <Link to="/register" preload={false} className="lp-head-cta lp-btn lp-btn-primary whitespace-nowrap">
+              <span className="hidden sm:inline">همین الان شروع کن</span>
+              <span className="sm:hidden">شروع کن</span>
+              <ArrowLeft className="h-4 w-4" />
             </Link>
           </div>
         </div>
 
         {quickLinks.length > 0 && (
-          <div className="border-t border-border/50 md:hidden">
-            <div className="flex gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {quickLinks.map((l) => (
-                <a
-                  key={l.id}
-                  href={`#${l.id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    scrollToSection(l.id);
-                  }}
-                  className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {l.label}
-                </a>
-              ))}
-            </div>
-          </div>
+          <nav className="lp-head-mobile" aria-label="میانبر بخش‌ها">
+            {quickLinks.map((l) => (
+              <a
+                key={l.id}
+                href={`#${l.id}`}
+                className="lp-head-chip"
+                onClick={(e) => {
+                  e.preventDefault();
+                  scrollToSection(l.id);
+                }}
+              >
+                {l.label}
+              </a>
+            ))}
+          </nav>
         )}
       </header>
 

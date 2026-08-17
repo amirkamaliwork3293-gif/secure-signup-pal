@@ -3,7 +3,7 @@
  * هویت بصری: پیشخوان مغازهٔ ایرانی (دفتر خط‌دار، فاکتور کاغذی، مهر ثبت)
  * با رنگ primary موجود. عنصر امضادار: دموی زنده‌نمای «فاکتور با صدا».
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { getPublicSettings } from "@/lib/auth.functions";
 import { DEFAULT_PLANS, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig } from "@/lib/plans";
@@ -72,6 +72,69 @@ function LandingDivider() {
       </span>
       <span className="lp-divider-line" />
     </div>
+  );
+}
+
+function KamixMark() {
+  const uid = `kx${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  return (
+    <svg viewBox="0 0 48 48" className="lp-head-mark" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${uid}-bg`} x1="10" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#9ec4ff" />
+          <stop offset="38%" stopColor="#4f8cff" />
+          <stop offset="72%" stopColor="#5a5bff" />
+          <stop offset="100%" stopColor="#7a4dff" />
+        </linearGradient>
+        <radialGradient id={`${uid}-shine`} cx="0.28" cy="0.2" r="0.78">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+          <stop offset="55%" stopColor="#ffffff" stopOpacity="0.08" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${uid}-fold`} x1="30" y1="5" x2="41" y2="17" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#dbe7ff" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#31407a" stopOpacity="0.55" />
+        </linearGradient>
+        <mask id={`${uid}-cut`}>
+          <rect width="48" height="48" fill="black" />
+          <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill="white" />
+          <circle cx="8.5" cy="17.4" r="3.55" fill="black" />
+          <circle cx="8.5" cy="30.6" r="3.55" fill="black" />
+        </mask>
+      </defs>
+      <g mask={`url(#${uid}-cut)`}>
+        <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill={`url(#${uid}-bg)`} />
+        <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill={`url(#${uid}-shine)`} />
+        <rect
+          x="10"
+          y="7"
+          width="29"
+          height="34"
+          rx="10"
+          fill="none"
+          stroke="#ffffff"
+          strokeOpacity="0.22"
+          strokeWidth="0.85"
+        />
+        <path
+          d="M19.1 14.1h3.7v6.35L31.15 14.1h4.35L25.2 23.05 35.85 33.7h-4.55L22.8 25.05v8.65h-3.7Z"
+          fill="#1a2744"
+          opacity="0.22"
+          transform="translate(0 0.65)"
+        />
+        <path
+          d="M19.1 14.1h3.7v6.35L31.15 14.1h4.35L25.2 23.05 35.85 33.7h-4.55L22.8 25.05v8.65h-3.7Z"
+          fill="#ffffff"
+        />
+        <g fill="#ffffff" fillOpacity="0.38">
+          <circle cx="12.45" cy="21.4" r="0.58" />
+          <circle cx="12.45" cy="24" r="0.58" />
+          <circle cx="12.45" cy="26.6" r="0.58" />
+        </g>
+        <path d="M32.6 5.5H40.5V13.6Z" fill={`url(#${uid}-fold)`} />
+        <path d="M32.6 5.5L40.5 13.6" stroke="#ffffff" strokeOpacity="0.4" strokeWidth="0.7" />
+      </g>
+    </svg>
   );
 }
 
@@ -216,8 +279,8 @@ export function LandingPage() {
               window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
             }}
           >
-            <span className="lp-head-mark" aria-hidden="true">
-              <Receipt />
+            <span className="lp-head-mark-wrap" aria-hidden="true">
+              <KamixMark />
             </span>
             <span className="lp-head-name">
               <strong>{content.brand_name}</strong>

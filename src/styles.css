@@ -504,41 +504,24 @@ html[data-app="1"] .landing-page {
   color: inherit;
   text-decoration: none;
 }
-.lp-head-mark {
-  position: relative;
+.lp-head-mark-wrap {
   display: grid;
-  place-items: center;
-  width: 2.45rem;
-  height: 2.45rem;
   flex-shrink: 0;
-  border-radius: 0.85rem;
-  background: var(--gradient-primary);
-  color: var(--primary-foreground);
-  box-shadow:
-    var(--shadow-elegant),
-    inset 0 1px 0 rgb(255 255 255 / 0.35);
-  overflow: hidden;
-  transition: transform 0.18s ease;
+  place-items: center;
+}
+.lp-head-mark {
+  width: 2.65rem;
+  height: 2.65rem;
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 10px 16px color-mix(in oklab, var(--primary) 45%, transparent));
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), filter 0.22s ease;
 }
 @media (hover: hover) {
   .lp-head-brand:hover .lp-head-mark {
-    transform: translateY(-1px);
+    transform: translateY(-1px) rotate(-6deg);
+    filter: drop-shadow(0 14px 20px color-mix(in oklab, var(--primary) 58%, transparent));
   }
-}
-.lp-head-mark::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  border-style: solid;
-  border-width: 0 11px 11px 0;
-  border-color: transparent rgb(255 255 255 / 0.28) transparent transparent;
-}
-.lp-head-mark svg {
-  position: relative;
-  z-index: 1;
-  width: 1.15rem;
-  height: 1.15rem;
 }
 
 .lp-head-name {
@@ -1399,6 +1382,7 @@ html[data-app="1"] .landing-page {
   .lp-plan,
   .lp-head-cta::after,
   .lp-head-inner,
+  .lp-head-mark,
   .sg-print,
   .sg-stagger,
   .sg-d1,

@@ -9,6 +9,7 @@
 
 export type MessageTemplateId =
   | "welcome"
+  | "password_reset"
   | "renewal_done"
   | "renewal_reminder"
   | "renewal_offer"
@@ -52,6 +53,18 @@ export const MESSAGE_TEMPLATES: MessageTemplateDef[] = [
       `یوزرنیم: ${username || "—"}\n` +
       `رمز عبور: ${password || "همان رمزی که هنگام ثبت‌نام انتخاب کردید"}\n` +
       `علاوه بر اپلیکیشن، از نسخه‌ی وب هم می‌توانید با همین مشخصات وارد شوید.` +
+      (includeLink ? `\n${WEB_LINK}` : ""),
+  },
+  {
+    id: "password_reset",
+    label: "بازیابی رمز (یوزرنیم + رمز جدید)",
+    needsPassword: true,
+    hasLink: true,
+    build: ({ name, username, password, includeLink = true }) =>
+      `${name} عزیز، درخواست بازیابی رمز عبور شما در KAMIX انجام شد. ✅\n` +
+      `یوزرنیم: ${username || "—"}\n` +
+      `رمز عبور جدید: ${password || "—"}\n` +
+      `با همین مشخصات وارد شوید.` +
       (includeLink ? `\n${WEB_LINK}` : ""),
   },
   {

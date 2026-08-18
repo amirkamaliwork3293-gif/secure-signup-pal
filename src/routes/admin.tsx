@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
+import { filterAndRankSearch, namesReferToSamePerson, personNameSearchFields } from "@/lib/search";
+import { openExternal, toIntlPhone } from "@/lib/openExternal";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
 import { useAuth } from "@/lib/AuthContext";
@@ -22,6 +24,7 @@ import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
   Package, Power, Percent, Timer, Search, KeyRound, BellRing, Phone, MessageSquare,
+  Copy,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -113,11 +116,17 @@ function AdminPage() {
     setActing(null);
   };
 
-  const handleResetPassword = async (user: UserProfile, newPassword: string) => {
+  const handleResetPassword = async (user: UserProfile, newPassword: string): Promise<boolean> => {
     setActing(user.id);
-    try { await resetPwd({ data: { user_id: user.id, new_password: newPassword } }); }
-    catch (e: any) { alert(e?.message); }
-    setActing(null);
+    try {
+      await resetPwd({ data: { user_id: user.id, new_password: newPassword } });
+      return true;
+    } catch (e: any) {
+      alert(e?.message);
+      return false;
+    } finally {
+      setActing(null);
+    }
   };
 
   const pending = requests.filter((r) => r.status === "pending");
@@ -208,6 +217,10 @@ function AdminPage() {
             {tab === "resets" && (
               <PasswordResetsTab
                 requests={resetRequests}
+                users={users}
+                phones={phones}
+                signupRequests={requests}
+                onResetPassword={handleResetPassword}
                 onRefresh={() => void fetchAll()}
               />
             )}
@@ -484,7 +497,7 @@ function UsersTab({
   acting: string | null;
   onExtend: (u: UserProfile, plan: SubscriptionPlan) => void;
   onDelete: (u: UserProfile) => void;
-  onResetPassword: (u: UserProfile, newPassword: string) => void;
+  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
 }) {
   const [searchQ, setSearchQ] = useState("");
   const [resetTarget, setResetTarget] = useState<UserProfile | null>(null);
@@ -503,8 +516,9 @@ function UsersTab({
   const handlePwdReset = async () => {
     if (!resetTarget || newPwd.length < 6) return;
     setPwdSaving(true);
-    await onResetPassword(resetTarget, newPwd);
+    const ok = await onResetPassword(resetTarget, newPwd);
     setPwdSaving(false);
+    if (!ok) return;
     setResetTarget(null);
     setNewPwd("");
     alert("رمز عبور با موفقیت تغییر کرد.");
@@ -676,16 +690,20 @@ function MessageUserModal({
 }) {
   const name = `${user.first_name || ""} ${user.last_name || ""}`.trim() || user.username;
   const availableTemplates = MESSAGE_TEMPLATES.filter((t) => !t.needsPassword || !!password);
-  const [templateId, setTemplateId] = useState<MessageTemplateId>(defaultTemplate);
+  const [templateId, setTemplateId] = useState<MessageTemplateId>(
+    availableTemplates.some((t) => t.id === defaultTemplate) ? defaultTemplate : (availableTemplates[0]?.id ?? "custom"),
+  );
   const [includeLink, setIncludeLink] = useState(true);
+  const [copied, setCopied] = useState(false);
   const buildText = (id: MessageTemplateId, withLink: boolean) =>
     (MESSAGE_TEMPLATES.find((t) => t.id === id) ?? MESSAGE_TEMPLATES[0]).build({
       name, username: user.username, password, includeLink: withLink,
     });
-  const [text, setText] = useState(() => buildText(defaultTemplate, true));
-  const normalizePhone = (p: string) => p.replace(/[^\d+]/g, "");
-  const localPhone = phone ? normalizePhone(phone) : "";
-  const encoded = encodeURIComponent(text);
+  const [text, setText] = useState(() => buildText(
+    availableTemplates.some((t) => t.id === defaultTemplate) ? defaultTemplate : (availableTemplates[0]?.id ?? "custom"),
+    true,
+  ));
+  const localPhone = phone ? phone.replace(/[^\d+]/g, "") : "";
   const currentTemplate = MESSAGE_TEMPLATES.find((t) => t.id === templateId);
 
   const applyTemplate = (id: MessageTemplateId) => {
@@ -695,6 +713,13 @@ function MessageUserModal({
   const toggleIncludeLink = (checked: boolean) => {
     setIncludeLink(checked);
     setText(buildText(templateId, checked));
+  };
+  const copyText = async () => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
   };
 
   return (
@@ -752,32 +777,46 @@ function MessageUserModal({
 
         {localPhone && (
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <a
-              href={`tel:${localPhone}`}
+            <button
+              type="button"
+              onClick={() => openExternal(`tel:${localPhone}`)}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
             >
               <Phone className="h-3.5 w-3.5" />
               تماس
-            </a>
-            <a
-              href={`sms:${localPhone}?body=${encoded}`}
-              onClick={() => onSent?.()}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openExternal(`sms:${localPhone}?body=${encodeURIComponent(text)}`);
+                onSent?.();
+              }}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 py-2 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-500/20"
             >
               <MessageSquare className="h-3.5 w-3.5" />
               پیامک
-            </a>
-            <a
-              href={`https://wa.me/${localPhone.replace(/^0/, "98").replace(/^\+/, "")}?text=${encoded}`}
-              target="_blank" rel="noopener noreferrer"
-              onClick={() => onSent?.()}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openExternal(`https://wa.me/${toIntlPhone(localPhone)}?text=${encodeURIComponent(text)}`);
+                onSent?.();
+              }}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-green-500/10 py-2 text-xs font-semibold text-green-700 dark:text-green-400 hover:bg-green-500/20"
             >
               <MessageSquare className="h-3.5 w-3.5" />
               واتساپ
-            </a>
+            </button>
           </div>
         )}
+        <button
+          type="button"
+          onClick={() => void copyText()}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-xs font-medium hover:bg-accent"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "متن کپی شد" : "کپی متن پیام"}
+        </button>
         {!localPhone && password && (
           <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
             چون شماره‌ای ثبت نشده، متن بالا را کپی کنید و از راه دیگری (مثلاً تلگرام) برای کاربر بفرستید.
@@ -1484,70 +1523,59 @@ function CustomerDetailDialog({
   );
 }
 
+function normalizeIranPhoneClient(p: string | null | undefined): string {
+  return (p || "").replace(/\s+/g, "").replace(/^\+98/, "0").replace(/^98/, "0");
+}
+
+function generateSimplePassword() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function userSearchFields(u: UserProfile, phone: string | null | undefined) {
+  return [
+    u.username,
+    u.first_name,
+    u.last_name,
+    `${u.first_name || ""} ${u.last_name || ""}`.trim(),
+    phone || "",
+    ...personNameSearchFields({ firstName: u.first_name || "", lastName: u.last_name || "" }),
+  ];
+}
+
 function PasswordResetsTab({
   requests,
+  users,
+  phones,
+  signupRequests,
+  onResetPassword,
   onRefresh,
 }: {
   requests: PasswordResetRequestRow[];
+  users: UserProfile[];
+  phones: Record<string, string | null>;
+  signupRequests: SignupRequest[];
+  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
   onRefresh: () => void;
 }) {
-  const ackFn = useServerFn(adminAckPasswordReset);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
-  const pending = requests.filter((r) => r.status === "pending");
-  const done = requests.filter((r) => r.status !== "pending");
-
-  const markDone = async (id: string) => {
-    setBusy(id);
-    try {
-      await ackFn({ data: { id } });
-      onRefresh();
-    } catch (e: unknown) {
-      alert((e as { message?: string })?.message || "خطا");
-    }
-    setBusy(null);
-  };
-
-  const Card = ({ r }: { r: PasswordResetRequestRow }) => (
-    <li className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">
-            {r.first_name} {r.last_name}
-          </div>
-          <div className="mt-2 grid gap-1.5 text-xs">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="w-24 shrink-0">نام</span>
-              <span className="font-medium text-foreground">{r.first_name}</span>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="w-24 shrink-0">نام خانوادگی</span>
-              <span className="font-medium text-foreground">{r.last_name}</span>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="w-24 shrink-0">شماره تلفن</span>
-              <span dir="ltr" className="font-medium text-foreground">{r.phone}</span>
-            </div>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <span className="w-24 shrink-0">زمان ارسال</span>
-              <span>{formatJalaliDateTime(r.created_at)}</span>
-            </div>
-          </div>
-        </div>
-        <StatusBadge status={r.status} />
-      </div>
-      {r.status === "pending" && (
-        <button
-          type="button"
-          disabled={busy === r.id}
-          onClick={() => void markDone(r.id)}
-          className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
-        >
-          {busy === r.id ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "انجام شد — از تب کاربران رمز را عوض کردم"}
-        </button>
-      )}
-    </li>
-  );
+  const filtered = filterAndRankSearch(requests, query, (r) => [
+    r.first_name,
+    r.last_name,
+    `${r.first_name} ${r.last_name}`,
+    r.phone,
+  ]);
+  const pending = filtered.filter((r) => r.status === "pending");
+  const done = filtered.filter((r) => r.status !== "pending");
 
   if (requests.length === 0) {
     return (
@@ -1561,12 +1589,34 @@ function PasswordResetsTab({
   return (
     <div className="space-y-4">
       <p className="rounded-xl border border-border bg-card px-3 py-2 text-[11px] leading-6 text-muted-foreground">
-        این‌جا فقط درخواست کاربر دیده می‌شود (نام، نام خانوادگی و شماره). رمز را از تب «کاربران» با دکمه تغییر رمز، دستی عوض کنید.
+        کاربر را با نام یا شماره پیدا کنید، یوزرنیم را ببینید، رمز جدید بگذارید و با پیامک نیمه‌دستی برایش بفرستید. رمز قبلی به‌خاطر امنیت قابل نمایش نیست.
       </p>
+      <div className="relative">
+        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="جستجوی درخواست: نام، نام خانوادگی یا شماره..."
+          className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+        />
+      </div>
+      {filtered.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+          درخواستی با این مشخصات پیدا نشد
+        </div>
+      )}
       {pending.length > 0 && (
         <ul className="space-y-2">
           {pending.map((r) => (
-            <Card key={r.id} r={r} />
+            <PasswordResetCard
+              key={r.id}
+              r={r}
+              users={users}
+              phones={phones}
+              signupRequests={signupRequests}
+              onResetPassword={onResetPassword}
+              onRefresh={onRefresh}
+            />
           ))}
         </ul>
       )}
@@ -1575,12 +1625,294 @@ function PasswordResetsTab({
           <div className="mb-2 text-xs font-semibold text-muted-foreground">سوابق</div>
           <ul className="space-y-2">
             {done.map((r) => (
-              <Card key={r.id} r={r} />
+              <PasswordResetCard
+                key={r.id}
+                r={r}
+                users={users}
+                phones={phones}
+                signupRequests={signupRequests}
+                onResetPassword={onResetPassword}
+                onRefresh={onRefresh}
+              />
             ))}
           </ul>
         </div>
       )}
     </div>
+  );
+}
+
+function PasswordResetCard({
+  r,
+  users,
+  phones,
+  signupRequests,
+  onResetPassword,
+  onRefresh,
+}: {
+  r: PasswordResetRequestRow;
+  users: UserProfile[];
+  phones: Record<string, string | null>;
+  signupRequests: SignupRequest[];
+  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
+  onRefresh: () => void;
+}) {
+  const ackFn = useServerFn(adminAckPasswordReset);
+  const [picked, setPicked] = useState<UserProfile | null>(null);
+  const [userQ, setUserQ] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [shownPwd, setShownPwd] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  const phoneOf = (u: UserProfile) => phones[u.username?.toLowerCase()] || null;
+
+  const phoneMatches = users.filter(
+    (u) => normalizeIranPhoneClient(phoneOf(u)) === normalizeIranPhoneClient(r.phone) && normalizeIranPhoneClient(r.phone),
+  );
+  const nameMatches = users.filter((u) =>
+    namesReferToSamePerson(
+      { firstName: r.first_name, lastName: r.last_name },
+      { firstName: u.first_name || "", lastName: u.last_name || "" },
+    ),
+  );
+  const suggested = [
+    ...phoneMatches,
+    ...nameMatches.filter((u) => !phoneMatches.some((p) => p.id === u.id)),
+  ].slice(0, 6);
+
+  const autoMatchId = phoneMatches.length === 1 ? phoneMatches[0].id : null;
+  useEffect(() => {
+    if (picked || !autoMatchId) return;
+    const u = users.find((x) => x.id === autoMatchId);
+    if (u) setPicked(u);
+  }, [picked, autoMatchId, users]);
+
+  const searched = userQ.trim()
+    ? filterAndRankSearch(users, userQ, (u) => userSearchFields(u, phoneOf(u))).slice(0, 8)
+    : [];
+
+  const tempPassword =
+    picked
+      ? signupRequests.find(
+          (s) => s.username?.toLowerCase() === picked.username.toLowerCase() && s.temp_password,
+        )?.temp_password || null
+      : null;
+  const passwordToShow = shownPwd || tempPassword;
+  const smsPhone = picked ? phoneOf(picked) || r.phone : r.phone;
+
+  const copyValue = async (label: string, value: string) => {
+    const ok = await copyToClipboard(value);
+    if (ok) {
+      setCopied(label);
+      setTimeout(() => setCopied(""), 1500);
+    }
+  };
+
+  const applyPassword = async () => {
+    if (!picked || newPwd.length < 6) {
+      alert("کاربر را انتخاب کنید و رمز جدید حداقل ۶ کاراکتر باشد.");
+      return;
+    }
+    if (picked.username === "amirkamali") {
+      alert("رمز این حساب از اینجا عوض نمی‌شود.");
+      return;
+    }
+    setBusy(true);
+    const ok = await onResetPassword(picked, newPwd);
+    setBusy(false);
+    if (!ok) return;
+    setShownPwd(newPwd);
+  };
+
+  const markDone = async () => {
+    setBusy(true);
+    try {
+      await ackFn({ data: { id: r.id } });
+      onRefresh();
+    } catch (e: unknown) {
+      alert((e as { message?: string })?.message || "خطا");
+    }
+    setBusy(false);
+  };
+
+  const Row = ({ label, value, copyKey, ltr }: { label: string; value: string; copyKey?: string; ltr?: boolean }) => (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <span className="w-24 shrink-0">{label}</span>
+      <span dir={ltr ? "ltr" : undefined} className="min-w-0 flex-1 font-medium text-foreground">{value}</span>
+      {copyKey && (
+        <button
+          type="button"
+          onClick={() => void copyValue(copyKey, value)}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border hover:bg-accent"
+          title="کپی"
+        >
+          {copied === copyKey ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+        </button>
+      )}
+    </div>
+  );
+
+  const UserChip = ({ u, reason }: { u: UserProfile; reason?: string }) => (
+    <button
+      type="button"
+      onClick={() => { setPicked(u); setShownPwd(null); }}
+      className={`w-full rounded-xl border px-3 py-2 text-right text-xs hover:bg-accent ${
+        picked?.id === u.id ? "border-primary bg-primary/5" : "border-border"
+      }`}
+    >
+      <div className="font-medium text-foreground">
+        {u.first_name || "—"} {u.last_name || ""}
+        <span dir="ltr" className="mr-2 text-muted-foreground">@{u.username}</span>
+      </div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">
+        {phoneOf(u) ? <span dir="ltr">{phoneOf(u)}</span> : "بدون شماره"}
+        {reason ? ` — ${reason}` : ""}
+      </div>
+    </button>
+  );
+
+  return (
+    <li className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">
+            {r.first_name} {r.last_name}
+          </div>
+          <div className="mt-2 grid gap-1.5 text-xs">
+            <Row label="نام" value={r.first_name} />
+            <Row label="نام خانوادگی" value={r.last_name} />
+            <Row label="شماره تلفن" value={r.phone} copyKey="req-phone" ltr />
+            <Row label="زمان ارسال" value={formatJalaliDateTime(r.created_at)} />
+          </div>
+        </div>
+        <StatusBadge status={r.status} />
+      </div>
+
+      {r.status === "pending" && (
+        <div className="mt-4 space-y-3 border-t border-border pt-3">
+          <div className="text-xs font-semibold">پیدا کردن حساب کاربر</div>
+          {suggested.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-muted-foreground">پیشنهاد بر اساس شماره یا نام</div>
+              {suggested.map((u) => (
+                <UserChip
+                  key={u.id}
+                  u={u}
+                  reason={phoneMatches.some((p) => p.id === u.id) ? "تطبیق شماره" : "تطبیق نام"}
+                />
+              ))}
+            </div>
+          )}
+          <div className="relative">
+            <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={userQ}
+              onChange={(e) => setUserQ(e.target.value)}
+              placeholder="جستجوی یوزرنیم، نام یا شماره در کاربران..."
+              className="w-full rounded-xl border border-input bg-background py-2 pr-8 pl-3 text-xs outline-none focus:border-primary"
+            />
+          </div>
+          {searched.length > 0 && (
+            <div className="space-y-1.5">
+              {searched.map((u) => (
+                <UserChip key={u.id} u={u} />
+              ))}
+            </div>
+          )}
+          {userQ.trim() && searched.length === 0 && (
+            <div className="text-[11px] text-muted-foreground">کاربری با این جستجو پیدا نشد.</div>
+          )}
+
+          {picked && (
+            <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+              <div className="text-xs font-semibold text-primary">حساب پیدا شد</div>
+              <div className="grid gap-1.5 text-xs">
+                <Row label="یوزرنیم" value={picked.username} copyKey="username" ltr />
+                <Row label="نام حساب" value={`${picked.first_name || ""} ${picked.last_name || ""}`.trim() || "—"} />
+                <Row label="شماره حساب" value={phoneOf(picked) || "ثبت نشده"} copyKey="user-phone" ltr />
+                {tempPassword && !shownPwd && (
+                  <Row label="رمز ثبت‌نام" value={tempPassword} copyKey="temp-pwd" ltr />
+                )}
+                {shownPwd && (
+                  <Row label="رمز جدید" value={shownPwd} copyKey="new-pwd" ltr />
+                )}
+              </div>
+              {passwordToShow && (
+                <button
+                  type="button"
+                  onClick={() => void copyValue("both", `یوزرنیم: ${picked.username}\nرمز عبور: ${passwordToShow}`)}
+                  className="w-full rounded-lg border border-border bg-background py-1.5 text-[11px] font-medium hover:bg-accent"
+                >
+                  {copied === "both" ? "کپی شد" : "کپی یوزرنیم و رمز"}
+                </button>
+              )}
+              {!shownPwd && (
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  رمز قبلی ذخیره نمی‌شود. یک رمز جدید بگذارید تا بتوانید آن را ببینید و پیامک کنید.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newPwd}
+                  onChange={(e) => setNewPwd(e.target.value)}
+                  dir="ltr"
+                  placeholder="رمز جدید (حداقل ۶ کاراکتر)"
+                  className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => setNewPwd(generateSimplePassword())}
+                  className="shrink-0 rounded-xl border border-border px-2.5 text-[11px] hover:bg-accent"
+                >
+                  تولید
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={busy || newPwd.length < 6}
+                onClick={() => void applyPassword()}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                اعمال رمز و نمایش
+              </button>
+              {passwordToShow && (
+                <button
+                  type="button"
+                  onClick={() => setSmsOpen(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-primary/40 py-2 text-xs font-semibold text-primary hover:bg-primary/5"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  پیامک نیمه‌دستی یوزرنیم و رمز
+                </button>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void markDone()}
+            className="w-full rounded-lg border border-border py-2 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "انجام شد"}
+          </button>
+        </div>
+      )}
+
+      {smsOpen && picked && passwordToShow && (
+        <MessageUserModal
+          user={picked}
+          phone={smsPhone}
+          password={passwordToShow}
+          defaultTemplate="password_reset"
+          onClose={() => setSmsOpen(false)}
+        />
+      )}
+    </li>
   );
 }
 

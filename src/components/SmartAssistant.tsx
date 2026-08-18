@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Drawer,
@@ -794,37 +795,37 @@ export function SmartAssistant() {
 
   if (HIDDEN_ON.includes(pathname)) return null;
 
+  const fab = (
+    <button
+      type="button"
+      data-tour="smart-assistant"
+      onClick={() => {
+        markAssistantOpened();
+        setOpen(true);
+      }}
+      aria-label="دستیار هوشمند صوتی"
+      title="دستیار هوشمند"
+      className={`ai-fab${reminderToastVisible ? " is-raised" : ""}`}
+    >
+      <span className="ai-fab-glow" aria-hidden="true" />
+      <span className="ai-fab-aura" aria-hidden="true" />
+      <span className="ai-fab-orbit" aria-hidden="true" />
+      <span className="ai-fab-core">
+        <AssistantMark className="ai-fab-mark" />
+      </span>
+      <span className="ai-fab-spark" aria-hidden="true">
+        <Sparkles className="h-2.5 w-2.5" />
+      </span>
+    </button>
+  );
+
   return (
     <>
-      {/* دکمه‌ی شناور — بالای نوار پایین موبایل */}
-      <button
-        type="button"
-        data-tour="smart-assistant"
-        onClick={() => {
-          markAssistantOpened();
-          setOpen(true);
-        }}
-        aria-label="دستیار هوشمند صوتی"
-        title="دستیار هوشمند"
-        className="ai-fab fixed left-4 z-30 h-14 w-14"
-        style={{
-          bottom: reminderToastVisible
-            ? "calc(12rem + var(--safe-bottom))"
-            : "calc(5.25rem + var(--safe-bottom))",
-        }}
-      >
-        <span className="ai-fab-glow" aria-hidden="true" />
-        <span className="ai-fab-aura" aria-hidden="true" />
-        <span className="ai-fab-orbit" aria-hidden="true" />
-        <span className="ai-fab-core">
-          <AssistantMark className="ai-fab-mark" />
-        </span>
-        <span className="ai-fab-spark" aria-hidden="true">
-          <Sparkles className="h-2.5 w-2.5" />
-        </span>
-      </button>
+      {/* روی body پورتال می‌شود تا transform کشو جایش را به وسط صفحه نکشد */}
+      {typeof document !== "undefined" ? createPortal(fab, document.body) : fab}
 
       <Drawer
+        shouldScaleBackground={false}
         open={open}
         onOpenChange={(v) => {
           if (v) {

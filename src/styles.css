@@ -283,10 +283,6 @@ html[data-app="1"] .landing-page {
 
 .ai-fab {
   position: fixed;
-  left: 1rem;
-  right: auto;
-  top: auto;
-  bottom: calc(5.25rem + var(--safe-bottom));
   z-index: 30;
   display: grid;
   place-items: center;
@@ -297,11 +293,20 @@ html[data-app="1"] .landing-page {
   border: 0;
   border-radius: 9999px;
   background: transparent;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
   -webkit-tap-highlight-color: transparent;
 }
 
-.ai-fab.is-raised {
-  bottom: calc(12rem + var(--safe-bottom));
+.ai-fab.is-dragging {
+  z-index: 80;
+  cursor: grabbing;
+}
+
+.ai-fab.is-dragging .ai-fab-core {
+  transform: scale(1.08);
 }
 
 .ai-fab-glow {
@@ -378,6 +383,10 @@ html[data-app="1"] .landing-page {
 
 .ai-fab:active .ai-fab-core {
   transform: scale(0.92);
+}
+
+.ai-fab.is-dragging:active .ai-fab-core {
+  transform: scale(1.08);
 }
 
 .ai-fab-mark {

@@ -11,7 +11,7 @@
  * تداخل نکند. روی همان دو صفحه، دکمه‌ی شناور هم عمداً نمایش داده نمی‌شود.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
@@ -175,6 +175,199 @@ function ledgerLabel(role: CustomerLedgerRole): string {
 function productUnitLabel(item: ParsedProductItem): string {
   const unit = item.unit;
   return unit === COUNT_UNIT ? " عدد" : ` ${unit}`;
+}
+
+const FAB_SIZE = 56;
+const FAB_PAD = 10;
+const FAB_NAV = 84;
+const FAB_POS_KEY = "acc.assistantFabPos.v1";
+const FAB_HOLD_MS = 220;
+const FAB_DRAG_PX = 10;
+
+type FabPos = { left: number; top: number; custom: boolean };
+
+function clampFabPos(left: number, top: number): { left: number; top: number } {
+  const vw = typeof window === "undefined" ? 360 : window.innerWidth;
+  const vh = typeof window === "undefined" ? 640 : window.innerHeight;
+  const maxL = Math.max(FAB_PAD, vw - FAB_SIZE - FAB_PAD);
+  const maxT = Math.max(FAB_PAD, vh - FAB_SIZE - FAB_PAD);
+  return {
+    left: Math.min(maxL, Math.max(FAB_PAD, left)),
+    top: Math.min(maxT, Math.max(FAB_PAD, top)),
+  };
+}
+
+function defaultFabPos(raised: boolean): FabPos {
+  const vh = typeof window === "undefined" ? 640 : window.innerHeight;
+  const extra = raised ? 108 : 0;
+  return { ...clampFabPos(FAB_PAD + 6, vh - FAB_SIZE - FAB_NAV - extra), custom: false };
+}
+
+function readFabPos(): FabPos | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(FAB_POS_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<FabPos>;
+    if (typeof p.left !== "number" || typeof p.top !== "number") return null;
+    return { ...clampFabPos(p.left, p.top), custom: p.custom !== false };
+  } catch {
+    return null;
+  }
+}
+
+function writeFabPos(pos: FabPos) {
+  try {
+    localStorage.setItem(FAB_POS_KEY, JSON.stringify(pos));
+  } catch {
+    /* ignore */
+  }
+}
+
+function DraggableAssistantFab({
+  raised,
+  onOpen,
+}: {
+  raised: boolean;
+  onOpen: () => void;
+}) {
+  const [pos, setPos] = useState<FabPos | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origLeft: number;
+    origTop: number;
+    moved: boolean;
+    active: boolean;
+    timer: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const saved = readFabPos();
+    setPos(saved ?? defaultFabPos(raised));
+    // فقط یک‌بار از حافظه بخوان؛ بعداً اگر سفارشی نبود با raised به‌روز می‌شود
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setPos((prev) => {
+      if (!prev || prev.custom) return prev;
+      return defaultFabPos(raised);
+    });
+  }, [raised]);
+
+  useEffect(() => {
+    const onResize = () => {
+      setPos((prev) => {
+        if (!prev) return prev;
+        if (!prev.custom) return defaultFabPos(raised);
+        const next = { ...prev, ...clampFabPos(prev.left, prev.top) };
+        writeFabPos(next);
+        return next;
+      });
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, [raised]);
+
+  const beginDrag = () => {
+    if (!drag.current) return;
+    drag.current.active = true;
+    setDragging(true);
+  };
+
+  const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.button != null && e.button !== 0) return;
+    const current = pos ?? defaultFabPos(raised);
+    drag.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origLeft: current.left,
+      origTop: current.top,
+      moved: false,
+      active: false,
+      timer: window.setTimeout(beginDrag, FAB_HOLD_MS),
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: PointerEvent<HTMLButtonElement>) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.active && Math.hypot(dx, dy) >= FAB_DRAG_PX) {
+      if (d.timer != null) {
+        window.clearTimeout(d.timer);
+        d.timer = null;
+      }
+      d.active = true;
+      setDragging(true);
+    }
+    if (!d.active) return;
+    e.preventDefault();
+    d.moved = true;
+    const next = { ...clampFabPos(d.origLeft + dx, d.origTop + dy), custom: true };
+    setPos(next);
+  };
+
+  const endPointer = (e: PointerEvent<HTMLButtonElement>, openIfTap: boolean) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    if (d.timer != null) window.clearTimeout(d.timer);
+    const wasDrag = d.active && d.moved;
+    drag.current = null;
+    setDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (wasDrag) {
+      setPos((prev) => {
+        const next = prev ?? defaultFabPos(raised);
+        writeFabPos({ ...next, custom: true });
+        return { ...next, custom: true };
+      });
+      return;
+    }
+    if (openIfTap) onOpen();
+  };
+
+  if (!pos) return null;
+
+  return (
+    <button
+      type="button"
+      data-tour="smart-assistant"
+      aria-label="دستیار هوشمند صوتی"
+      title="دستیار هوشمند — برای جابجایی نگه دارید"
+      className={`ai-fab${dragging ? " is-dragging" : ""}`}
+      style={{ left: pos.left, top: pos.top, right: "auto", bottom: "auto" }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={(e) => endPointer(e, true)}
+      onPointerCancel={(e) => endPointer(e, false)}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span className="ai-fab-glow" aria-hidden="true" />
+      <span className="ai-fab-aura" aria-hidden="true" />
+      <span className="ai-fab-orbit" aria-hidden="true" />
+      <span className="ai-fab-core">
+        <AssistantMark className="ai-fab-mark" />
+      </span>
+      <span className="ai-fab-spark" aria-hidden="true">
+        <Sparkles className="h-2.5 w-2.5" />
+      </span>
+    </button>
+  );
 }
 
 export function SmartAssistant() {
@@ -796,32 +989,17 @@ export function SmartAssistant() {
   if (HIDDEN_ON.includes(pathname)) return null;
 
   const fab = (
-    <button
-      type="button"
-      data-tour="smart-assistant"
-      onClick={() => {
+    <DraggableAssistantFab
+      raised={reminderToastVisible}
+      onOpen={() => {
         markAssistantOpened();
         setOpen(true);
       }}
-      aria-label="دستیار هوشمند صوتی"
-      title="دستیار هوشمند"
-      className={`ai-fab${reminderToastVisible ? " is-raised" : ""}`}
-    >
-      <span className="ai-fab-glow" aria-hidden="true" />
-      <span className="ai-fab-aura" aria-hidden="true" />
-      <span className="ai-fab-orbit" aria-hidden="true" />
-      <span className="ai-fab-core">
-        <AssistantMark className="ai-fab-mark" />
-      </span>
-      <span className="ai-fab-spark" aria-hidden="true">
-        <Sparkles className="h-2.5 w-2.5" />
-      </span>
-    </button>
+    />
   );
 
   return (
     <>
-      {/* روی body پورتال می‌شود تا transform کشو جایش را به وسط صفحه نکشد */}
       {typeof document !== "undefined" ? createPortal(fab, document.body) : fab}
 
       <Drawer

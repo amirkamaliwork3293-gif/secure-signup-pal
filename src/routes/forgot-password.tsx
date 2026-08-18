@@ -70,7 +70,7 @@ function ForgotPasswordPage() {
             </div>
             <h1 className="text-base font-bold">درخواست ثبت شد</h1>
             <p className="text-xs leading-6 text-muted-foreground">
-              درخواست بازیابی رمز عبور شما برای مدیر ارسال شد. پس از بررسی اطلاعات (نام، نام خانوادگی و شماره تلفن ثبت‌نام)، رمز جدید برایتان تنظیم می‌شود. لطفاً کمی بعد دوباره برای ورود تلاش کنید.
+              درخواست شما برای مدیر ارسال شد. پس از بررسی نام، نام خانوادگی و شماره تلفن، رمز عبور از سمت پشتیبانی تنظیم می‌شود. کمی بعد دوباره برای ورود تلاش کنید.
             </p>
             <Link
               to="/login"
@@ -86,7 +86,7 @@ function ForgotPasswordPage() {
               <h1 className="text-sm font-bold">درخواست بازیابی رمز عبور</h1>
             </div>
             <p className="text-[11px] leading-5 text-muted-foreground">
-              همان نام، نام خانوادگی و شماره موبایلی را وارد کنید که هنگام ثبت‌نام استفاده کرده‌اید. مدیر پس از تطبیق اطلاعات، رمز را بازیابی می‌کند.
+              نام، نام خانوادگی و شماره موبایلی را وارد کنید که با آن ثبت‌نام کرده‌اید. درخواست برای مدیر ارسال می‌شود.
             </p>
             <Field label="نام" value={firstName} onChange={setFirstName} placeholder="مثال: علی" />
             <Field label="نام خانوادگی" value={lastName} onChange={setLastName} placeholder="مثال: محمدی" />

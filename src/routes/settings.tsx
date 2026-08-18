@@ -39,6 +39,7 @@ import {
   QrCode,
   Coins,
   Bell,
+  Factory,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -61,6 +62,7 @@ function SettingsPageInner() {
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
   const [showRemindersFeature, setShowRemindersFeature] = useState(appSettings.showRemindersFeature !== false);
+  const [showProductionFeature, setShowProductionFeature] = useState(!!appSettings.showProductionFeature);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
     appSettings.currencyUnit === "rial" ? "rial" : "toman",
   );
@@ -77,6 +79,7 @@ function SettingsPageInner() {
       showStudentsFeature,
       showGoldFeature,
       showRemindersFeature,
+      showProductionFeature,
       currencyUnit,
     });
     // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
@@ -318,6 +321,24 @@ function SettingsPageInner() {
           </label>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
             یادآوری وظایف، سررسیدها و پیگیری مشتریان — با هشدار «امروز / سررسید گذشته» در نوار پایین.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Factory className="h-4 w-4 text-primary" />
+              نمایش بخش «تولید و فرمول»
+            </span>
+            <input
+              type="checkbox"
+              checked={showProductionFeature}
+              onChange={(e) => setShowProductionFeature(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            مخصوص کارگاه، کافه و تولیدی. با فعال‌شدن، بخش «تولید» اضافه می‌شود تا برای هر محصول فرمول مواد اولیه بسازید و با فروش، موجودی مواد خودکار کم شود. اگر تولید ندارید خاموش بماند تا برنامه شلوغ نشود.
           </p>
         </div>
       </Group>

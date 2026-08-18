@@ -48,6 +48,7 @@ function ProductsPageInner() {
   const navigate = Route.useNavigate();
   const [list, setList] = products.useAll();
   const [catList, setCatList] = categories.useAll();
+  const [appSettings] = settings.useAll();
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Product | null>(null);
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
@@ -278,6 +279,11 @@ function ProductsPageInner() {
             <Plus className="h-3.5 w-3.5" />
             افزودن
           </button>
+          {appSettings.showProductionFeature && (
+            <Link to="/production" className="inline-flex items-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+              فرمول تولید
+            </Link>
+          )}
         </div>
       </div>
 
@@ -681,6 +687,7 @@ function ProductModal({
       wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
       wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
       expiryAt: hasExpiry ? jalaliToTimestamp(ejy, ejm, ejd, 23, 59) : undefined,
+      recipe: initial?.recipe,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
     else onSave(data);
@@ -902,6 +909,14 @@ function ProductModal({
             <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} placeholder="توضیحات اضافی (اختیاری)"
               className={`${inputCls} resize-none`} />
           </Field>
+          {appSettings.showProductionFeature && (
+            <Link
+              to="/production"
+              className="block rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] leading-5 text-primary"
+            >
+              این محصول ساخته می‌شود؟ فرمول مواد اولیه را در بخش «تولید» تعریف کنید تا با هر فروش، مواد از انبار کم شود.
+            </Link>
+          )}
           <button type="submit"
             className="mt-2 w-full rounded-xl bg-gradient-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-elegant">
             {isEdit ? "ذخیره تغییرات" : "ذخیره محصول"}

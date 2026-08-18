@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson } from "@/lib/search";
+import {
+  stockDeltasForSoldItems,
+  expandRecipeForQty,
+  ingredientsUsedOnSale,
+  type RecipeIngredient,
+  type ProductionEvent,
+} from "@/lib/production";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +37,11 @@ export type Product = {
   wholesaleMinQty?: number;
   /** تاریخ انقضا (timestamp میلی‌ثانیه) — کاملاً اختیاری */
   expiryAt?: number;
+  /**
+   * فرمول تولید اختیاری: مواد لازم برای ساخت یک واحد از این محصول.
+   * اگر خالی باشد، فروش فقط موجودی خود محصول را کم می‌کند.
+   */
+  recipe?: RecipeIngredient[];
 };
 
 export const COUNT_UNIT = "عدد";
@@ -265,6 +277,7 @@ const EXPENSES_KEY = "acc.expenses.v1";
 const REMINDERS_KEY = "acc.reminders.v1";
 const ACCOUNTS_KEY = "acc.accounts.v1";
 const ACCOUNT_TXS_KEY = "acc.account_txs.v1";
+const PRODUCTION_KEY = "acc.production.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
@@ -275,7 +288,7 @@ const CLOUD_FIELDS: Record<
   string,
   | "products" | "categories" | "invoices" | "current_invoice" | "settings"
   | "customers" | "students" | "purchases" | "expenses" | "reminders"
-  | "accounts" | "account_txs"
+  | "accounts" | "account_txs" | "production"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -289,6 +302,7 @@ const CLOUD_FIELDS: Record<
   [REMINDERS_KEY]: "reminders",
   [ACCOUNTS_KEY]: "accounts",
   [ACCOUNT_TXS_KEY]: "account_txs",
+  [PRODUCTION_KEY]: "production",
 };
 
 // Reverse map: cloud column name -> local storage key
@@ -336,6 +350,11 @@ export type AppSettings = {
   showGoldFeature?: boolean;
   /** نمایش بخش «یادآوری‌ها» (پیگیری مشتریان و وظایف) در نوار پایین — پیش‌فرض فعال */
   showRemindersFeature?: boolean;
+  /**
+   * نمایش بخش «تولید و فرمول» — پیش‌فرض غیرفعال تا برای فروشگاه‌هایی
+   * که تولید ندارند برنامه شلوغ نشود.
+   */
+  showProductionFeature?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
@@ -372,6 +391,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showStudentsFeature: false,
   showGoldFeature: false,
   showRemindersFeature: true,
+  showProductionFeature: false,
 };
 
 function getStorageScope() {
@@ -630,6 +650,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /production/.test(error.message) && "production" in payload) {
+      delete payload.production;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -726,6 +753,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
     overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
     overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
+    overwrite("production", PRODUCTION_KEY, (data as Record<string, unknown>).production);
     markCloudHydrated();
   } catch (e) {
     console.error("[store] hydrate failed", e);
@@ -925,24 +953,17 @@ function useBoard(): [
  * می‌شود — نه کل مقدار از نو.
  */
 function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: InvoiceItem[]) {
-  const deltaByProduct = new Map<string, number>();
-  for (const it of oldItems) {
-    if (!it.productId) continue;
-    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) - it.quantity);
-  }
-  for (const it of newItems) {
-    if (!it.productId) continue;
-    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) + it.quantity);
-  }
-  if (deltaByProduct.size === 0) return;
-  const list = read<Product[]>(PRODUCTS_KEY, []);
+  const catalog = read<Product[]>(PRODUCTS_KEY, []);
+  const oldDeltas = stockDeltasForSoldItems(oldItems, catalog);
+  const newDeltas = stockDeltasForSoldItems(newItems, catalog);
+  const ids = new Set([...oldDeltas.keys(), ...newDeltas.keys()]);
+  if (ids.size === 0) return;
   let changed = false;
-  const next = list.map((p) => {
-    const delta = deltaByProduct.get(p.id);
+  const next = catalog.map((p) => {
+    const delta = (newDeltas.get(p.id) || 0) - (oldDeltas.get(p.id) || 0);
     if (!delta) return p;
     changed = true;
-    // delta مثبت یعنی تعداد فروخته‌شده بیشتر شده → از انبار کم می‌شود
-    // delta منفی یعنی تعداد کم شده → به انبار برمی‌گردد
+    // delta مثبت یعنی فروش بیشتر شده → از انبار کم می‌شود
     return { ...p, stock: Math.max(0, (p.stock || 0) - delta) };
   });
   if (changed) products.save(next);
@@ -1049,9 +1070,6 @@ export const invoice = {
   getHistory: () => read<Invoice[]>(HISTORY_KEY, []),
   archive: (inv: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
-    // کسر موجودی در یک نوشتن اتمی — تا تعداد در «محصولات» و «انبار» یکی بماند
-    // و اگر یک کالا چند ردیف داشته باشد، موجودی دوبار از روی دادهٔ کهنه کم نشود.
-    reconcileStockForInvoiceEdit([], inv.items);
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
     // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
     // همین تاریخ را ببینند و بین «تاریخچه» و «دفتر بدهی مشتری» اختلاف نیفتد.
@@ -1060,6 +1078,11 @@ export const invoice = {
     // بازمحاسبه‌ی نهایی: مبلغ ثبت‌شده در تاریخچه همیشه با اقلام و تخفیف همان
     // لحظه می‌خواند، حتی اگر فراخوان یادش رفته باشد recalc را صدا بزند.
     const stamped: Invoice = recalc({ ...inv, createdAt: finalizedAt });
+    // لاگ تولید باید قبل از کسر موجودی باشد تا «موجودی ازپیش‌تولیدشده» درست تشخیص داده شود.
+    logProductionSales(stamped);
+    // کسر موجودی در یک نوشتن اتمی — تا تعداد در «محصولات» و «انبار» یکی بماند
+    // و اگر یک کالا چند ردیف داشته باشد، موجودی دوبار از روی دادهٔ کهنه کم نشود.
+    reconcileStockForInvoiceEdit([], stamped.items);
     write(HISTORY_KEY, [stamped, ...hist]);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
@@ -1513,6 +1536,66 @@ export const accountTxs = {
 
   remove: (id: string) => {
     write(ACCOUNT_TXS_KEY, read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.id !== id));
+  },
+};
+
+function logProductionSales(inv: Invoice) {
+  const catalog = read<Product[]>(PRODUCTS_KEY, []);
+  const used = ingredientsUsedOnSale(inv.items, catalog);
+  if (used.length === 0) return;
+  const events: ProductionEvent[] = used.map((u) => ({
+    id: cryptoId(),
+    createdAt: inv.createdAt || Date.now(),
+    kind: "sale",
+    outputProductId: u.product.id,
+    outputName: u.product.name,
+    outputQty: u.qty,
+    outputUnit: u.product.unit,
+    invoiceId: inv.id,
+    ingredients: u.ingredients,
+  }));
+  write(PRODUCTION_KEY, [...events, ...read<ProductionEvent[]>(PRODUCTION_KEY, [])]);
+}
+
+export const production = {
+  useAll: () => useStore<ProductionEvent[]>(PRODUCTION_KEY, []),
+  getAll: () => read<ProductionEvent[]>(PRODUCTION_KEY, []),
+  save: (list: ProductionEvent[]) => write(PRODUCTION_KEY, list),
+
+  /**
+   * تولید دسته‌ای: مواد فرمول از انبار کم و موجودی محصول نهایی زیاد می‌شود.
+   */
+  produce: (productId: string, qty: number, note?: string): ProductionEvent | null => {
+    if (qty <= 0) return null;
+    const catalog = read<Product[]>(PRODUCTS_KEY, []);
+    const product = catalog.find((p) => p.id === productId);
+    if (!product) return null;
+    const ingredients = expandRecipeForQty(product, qty, catalog);
+    if (ingredients.length === 0) return null;
+    const next = catalog.map((p) => {
+      if (p.id === productId) return { ...p, stock: (p.stock || 0) + qty };
+      const used = ingredients.find((u) => u.productId === p.id);
+      if (!used) return p;
+      return { ...p, stock: Math.max(0, (p.stock || 0) - used.quantity) };
+    });
+    products.save(next);
+    const event: ProductionEvent = {
+      id: cryptoId(),
+      createdAt: Date.now(),
+      kind: "produce",
+      outputProductId: productId,
+      outputName: product.name,
+      outputQty: qty,
+      outputUnit: product.unit,
+      ingredients,
+      note,
+    };
+    write(PRODUCTION_KEY, [event, ...read<ProductionEvent[]>(PRODUCTION_KEY, [])]);
+    return event;
+  },
+
+  remove: (id: string) => {
+    write(PRODUCTION_KEY, read<ProductionEvent[]>(PRODUCTION_KEY, []).filter((e) => e.id !== id));
   },
 };
 

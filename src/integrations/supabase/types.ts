@@ -332,6 +332,7 @@ export type Database = {
           expenses: Json
           invoices: Json
           products: Json
+          production: Json
           purchases: Json
           reminders: Json
           settings: Json
@@ -348,6 +349,7 @@ export type Database = {
           expenses?: Json
           invoices?: Json
           products?: Json
+          production?: Json
           purchases?: Json
           reminders?: Json
           settings?: Json
@@ -364,6 +366,7 @@ export type Database = {
           expenses?: Json
           invoices?: Json
           products?: Json
+          production?: Json
           purchases?: Json
           reminders?: Json
           settings?: Json

@@ -164,11 +164,19 @@ export function LoginPage() {
         </div>
 
         {tab === "user" && (
-          <div className="mt-5 text-center text-xs text-muted-foreground">
-            حساب ندارید؟{" "}
-            <Link to="/register" className="font-semibold text-primary hover:underline">
-              ثبت‌نام کنید
-            </Link>
+          <div className="mt-5 space-y-2 text-center text-xs text-muted-foreground">
+            <div>
+              رمز عبور را فراموش کرده‌اید؟{" "}
+              <Link to="/forgot-password" className="font-semibold text-primary hover:underline">
+                درخواست بازیابی
+              </Link>
+            </div>
+            <div>
+              حساب ندارید؟{" "}
+              <Link to="/register" className="font-semibold text-primary hover:underline">
+                ثبت‌نام کنید
+              </Link>
+            </div>
           </div>
         )}
       </div>

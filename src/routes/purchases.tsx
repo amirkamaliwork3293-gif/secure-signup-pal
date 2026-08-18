@@ -25,6 +25,7 @@ import {
   toJalali,
   getUnitDefs,
   COUNT_UNIT,
+  isWeightUnit,
   type Product,
   type PurchaseItem,
   type Purchase,
@@ -33,10 +34,11 @@ import {
 } from "@/lib/store";
 import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
+import { QuantityStepper } from "@/components/QuantityStepper";
 import {
   ShoppingBag, Plus, Trash2, Search, X, Package, Check,
   ChevronDown, ChevronUp, Truck, History as HistoryIcon,
-  Pencil, Calendar, PlusCircle, Minus, Users,
+  Pencil, Calendar, PlusCircle, Users,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -82,23 +84,13 @@ function EditablePurchaseItem({
           )}
           <div className="text-[11px] text-muted-foreground">جمع: {formatToman(purchaseLineTotal(item))}</div>
         </div>
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-card">
-          <button
-            type="button"
-            onClick={() => onChange({ ...item, quantity: Math.max(1, item.quantity - 1) })}
-            className="grid h-8 w-8 place-items-center text-muted-foreground hover:text-foreground"
-          >
-            <Minus className="h-3.5 w-3.5" />
-          </button>
-          <span className="min-w-6 text-center text-sm font-semibold">{formatNumber(item.quantity)}</span>
-          <button
-            type="button"
-            onClick={() => onChange({ ...item, quantity: item.quantity + 1 })}
-            className="grid h-8 w-8 place-items-center text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        <QuantityStepper
+          value={item.quantity}
+          min={0.001}
+          step={isWeightUnit(item.unit) ? 0.1 : 1}
+          allowDecimal={isWeightUnit(item.unit)}
+          onChange={(quantity) => onChange({ ...item, quantity: Math.max(0.001, quantity) })}
+        />
         <button
           type="button"
           onClick={onRemove}

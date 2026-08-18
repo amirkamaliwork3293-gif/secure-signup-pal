@@ -1,9 +1,16 @@
 /**
- * ابزار مشترک جستجو: هرجا کاربر عبارتی تایپ می‌کند، مواردی که یکی از فیلدهایشان
- * دقیقاً با همان عبارت شروع می‌شود باید همیشه بالاتر از مواردی باشند که فقط
- * در وسط متن پیدا شده‌اند — تا کاربر سریع‌تر چیزی را که دنبالش است پیدا کند.
+ * ابزار مشترک جستجو: هرجا کاربر عبارتی تایپ می‌کند، مواردی که کل عبارت
+ * (نه فقط کلمه‌ی اول) را پوشش می‌دهند باید بالاتر از مواردی باشند که فقط
+ * بخشی از کلمات را دارند.
  *
- * ترتیب اصلی آرایه (مثلاً جدیدترین اول) در هر دو گروه حفظ می‌شود (پایدار).
+ * اولویت:
+ *  ۱) تطبیق دقیق کل عبارت
+ *  ۲) شروع شدن فیلد با کل عبارت
+ *  ۳) وجود کل عبارت به‌صورت پیوسته در فیلد (حتی اگر کلمه‌ی دوم/سوم باشد)
+ *  ۴) وجود همه‌ی کلمه‌ها (ترجیحاً به همان ترتیب)
+ *  ۵) تطبیق جزئی کلمه‌ها — تطبیق فقط کلمه‌ی اول در جستجوی چندکلمه‌ای ضعیف است
+ *
+ * ترتیب اصلی آرایه در امتیاز برابر حفظ می‌شود (پایدار).
  */
 
 /** نرمال‌سازی برای مقایسه: ی/ك عربی، فاصلهٔ مجازی، ارقام فارسی، حروف کوچک */
@@ -48,17 +55,81 @@ export function personNameSearchFields(
   return [first, last, full, ...words];
 }
 
-function fieldMatchesQuery(fields: string[], q: string, tokens: string[]): boolean {
-  if (fields.some((f) => f.includes(q))) return true;
-  if (tokens.length === 0) return false;
-  if (tokens.length === 1) return fields.some((f) => f.includes(tokens[0]));
-  // چندکلمه‌ای («علی کمالی»): همهٔ کلمه‌ها باید در فیلدهای نام پیدا شوند
-  return tokens.every((t) => fields.some((f) => f.includes(t)));
+function tokensInOrder(field: string, tokens: string[]): boolean {
+  let pos = 0;
+  for (const t of tokens) {
+    const i = field.indexOf(t, pos);
+    if (i < 0) return false;
+    pos = i + t.length;
+  }
+  return true;
 }
 
-function fieldStartsQuery(fields: string[], q: string, tokens: string[]): boolean {
-  if (fields.some((f) => f.startsWith(q))) return true;
-  return tokens.some((t) => t.length >= 2 && fields.some((f) => f.startsWith(t)));
+/**
+ * امتیاز بالاتر = اولویت بیشتر. `null` یعنی هیچ تطبیقی نیست (حذف از نتایج).
+ *
+ * کل عبارت همیشه بر تک‌کلمه‌ی اول اولویت دارد؛ مثلاً جستجوی «گلس آیفون»
+ * محصول «گلس آیفون ۱۳» را بالاتر از «گلس سامسونگ» می‌آورد.
+ */
+export function scoreSearchFields(fields: string[], query: string): number | null {
+  const q = norm(query);
+  if (!q) return 0;
+  const normalized = fields.map(norm).filter(Boolean);
+  if (normalized.length === 0) return null;
+  const tokens = q.split(" ").filter((t) => t.length >= 1);
+
+  let best = -1;
+
+  for (const f of normalized) {
+    if (f === q) {
+      best = Math.max(best, 10000);
+      continue;
+    }
+    if (f.startsWith(q)) {
+      // نام کوتاه‌تر که با کل عبارت شروع شود نزدیک‌تر است
+      best = Math.max(best, 9000 - Math.min(f.length - q.length, 400));
+      continue;
+    }
+    const idx = f.indexOf(q);
+    if (idx >= 0) {
+      const atBoundary = idx === 0 || f[idx - 1] === " ";
+      best = Math.max(best, (atBoundary ? 8200 : 7600) - Math.min(idx, 200));
+    }
+  }
+
+  if (best >= 0) return best;
+
+  const meaningful = tokens.filter((t) => t.length >= 2);
+  const useTokens = meaningful.length > 0 ? meaningful : tokens;
+
+  if (useTokens.length === 0) return null;
+
+  const tokenInFields = (t: string) => normalized.some((f) => f.includes(t));
+  const hits = useTokens.filter(tokenInFields);
+  if (hits.length === 0) return null;
+
+  const allPresent = hits.length === useTokens.length;
+  if (allPresent && useTokens.length > 1) {
+    const inOrder = normalized.some((f) => tokensInOrder(f, useTokens));
+    return (inOrder ? 6200 : 5400) + useTokens.length * 40;
+  }
+
+  if (allPresent && useTokens.length === 1) {
+    // تک‌کلمه که در وسط نام آمده (مثلاً «آیفون» داخل «گلس آیفون»)
+    const atStart = normalized.some((f) => f.startsWith(useTokens[0]));
+    return atStart ? 5000 : 4500;
+  }
+
+  // تطبیق جزئی: هرچه کلمه‌های بیشتری (مخصوصاً کلمه‌های بعدی) جور شوند بهتر است
+  let laterHits = 0;
+  useTokens.forEach((t, i) => {
+    if (i > 0 && tokenInFields(t)) laterHits++;
+  });
+  const firstOnlyPenalty =
+    useTokens.length > 1 && hits.length === 1 && tokenInFields(useTokens[0]) && laterHits === 0
+      ? 500
+      : 0;
+  return 1200 + hits.length * 220 + laterHits * 180 - firstOnlyPenalty;
 }
 
 /**
@@ -75,22 +146,19 @@ export function filterAndRankSearch<T>(
 ): T[] {
   const q = norm(query);
   if (!q) return items;
-  const tokens = q.split(" ").filter((t) => t.length >= 2);
 
-  const startsGroup: T[] = [];
-  const containsGroup: T[] = [];
-
-  for (const item of items) {
+  const scored: { item: T; score: number; index: number }[] = [];
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
     const fields = getFields(item).map(norm).filter(Boolean);
     if (fields.length === 0) continue;
-    if (fieldStartsQuery(fields, q, tokens)) {
-      startsGroup.push(item);
-      continue;
-    }
-    if (fieldMatchesQuery(fields, q, tokens)) containsGroup.push(item);
+    const score = scoreSearchFields(fields, q);
+    if (score === null) continue;
+    scored.push({ item, score, index });
   }
 
-  return [...startsGroup, ...containsGroup];
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored.map((s) => s.item);
 }
 
 /** فقط رتبه‌بندی (بدون فیلتر) — برای جاهایی که فیلتر جدا انجام شده و فقط ترتیب مهم است. */
@@ -101,15 +169,12 @@ export function rankBySearchMatch<T>(
 ): T[] {
   const q = norm(query);
   if (!q) return items;
-  const tokens = q.split(" ").filter((t) => t.length >= 2);
-  const startsGroup: T[] = [];
-  const restGroup: T[] = [];
-  for (const item of items) {
+  const scored = items.map((item, index) => {
     const fields = getFields(item).map(norm);
-    if (fieldStartsQuery(fields, q, tokens)) startsGroup.push(item);
-    else restGroup.push(item);
-  }
-  return [...startsGroup, ...restGroup];
+    return { item, score: scoreSearchFields(fields, q) ?? -1, index };
+  });
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored.map((s) => s.item);
 }
 
 /**

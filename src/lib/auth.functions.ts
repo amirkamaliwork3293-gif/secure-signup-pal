@@ -897,3 +897,168 @@ export const getPublicSettings = createServerFn({ method: "GET" }).handler(async
   publicSettingsCache = { at: Date.now(), value };
   return value;
 });
+
+function normalizeIranPhone(p: string): string {
+  return p.replace(/\s+/g, "").replace(/^\+98/, "0").replace(/^98/, "0");
+}
+
+function namesMatch(a: string | null | undefined, b: string): boolean {
+  const na = (a || "").trim().toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\s+/g, " ");
+  const nb = b.trim().toLowerCase().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\s+/g, " ");
+  return !!na && na === nb;
+}
+
+// ─── Public: submit password recovery request ────────────────────────────────
+export const submitPasswordResetRequest = createServerFn({ method: "POST" })
+  .inputValidator((d: { first_name: string; last_name: string; phone: string }) => {
+    if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
+    const phone = normalizeIranPhone(d.phone || "");
+    if (!/^09\d{9}$/.test(phone)) throw new Error("شماره موبایل را به‌صورت ۰۹xxxxxxxxx وارد کنید.");
+    return {
+      first_name: d.first_name.trim(),
+      last_name: d.last_name.trim(),
+      phone,
+    };
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: recentRows } = await supabaseAdmin
+      .from("password_reset_requests")
+      .select("id, created_at")
+      .eq("phone", data.phone)
+      .eq("status", "pending")
+      .gte("created_at", new Date(Date.now() - 30 * 60 * 1000).toISOString())
+      .limit(1);
+    const recent = recentRows?.[0];
+    if (recent) {
+      return { id: recent.id as string, alreadyPending: true };
+    }
+
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, username, first_name, last_name")
+      .eq("status", "active");
+
+    const nameMatches = (profiles ?? []).filter(
+      (p: { first_name: string | null; last_name: string | null }) =>
+        namesMatch(p.first_name, data.first_name) && namesMatch(p.last_name, data.last_name),
+    );
+
+    const { data: usersPage } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const phoneById = new Map<string, string>();
+    for (const u of usersPage?.users ?? []) {
+      const raw = (u.user_metadata?.phone as string | undefined) || "";
+      if (raw) phoneById.set(u.id, normalizeIranPhone(raw));
+    }
+
+    const { data: signupRows } = await supabaseAdmin
+      .from("signup_requests")
+      .select("username, phone")
+      .not("phone", "is", null);
+
+    const phoneByUsername = new Map<string, string>();
+    for (const r of signupRows ?? []) {
+      if (r.phone) phoneByUsername.set(String(r.username).toLowerCase(), normalizeIranPhone(r.phone));
+    }
+
+    let matched: { id: string; username: string } | null = null;
+    for (const p of nameMatches) {
+      const fromMeta = phoneById.get(p.id);
+      const fromSignup = phoneByUsername.get(String(p.username).toLowerCase());
+      if (fromMeta === data.phone || fromSignup === data.phone) {
+        matched = { id: p.id, username: p.username };
+        break;
+      }
+    }
+
+    const insert = await supabaseAdmin
+      .from("password_reset_requests")
+      .insert({
+        first_name: data.first_name,
+        last_name: data.last_name,
+        phone: data.phone,
+        status: "pending",
+        matched_user_id: matched?.id ?? null,
+        matched_username: matched?.username ?? null,
+      })
+      .select("id")
+      .single();
+    if (insert.error) throw new Error(insert.error.message);
+    return { id: insert.data.id as string, alreadyPending: false };
+  });
+
+export type PasswordResetRequestRow = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  status: "pending" | "resolved" | "rejected";
+  matched_user_id: string | null;
+  matched_username: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+};
+
+export const adminListPasswordResetRequests = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("password_reset_requests")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as PasswordResetRequestRow[];
+  });
+
+export const adminResolvePasswordReset = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (d: { id: string; action: "resolve" | "reject"; user_id?: string; new_password?: string }) => {
+      if (!d.id) throw new Error("شناسه درخواست لازم است.");
+      if (d.action !== "resolve" && d.action !== "reject") throw new Error("عملیات نامعتبر است.");
+      if (d.action === "resolve") {
+        if (!d.user_id) throw new Error("کاربر مقصد را انتخاب کنید.");
+        if (!d.new_password || d.new_password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
+      }
+      return d;
+    },
+  )
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    if (data.action === "reject") {
+      const { error } = await supabaseAdmin
+        .from("password_reset_requests")
+        .update({
+          status: "rejected",
+          reviewed_at: new Date().toISOString(),
+          resolved_by: context.userId,
+        })
+        .eq("id", data.id);
+      if (error) throw new Error(error.message);
+      return { success: true };
+    }
+
+    if (data.user_id === context.userId) throw new Error("نمی‌توانید رمز خود را از اینجا تغییر دهید.");
+    const { error: pwdErr } = await supabaseAdmin.auth.admin.updateUserById(data.user_id!, {
+      password: data.new_password!,
+    });
+    if (pwdErr) throw new Error(pwdErr.message);
+
+    const { error } = await supabaseAdmin
+      .from("password_reset_requests")
+      .update({
+        status: "resolved",
+        reviewed_at: new Date().toISOString(),
+        resolved_by: context.userId,
+        matched_user_id: data.user_id,
+      })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });

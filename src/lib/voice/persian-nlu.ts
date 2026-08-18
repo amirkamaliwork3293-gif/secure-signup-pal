@@ -347,21 +347,54 @@ export function scoreProduct(phrase: string, productName: string): number {
   const b = normalizeFa(productName);
   if (!a || !b) return 0;
 
+  const at = a.split(" ").filter(Boolean);
+  const bt = b.split(" ").filter(Boolean);
+
   let score: number;
   if (a === b) {
+    // کل عبارت دقیقاً همان نام محصول است
     score = 1;
-  } else if (b.includes(a) || a.includes(b)) {
-    score = 0.85;
+  } else if (b.startsWith(a)) {
+    // نام محصول با کل عبارت گفته‌شده شروع می‌شود (مثلاً «گلس آیفون ۱۳»)
+    score = 0.96;
+  } else if (b.includes(a)) {
+    // کل عبارت به‌صورت پیوسته در نام محصول هست — حتی اگر کلمه‌ی دوم/سوم باشد
+    score = 0.9;
   } else {
-    const at = a.split(" ").filter(Boolean);
-    const bt = b.split(" ").filter(Boolean);
     if (at.length === 0 || bt.length === 0) return 0;
+    const tokenHit = (tok: string) =>
+      bt.some((x) => x === tok || x.includes(tok) || tok.includes(x));
     let hits = 0;
-    for (const tok of at) {
-      if (bt.some((x) => x === tok || x.includes(tok) || tok.includes(x))) hits++;
+    let laterHits = 0;
+    at.forEach((tok, i) => {
+      if (tokenHit(tok)) {
+        hits++;
+        if (i > 0) laterHits++;
+      }
+    });
+    if (hits === 0) return 0;
+
+    const allPresent = hits === at.length;
+    const inOrder = (() => {
+      let pos = 0;
+      for (const tok of at) {
+        const i = bt.findIndex((x, idx) => idx >= pos && (x === tok || x.includes(tok) || tok.includes(x)));
+        if (i < 0) return false;
+        pos = i + 1;
+      }
+      return true;
+    })();
+
+    if (allPresent && at.length > 1) {
+      score = inOrder ? 0.82 : 0.72;
+    } else if (allPresent) {
+      score = 0.7;
+    } else {
+      const overlap = hits / Math.max(at.length, bt.length);
+      // تطبیق فقط کلمه‌ی اول در عبارت چندکلمه‌ای نباید برنده‌ی جستجو باشد
+      const firstOnly = at.length > 1 && hits === 1 && laterHits === 0;
+      score = firstOnly ? overlap * 0.35 : overlap >= 0.5 ? 0.5 + overlap * 0.25 : overlap * 0.5;
     }
-    const overlap = hits / Math.max(at.length, bt.length);
-    score = overlap >= 0.5 ? 0.5 + overlap * 0.3 : overlap * 0.6;
   }
 
   // اگر عبارتِ گفته‌شده شامل عدد باشد (مثلاً «شماره ۱۷» یا «سایز ۴۲»)، همان عدد

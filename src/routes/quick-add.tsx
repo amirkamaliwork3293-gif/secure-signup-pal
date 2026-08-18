@@ -10,7 +10,7 @@ const BarcodePrintModal = lazy(() =>
 );
 import { Plus, Trash2, Zap, Printer, ArrowRight } from "lucide-react";
 
-type Draft = { id: string; name: string; price: string };
+type Draft = { id: string; name: string; price: string; stock: string };
 
 export const Route = createFileRoute("/quick-add")({
   head: () => ({ meta: [{ title: "ثبت سریع محصولات | KAMIX" }] }),
@@ -18,10 +18,11 @@ export const Route = createFileRoute("/quick-add")({
 });
 
 function QuickAdd() {
-  const [drafts, setDrafts] = useState<Draft[]>([{ id: cryptoId(), name: "", price: "" }]);
+  const emptyDraft = (): Draft => ({ id: cryptoId(), name: "", price: "", stock: "" });
+  const [drafts, setDrafts] = useState<Draft[]>([emptyDraft()]);
   const [printItems, setPrintItems] = useState<Product[] | null>(null);
 
-  const add = () => setDrafts((p) => [...p, { id: cryptoId(), name: "", price: "" }]);
+  const add = () => setDrafts((p) => [...p, emptyDraft()]);
   const update = (id: string, k: keyof Draft, v: string) => setDrafts((p) => p.map((d) => d.id === id ? { ...d, [k]: v } : d));
   const remove = (id: string) => setDrafts((p) => p.length > 1 ? p.filter((d) => d.id !== id) : p);
 
@@ -32,13 +33,13 @@ function QuickAdd() {
     const taken = new Set(existing.map((p) => p.code).filter(Boolean));
     const created: Product[] = valid.map((d) => ({
       id: cryptoId(), name: d.name.trim(), price: Number(d.price), code: generateUniqueCode(taken),
-      stock: 0, category: "",
+      stock: parseNumberInput(d.stock) || 0, category: "",
     }));
     products.save([...created, ...existing]);
     if (andPrint) setPrintItems(created);
     else {
       alert(`${created.length.toLocaleString("fa-IR")} محصول با بارکد ثبت شد.`);
-      setDrafts([{ id: cryptoId(), name: "", price: "" }]);
+      setDrafts([emptyDraft()]);
     }
   };
 
@@ -47,7 +48,7 @@ function QuickAdd() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold flex items-center gap-2"><Zap className="h-5 w-5 text-primary" />ثبت سریع محصولات</h1>
-          <p className="text-xs text-muted-foreground">فقط نام و قیمت — بارکد یکتا خودکار تولید می‌شود</p>
+          <p className="text-xs text-muted-foreground">نام، قیمت و موجودی — بارکد یکتا خودکار تولید می‌شود</p>
         </div>
         <Link to="/products" className="inline-flex items-center gap-1 rounded-xl border border-border px-3 py-2 text-xs">
           <ArrowRight className="h-3.5 w-3.5" /> محصولات
@@ -56,10 +57,10 @@ function QuickAdd() {
 
       <div className="space-y-2">
         {drafts.map((d, i) => (
-          <div key={d.id} className="flex gap-2 rounded-xl border border-border bg-card p-2">
+          <div key={d.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-2">
             <span className="grid h-9 w-7 place-items-center text-xs text-muted-foreground">{(i + 1).toLocaleString("fa-IR")}</span>
             <input value={d.name} onChange={(e) => update(d.id, "name", e.target.value)} placeholder="نام محصول"
-              className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+              className="min-w-[8rem] flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
             <input
               value={d.price ? formatNumber(parseNumberInput(d.price)) : ""}
               onChange={(e) => {
@@ -67,7 +68,19 @@ function QuickAdd() {
                 update(d.id, "price", n ? String(n) : "");
               }}
               inputMode="numeric" placeholder="قیمت"
-              className="w-28 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+              className="w-24 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+            <input
+              value={d.stock}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw.trim() === "") { update(d.id, "stock", ""); return; }
+                const n = parseNumberInput(raw);
+                update(d.id, "stock", String(n));
+              }}
+              inputMode="decimal" placeholder="موجودی"
+              dir="ltr"
+              className="w-20 rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            />
             <button onClick={() => remove(d.id)} className="grid h-9 w-9 place-items-center rounded-lg text-destructive hover:bg-destructive/10">
               <Trash2 className="h-4 w-4" />
             </button>
@@ -87,7 +100,7 @@ function QuickAdd() {
       </div>
 
       <Suspense fallback={null}>
-        {printItems && <BarcodePrintModal items={printItems} onClose={() => { setPrintItems(null); setDrafts([{ id: cryptoId(), name: "", price: "" }]); }} />}
+        {printItems && <BarcodePrintModal items={printItems} onClose={() => { setPrintItems(null); setDrafts([emptyDraft()]); }} />}
       </Suspense>
     </Layout>
   );

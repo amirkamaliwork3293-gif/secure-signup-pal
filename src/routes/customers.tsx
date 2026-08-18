@@ -21,6 +21,7 @@ import {
   addProductToInvoice,
   applyProductDiscount,
   PAYMENT_LABEL,
+  isWeightUnit,
   type Customer,
   type CustomerTx,
   type Product,
@@ -32,6 +33,7 @@ import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { shareText } from "@/lib/openExternal";
 import { isWebView } from "@/lib/isWebView";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { QuantityStepper } from "@/components/QuantityStepper";
 import {
   Users,
   Plus,
@@ -1998,10 +2000,10 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
     setSearchQ("");
   };
 
-  const updateQty = (productId: string, delta: number) => {
+  const setQty = (productId: string, quantity: number) => {
     setCartInv((prev) => {
       const items = prev.items
-        .map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + delta } : i))
+        .map((i) => (i.productId === productId ? { ...i, quantity } : i))
         .filter((i) => i.quantity > 0);
       return recalc({ ...prev, items });
     });
@@ -2174,21 +2176,14 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
                     <div className="truncate font-medium">{item.name}</div>
                     <div className="text-[10px] text-muted-foreground">{formatToman(item.price)} × {formatNumber(item.quantity)}</div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => updateQty(item.productId, -1)}
-                      className="grid h-6 w-6 place-items-center rounded-md bg-secondary"
-                    >
-                      -
-                    </button>
-                    <span className="w-5 text-center">{formatNumber(item.quantity)}</span>
-                    <button
-                      onClick={() => updateQty(item.productId, 1)}
-                      className="grid h-6 w-6 place-items-center rounded-md bg-secondary"
-                    >
-                      +
-                    </button>
-                  </div>
+                  <QuantityStepper
+                    value={item.quantity}
+                    min={0}
+                    step={isWeightUnit(item.unit) ? 0.1 : 1}
+                    allowDecimal={isWeightUnit(item.unit)}
+                    onChange={(q) => setQty(item.productId, q)}
+                    className="bg-background"
+                  />
                   <button
                     onClick={() => removeItem(item.productId)}
                     className="grid h-7 w-7 place-items-center rounded-lg text-destructive hover:bg-destructive/10"

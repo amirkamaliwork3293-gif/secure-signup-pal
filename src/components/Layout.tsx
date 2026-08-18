@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -22,6 +22,7 @@ const nav = [
   { to: "/reminders", label: "یادآوری",  icon: Bell,     settingKey: "showRemindersFeature" },
   { to: "/students",  label: "هنرجویان", icon: GraduationCap, settingKey: "showStudentsFeature" },
   { to: "/gold",      label: "طلا",      icon: Coins,    settingKey: "showGoldFeature" },
+  { to: "/production", label: "تولید",    icon: Factory,  settingKey: "showProductionFeature" },
   { to: "/history",   label: "تاریخچه",  icon: History,  settingKey: null },
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
   { to: "/invoice-design", label: "طراح فاکتور", icon: LayoutTemplate, settingKey: null },

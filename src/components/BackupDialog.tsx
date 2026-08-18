@@ -21,6 +21,7 @@ import {
   students as studentsStore,
   accounts as accountsStore,
   accountTxs as accountTxsStore,
+  production as productionStore,
   customerBalance,
   customerFullName,
   formatJalaliDateTime,
@@ -103,6 +104,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
   const [studs] = studentsStore.useAll();
   const [accs] = accountsStore.useAll();
   const [txs] = accountTxsStore.useAll();
+  const [prodEvents] = productionStore.useAll();
 
   const counts: Record<SectionKey, number> = {
     products: prods.length,
@@ -429,6 +431,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     if (selected.reminders) data.reminders = rems;
     if (selected.students) data.students = studs;
     if (selected.accounts) { data.accounts = accs; data.accountTxs = txs; }
+    if (selected.products) data.production = prodEvents;
     return data;
   }
 

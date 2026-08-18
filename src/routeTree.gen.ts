@@ -32,6 +32,8 @@ import { Route as InvoiceDesignRouteImport } from './routes/invoice-design'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as GoldRouteImport } from './routes/gold'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ProductionRouteImport } from './routes/production'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as BackupRouteImport } from './routes/backup'
@@ -155,6 +157,16 @@ const GoldRoute = GoldRouteImport.update({
   path: '/gold',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProductionRoute = ProductionRouteImport.update({
+  id: '/production',
+  path: '/production',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
@@ -198,6 +210,8 @@ export interface FileRoutesByFullPath {
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/production': typeof ProductionRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -230,6 +244,8 @@ export interface FileRoutesByTo {
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/production': typeof ProductionRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -263,6 +279,8 @@ export interface FileRoutesById {
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
   '/gold': typeof GoldRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/production': typeof ProductionRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -297,6 +315,8 @@ export interface FileRouteTypes {
     | '/customers'
     | '/expenses'
     | '/gold'
+    | '/forgot-password'
+    | '/production'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -329,6 +349,8 @@ export interface FileRouteTypes {
     | '/customers'
     | '/expenses'
     | '/gold'
+    | '/forgot-password'
+    | '/production'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -361,6 +383,8 @@ export interface FileRouteTypes {
     | '/customers'
     | '/expenses'
     | '/gold'
+    | '/forgot-password'
+    | '/production'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -394,6 +418,8 @@ export interface RootRouteChildren {
   CustomersRoute: typeof CustomersRoute
   ExpensesRoute: typeof ExpensesRoute
   GoldRoute: typeof GoldRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  ProductionRoute: typeof ProductionRoute
   HistoryRoute: typeof HistoryRoute
   InventoryRoute: typeof InventoryRoute
   InvoiceDesignRoute: typeof InvoiceDesignRoute
@@ -583,6 +609,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GoldRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/production': {
+      id: '/production'
+      path: '/production'
+      fullPath: '/production'
+      preLoaderRoute: typeof ProductionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/expenses': {
       id: '/expenses'
       path: '/expenses'
@@ -642,6 +682,8 @@ const rootRouteChildren: RootRouteChildren = {
   CustomersRoute: CustomersRoute,
   ExpensesRoute: ExpensesRoute,
   GoldRoute: GoldRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  ProductionRoute: ProductionRoute,
   HistoryRoute: HistoryRoute,
   InventoryRoute: InventoryRoute,
   InvoiceDesignRoute: InvoiceDesignRoute,

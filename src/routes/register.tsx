@@ -524,6 +524,12 @@ function RegisterPage() {
             وارد شوید
           </Link>
         </p>
+        <p className="text-center text-xs text-muted-foreground">
+          رمز عبور را فراموش کرده‌اید؟{" "}
+          <Link to="/forgot-password" className="font-semibold text-primary hover:underline">
+            درخواست بازیابی رمز عبور
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -11,6 +11,8 @@ import {
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
   updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
   adminClearSignupTempPassword,
+  adminListPasswordResetRequests, adminResolvePasswordReset,
+  type PasswordResetRequestRow,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
@@ -31,7 +33,7 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-type Tab = "requests" | "users" | "renewals" | "customers" | "plans" | "settings" | "landing";
+type Tab = "requests" | "users" | "renewals" | "customers" | "plans" | "settings" | "landing" | "resets";
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -39,6 +41,7 @@ function AdminPage() {
   const [requests, setRequests] = useState<SignupRequest[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [phones, setPhones] = useState<Record<string, string | null>>({});
+  const [resetRequests, setResetRequests] = useState<PasswordResetRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
 
@@ -49,6 +52,7 @@ function AdminPage() {
   const resetPwd = useServerFn(adminResetUserPassword);
   const getRequests = useServerFn(adminGetRequestsWithPhone);
   const getPhones = useServerFn(adminGetUserPhones);
+  const getResetReqs = useServerFn(adminListPasswordResetRequests);
 
   const fetchAll = async () => {
     if (state.status !== "authenticated" || !state.isAdmin) {
@@ -59,10 +63,11 @@ function AdminPage() {
     }
 
     setLoading(true);
-    const [requestsData, u, phoneMap] = await Promise.all([
+    const [requestsData, u, phoneMap, resets] = await Promise.all([
       getRequests(),
       supabase.from("profiles").select("*").order("created_at", { ascending: false }),
       getPhones().catch(() => ({} as Record<string, string | null>)),
+      getResetReqs().catch(() => [] as PasswordResetRequestRow[]),
     ]);
 
     if (u.error) throw new Error(u.error.message);
@@ -70,6 +75,7 @@ function AdminPage() {
     setRequests((requestsData as unknown as SignupRequest[]) || []);
     setUsers((u.data as UserProfile[]) || []);
     setPhones((phoneMap as Record<string, string | null>) || {});
+    setResetRequests((resets as PasswordResetRequestRow[]) || []);
     setLoading(false);
   };
 
@@ -117,6 +123,7 @@ function AdminPage() {
   const pending = requests.filter((r) => r.status === "pending");
   const activeUsers = users.filter((u) => u.status === "active");
   const expiredUsers = users.filter((u) => u.status === "expired");
+  const pendingResets = resetRequests.filter((r) => r.status === "pending");
 
   return (
     <div className="min-h-screen bg-background pb-12">
@@ -162,6 +169,7 @@ function AdminPage() {
         <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
           {([
             { id: "requests" as Tab, label: `درخواست‌ها (${pending.length})`, icon: Inbox },
+            { id: "resets" as Tab, label: `بازیابی رمز (${pendingResets.length})`, icon: KeyRound },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
             { id: "customers" as Tab, label: "مشتریان", icon: CalendarClock },
             { id: "users" as Tab, label: "کاربران", icon: Users },
@@ -195,6 +203,15 @@ function AdminPage() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 phones={phones}
+              />
+            )}
+            {tab === "resets" && (
+              <PasswordResetsTab
+                requests={resetRequests}
+                users={users}
+                phones={phones}
+                acting={acting}
+                onRefresh={() => void fetchAll()}
               />
             )}
             {tab === "users" && (
@@ -454,6 +471,7 @@ function StatusBadge({ status }: { status: string }) {
     pending: { label: "در انتظار", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
     approved: { label: "تایید شده", cls: "bg-green-500/10 text-green-700 dark:text-green-400" },
     rejected: { label: "رد شده", cls: "bg-destructive/10 text-destructive" },
+    resolved: { label: "بازیابی شد", cls: "bg-green-500/10 text-green-700 dark:text-green-400" },
     active: { label: "فعال", cls: "bg-green-500/10 text-green-700 dark:text-green-400" },
     expired: { label: "منقضی", cls: "bg-destructive/10 text-destructive" },
   };
@@ -1468,3 +1486,173 @@ function CustomerDetailDialog({
     </div>
   );
 }
+
+function PasswordResetsTab({
+  requests,
+  users,
+  phones,
+  acting,
+  onRefresh,
+}: {
+  requests: PasswordResetRequestRow[];
+  users: UserProfile[];
+  phones: Record<string, string | null>;
+  acting: string | null;
+  onRefresh: () => void;
+}) {
+  const resolveFn = useServerFn(adminResolvePasswordReset);
+  const [pwdFor, setPwdFor] = useState<string | null>(null);
+  const [userFor, setUserFor] = useState<Record<string, string>>({});
+  const [pwd, setPwd] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const pending = requests.filter((r) => r.status === "pending");
+  const done = requests.filter((r) => r.status !== "pending");
+
+  const resolve = async (r: PasswordResetRequestRow, action: "resolve" | "reject") => {
+    const userId = action === "resolve" ? (userFor[r.id] || r.matched_user_id || "") : undefined;
+    if (action === "resolve" && (!userId || pwd.length < 6)) {
+      alert("کاربر و رمز جدید (حداقل ۶ کاراکتر) را وارد کنید.");
+      return;
+    }
+    setBusy(r.id);
+    try {
+      await resolveFn({
+        data: {
+          id: r.id,
+          action,
+          user_id: userId || undefined,
+          new_password: action === "resolve" ? pwd : undefined,
+        },
+      });
+      setPwd("");
+      setPwdFor(null);
+      onRefresh();
+      if (action === "resolve") alert("رمز عبور با موفقیت تغییر کرد.");
+    } catch (e: unknown) {
+      alert((e as { message?: string })?.message || "خطا");
+    }
+    setBusy(null);
+  };
+
+  const Card = ({ r }: { r: PasswordResetRequestRow }) => {
+    const matched = users.find((u) => u.id === r.matched_user_id);
+    const isBusy = busy === r.id || acting === r.id;
+    return (
+      <li className="rounded-2xl border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">
+              {r.first_name} {r.last_name}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{r.phone}</span>
+              <span>{formatJalaliDateTime(r.created_at)}</span>
+            </div>
+            {matched ? (
+              <div className="mt-2 rounded-lg bg-green-500/10 px-2.5 py-1.5 text-[11px] text-green-700 dark:text-green-400">
+                تطبیق خودکار: @{matched.username}
+                {phones[matched.username] ? ` — ${phones[matched.username]}` : ""}
+              </div>
+            ) : (
+              <div className="mt-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                کاربر متناظر به‌صورت خودکار پیدا نشد — از فهرست انتخاب کنید.
+              </div>
+            )}
+          </div>
+          <StatusBadge status={r.status} />
+        </div>
+
+        {r.status === "pending" && (
+          <div className="mt-3 space-y-2">
+            <select
+              value={userFor[r.id] || r.matched_user_id || ""}
+              onChange={(e) => setUserFor((s) => ({ ...s, [r.id]: e.target.value }))}
+              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+            >
+              <option value="">انتخاب کاربر برای بازیابی رمز</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.first_name || ""} {u.last_name || ""} @{u.username}
+                </option>
+              ))}
+            </select>
+            {pwdFor === r.id ? (
+              <input
+                type="text"
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                placeholder="رمز عبور جدید (حداقل ۶ کاراکتر)"
+                dir="ltr"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setPwdFor(r.id); setPwd(""); }}
+                className="text-[11px] font-medium text-primary"
+              >
+                وارد کردن رمز جدید
+              </button>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => void resolve(r, "resolve")}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                بازیابی رمز
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  if (!confirm("درخواست رد شود؟")) return;
+                  void resolve(r, "reject");
+                }}
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground disabled:opacity-60"
+              >
+                <X className="h-3.5 w-3.5" />
+                رد
+              </button>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  if (requests.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        <KeyRound className="mx-auto mb-2 h-8 w-8 opacity-30" />
+        درخواست بازیابی رمزی ثبت نشده
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {pending.length > 0 && (
+        <ul className="space-y-2">
+          {pending.map((r) => (
+            <Card key={r.id} r={r} />
+          ))}
+        </ul>
+      )}
+      {done.length > 0 && (
+        <div>
+          <div className="mb-2 text-xs font-semibold text-muted-foreground">سوابق</div>
+          <ul className="space-y-2">
+            {done.map((r) => (
+              <Card key={r.id} r={r} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+

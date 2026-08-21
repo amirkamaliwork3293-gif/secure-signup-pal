@@ -14,54 +14,46 @@ import {
 } from "@/lib/iran-banks";
 import { copyText, shareText } from "@/lib/openExternal";
 
-const THEME: Record<IranBank["hue"], { from: string; to: string; accent: string }> = {
-  turquoise: { from: "#2a3a40", to: "#14191c", accent: "#6ec9c0" },
-  navy: { from: "#2a3444", to: "#14181f", accent: "#8aafd6" },
-  crimson: { from: "#3a2c30", to: "#181416", accent: "#e08a8a" },
-  gold: { from: "#35322c", to: "#171614", accent: "#cfc3a8" },
-  forest: { from: "#2c3832", to: "#141816", accent: "#86c098" },
-  violet: { from: "#322c3c", to: "#16141c", accent: "#b8a6d4" },
+const THEME: Record<IranBank["hue"], { from: string; to: string; mid: string }> = {
+  turquoise: { from: "#2DD4BF", mid: "#22D3EE", to: "#0EA5A4" },
+  navy: { from: "#60A5FA", mid: "#818CF8", to: "#6366F1" },
+  crimson: { from: "#FB7185", mid: "#F97316", to: "#F43F5E" },
+  gold: { from: "#FBBF24", mid: "#FB923C", to: "#F59E0B" },
+  forest: { from: "#34D399", mid: "#A3E635", to: "#10B981" },
+  violet: { from: "#C084FC", mid: "#F472B6", to: "#8B5CF6" },
 };
+
+function Chip() {
+  return (
+    <div
+      className="h-6 w-9 rounded-md"
+      style={{
+        background: "linear-gradient(180deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,.22) 100%)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,.7), 0 2px 6px rgba(0,0,0,.12)",
+      }}
+      aria-hidden
+    />
+  );
+}
+
+function Contactless() {
+  return (
+    <svg width="18" height="14" viewBox="0 0 24 20" aria-hidden className="text-white/80">
+      <path
+        fill="currentColor"
+        d="M8 4c3.2 0 5.8 2.6 5.8 5.8S11.2 15.6 8 15.6H6.4V4H8zm7.6 1.2c.9 1.4 1.4 3 1.4 4.8s-.5 3.4-1.4 4.8l-1.3-.8c.7-1.1 1.1-2.5 1.1-4s-.4-2.9-1.1-4l1.3-.8z"
+      />
+    </svg>
+  );
+}
 
 function validThru(createdAt?: number): string {
   const d = new Date((createdAt || Date.now()) + 5 * 365.25 * 86_400_000);
   return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getFullYear()).slice(-2)}`;
 }
 
-function Chip() {
-  return (
-    <div
-      className="relative h-7 w-10 overflow-hidden rounded-[6px]"
-      style={{
-        background: "linear-gradient(160deg, #f2f0ea 0%, #c8c4ba 48%, #9a958a 100%)",
-        boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,.85), inset 0 -1px 1px rgba(0,0,0,.2), 0 2px 3px rgba(0,0,0,.28)",
-      }}
-      aria-hidden
-    >
-      <div className="absolute inset-[3px] rounded-[3px] border border-black/15" />
-      <div className="absolute inset-x-1 top-1/2 h-px -translate-y-1/2 bg-black/20" />
-      <div className="absolute inset-y-1 left-1/3 w-px bg-black/20" />
-      <div className="absolute inset-y-1 left-2/3 w-px bg-black/20" />
-    </div>
-  );
-}
-
-function Contactless({ color }: { color: string }) {
-  return (
-    <svg width="20" height="16" viewBox="0 0 24 20" aria-hidden style={{ color }}>
-      <path
-        fill="currentColor"
-        d="M8 4c3.2 0 5.8 2.6 5.8 5.8S11.2 15.6 8 15.6H6.4V4H8zm7.6 1.2c.9 1.4 1.4 3 1.4 4.8s-.5 3.4-1.4 4.8l-1.3-.8c.7-1.1 1.1-2.5 1.1-4s-.4-2.9-1.1-4l1.3-.8z"
-        opacity="0.85"
-      />
-    </svg>
-  );
-}
-
 export function IranianBankCardFace({
   account,
-  shopName,
 }: {
   account: Account;
   shopName?: string;
@@ -79,79 +71,54 @@ export function IranianBankCardFace({
       <div className="relative aspect-[1.586/1] w-full" style={{ transform: "rotateX(7deg)" }}>
         {/* ضخامت سه‌بعدی */}
         <div
-          className="absolute inset-0 translate-y-2 rounded-[1.35rem]"
-          style={{ background: "rgba(0,0,0,.38)", filter: "blur(10px)" }}
-        />
-        <div
-          className="absolute inset-x-2 bottom-0 h-2 translate-y-1 rounded-b-[1.2rem]"
-          style={{ background: "rgba(0,0,0,.35)" }}
+          className="absolute inset-0 translate-y-2 rounded-[1.4rem]"
+          style={{ background: theme.to, opacity: 0.35, filter: "blur(12px)" }}
         />
 
         <div
-          className="relative h-full overflow-hidden rounded-[1.35rem] text-white"
+          className="relative h-full overflow-hidden rounded-[1.4rem] text-white"
           style={{
-            background: `linear-gradient(165deg, ${theme.from} 0%, ${theme.to} 100%)`,
+            background: `linear-gradient(145deg, ${theme.from} 0%, ${theme.mid} 48%, ${theme.to} 100%)`,
             boxShadow:
-              "inset 0 1px 0 rgba(255,255,255,.16), inset 0 -10px 22px rgba(0,0,0,.28), 0 18px 36px -16px rgba(0,0,0,.5)",
+              "inset 0 1px 0 rgba(255,255,255,.45), inset 0 -12px 24px rgba(0,0,0,.12), 0 20px 40px -18px rgba(0,0,0,.35)",
           }}
           dir="ltr"
         >
-          {/* بازتاب نور */}
           <div
-            className="pointer-events-none absolute -left-1/4 -top-1/2 h-[90%] w-[80%] rotate-12 rounded-full"
-            style={{
-              background:
-                "radial-gradient(circle, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 62%)",
-            }}
+            className="pointer-events-none absolute -left-10 -top-16 h-44 w-44 rounded-full"
+            style={{ background: "rgba(255,255,255,.28)", filter: "blur(2px)" }}
           />
           <div
-            className="pointer-events-none absolute -bottom-8 -right-6 h-28 w-28 rounded-full"
-            style={{ background: theme.accent, opacity: 0.14, filter: "blur(28px)" }}
-          />
-          <div
-            className="pointer-events-none absolute left-0 top-0 h-full w-1"
-            style={{ background: theme.accent, opacity: 0.7 }}
+            className="pointer-events-none absolute -bottom-10 -right-8 h-36 w-36 rounded-full"
+            style={{ background: "rgba(255,255,255,.18)" }}
           />
 
-          <div className="relative flex h-full flex-col justify-between p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium tracking-tight">{bank}</div>
-                {shopName && shopName !== holder && (
-                  <div className="truncate text-[10px] text-white/50">{shopName}</div>
-                )}
-              </div>
-              <Contactless color={theme.accent} />
+          <div className="relative flex h-full flex-col justify-between p-5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="truncate text-[12px] font-medium text-white/90">{bank}</div>
+              <Contactless />
             </div>
 
             <Chip />
 
             <div>
               {card ? (
-                <div className="font-mono text-[16px] font-medium tracking-[0.22em] text-white/95 sm:text-[18px]">
+                <div className="font-mono text-[17px] font-semibold tracking-[0.2em] sm:text-[19px]">
                   {grouped}
                 </div>
               ) : (
-                <div className="text-[11px] text-white/50">شماره کارت ثبت نشده</div>
+                <div className="text-[11px] text-white/70">شماره کارت ثبت نشده</div>
               )}
               {iban && (
-                <div className="mt-1.5 font-mono text-[10px] tracking-wide text-white/45">
+                <div className="mt-1 font-mono text-[10px] tracking-wide text-white/70">
                   {formatIbanDisplay(iban, false)}
                 </div>
               )}
             </div>
 
-            <div className="flex items-end justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[8px] tracking-[0.16em] text-white/40">CARDHOLDER</div>
-                <div className="truncate text-[12px] font-medium text-white/90">{holder}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[8px] tracking-[0.16em] text-white/40">VALID</div>
-                <div className="font-mono text-[12px] text-white/80">
-                  {validThru(account.createdAt)}
-                </div>
-              </div>
+            <div className="flex items-end justify-between gap-2 text-[12px] font-medium">
+              <div className="min-w-0 truncate">{holder}</div>
+              <div className="shrink-0 font-mono text-white/80">{validThru(account.createdAt)}</div>
             </div>
           </div>
         </div>
@@ -305,12 +272,11 @@ export function MiniBankChip({ account }: { account: Account }) {
     <div
       className="relative min-w-[9.4rem] overflow-hidden rounded-2xl p-3 text-white"
       style={{
-        background: `linear-gradient(165deg, ${theme.from}, ${theme.to})`,
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,.14), 0 8px 16px -10px rgba(0,0,0,.4)",
+        background: `linear-gradient(145deg, ${theme.from}, ${theme.to})`,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,.35), 0 8px 16px -10px rgba(0,0,0,.25)",
       }}
     >
-      <div className="absolute left-0 top-0 h-full w-0.5" style={{ background: theme.accent }} />
-      <div className="truncate text-[10px] text-white/60">{bank || account.name}</div>
+      <div className="truncate text-[10px] text-white/80">{bank || account.name}</div>
       <div className="mt-1 font-mono text-[11px] tracking-[0.16em] text-white/90" dir="ltr">
         {card.length >= 4 ? `•••• ${formatNumber(card.slice(-4))}` : account.name}
       </div>

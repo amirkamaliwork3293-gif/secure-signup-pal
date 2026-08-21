@@ -24,6 +24,7 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as QuickAddRouteImport } from './routes/quick-add'
 import { Route as PurchasesRouteImport } from './routes/purchases'
 import { Route as ProductsRouteImport } from './routes/products'
+import { Route as ProductionRouteImport } from './routes/production'
 import { Route as MenuQrRouteImport } from './routes/menu-qr'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as LoginRouteImport } from './routes/login'
@@ -33,7 +34,6 @@ import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as GoldRouteImport } from './routes/gold'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as ProductionRouteImport } from './routes/production'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as BackupRouteImport } from './routes/backup'
@@ -117,6 +117,11 @@ const ProductsRoute = ProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProductionRoute = ProductionRouteImport.update({
+  id: '/production',
+  path: '/production',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MenuQrRoute = MenuQrRouteImport.update({
   id: '/menu-qr',
   path: '/menu-qr',
@@ -162,11 +167,6 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProductionRoute = ProductionRouteImport.update({
-  id: '/production',
-  path: '/production',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
@@ -209,9 +209,8 @@ export interface FileRoutesByFullPath {
   '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
-  '/gold': typeof GoldRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/production': typeof ProductionRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -219,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
@@ -243,9 +243,8 @@ export interface FileRoutesByTo {
   '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
-  '/gold': typeof GoldRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/production': typeof ProductionRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -253,6 +252,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
@@ -278,9 +278,8 @@ export interface FileRoutesById {
   '/backup': typeof BackupRoute
   '/customers': typeof CustomersRoute
   '/expenses': typeof ExpensesRoute
-  '/gold': typeof GoldRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/production': typeof ProductionRoute
+  '/gold': typeof GoldRoute
   '/history': typeof HistoryRoute
   '/inventory': typeof InventoryRoute
   '/invoice-design': typeof InvoiceDesignRoute
@@ -288,6 +287,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
   '/quick-add': typeof QuickAddRoute
@@ -314,9 +314,8 @@ export interface FileRouteTypes {
     | '/backup'
     | '/customers'
     | '/expenses'
-    | '/gold'
     | '/forgot-password'
-    | '/production'
+    | '/gold'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -324,6 +323,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/production'
     | '/products'
     | '/purchases'
     | '/quick-add'
@@ -348,9 +348,8 @@ export interface FileRouteTypes {
     | '/backup'
     | '/customers'
     | '/expenses'
-    | '/gold'
     | '/forgot-password'
-    | '/production'
+    | '/gold'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -358,6 +357,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/production'
     | '/products'
     | '/purchases'
     | '/quick-add'
@@ -382,9 +382,8 @@ export interface FileRouteTypes {
     | '/backup'
     | '/customers'
     | '/expenses'
-    | '/gold'
     | '/forgot-password'
-    | '/production'
+    | '/gold'
     | '/history'
     | '/inventory'
     | '/invoice-design'
@@ -392,6 +391,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/production'
     | '/products'
     | '/purchases'
     | '/quick-add'
@@ -417,9 +417,8 @@ export interface RootRouteChildren {
   BackupRoute: typeof BackupRoute
   CustomersRoute: typeof CustomersRoute
   ExpensesRoute: typeof ExpensesRoute
-  GoldRoute: typeof GoldRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
-  ProductionRoute: typeof ProductionRoute
+  GoldRoute: typeof GoldRoute
   HistoryRoute: typeof HistoryRoute
   InventoryRoute: typeof InventoryRoute
   InvoiceDesignRoute: typeof InvoiceDesignRoute
@@ -427,6 +426,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MenuRoute: typeof MenuRoute
   MenuQrRoute: typeof MenuQrRoute
+  ProductionRoute: typeof ProductionRoute
   ProductsRoute: typeof ProductsRoute
   PurchasesRoute: typeof PurchasesRoute
   QuickAddRoute: typeof QuickAddRoute
@@ -553,6 +553,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/production': {
+      id: '/production'
+      path: '/production'
+      fullPath: '/production'
+      preLoaderRoute: typeof ProductionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/menu-qr': {
       id: '/menu-qr'
       path: '/menu-qr'
@@ -616,13 +623,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/production': {
-      id: '/production'
-      path: '/production'
-      fullPath: '/production'
-      preLoaderRoute: typeof ProductionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/expenses': {
       id: '/expenses'
       path: '/expenses'
@@ -681,9 +681,8 @@ const rootRouteChildren: RootRouteChildren = {
   BackupRoute: BackupRoute,
   CustomersRoute: CustomersRoute,
   ExpensesRoute: ExpensesRoute,
-  GoldRoute: GoldRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
-  ProductionRoute: ProductionRoute,
+  GoldRoute: GoldRoute,
   HistoryRoute: HistoryRoute,
   InventoryRoute: InventoryRoute,
   InvoiceDesignRoute: InvoiceDesignRoute,
@@ -691,6 +690,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MenuRoute: MenuRoute,
   MenuQrRoute: MenuQrRoute,
+  ProductionRoute: ProductionRoute,
   ProductsRoute: ProductsRoute,
   PurchasesRoute: PurchasesRoute,
   QuickAddRoute: QuickAddRoute,

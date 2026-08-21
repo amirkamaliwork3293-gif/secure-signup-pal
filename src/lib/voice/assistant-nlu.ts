@@ -15,9 +15,8 @@
  *   invoice_item        پیش‌فرض: همان رفتار فعلی «ثبت صوتی فاکتور»
  *   unknown             هیچ‌کدام
  *
- * قاعده‌ی مهم: هر جمله‌ای که به هیچ‌یک از نیت‌های بالا نخورد، دست‌نخورده به
- * `parseVoiceText` (موتور فعلی فاکتور) سپرده می‌شود؛ پس این لایه هیچ قابلیتی را
- * از بین نمی‌برد و فقط رویش اضافه می‌شود.
+ * قاعده‌ی مهم: دستورهای عملی (فاکتور، بدهی، هزینه، محصول، یادآوری) دست‌نخورده
+ * می‌مانند. جمله‌ی نامرتبط یا سؤال نامشخص دیگر به «کالا پیدا نشد» نمی‌افتد.
  */
 
 import {
@@ -41,7 +40,7 @@ import {
   type ParsedCandidate,
 } from "@/lib/voice/persian-nlu";
 import { parseProductVoiceText, type ParsedProductItem } from "@/lib/voice/product-nlu";
-import { buildQueryAnswer, type QueryKind } from "@/lib/voice/assistant-queries";
+import { buildQueryAnswer, type QueryKind, type QueryRange, type QuerySpec } from "@/lib/voice/assistant-queries";
 
 // ─── انواع ────────────────────────────────────────────────────────────────────
 
@@ -356,7 +355,7 @@ function isClearWinner(scores: number[]): boolean {
 // ─── الگوهای تشخیص نیت ────────────────────────────────────────────────────────
 // همه‌ی الگوها روی متنِ نرمال‌شده نوشته شده‌اند (آ→ا، ي→ی، بدون نیم‌فاصله).
 
-const RE_REMINDER = /یاداور|یادم بنداز|یادم باشه|به یادم/;
+const RE_REMINDER = /یاداور|یادم بنداز|یادم باشه|به یادم|یادآوری|الارم|یادم نره/;
 const RE_PRICE_EDIT =
   /ویرایش قیمت|تغییر قیمت|قیمت جدید|قیمتش? ?(رو|را)? ?(عوض|اصلاح|تغییر)|قیمت.*(بشه|بشود|بکن|کن|بذار|بزن)|قیمتش? ?(بشه|بشود)/;
 /** طلبکار = مشتری از ما طلب دارد (مانده منفی). جدا از «بدهکار». */
@@ -371,23 +370,154 @@ const RE_PRODUCT_ADD =
   /ثبت محصول|محصول جدید|به محصولات|تو محصولات|در محصولات|موجودی .*اضافه|اضافه شود|اضافه بشه|اضافه کن|اضافه بکن/;
 const RE_TO_INVOICE = /به فاکتور|روی فاکتور|تو فاکتور/;
 const RE_OPEN_INVOICE =
-  /فاکتور.{0,48}(باز کن|بازکن|نشون بده|نشان بده|بیار|بده ببینم|پیدا کن)|باز کن.{0,24}فاکتور|(برو( به)?|ببر( به)?) فاکتور/;
+  /فاکتور.{0,48}(باز کن|بازکن|نشون بده|نشان بده|بیار|بده ببینم|پیدا کن|چیه|چیست|کجاست)|باز کن.{0,24}فاکتور|(برو( به)?|ببر( به)?) فاکتور/;
 
-const QUERY_PATTERNS: { kind: QueryKind; re: RegExp }[] = [
-  { kind: "most_profitable", re: /پرسود|پر سود|بیشترین سود|سود اورترین|سوداورترین/ },
-  { kind: "least_profitable", re: /کم سود|کمسود|کمترین سود|بی سود|بیسود/ },
-  { kind: "best_customers", re: /بهترین مشتری|مشتری برتر|وفادارترین مشتری|بیشترین خرید/ },
-  { kind: "top_selling", re: /پرفروش|پر فروش|بیشترین فروش|بیشتر فروش رفته/ },
-  {
-    kind: "debtors",
-    re: /چند تا بدهکار|چندتا بدهکار|تعداد بدهکار|بدهکارها|بدهکارانم|چقدر طلب|طلبم چقدر|جمع بدهی/,
-  },
-  { kind: "today_sales", re: /امروز چقدر فروخت|فروش امروز|چقدر فروش داشتم|فروش امروزم/ },
-  {
-    kind: "month_expenses",
-    re: /چقدر هزینه|جمع هزینه|هزینه ها?ی این ماه|هزینه این ماه|هزینه ها?ی ماه/,
-  },
-];
+/** نشانه‌ی سؤال / گزارش — برای جدا کردن پرسش از دستور ثبت */
+function looksLikeQuestion(norm: string): boolean {
+  return /(چقدر|چقد|چند\s*تا|چندتا|چنده|چیه|چیست|کیه|کیست|گزارش|بگو\b|داشتم|کردم|فروختم|درآوردم|در اوردم|گیرم|وضعیت حساب|حسابش|بدهکاره|طلبکاره)/.test(
+    norm,
+  );
+}
+
+function extractQueryRange(norm: string): QueryRange | undefined {
+  if (/دیروز/.test(norm)) return "yesterday";
+  if (/امروز/.test(norm)) return "today";
+  if (/این\s*هفته|هفته\s*(ی\s*)?(جاری|الان)/.test(norm)) return "week";
+  if (/این\s*ماه|ماه\s*(جاری|الان)|ماه\s*چقدر/.test(norm)) return "month";
+  if (/امسال|این\s*سال|سال\s*(جاری|الان)/.test(norm)) return "year";
+  if (/(از\s*اول|از\s*ابتدا|تا\s*الان|کل\s*(سود|فروش|هزینه)|همه\s*(ی\s*)?(سود|فروش))/.test(norm))
+    return "all";
+  return undefined;
+}
+
+const QUERY_NAME_NOISE = new Set([
+  "است",
+  "هست",
+  "هستش",
+  "شد",
+  "شده",
+  "چقدر",
+  "چقد",
+  "چند",
+  "چیه",
+  "چیست",
+  "کیه",
+  "بگو",
+  "گزارش",
+  "وضعیت",
+  "حساب",
+  "حسابش",
+  "مانده",
+  "داره",
+  "دارد",
+  "دارم",
+  "هست",
+  "من",
+  "رو",
+  "را",
+  "به",
+  "از",
+  "برای",
+  "و",
+]);
+
+function extractQueryCustomerName(norm: string): string {
+  return joinClean(tokensOf(norm), (t) => {
+    if (HONORIFICS.has(t) || QUERY_NAME_NOISE.has(t) || isWhenNoise(t)) return true;
+    return /^(بدهکار|طلبکار|بدهی|طلب|چقدر|چند)/.test(t);
+  });
+}
+
+/**
+ * تشخیص نیت پرسشی. الگوهای خاص‌تر اول می‌آیند تا «پرسودترین» با «چقدر سود»
+ * قاطی نشود، و سؤال وضعیت مشتری قبل از دستور ثبت بدهی گرفته شود.
+ */
+function detectQuery(norm: string): QuerySpec | null {
+  const range = extractQueryRange(norm);
+  const q = looksLikeQuestion(norm);
+  const reportCue = q || !!range || /^(سود|سودم|فروش|فروشم|گزارش)$/.test(norm);
+
+  if (/(پرسود|پر سود|بیشترین سود|سود اورترین|سوداورترین)/.test(norm)) {
+    return { kind: "most_profitable", range };
+  }
+  if (/(کم سود|کمسود|کمترین سود|بی سود|بیسود)/.test(norm)) {
+    return { kind: "least_profitable", range };
+  }
+  if (/(بهترین مشتری|مشتری برتر|وفادارترین مشتری|بیشترین خرید)/.test(norm)) {
+    return { kind: "best_customers", range };
+  }
+  if (/(پرفروش|پر فروش|بیشترین فروش|بیشتر فروش رفته)/.test(norm)) {
+    return { kind: "top_selling", range };
+  }
+  if (/(کم\s*بود|رو\s*به\s*اتمام|موجودی\s*کم|کالاهای?\s*تمام|ته\s*کشید)/.test(norm) && reportCue) {
+    return { kind: "low_stock" };
+  }
+  if (/(چند\s*(تا\s*)?فاکتور|تعداد فاکتور|چند فاکتور)/.test(norm)) {
+    return { kind: "invoice_count", range };
+  }
+
+  const genericDebtors =
+    /چند\s*تا\s*بدهکار|چندتا بدهکار|تعداد بدهکار|بدهکارها|بدهکاران|جمع بدهی|چقدر طلب|طلبم چقدر/.test(
+      norm,
+    );
+  const genericCreditors = /چند\s*تا\s*طلبکار|چندتا طلبکار|طلبکارها|طلبکاران|جمع طلبکاری/.test(norm);
+  if (genericDebtors) return { kind: "debtors" };
+  if (genericCreditors) return { kind: "creditors" };
+
+  if (
+    (/(وضعیت حساب|حسابش|مانده حساب)/.test(norm) ||
+      (/(بدهکار|طلبکار|بدهی)/.test(norm) && q)) &&
+    !genericDebtors &&
+    !genericCreditors
+  ) {
+    const customerName = extractQueryCustomerName(norm);
+    if (customerName) return { kind: "customer_status", customerName };
+    if (/(طلبکار)/.test(norm)) return { kind: "creditors" };
+    if (/(بدهکار|بدهی)/.test(norm)) return { kind: "debtors" };
+  }
+
+  if (/(سود\s*خالص|سود\s*بعد|سود\s*واقعی|برام\s*موند|چقدر\s*برام)/.test(norm)) {
+    return { kind: "net_profit", range };
+  }
+  if (/(سود|سودم|سوددهی|سوداوری|درآوردم|در اوردم|گیرم)/.test(norm) && reportCue) {
+    return { kind: "profit", range };
+  }
+
+  if (
+    /(فروش|فروختم|فروشم|درآمد)/.test(norm) &&
+    !RE_PRODUCT_ADD.test(norm) &&
+    reportCue
+  ) {
+    return { kind: "sales", range };
+  }
+
+  if (RE_EXPENSE.test(norm)) {
+    const expenseQuestion = /(چقدر|جمع|گزارش|داشتم|کردم|چیه)/.test(norm);
+    const money = collectAmountRuns(tokensOf(norm)).some((r) => r.hasAnchor || r.amount >= 1000);
+    // «چقدر هزینه کردم» / «هزینه این ماه» سؤال است؛ «ماهانه ۴۵ میلیون هزینه اجاره» ثبت است
+    if (expenseQuestion || (range && !money)) {
+      return { kind: "expenses", range };
+    }
+  }
+
+  if (/گزارش/.test(norm) && (q || range || /^گزارش/.test(norm))) {
+    return { kind: "snapshot", range };
+  }
+
+  return null;
+}
+
+/** «۲ تا نون»، «سه عدد شیر»، «به فاکتور اضافه کن» — دستور ثبت فاکتور است */
+function looksLikeInvoiceCommand(norm: string): boolean {
+  if (RE_TO_INVOICE.test(norm)) return true;
+  if (/\d+(\.\d+)?\s*(تا|عدد|کیلو|کیلوگرم|گرم|دونه|دونا|تاي)/.test(norm)) return true;
+  const tokens = tokensOf(norm);
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokenToNumber(tokens[i]) === undefined) continue;
+    if (/^(تا|عدد|کیلو|کیلوگرم|گرم|دونه|دونا)$/.test(tokens[i + 1])) return true;
+  }
+  return false;
+}
 
 // ─── واژه‌های بی‌اثر هر نیت ───────────────────────────────────────────────────
 
@@ -619,7 +749,7 @@ const REMINDER_NOISE = new Set([
 
 function isReminderNoise(t: string): boolean {
   if (REMINDER_NOISE.has(t) || isWhenNoise(t)) return true;
-  return /^(یاداور|یادم|یاد|بنداز|باشه)/.test(t) || /^\d+$/.test(t);
+  return /^(یاداور|یادم|یاد|بنداز|باشه|الارم|نره)/.test(t) || /^\d+$/.test(t);
 }
 
 function isWhenNoise(t: string): boolean {
@@ -998,6 +1128,9 @@ const OPEN_INVOICE_NOISE = new Set([
   "این",
   "مربوط",
   "مال",
+  "چیه",
+  "چیست",
+  "کجاست",
   "و",
 ]);
 
@@ -1051,23 +1184,19 @@ function parseOpenInvoice(raw: string, norm: string, ctx: AssistantContext): Ass
   };
 }
 
-function detectQueryKind(norm: string): QueryKind | null {
-  for (const q of QUERY_PATTERNS) if (q.re.test(norm)) return q.kind;
-  return null;
-}
-
 // ─── تابع اصلی ────────────────────────────────────────────────────────────────
 
 /**
  * تشخیص نیت یک دستور صوتی. ترتیب بررسی مهم است:
  *   ۱) یادآوری
  *   ۲) باز کردن فاکتور — پیش از بدهی، چون «فاکتور آقای …» نام مشتری دارد
- *   ۳) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» فقط یک سؤال است
+ *   ۳) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» / «چقدر سود داشتم» فقط سؤال است
  *   ۴) ویرایش قیمت
  *   ۵) افزودن محصول به فهرست کالاها
  *   ۶) بدهی / طلبکاری / تسویه مشتری
  *   ۷) هزینه
- *   ۸) در نهایت: همان موتور فعلی فاکتور (رفتار پیش‌فرض دست‌نخورده)
+ *   ۸) فاکتور فقط اگر کالا تطبیق شد یا جمله واقعاً دستور ثبت کالا باشد
+ *   ۹) وگرنه unknown با راهنما — نه «کالایی پیدا نشد»
  */
 export function parseAssistantCommand(text: string, context: AssistantContext): AssistantIntent {
   const raw = (text ?? "").trim();
@@ -1077,13 +1206,13 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   if (RE_REMINDER.test(norm)) return parseReminder(raw, norm, context);
   if (RE_OPEN_INVOICE.test(norm)) return parseOpenInvoice(raw, norm, context);
 
-  const queryKind = detectQueryKind(norm);
-  if (queryKind) {
+  const query = detectQuery(norm);
+  if (query) {
     return {
       kind: "query",
       raw,
-      queryKind,
-      answer: buildQueryAnswer(queryKind, {
+      queryKind: query.kind,
+      answer: buildQueryAnswer(query, {
         products: context.products,
         invoices: context.invoices,
         customers: context.customers,
@@ -1105,14 +1234,26 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   }
   if (RE_EXPENSE.test(norm)) return parseExpense(raw, norm, context);
 
-  // پیش‌فرض: افزودن کالا به فاکتور — دقیقاً همان موتور صفحه‌ی /voice
   const result = parseVoiceText(raw, context.products);
-  if (result.items.length > 0) return { kind: "invoice_item", raw, result };
+  const anyProductHit = result.items.some((i) => i.candidates.length > 0);
+  if (anyProductHit || looksLikeInvoiceCommand(norm)) {
+    return { kind: "invoice_item", raw, result };
+  }
+
+  if (looksLikeQuestion(norm)) {
+    return {
+      kind: "unknown",
+      raw,
+      reason:
+        "سؤال را شنیدم، ولی نوع گزارش را تشخیص ندادم. مثلاً بگویید «امروز چقدر سود داشتم»، «این ماه چقدر فروختم»، یا «چند تا بدهکار دارم».",
+    };
+  }
 
   return {
     kind: "unknown",
     raw,
-    reason: "متوجه نشدم. می‌توانید متن را ویرایش کنید و دوباره بفرستید.",
+    reason:
+      "متوجه نشدم. می‌توانید دستور ثبت بدهید (مثل «۲ تا نون» یا «آقای … بدهکار است») یا سؤال بپرسید (مثل «امروز چقدر سود داشتم»).",
   };
 }
 

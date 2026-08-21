@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Copy, Check, Share2, CreditCard, Landmark, ChevronDown } from "lucide-react";
 import type { Account } from "@/lib/store";
-import { accounts as accountsStore, formatToman, formatNumber } from "@/lib/store";
+import { formatToman, formatNumber } from "@/lib/store";
 import {
   bankFromCardNumber,
   cardShareText,
@@ -10,13 +10,13 @@ import {
   formatIbanDisplay,
   normalizeIban,
 } from "@/lib/iran-banks";
-import { CARD_SWATCHES, defaultCardColorId, parseHex, resolveCardTheme } from "@/lib/card-theme";
+import { CARD_SWATCHES, parseHex, resolveCardTheme } from "@/lib/card-theme";
 import { copyText, shareText } from "@/lib/openExternal";
 
 function Chip({ dark }: { dark?: boolean }) {
   return (
     <div
-      className="relative h-[1.35rem] w-[1.95rem] overflow-hidden rounded-[5px]"
+      className="relative h-6 w-9 overflow-hidden rounded-md"
       style={{
         background: dark
           ? "linear-gradient(135deg, #FDE68A 0%, #D97706 55%, #92400E 100%)"
@@ -40,7 +40,7 @@ function Chip({ dark }: { dark?: boolean }) {
 
 function Contactless({ className }: { className?: string }) {
   return (
-    <svg width="16" height="13" viewBox="0 0 24 20" aria-hidden className={className}>
+    <svg width="18" height="14" viewBox="0 0 24 20" aria-hidden className={className}>
       <path
         fill="currentColor"
         d="M8 4c3.2 0 5.8 2.6 5.8 5.8S11.2 15.6 8 15.6H6.4V4H8zm7.6 1.2c.9 1.4 1.4 3 1.4 4.8s-.5 3.4-1.4 4.8l-1.3-.8c.7-1.1 1.1-2.5 1.1-4s-.4-2.9-1.1-4l1.3-.8z"
@@ -126,14 +126,14 @@ export function IranianBankCardFace({
   const muted = theme.darkText ? "text-slate-500" : "text-white/70";
 
   return (
-    <div className="mx-auto w-full max-w-[20rem] [perspective:1100px]">
-      <div className="relative aspect-[1.586/1] w-full" style={{ transform: "rotateX(5deg)" }}>
+    <div className="w-full md:mx-auto md:max-w-[20rem] [perspective:1100px]">
+      <div className="relative aspect-[1.586/1] w-full" style={{ transform: "rotateX(7deg)" }}>
         <div
           className="absolute inset-x-3 bottom-0 h-4 rounded-full blur-md"
           style={{ background: theme.to, opacity: 0.45 }}
         />
         <div
-          className={`relative h-full overflow-hidden rounded-[1.15rem] ${ink}`}
+          className={`relative h-full overflow-hidden rounded-[1.4rem] ${ink}`}
           style={{
             background: `linear-gradient(152deg, ${theme.from} 0%, ${theme.mid} 46%, ${theme.to} 100%)`,
             boxShadow:
@@ -166,9 +166,9 @@ export function IranianBankCardFace({
             }}
           />
 
-          <div className="relative flex h-full flex-col justify-between px-4 py-3.5">
+          <div className="relative flex h-full flex-col justify-between p-5">
             <div className="flex items-center justify-between gap-2">
-              <div className={`truncate text-[11px] font-medium tracking-wide ${muted}`}>
+              <div className={`truncate text-[12px] font-medium tracking-wide ${muted}`}>
                 {bank}
               </div>
               <Contactless className={muted} />
@@ -178,20 +178,20 @@ export function IranianBankCardFace({
 
             <div>
               {card ? (
-                <div className="font-mono text-[15px] font-semibold tracking-[0.18em] sm:text-[16px]">
+                <div className="font-mono text-[17px] font-semibold tracking-[0.2em] sm:text-[19px]">
                   {grouped}
                 </div>
               ) : (
                 <div className={`text-[11px] ${muted}`}>شماره کارت ثبت نشده</div>
               )}
               {iban && (
-                <div className={`mt-0.5 font-mono text-[9px] tracking-wider ${muted}`}>
+                <div className={`mt-1 font-mono text-[10px] tracking-wide ${muted}`}>
                   {formatIbanDisplay(iban, false)}
                 </div>
               )}
             </div>
 
-            <div className="flex items-end justify-between gap-2 text-[11px] font-medium">
+            <div className="flex items-end justify-between gap-2 text-[12px] font-medium">
               <div className="min-w-0 truncate">{holder}</div>
               <div className={`shrink-0 font-mono ${muted}`}>{validThru(account.createdAt)}</div>
             </div>
@@ -274,10 +274,6 @@ export function IranianBankCard({
     }
   };
 
-  const saveColor = (id: string) => {
-    accountsStore.update({ ...account, cardColor: id });
-  };
-
   if (!hasCard && !hasIban) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-dashed border-border bg-card p-3">
@@ -351,10 +347,6 @@ export function IranianBankCard({
       {open && (
         <div className="mt-3 space-y-3">
           <IranianBankCardFace account={account} shopName={shopName} />
-          <CardColorPicker
-            value={account.cardColor || defaultCardColorId(account)}
-            onChange={saveColor}
-          />
           <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"

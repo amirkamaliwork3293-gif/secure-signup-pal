@@ -34,12 +34,8 @@ import {
   type AccountTx,
 } from "@/lib/store";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
-import {
-  IranianBankCard,
-  MiniBankChip,
-  CardColorPicker,
-  defaultCardColorId,
-} from "@/components/IranianBankCard";
+import { IranianBankCard, MiniBankChip, CardColorPicker } from "@/components/IranianBankCard";
+import { defaultCardColorId } from "@/lib/card-theme";
 import { bankFromCardNumber, digitsOnly, IRAN_BANK_NAMES, normalizeIban } from "@/lib/iran-banks";
 import {
   Wallet,
@@ -887,29 +883,29 @@ function AccountsPanel() {
                 </div>
 
                 {(!hasFace || cardOpen) && (
-                <div className="mt-2 flex gap-1.5">
-                  <button
-                    onClick={() => {
-                      setTxFormFor(txFormFor === a.id && !editingTx ? null : a.id);
-                      setEditingTx(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-[11px] font-medium hover:bg-accent"
-                  >
-                    <ArrowDownCircle className="h-3.5 w-3.5 text-success" />
-                    <ArrowUpCircle className="h-3.5 w-3.5 text-destructive -mr-1" />
-                    ثبت واریز / برداشت
-                  </button>
-                  {accountTxs.length > 0 && (
+                  <div className="mt-2 flex gap-1.5">
                     <button
-                      onClick={() => setOpenHistoryFor(openHistoryFor === a.id ? null : a.id)}
-                      className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                      onClick={() => {
+                        setTxFormFor(txFormFor === a.id && !editingTx ? null : a.id);
+                        setEditingTx(null);
+                      }}
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-[11px] font-medium hover:bg-accent"
                     >
-                      {openHistoryFor === a.id
-                        ? "بستن تاریخچه"
-                        : `تاریخچه (${formatNumber(accountTxs.length)})`}
+                      <ArrowDownCircle className="h-3.5 w-3.5 text-success" />
+                      <ArrowUpCircle className="h-3.5 w-3.5 text-destructive -mr-1" />
+                      ثبت واریز / برداشت
                     </button>
-                  )}
-                </div>
+                    {accountTxs.length > 0 && (
+                      <button
+                        onClick={() => setOpenHistoryFor(openHistoryFor === a.id ? null : a.id)}
+                        className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                      >
+                        {openHistoryFor === a.id
+                          ? "بستن تاریخچه"
+                          : `تاریخچه (${formatNumber(accountTxs.length)})`}
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {(!hasFace || cardOpen) && txFormFor === a.id && (
@@ -1007,9 +1003,7 @@ function AccountForm({
     initial?.bankName ?? bankFromCardNumber(initial?.cardNumber) ?? "",
   );
   const [openingBalance, setOpeningBalance] = useState(initial?.openingBalance ?? 0);
-  const [cardColor, setCardColor] = useState(
-    initial?.cardColor ?? defaultCardColorId(initial),
-  );
+  const [cardColor, setCardColor] = useState(initial?.cardColor ?? defaultCardColorId(initial));
   const [err, setErr] = useState<string | null>(null);
 
   const detected = bankFromCardNumber(cardNumber);

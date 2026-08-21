@@ -4,113 +4,14 @@ import type { Account } from "@/lib/store";
 import { accounts as accountsStore, formatToman, formatNumber } from "@/lib/store";
 import {
   bankFromCardNumber,
-  bankHue,
   cardShareText,
   digitsOnly,
   formatCardNumberDisplay,
   formatIbanDisplay,
   normalizeIban,
-  type IranBank,
 } from "@/lib/iran-banks";
+import { CARD_SWATCHES, defaultCardColorId, parseHex, resolveCardTheme } from "@/lib/card-theme";
 import { copyText, shareText } from "@/lib/openExternal";
-
-export type CardSwatch = {
-  id: string;
-  label: string;
-  from: string;
-  mid: string;
-  to: string;
-  /** اگر true باشد متن روی کارت تیره است (پس‌زمینه روشن) */
-  darkText: boolean;
-};
-
-export const CARD_SWATCHES: CardSwatch[] = [
-  { id: "mint", label: "نعنایی", from: "#5EEAD4", mid: "#2DD4BF", to: "#0F766E", darkText: false },
-  { id: "sky", label: "آسمانی", from: "#7DD3FC", mid: "#38BDF8", to: "#2563EB", darkText: false },
-  { id: "coral", label: "مرجانی", from: "#FDA4AF", mid: "#FB7185", to: "#E11D48", darkText: false },
-  { id: "sun", label: "آفتابی", from: "#FDE68A", mid: "#FBBF24", to: "#D97706", darkText: false },
-  { id: "lime", label: "سبز", from: "#BEF264", mid: "#84CC16", to: "#15803D", darkText: false },
-  { id: "grape", label: "بنفش", from: "#D8B4FE", mid: "#C084FC", to: "#7C3AED", darkText: false },
-  { id: "ink", label: "ذغالی", from: "#64748B", mid: "#334155", to: "#0F172A", darkText: false },
-  { id: "ice", label: "یخی", from: "#F8FAFC", mid: "#E2E8F0", to: "#94A3B8", darkText: true },
-];
-
-const HUE_TO_SWATCH: Record<IranBank["hue"], string> = {
-  turquoise: "mint",
-  navy: "sky",
-  crimson: "coral",
-  gold: "sun",
-  forest: "lime",
-  violet: "grape",
-};
-
-function clampByte(n: number) {
-  return Math.max(0, Math.min(255, Math.round(n)));
-}
-
-function parseHex(hex: string): { r: number; g: number; b: number } | null {
-  const h = hex.trim().replace("#", "");
-  const full =
-    h.length === 3
-      ? h
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : h;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
-  const n = parseInt(full, 16);
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-
-function toHex({ r, g, b }: { r: number; g: number; b: number }) {
-  return `#${[r, g, b].map((x) => clampByte(x).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function mix(
-  a: { r: number; g: number; b: number },
-  b: { r: number; g: number; b: number },
-  t: number,
-) {
-  return {
-    r: a.r + (b.r - a.r) * t,
-    g: a.g + (b.g - a.g) * t,
-    b: a.b + (b.b - a.b) * t,
-  };
-}
-
-function luminance({ r, g, b }: { r: number; g: number; b: number }) {
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-}
-
-export function defaultCardColorId(account?: {
-  bankName?: string;
-  cardNumber?: string;
-}): string {
-  return HUE_TO_SWATCH[bankHue(account.bankName || bankFromCardNumber(account.cardNumber))];
-}
-
-export function resolveCardTheme(account: Pick<Account, "cardColor" | "bankName" | "cardNumber">): CardSwatch {
-  const raw = account.cardColor?.trim();
-  if (raw) {
-    const named = CARD_SWATCHES.find((s) => s.id === raw);
-    if (named) return named;
-    const rgb = parseHex(raw);
-    if (rgb) {
-      const from = toHex(mix(rgb, { r: 255, g: 255, b: 255 }, 0.28));
-      const mid = toHex(rgb);
-      const to = toHex(mix(rgb, { r: 15, g: 23, b: 42 }, 0.38));
-      return {
-        id: raw.startsWith("#") ? raw : `#${raw.replace("#", "")}`,
-        label: "دلخواه",
-        from,
-        mid,
-        to,
-        darkText: luminance(rgb) > 0.62,
-      };
-    }
-  }
-  return CARD_SWATCHES.find((s) => s.id === defaultCardColorId(account)) ?? CARD_SWATCHES[0]!;
-}
 
 function Chip({ dark }: { dark?: boolean }) {
   return (
@@ -160,7 +61,8 @@ export function CardColorPicker({
   value?: string;
   onChange: (id: string) => void;
 }) {
-  const customHex = value && parseHex(value) ? (value.startsWith("#") ? value : `#${value}`) : "#38BDF8";
+  const customHex =
+    value && parseHex(value) ? (value.startsWith("#") ? value : `#${value}`) : "#38BDF8";
   return (
     <div className="flex flex-wrap items-center gap-1.5" dir="rtl">
       <span className="ml-1 text-[10px] text-muted-foreground">رنگ کارت</span>
@@ -178,12 +80,17 @@ export function CardColorPicker({
             style={{
               background: `linear-gradient(145deg, ${s.from}, ${s.to})`,
               borderColor: active ? "hsl(var(--foreground))" : "transparent",
-              boxShadow: active ? "0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--foreground) / .25)" : undefined,
+              boxShadow: active
+                ? "0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--foreground) / .25)"
+                : undefined,
             }}
           />
         );
       })}
-      <label className="relative h-6 w-6 cursor-pointer overflow-hidden rounded-full border border-border" title="رنگ دلخواه">
+      <label
+        className="relative h-6 w-6 cursor-pointer overflow-hidden rounded-full border border-border"
+        title="رنگ دلخواه"
+      >
         <span className="sr-only">رنگ دلخواه</span>
         <input
           type="color"
@@ -194,8 +101,7 @@ export function CardColorPicker({
         <span
           className="block h-full w-full"
           style={{
-            background:
-              "conic-gradient(#fb7185, #fbbf24, #34d399, #38bdf8, #c084fc, #fb7185)",
+            background: "conic-gradient(#fb7185, #fbbf24, #34d399, #38bdf8, #c084fc, #fb7185)",
           }}
         />
       </label>
@@ -237,7 +143,9 @@ export function IranianBankCardFace({
         >
           <div
             className="pointer-events-none absolute -left-8 -top-12 h-36 w-36 rounded-full"
-            style={{ background: theme.darkText ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.28)" }}
+            style={{
+              background: theme.darkText ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.28)",
+            }}
           />
           <div
             className="pointer-events-none absolute -bottom-12 -right-6 h-32 w-32 rounded-full"
@@ -253,15 +161,16 @@ export function IranianBankCardFace({
           <div
             className="pointer-events-none absolute inset-0 opacity-[0.07]"
             style={{
-              backgroundImage:
-                "radial-gradient(rgba(255,255,255,.9) 0.6px, transparent 0.7px)",
+              backgroundImage: "radial-gradient(rgba(255,255,255,.9) 0.6px, transparent 0.7px)",
               backgroundSize: "7px 7px",
             }}
           />
 
           <div className="relative flex h-full flex-col justify-between px-4 py-3.5">
             <div className="flex items-center justify-between gap-2">
-              <div className={`truncate text-[11px] font-medium tracking-wide ${muted}`}>{bank}</div>
+              <div className={`truncate text-[11px] font-medium tracking-wide ${muted}`}>
+                {bank}
+              </div>
               <Contactless className={muted} />
             </div>
 
@@ -442,7 +351,10 @@ export function IranianBankCard({
       {open && (
         <div className="mt-3 space-y-3">
           <IranianBankCardFace account={account} shopName={shopName} />
-          <CardColorPicker value={account.cardColor || defaultCardColorId(account)} onChange={saveColor} />
+          <CardColorPicker
+            value={account.cardColor || defaultCardColorId(account)}
+            onChange={saveColor}
+          />
           <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"

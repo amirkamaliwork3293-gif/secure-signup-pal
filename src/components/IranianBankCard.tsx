@@ -14,202 +14,46 @@ import {
 } from "@/lib/iran-banks";
 import { copyText, shareText } from "@/lib/openExternal";
 
-/** پالت لوکس کارت — سرمه‌ای، طلایی، پوست‌آهو؛ الهام از کارت‌های تذهیب ایرانی */
-const NAVY: Record<IranBank["hue"], string> = {
-  turquoise: "#08243b",
-  navy: "#071a33",
-  crimson: "#2a1020",
-  gold: "#1a1408",
-  forest: "#0a241c",
-  violet: "#1a1030",
+const THEME: Record<IranBank["hue"], { from: string; to: string; accent: string }> = {
+  turquoise: { from: "#2a3a40", to: "#14191c", accent: "#6ec9c0" },
+  navy: { from: "#2a3444", to: "#14181f", accent: "#8aafd6" },
+  crimson: { from: "#3a2c30", to: "#181416", accent: "#e08a8a" },
+  gold: { from: "#35322c", to: "#171614", accent: "#cfc3a8" },
+  forest: { from: "#2c3832", to: "#141816", accent: "#86c098" },
+  violet: { from: "#322c3c", to: "#16141c", accent: "#b8a6d4" },
 };
 
 function validThru(createdAt?: number): string {
   const d = new Date((createdAt || Date.now()) + 5 * 365.25 * 86_400_000);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${mm}/${yy}`;
-}
-
-function GoldStar({ uid }: { uid: string }) {
-  return (
-    <svg viewBox="0 0 48 48" className="h-9 w-9 shrink-0" aria-hidden>
-      <defs>
-        <linearGradient id={`${uid}-star`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#f7e7ad" />
-          <stop offset="45%" stopColor="#d4af37" />
-          <stop offset="100%" stopColor="#8a6418" />
-        </linearGradient>
-      </defs>
-      <g fill={`url(#${uid}-star)`} stroke="#f3e0a0" strokeWidth="0.6">
-        <polygon points="24,2 29,17 45,17 32,27 37,43 24,33 11,43 16,27 3,17 19,17" />
-        <polygon
-          points="24,10 27,19 36,19 29,25 32,34 24,28 16,34 19,25 12,19 21,19"
-          opacity="0.55"
-        />
-      </g>
-      <circle cx="24" cy="24" r="4.2" fill="#0b1f36" stroke="#f3e0a0" strokeWidth="0.8" />
-    </svg>
-  );
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getFullYear()).slice(-2)}`;
 }
 
 function Chip() {
   return (
     <div
-      className="relative h-[1.7rem] w-[2.35rem] overflow-hidden rounded-[5px] border border-[#c9a227]"
+      className="relative h-7 w-10 overflow-hidden rounded-[6px]"
       style={{
-        background: "linear-gradient(145deg,#f6e7ad 0%,#d4af37 42%,#b08d2a 70%,#7a5c14 100%)",
-        boxShadow: "inset 0 1px 0 #fff4c4, 0 1px 2px rgba(0,0,0,.35)",
+        background: "linear-gradient(160deg, #f2f0ea 0%, #c8c4ba 48%, #9a958a 100%)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,.85), inset 0 -1px 1px rgba(0,0,0,.2), 0 2px 3px rgba(0,0,0,.28)",
       }}
       aria-hidden
     >
-      <div className="absolute inset-x-1 top-[30%] h-px bg-[#7a5c14]/55" />
-      <div className="absolute inset-x-1 top-[55%] h-px bg-[#7a5c14]/45" />
-      <div className="absolute inset-y-1 left-[32%] w-px bg-[#7a5c14]/50" />
-      <div className="absolute inset-y-1 left-[62%] w-px bg-[#7a5c14]/50" />
+      <div className="absolute inset-[3px] rounded-[3px] border border-black/15" />
+      <div className="absolute inset-x-1 top-1/2 h-px -translate-y-1/2 bg-black/20" />
+      <div className="absolute inset-y-1 left-1/3 w-px bg-black/20" />
+      <div className="absolute inset-y-1 left-2/3 w-px bg-black/20" />
     </div>
   );
 }
 
-function Contactless() {
+function Contactless({ color }: { color: string }) {
   return (
-    <svg width="22" height="18" viewBox="0 0 24 20" aria-hidden className="text-[#e8c76b]">
+    <svg width="20" height="16" viewBox="0 0 24 20" aria-hidden style={{ color }}>
       <path
         fill="currentColor"
-        d="M8 3.8c3.4 0 6.2 2.8 6.2 6.2S11.4 16.2 8 16.2H6.2V3.8H8zm8.2 1.1c1 1.5 1.6 3.2 1.6 5.1s-.6 3.6-1.6 5.1l-1.4-.85c.8-1.2 1.25-2.65 1.25-4.25S15.6 7.85 14.8 6.65l1.4-.75zM20.2 2.6c1.55 2.3 2.45 5 2.45 7.9s-.9 5.6-2.45 7.9l-1.45-.9c1.35-2 2.1-4.4 2.1-7s-.75-5-2.1-7l1.45-.9z"
-        opacity="0.92"
-      />
-    </svg>
-  );
-}
-
-function ShetabMark({ uid }: { uid: string }) {
-  return (
-    <div className="flex items-center gap-1.5" dir="rtl">
-      <svg viewBox="0 0 36 36" className="h-8 w-8" aria-hidden>
-        <defs>
-          <linearGradient id={`${uid}-sh`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#f6e7ad" />
-            <stop offset="100%" stopColor="#b08d2a" />
-          </linearGradient>
-        </defs>
-        <circle cx="18" cy="18" r="16" fill="none" stroke={`url(#${uid}-sh)`} strokeWidth="1.4" />
-        <path
-          d="M10 22c4-9 12-12 17-8"
-          fill="none"
-          stroke={`url(#${uid}-sh)`}
-          strokeWidth="2.2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M9 16c5 8 14 9 19 2"
-          fill="none"
-          stroke={`url(#${uid}-sh)`}
-          strokeWidth="2.2"
-          strokeLinecap="round"
-        />
-      </svg>
-      <div className="leading-none">
-        <div className="text-[11px] font-bold tracking-wide text-[#f1d48a]">شتاب</div>
-        <div className="text-[7px] tracking-[0.18em] text-[#e8c76b]/80">SHETAB</div>
-      </div>
-    </div>
-  );
-}
-
-/** نقوش تذهیب و اسلیمی روی زمینه سرمه‌ای + ترنج طلایی و پنل پوست‌آهو */
-function CardOrnament({ uid, navy }: { uid: string; navy: string }) {
-  return (
-    <svg
-      viewBox="0 0 162 100"
-      preserveAspectRatio="none"
-      className="pointer-events-none absolute inset-0 h-full w-full"
-      aria-hidden
-    >
-      <defs>
-        <pattern id={`${uid}-vine`} width="28" height="24" patternUnits="userSpaceOnUse">
-          <path
-            d="M2 12 C7 4, 14 4, 18 12 C14 20, 7 20, 2 12 M18 12 C22 7, 26 8, 27 12"
-            fill="none"
-            stroke="#3d6a94"
-            strokeWidth="0.45"
-            opacity="0.7"
-          />
-          <path d="M9 7 C11 5, 13 5, 14 8 C12 9, 10 9, 9 7" fill="#2a5680" opacity="0.5" />
-          <circle cx="5" cy="6" r="0.55" fill="#c9a227" opacity="0.4" />
-          <circle cx="22" cy="17" r="0.45" fill="#c9a227" opacity="0.35" />
-        </pattern>
-        <linearGradient id={`${uid}-gold`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#f7e7ad" />
-          <stop offset="50%" stopColor="#d4af37" />
-          <stop offset="100%" stopColor="#8a6418" />
-        </linearGradient>
-        <linearGradient id={`${uid}-cream`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#efe3c4" />
-          <stop offset="100%" stopColor="#f7efd8" />
-        </linearGradient>
-        <radialGradient id={`${uid}-glow`} cx="68%" cy="42%" r="50%">
-          <stop offset="0%" stopColor="#1a4a6e" stopOpacity="0.4" />
-          <stop offset="100%" stopColor={navy} stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <rect width="162" height="100" fill={navy} />
-      <rect width="122" height="100" fill={`url(#${uid}-vine)`} />
-      <rect width="162" height="100" fill={`url(#${uid}-glow)`} />
-
-      <path
-        d="M118 0 C126 16, 126 36, 120 50 C128 66, 138 82, 148 100 L162 100 L162 0 Z"
-        fill={`url(#${uid}-cream)`}
-      />
-      <path
-        d="M118 0 C126 16, 126 36, 120 50 C128 66, 138 82, 148 100"
-        fill="none"
-        stroke={`url(#${uid}-gold)`}
-        strokeWidth="1.35"
-      />
-      <path
-        d="M120.2 0 C128 16, 128 36, 122.2 50 C130 66, 140 82, 150 100"
-        fill="none"
-        stroke={`url(#${uid}-gold)`}
-        strokeWidth="0.4"
-        opacity="0.7"
-      />
-
-      <g transform="translate(118 50)" opacity="0.96">
-        <ellipse
-          cx="0"
-          cy="0"
-          rx="16"
-          ry="24"
-          fill="none"
-          stroke={`url(#${uid}-gold)`}
-          strokeWidth="1.15"
-        />
-        <ellipse
-          cx="0"
-          cy="0"
-          rx="11.5"
-          ry="18"
-          fill="none"
-          stroke={`url(#${uid}-gold)`}
-          strokeWidth="0.55"
-        />
-        <circle cx="0" cy="0" r="3.8" fill={`url(#${uid}-gold)`} />
-      </g>
-
-      <path
-        d="M6 7 C12 5, 14 13, 10 15 C16 17, 12 24, 6 20 C4 15, 4 9, 6 7"
-        fill="none"
-        stroke="#d4af37"
-        strokeWidth="0.7"
-        opacity="0.5"
-      />
-      <path
-        d="M6 93 C12 95, 14 87, 10 85 C16 83, 12 76, 6 80 C4 85, 4 91, 6 93"
-        fill="none"
-        stroke="#d4af37"
-        strokeWidth="0.7"
-        opacity="0.5"
+        d="M8 4c3.2 0 5.8 2.6 5.8 5.8S11.2 15.6 8 15.6H6.4V4H8zm7.6 1.2c.9 1.4 1.4 3 1.4 4.8s-.5 3.4-1.4 4.8l-1.3-.8c.7-1.1 1.1-2.5 1.1-4s-.4-2.9-1.1-4l1.3-.8z"
+        opacity="0.85"
       />
     </svg>
   );
@@ -225,116 +69,91 @@ export function IranianBankCardFace({
 }) {
   const card = digitsOnly(account.cardNumber);
   const iban = normalizeIban(account.iban);
-  const bank = account.bankName || bankFromCardNumber(account.cardNumber) || "کارت بانکی ایران";
+  const bank = account.bankName || bankFromCardNumber(account.cardNumber) || "کارت بانکی";
   const holder = account.holderName || account.name;
-  const hue = bankHue(bank);
-  const uid = `lux${account.id.replace(/[^a-zA-Z0-9]/g, "")}`;
-  const navy = NAVY[hue];
+  const theme = THEME[bankHue(bank)];
   const grouped = card ? formatCardNumberDisplay(card, false) : "";
 
   return (
-    <div
-      className="relative aspect-[1.62/1] w-full overflow-hidden rounded-2xl"
-      style={{
-        boxShadow: "0 18px 40px -12px rgba(8,20,40,.55), inset 0 0 0 1px rgba(212,175,55,.35)",
-      }}
-      dir="ltr"
-    >
-      <CardOrnament uid={uid} navy={navy} />
-      <svg
-        viewBox="0 0 80 80"
-        className="pointer-events-none absolute top-1/2 left-[70%] h-[58%] w-[28%] -translate-x-1/2 -translate-y-1/2"
-        aria-hidden
-      >
-        <defs>
-          <linearGradient id={`${uid}-med`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#f7e7ad" />
-            <stop offset="50%" stopColor="#d4af37" />
-            <stop offset="100%" stopColor="#8a6418" />
-          </linearGradient>
-        </defs>
-        {Array.from({ length: 10 }).map((_, i) => (
-          <path
-            key={i}
-            d="M40 8 Q48 28 40 40 Q32 28 40 8"
-            fill="#145a56"
-            stroke={`url(#${uid}-med)`}
-            strokeWidth="0.7"
-            transform={`rotate(${i * 36} 40 40)`}
-            opacity="0.9"
-          />
-        ))}
-        <circle cx="40" cy="40" r="7" fill={`url(#${uid}-med)`} />
-        <circle cx="40" cy="40" r="3.2" fill="#0b1f36" />
-      </svg>
-      <div className="pointer-events-none absolute inset-[6px] rounded-[14px] border border-[#d4af37]/35" />
-
-      <div className="relative flex h-full flex-col justify-between p-3.5 sm:p-4">
-        <div className="flex max-w-[68%] items-start gap-2">
-          <GoldStar uid={uid} />
-          <div className="min-w-0 pt-0.5">
-            <div className="truncate text-[13px] font-bold leading-tight text-[#f6e7ad]">
-              {bank}
-            </div>
-            <div className="text-[8px] tracking-[0.22em] text-[#e8c76b]/80">IRAN SHETAB CARD</div>
-          </div>
-        </div>
-
-        <div className="mt-1 flex max-w-[68%] items-center gap-3">
-          <Chip />
-          <Contactless />
-        </div>
-
-        <div className="max-w-[70%]">
-          {card ? (
-            <div
-              className="font-mono text-[15px] font-bold tracking-[0.22em] text-[#f3e0a0] sm:text-[18px]"
-              style={{
-                textShadow: "0 1px 0 #fff6c8, 0 2px 0 #9a7a28, 0 3px 6px rgba(0,0,0,.45)",
-              }}
-            >
-              {grouped}
-            </div>
-          ) : (
-            <div className="text-[11px] text-[#e8c76b]/80">شماره کارت ثبت نشده</div>
-          )}
-          <div className="mt-1 text-center text-[8px] tracking-[0.28em] text-[#e8c76b]">
-            VALID THRU {validThru(account.createdAt)}
-          </div>
-          {iban && (
-            <div className="mt-1 font-mono text-[8px] tracking-wider text-[#f1d48a]/85 sm:text-[9px]">
-              {formatIbanDisplay(iban, false)}
-            </div>
-          )}
-        </div>
-
-        <div className="flex max-w-[72%] items-end justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-[#f6e7ad]">
-              {holder}
-            </div>
-            {shopName && shopName !== holder && (
-              <div className="truncate text-[8px] text-[#e8c76b]/75">{shopName}</div>
-            )}
-          </div>
-          <ShetabMark uid={uid} />
-        </div>
-      </div>
-
-      {/* خوشنویسی تزئینی روی پنل پوست‌آهو */}
-      <div
-        className="pointer-events-none absolute bottom-[14%] right-[3%] top-[12%] flex w-[18%] items-center justify-center"
-        dir="rtl"
-      >
+    <div className="[perspective:900px] pb-2">
+      <div className="relative aspect-[1.586/1] w-full" style={{ transform: "rotateX(7deg)" }}>
+        {/* ضخامت سه‌بعدی */}
         <div
-          className="rotate-[-8deg] text-center font-serif text-[9px] leading-5 text-[#3a2a12]/80 sm:text-[10px]"
-          style={{ fontFamily: "Vazirmatn, Tahoma, serif" }}
+          className="absolute inset-0 translate-y-2 rounded-[1.35rem]"
+          style={{ background: "rgba(0,0,0,.38)", filter: "blur(10px)" }}
+        />
+        <div
+          className="absolute inset-x-2 bottom-0 h-2 translate-y-1 rounded-b-[1.2rem]"
+          style={{ background: "rgba(0,0,0,.35)" }}
+        />
+
+        <div
+          className="relative h-full overflow-hidden rounded-[1.35rem] text-white"
+          style={{
+            background: `linear-gradient(165deg, ${theme.from} 0%, ${theme.to} 100%)`,
+            boxShadow:
+              "inset 0 1px 0 rgba(255,255,255,.16), inset 0 -10px 22px rgba(0,0,0,.28), 0 18px 36px -16px rgba(0,0,0,.5)",
+          }}
+          dir="ltr"
         >
-          هنر نزد
-          <br />
-          ایرانیان
-          <br />
-          است و بس
+          {/* بازتاب نور */}
+          <div
+            className="pointer-events-none absolute -left-1/4 -top-1/2 h-[90%] w-[80%] rotate-12 rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 62%)",
+            }}
+          />
+          <div
+            className="pointer-events-none absolute -bottom-8 -right-6 h-28 w-28 rounded-full"
+            style={{ background: theme.accent, opacity: 0.14, filter: "blur(28px)" }}
+          />
+          <div
+            className="pointer-events-none absolute left-0 top-0 h-full w-1"
+            style={{ background: theme.accent, opacity: 0.7 }}
+          />
+
+          <div className="relative flex h-full flex-col justify-between p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-medium tracking-tight">{bank}</div>
+                {shopName && shopName !== holder && (
+                  <div className="truncate text-[10px] text-white/50">{shopName}</div>
+                )}
+              </div>
+              <Contactless color={theme.accent} />
+            </div>
+
+            <Chip />
+
+            <div>
+              {card ? (
+                <div className="font-mono text-[16px] font-medium tracking-[0.22em] text-white/95 sm:text-[18px]">
+                  {grouped}
+                </div>
+              ) : (
+                <div className="text-[11px] text-white/50">شماره کارت ثبت نشده</div>
+              )}
+              {iban && (
+                <div className="mt-1.5 font-mono text-[10px] tracking-wide text-white/45">
+                  {formatIbanDisplay(iban, false)}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[8px] tracking-[0.16em] text-white/40">CARDHOLDER</div>
+                <div className="truncate text-[12px] font-medium text-white/90">{holder}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[8px] tracking-[0.16em] text-white/40">VALID</div>
+                <div className="font-mono text-[12px] text-white/80">
+                  {validThru(account.createdAt)}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -409,7 +228,7 @@ export function IranianBankCard({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{account.name}</div>
           <div className="text-[11px] text-muted-foreground">
-            برای نمایش کارت زیبا، شماره کارت یا شبا را ثبت کنید
+            برای نمایش کارت، شماره کارت یا شبا را ثبت کنید
           </div>
           {typeof balance === "number" && (
             <div
@@ -427,7 +246,7 @@ export function IranianBankCard({
     <div>
       <IranianBankCardFace account={account} shopName={shopName} />
       {typeof balance === "number" && (
-        <div className="mt-1.5 flex items-center justify-between text-[11px]">
+        <div className="mt-3 flex items-center justify-between text-[11px]">
           <span className="text-muted-foreground">موجودی این کارت</span>
           <span className={`font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}>
             {formatToman(balance)}
@@ -481,17 +300,18 @@ export function IranianBankCard({
 export function MiniBankChip({ account }: { account: Account }) {
   const card = digitsOnly(account.cardNumber);
   const bank = account.bankName || bankFromCardNumber(account.cardNumber);
-  const hue = bankHue(bank);
+  const theme = THEME[bankHue(bank)];
   return (
     <div
-      className="relative min-w-[9.4rem] overflow-hidden rounded-2xl p-3 text-[#f6e7ad] shadow-card"
+      className="relative min-w-[9.4rem] overflow-hidden rounded-2xl p-3 text-white"
       style={{
-        background: `linear-gradient(145deg, ${NAVY[hue]} 0%, #0c3050 100%)`,
-        boxShadow: "inset 0 0 0 1px rgba(212,175,55,.35)",
+        background: `linear-gradient(165deg, ${theme.from}, ${theme.to})`,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,.14), 0 8px 16px -10px rgba(0,0,0,.4)",
       }}
     >
-      <div className="truncate text-[10px] text-[#e8c76b]">{bank || account.name}</div>
-      <div className="mt-1 font-mono text-[11px] tracking-[0.18em]" dir="ltr">
+      <div className="absolute left-0 top-0 h-full w-0.5" style={{ background: theme.accent }} />
+      <div className="truncate text-[10px] text-white/60">{bank || account.name}</div>
+      <div className="mt-1 font-mono text-[11px] tracking-[0.16em] text-white/90" dir="ltr">
         {card.length >= 4 ? `•••• ${formatNumber(card.slice(-4))}` : account.name}
       </div>
     </div>

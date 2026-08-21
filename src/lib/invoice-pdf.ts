@@ -7,8 +7,16 @@
  * و دقیقاً همان چیدمان نسخه چاپی سایت را دارد.
  */
 import { jsPDF } from "jspdf";
-import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Invoice } from "@/lib/store";
-import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import {
+  formatNumber,
+  formatAmount,
+  currencyLabel,
+  formatJalaliDate,
+  PAYMENT_LABEL,
+  formatChequeDue,
+  type Invoice,
+} from "@/lib/store";
+import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
@@ -28,7 +36,10 @@ type Ctx = CanvasRenderingContext2D;
 /** بارگذاری تصویر لوگو برای رسم روی canvas — در صورت خطا/نبود، null برمی‌گرداند (هرگز throw نمی‌کند) */
 function loadLogoImage(url?: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
-    if (!url) { resolve(null); return; }
+    if (!url) {
+      resolve(null);
+      return;
+    }
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
@@ -68,18 +79,23 @@ function columns() {
   // مرز راستِ هر ستون (RTL)
   const xRight = PAGE_W - MARGIN;
   return {
-    idx:       { x: xRight,                          w: idx },
-    name:      { x: xRight - idx,                    w: name },
-    qty:       { x: xRight - idx - name,             w: qty },
-    unitPrice: { x: xRight - idx - name - qty,       w: unitPrice },
-    total:     { x: xRight - idx - name - qty - unitPrice, w: total },
+    idx: { x: xRight, w: idx },
+    name: { x: xRight - idx, w: name },
+    qty: { x: xRight - idx - name, w: qty },
+    unitPrice: { x: xRight - idx - name - qty, w: unitPrice },
+    total: { x: xRight - idx - name - qty - unitPrice, w: total },
   };
 }
 
 const ROW_H = 9 * SCALE;
 const HEAD_H = 10 * SCALE;
 
-function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageElement | null): number {
+function drawHeader(
+  ctx: Ctx,
+  inv: Invoice,
+  pageNo: number,
+  logoImg?: HTMLImageElement | null,
+): number {
   const shopName = inv.shopName || "فروشگاه";
   let y = MARGIN + 4 * SCALE;
 
@@ -101,14 +117,20 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
 
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
   ctx.fillStyle = MUTED;
-  ctx.fillText(pageNo === 1 ? "فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`, PAGE_W / 2, y);
+  ctx.fillText(
+    pageNo === 1 ? "فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`,
+    PAGE_W / 2,
+    y,
+  );
   y += 5 * SCALE;
 
   // آدرس/تلفن فروشگاه — فقط در صفحه اول و در صورت وجود
   if (pageNo === 1 && (inv.shopAddress || inv.shopPhone)) {
     ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
     ctx.fillStyle = MUTED;
-    const line = [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join("   |   ");
+    const line = [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""]
+      .filter(Boolean)
+      .join("   |   ");
     ctx.fillText(fitText(ctx, line, PAGE_W - MARGIN * 2), PAGE_W / 2, y);
     y += 4.5 * SCALE;
   }
@@ -130,8 +152,8 @@ function drawHeader(ctx: Ctx, inv: Invoice, pageNo: number, logoImg?: HTMLImageE
     const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—";
 
     ctx.font = `400 ${3.6 * SCALE}px ${FONT}`;
-    const colR = PAGE_W - MARGIN;            // ستون راست
-    const colL = PAGE_W / 2 - 2 * SCALE;     // ستون چپ
+    const colR = PAGE_W - MARGIN; // ستون راست
+    const colL = PAGE_W / 2 - 2 * SCALE; // ستون چپ
     const meta: [string, string, number][] = [
       [`شماره: ${inv.id.toUpperCase()}`, "", colR],
       [`تاریخ: ${date}`, "", colL],
@@ -210,7 +232,8 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
   ctx.fillText(formatNumber(i + 1), cols.idx.x - cols.idx.w / 2, cy);
   ctx.fillText(
     formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
-    cols.qty.x - cols.qty.w / 2, cy,
+    cols.qty.x - cols.qty.w / 2,
+    cy,
   );
   ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
   ctx.fillText(formatAmount(lineTotal(item)), cols.total.x - cols.total.w / 2, cy);
@@ -222,7 +245,13 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
 }
 
 /** یک سطر از جدول مبالغ انتهای فاکتور */
-function drawSummaryRow(ctx: Ctx, y: number, label: string, value: string, strong: boolean): number {
+function drawSummaryRow(
+  ctx: Ctx,
+  y: number,
+  label: string,
+  value: string,
+  strong: boolean,
+): number {
   const cols = columns();
   const h = strong ? HEAD_H : ROW_H;
   if (strong) {
@@ -252,11 +281,18 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   const t = invoiceTotals(inv);
   let cur = y;
   if (t.discount > 0 || t.tax > 0) {
-    cur = drawSummaryRow(ctx, cur, "جمع اقلام", `${formatAmount(t.subtotal)} ${currencyLabel()}`, false);
+    cur = drawSummaryRow(
+      ctx,
+      cur,
+      "جمع اقلام",
+      `${formatAmount(t.subtotal)} ${currencyLabel()}`,
+      false,
+    );
   }
   if (t.discount > 0) {
     cur = drawSummaryRow(
-      ctx, cur,
+      ctx,
+      cur,
       `تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}`,
       `${formatAmount(t.discount)} ${currencyLabel()}`,
       false,
@@ -264,7 +300,8 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   }
   if (t.tax > 0) {
     cur = drawSummaryRow(
-      ctx, cur,
+      ctx,
+      cur,
       `مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}`,
       `${formatAmount(t.tax)} ${currencyLabel()}`,
       false,
@@ -272,11 +309,30 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   }
   cur = drawSummaryRow(ctx, cur, "جمع کل", `${formatAmount(t.total)} ${currencyLabel()}`, true);
   if (t.paid > 0) {
-    cur = drawSummaryRow(ctx, cur, "پرداخت نقدی", `${formatAmount(t.paid)} ${currencyLabel()}`, false);
-  }
-  if (t.checkAmount > 0) {
     cur = drawSummaryRow(
-      ctx, cur,
+      ctx,
+      cur,
+      "پرداخت نقدی",
+      `${formatAmount(t.paid)} ${currencyLabel()}`,
+      false,
+    );
+  }
+  const cheques = invoiceCheques(inv);
+  if (cheques.length > 0) {
+    for (let i = 0; i < cheques.length; i++) {
+      const c = cheques[i];
+      cur = drawSummaryRow(
+        ctx,
+        cur,
+        chequeLineLabel(c, i, formatChequeDue),
+        `${formatAmount(c.amount)} ${currencyLabel()}`,
+        false,
+      );
+    }
+  } else if (t.checkAmount > 0) {
+    cur = drawSummaryRow(
+      ctx,
+      cur,
       `مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}`,
       `${formatAmount(t.checkAmount)} ${currencyLabel()}`,
       false,
@@ -284,7 +340,8 @@ function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
   }
   if (t.remaining > 0) {
     cur = drawSummaryRow(
-      ctx, cur,
+      ctx,
+      cur,
       `مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}`,
       `${formatAmount(t.remaining)} ${currencyLabel()}`,
       true,
@@ -301,7 +358,8 @@ function totalBlockHeight(inv: Invoice): number {
   if (t.discount > 0) h += ROW_H;
   if (t.tax > 0) h += ROW_H;
   if (t.paid > 0) h += ROW_H;
-  if (t.checkAmount > 0) h += ROW_H;
+  const nCheques = Math.max(invoiceCheques(inv).length, t.checkAmount > 0 ? 1 : 0);
+  if (nCheques > 0) h += ROW_H * nCheques;
   if (t.remaining > 0) h += HEAD_H;
   return h;
 }
@@ -323,7 +381,11 @@ function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
 /** ساخت PDF چندصفحه‌ای فاکتور — خروجی آماده savePdf / save */
 export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
   // اطمینان از آماده‌بودن فونت‌های وب پیش از رندر روی canvas
-  try { await (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready; } catch { /* ignore */ }
+  try {
+    await (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready;
+  } catch {
+    /* ignore */
+  }
 
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
   const logoImg = await loadLogoImage(inv.shopLogoUrl);

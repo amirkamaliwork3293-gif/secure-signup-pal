@@ -28,8 +28,15 @@ import {
   formatJalaliDate,
   PAYMENT_LABEL,
   accountBalance,
+  formatChequeDue,
 } from "@/lib/store";
-import { invoiceTotals, lineTotal, purchaseLineTotal } from "@/lib/invoice-math";
+import {
+  invoiceTotals,
+  lineTotal,
+  purchaseLineTotal,
+  invoiceCheques,
+  chequeLineLabel,
+} from "@/lib/invoice-math";
 
 type Row = Record<string, string | number>;
 
@@ -77,8 +84,8 @@ export function BackupSection() {
           <h2 className="text-sm font-bold">پشتیبان‌گیری از اطلاعات</h2>
         </div>
         <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) یک نسخه‌ی پشتیبان اکسل یا فایل
-          کامل JSON بگیرید. این کار فقط یک کپی می‌سازد و هیچ داده‌ای را تغییر نمی‌دهد.
+          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) یک نسخه‌ی پشتیبان اکسل یا فایل کامل
+          JSON بگیرید. این کار فقط یک کپی می‌سازد و هیچ داده‌ای را تغییر نمی‌دهد.
         </p>
         <button
           onClick={() => setOpen(true)}
@@ -166,7 +173,8 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         totals.reduce((s, t) => s + t.total, 0),
       );
       const unpaid = totals.reduce((s, t) => s + t.remaining, 0);
-      if (unpaid > 0) addSummary("فاکتورهای نسیه/چک", invs.length, "مجموع مانده‌ی وصول‌نشده", unpaid);
+      if (unpaid > 0)
+        addSummary("فاکتورهای نسیه/چک", invs.length, "مجموع مانده‌ی وصول‌نشده", unpaid);
     }
     if (selected.purchases) {
       addSummary(
@@ -196,7 +204,12 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       out.push({
         name: "خلاصه",
         rows: [
-          { بخش: "تاریخ تهیه نسخه پشتیبان", "تعداد رکورد": "", "شرح مبلغ": formatJalaliDateTime(Date.now()), مبلغ: "" },
+          {
+            بخش: "تاریخ تهیه نسخه پشتیبان",
+            "تعداد رکورد": "",
+            "شرح مبلغ": formatJalaliDateTime(Date.now()),
+            مبلغ: "",
+          },
           ...summary,
         ],
       });
@@ -208,7 +221,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         rows: prods.map((p) => ({
           نام: p.name,
           کد: p.code ?? "",
-          "دسته‌بندی": p.category ?? "",
+          دسته‌بندی: p.category ?? "",
           واحد: p.unit ?? "",
           موجودی: p.stock ?? 0,
           "قیمت فروش": p.price ?? 0,
@@ -238,7 +251,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           "مانده حساب": customerBalance(c),
           "تعداد تراکنش": c.txs?.length ?? 0,
           "تاریخ ثبت": d(c.createdAt),
-          "یادداشت": c.note ?? "",
+          یادداشت: c.note ?? "",
         })),
       });
       out.push({
@@ -250,7 +263,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
             مبلغ: t.amount,
             تاریخ: d(t.at),
             "شماره فاکتور": t.invoiceId ?? "",
-            "یادداشت": t.note ?? "",
+            یادداشت: t.note ?? "",
           })),
         ),
       });
@@ -277,7 +290,13 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
             "روش پرداخت": inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "",
             "پرداخت نقدی": t.paid || "",
             "مبلغ چک": t.checkAmount || "",
-            "مانده": t.remaining || "",
+            "جزئیات چک": invoiceCheques(inv)
+              .map(
+                (c, i) =>
+                  chequeLineLabel(c, i, formatChequeDue) + (c.amount ? ` = ${c.amount}` : ""),
+              )
+              .join(" | "),
+            مانده: t.remaining || "",
             توضیحات: inv.notes ?? "",
           };
         }),
@@ -306,13 +325,13 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         rows: purch.map((p) => ({
           "شماره فاکتور": p.id.toUpperCase(),
           تاریخ: d(p.createdAt),
-          "تامین‌کننده": p.supplierName ?? "",
+          تامین‌کننده: p.supplierName ?? "",
           تلفن: p.supplierPhone ?? "",
           "تعداد اقلام": p.items?.length ?? 0,
           "جمع کل": p.total ?? 0,
           "روش پرداخت": p.paymentMethod ? PAYMENT_LABEL[p.paymentMethod] : "",
-          "پرداخت‌شده": p.paidAmount ?? "",
-          "یادداشت": p.note ?? "",
+          پرداخت‌شده: p.paidAmount ?? "",
+          یادداشت: p.note ?? "",
         })),
       });
       out.push({
@@ -321,7 +340,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           (p.items ?? []).map((it) => ({
             "شماره فاکتور": p.id.toUpperCase(),
             تاریخ: d(p.createdAt),
-            "تامین‌کننده": p.supplierName ?? "",
+            تامین‌کننده: p.supplierName ?? "",
             کالا: it.name,
             تعداد: it.quantity,
             واحد: it.unit ?? "",
@@ -338,11 +357,11 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         rows: exps.map((e) => ({
           عنوان: e.title,
           مبلغ: e.amount,
-          "دسته‌بندی": e.category,
+          دسته‌بندی: e.category,
           تاریخ: d(e.at),
           "روش پرداخت": e.paymentMethod ? PAYMENT_LABEL[e.paymentMethod] : "",
           "دوره تکرار (روز)": e.recurringDays ?? "",
-          "یادداشت": e.note ?? "",
+          یادداشت: e.note ?? "",
         })),
       });
     }
@@ -352,12 +371,12 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         name: "یادآوری‌ها",
         rows: rems.map((r) => ({
           عنوان: r.title,
-          "سررسید": d(r.dueAt),
+          سررسید: d(r.dueAt),
           مشتری: r.customerName ?? "",
           "انجام شده": r.done ? "بله" : "خیر",
           "تاریخ انجام": d(r.doneAt),
           "دوره تکرار (روز)": r.recurringDays ?? "",
-          "یادداشت": r.note ?? "",
+          یادداشت: r.note ?? "",
         })),
       });
     }
@@ -369,24 +388,24 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           نام: [s.firstName, s.lastName].filter(Boolean).join(" "),
           تلفن: s.phone ?? "",
           رشته: s.discipline ?? "",
-          "شهریه": s.fee,
+          شهریه: s.fee,
           "طول دوره (روز)": s.periodDays,
           "تاریخ شروع": dd(s.startDate),
           "سررسید بعدی": dd(s.nextDueAt),
           فعال: s.active ? "بله" : "خیر",
-          "اقساطی": s.installmentMode ? "بله" : "خیر",
+          اقساطی: s.installmentMode ? "بله" : "خیر",
           "تعداد پرداخت": s.payments?.length ?? 0,
-          "یادداشت": s.note ?? "",
+          یادداشت: s.note ?? "",
         })),
       });
       out.push({
         name: "پرداخت هنرجویان",
         rows: studs.flatMap((s) =>
           ((s.payments ?? []) as any[]).map((p) => ({
-            "هنرجو": [s.firstName, s.lastName].filter(Boolean).join(" "),
+            هنرجو: [s.firstName, s.lastName].filter(Boolean).join(" "),
             مبلغ: p.amount ?? 0,
             تاریخ: d(p.at ?? p.createdAt),
-            "یادداشت": p.note ?? "",
+            یادداشت: p.note ?? "",
           })),
         ),
       });
@@ -397,7 +416,10 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         name: "حساب‌ها",
         rows: accs.map((a) => ({
           نام: a.name,
+          "صاحب حساب": a.holderName ?? "",
+          بانک: a.bankName ?? "",
           "شماره کارت": a.cardNumber ?? "",
+          شبا: a.iban ?? "",
           "موجودی اولیه": a.openingBalance,
           "موجودی فعلی": accountBalance(a, txs),
           "تاریخ ایجاد": d(a.createdAt),
@@ -410,7 +432,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           نوع: t.type === "deposit" ? "واریز" : "برداشت",
           مبلغ: t.amount,
           تاریخ: d(t.at),
-          "یادداشت": t.note ?? "",
+          یادداشت: t.note ?? "",
         })),
       });
     }
@@ -423,14 +445,20 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       exportedAt: new Date().toISOString(),
       version: 1,
     };
-    if (selected.products) { data.products = prods; data.categories = cats; }
+    if (selected.products) {
+      data.products = prods;
+      data.categories = cats;
+    }
     if (selected.customers) data.customers = custs;
     if (selected.invoices) data.invoices = invs;
     if (selected.purchases) data.purchases = purch;
     if (selected.expenses) data.expenses = exps;
     if (selected.reminders) data.reminders = rems;
     if (selected.students) data.students = studs;
-    if (selected.accounts) { data.accounts = accs; data.accountTxs = txs; }
+    if (selected.accounts) {
+      data.accounts = accs;
+      data.accountTxs = txs;
+    }
     if (selected.products) data.production = prodEvents;
     return data;
   }
@@ -465,7 +493,8 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         ws["!cols"] = headers.map((h) => {
           const longest = s.rows.reduce((m, r) => {
             const v = r[h];
-            const len = typeof v === "number" ? String(Math.round(v)).length + 3 : String(v ?? "").length;
+            const len =
+              typeof v === "number" ? String(Math.round(v)).length + 3 : String(v ?? "").length;
             return Math.max(m, len);
           }, h.length);
           return { wch: Math.min(42, Math.max(10, longest + 2)) };
@@ -482,7 +511,8 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         });
 
         // فیلتر/مرتب‌سازی روی سطر عنوان
-        if (headers.length > 0 && s.rows.length > 1) ws["!autofilter"] = { ref: ws["!ref"] as string };
+        if (headers.length > 0 && s.rows.length > 1)
+          ws["!autofilter"] = { ref: ws["!ref"] as string };
 
         // نام برگه در اکسل حداکثر ۳۱ کاراکتر و بدون کاراکترهای غیرمجاز
         XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 30));
@@ -632,7 +662,8 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
               </button>
             </div>
             <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
-              فایل JSON نسخه‌ی کامل و بدون کم‌وکاست داده‌هاست؛ فایل اکسل برای مشاهده و چاپ مناسب‌تر است.
+              فایل JSON نسخه‌ی کامل و بدون کم‌وکاست داده‌هاست؛ فایل اکسل برای مشاهده و چاپ مناسب‌تر
+              است.
             </p>
           </>
         )}

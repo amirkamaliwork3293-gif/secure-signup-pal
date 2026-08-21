@@ -24,7 +24,7 @@
  * و فاکتور ذخیره‌شده نمی‌سازد؛ به این فایل ربطی ندارد.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import type { Invoice, InvoiceItem } from "@/lib/store";
+import type { Invoice, InvoiceItem, InvoiceCheque } from "@/lib/store";
 
 /** جمع یک ردیف فاکتور — همیشه گرد شده (قاعده‌ی ۱) */
 export function lineTotal(item: Pick<InvoiceItem, "price" | "quantity">): number {
@@ -70,7 +70,9 @@ export function purchaseLineTotal(item: { buyPrice: number; quantity: number }):
 }
 
 /** جمع کل فاکتور خرید */
-export function purchaseTotal(items: readonly { buyPrice: number; quantity: number }[] | undefined): number {
+export function purchaseTotal(
+  items: readonly { buyPrice: number; quantity: number }[] | undefined,
+): number {
   return (items ?? []).reduce((s, it) => s + purchaseLineTotal(it), 0);
 }
 
@@ -100,6 +102,86 @@ export function discountFactor(inv: Invoice): number {
   if (subtotal <= 0) return 1;
   const discount = discountOf(subtotal, inv.discountPercent, inv.discountAmount);
   return (subtotal - discount) / subtotal;
+}
+
+/**
+ * فهرست چک‌های یک فاکتور. فاکتورهای قدیمی که فقط checkAmount/checkNumber دارند
+ * به یک برگ چک واحد تبدیل می‌شوند تا بقیه برنامه فقط با آرایه کار کند.
+ */
+export function invoiceCheques(
+  inv: Pick<Invoice, "cheques" | "checkAmount" | "checkNumber" | "checkDueDate">,
+): InvoiceCheque[] {
+  if (Array.isArray(inv.cheques) && inv.cheques.length > 0) {
+    return inv.cheques.filter(Boolean);
+  }
+  const amount = Math.max(0, Math.round(Number(inv.checkAmount) || 0));
+  if (amount > 0 || inv.checkNumber || inv.checkDueDate) {
+    return [
+      {
+        id: "legacy",
+        amount,
+        serial: inv.checkNumber || undefined,
+        dueDate: inv.checkDueDate || undefined,
+      },
+    ];
+  }
+  return [];
+}
+
+/** مجموع مبلغ برگ‌های چک (بدون سقف جمع فاکتور) */
+export function chequeAmountSum(
+  inv: Pick<Invoice, "cheques" | "checkAmount" | "checkNumber" | "checkDueDate">,
+): number {
+  const list = invoiceCheques(inv);
+  const fromList = list.reduce((s, c) => s + Math.max(0, Math.round(Number(c.amount) || 0)), 0);
+  if (fromList > 0) return fromList;
+  return Math.max(0, Math.round(Number(inv.checkAmount) || 0));
+}
+
+/** همگام‌سازی فیلدهای قدیمی تک‌چکی از روی فهرست چک‌ها */
+export function withSyncedChequeFields(inv: Invoice): Invoice {
+  const list = (inv.cheques ?? []).filter(
+    (c) => (Number(c.amount) || 0) > 0 || c.serial || c.sayadi || c.dueDate || c.bankName,
+  );
+  if (list.length === 0) {
+    return {
+      ...inv,
+      cheques: undefined,
+      checkAmount: undefined,
+      checkNumber: undefined,
+      checkDueDate: undefined,
+    };
+  }
+  const sum = list.reduce((s, c) => s + Math.max(0, Math.round(Number(c.amount) || 0)), 0);
+  const dated = list
+    .map((c) => c.dueDate)
+    .filter((d): d is string => !!d)
+    .sort();
+  const firstId = list.find((c) => c.serial?.trim() || c.sayadi?.trim());
+  return {
+    ...inv,
+    cheques: list,
+    checkAmount: sum > 0 ? sum : inv.checkAmount || undefined,
+    checkNumber: firstId?.serial?.trim() || firstId?.sayadi?.trim() || undefined,
+    checkDueDate: dated[0] || undefined,
+  };
+}
+
+/** برچسب یک برگ چک برای چاپ و اشتراک */
+export function chequeLineLabel(
+  c: InvoiceCheque,
+  index: number,
+  dueFmt: (d?: string) => string,
+): string {
+  const n = index + 1;
+  const bits = [
+    `چک ${n.toLocaleString("fa-IR")}`,
+    c.bankName,
+    c.serial ? `سریال ${c.serial}` : "",
+    c.sayadi ? `صیادی ${c.sayadi}` : "",
+    c.dueDate ? `سررسید ${dueFmt(c.dueDate)}` : "",
+  ].filter(Boolean);
+  return bits.join(" — ");
 }
 
 /** درآمد خالص یک ردیف پس از سرشکن‌شدن تخفیفِ کل فاکتور */
@@ -139,7 +221,7 @@ export function invoiceTotals(inv: Invoice): InvoiceTotals {
   const tax = taxOf(subtotal - discount, inv.taxPercent);
   const total = subtotal - discount + tax;
   const paid = Math.min(total, Math.max(0, Math.round(Number(inv.paidAmount) || 0)));
-  const checkAmount = Math.min(total - paid, Math.max(0, Math.round(Number(inv.checkAmount) || 0)));
+  const checkAmount = Math.min(total - paid, Math.max(0, chequeAmountSum(inv)));
   // مانده فقط برای فاکتورهای نسیه/چک معنا دارد. در فاکتور نقدی/کارتی کل مبلغ در
   // همان لحظه پرداخت شده، پس مانده صفر است (paidAmount در آن حالت ذخیره نمی‌شود).
   const deferred = inv.paymentMethod === "credit" || inv.paymentMethod === "check";

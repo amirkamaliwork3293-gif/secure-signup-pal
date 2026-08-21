@@ -14,7 +14,12 @@ function isCapacitor(): boolean {
 }
 
 type NativeSharePlugin = {
-  share?: (opts: { title?: string; text?: string; url?: string; dialogTitle?: string }) => Promise<unknown>;
+  share?: (opts: {
+    title?: string;
+    text?: string;
+    url?: string;
+    dialogTitle?: string;
+  }) => Promise<unknown>;
 };
 
 function nativeSharePlugin(): NativeSharePlugin | null {
@@ -48,6 +53,10 @@ async function copyTextSafe(text: string): Promise<boolean> {
       return false;
     }
   }
+}
+
+export async function copyText(text: string): Promise<boolean> {
+  return copyTextSafe(text);
 }
 
 export function openExternal(url: string): void {
@@ -146,7 +155,10 @@ export async function shareText(opts: {
   // اگر پنجره اشتراک باز نشد، حالا در همان کلیک متن را کپی می‌کنیم.
   copied = await copyTextSafe(combined);
 
-  const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { share?: (d: ShareData) => Promise<void> }) : null;
+  const nav =
+    typeof navigator !== "undefined"
+      ? (navigator as Navigator & { share?: (d: ShareData) => Promise<void> })
+      : null;
   if (nav?.share) {
     try {
       await nav.share({ title: opts.title, text: combined });

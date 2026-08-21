@@ -3,11 +3,28 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
 import {
-  products, categories, settings, cryptoId, formatToman, formatNumber, stockStatus,
-  parseNumberInput, COUNT_UNIT, getUnitDefs, addUnitDef, removeUnitDef,
-  expiryStatus, daysToExpiry, formatJalaliDate, toJalali, jalaliToTimestamp,
-  jalaliMonthLength, JMONTHS_LONG,
-  type Product, type Category, type UnitDef,
+  products,
+  categories,
+  settings,
+  cryptoId,
+  formatToman,
+  formatNumber,
+  stockStatus,
+  parseNumberInput,
+  COUNT_UNIT,
+  getUnitDefs,
+  addUnitDef,
+  removeUnitDef,
+  expiryStatus,
+  daysToExpiry,
+  formatJalaliDate,
+  toJalali,
+  jalaliToTimestamp,
+  jalaliMonthLength,
+  JMONTHS_LONG,
+  type Product,
+  type Category,
+  type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
@@ -23,10 +40,29 @@ const BarcodePrintModal = lazy(() =>
 const BarcodeViewModal = lazy(() =>
   import("@/components/BarcodeViewModal").then((m) => ({ default: m.BarcodeViewModal })),
 );
+const BulkPriceChangeModal = lazy(() =>
+  import("@/components/BulkPriceChangeModal").then((m) => ({ default: m.BulkPriceChangeModal })),
+);
 import {
-  Plus, Trash2, Package, X, Pencil, AlertTriangle,
-  Search, Filter, Upload, Zap, Printer, Barcode, CheckSquare, Square, FileSpreadsheet, ShoppingBag,
-  CalendarClock, Mic,
+  Plus,
+  Trash2,
+  Package,
+  X,
+  Pencil,
+  AlertTriangle,
+  Search,
+  Filter,
+  Upload,
+  Zap,
+  Printer,
+  Barcode,
+  CheckSquare,
+  Square,
+  FileSpreadsheet,
+  ShoppingBag,
+  CalendarClock,
+  Mic,
+  Percent,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -68,6 +104,7 @@ function ProductsPageInner() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [printTargets, setPrintTargets] = useState<Product[] | null>(null);
+  const [showBulkPrice, setShowBulkPrice] = useState(false);
 
   useEffect(() => {
     if (incomingCode) setOpen(true);
@@ -132,9 +169,11 @@ function ProductsPageInner() {
             return true;
           })
           .sort((a, b) =>
-            view === "expiry" ? (a.expiryAt ?? 0) - (b.expiryAt ?? 0)
-            : view === "low"  ? a.stock - b.stock
-            : 0,
+            view === "expiry"
+              ? (a.expiryAt ?? 0) - (b.expiryAt ?? 0)
+              : view === "low"
+                ? a.stock - b.stock
+                : 0,
           ),
         debouncedSearchQ,
         (p) => [p.name, p.code],
@@ -143,18 +182,27 @@ function ProductsPageInner() {
   );
 
   const lowCount = useMemo(
-    () => list.filter((p) => { const s = stockStatus(p); return s === "low" || s === "out"; }).length,
+    () =>
+      list.filter((p) => {
+        const s = stockStatus(p);
+        return s === "low" || s === "out";
+      }).length,
     [list],
   );
   const expiryCount = useMemo(
-    () => list.filter((p) => { const s = expiryStatus(p); return s === "soon" || s === "expired"; }).length,
+    () =>
+      list.filter((p) => {
+        const s = expiryStatus(p);
+        return s === "soon" || s === "expired";
+      }).length,
     [list],
   );
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -180,8 +228,14 @@ function ProductsPageInner() {
     setPrintTargets(list.filter((p) => selected.has(p.id)));
   };
 
-  const totalInventoryValue = useMemo(() => list.reduce((sum, p) => sum + p.price * p.stock, 0), [list]);
-  const totalBuyValue = useMemo(() => list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0), [list]);
+  const totalInventoryValue = useMemo(
+    () => list.reduce((sum, p) => sum + p.price * p.stock, 0),
+    [list],
+  );
+  const totalBuyValue = useMemo(
+    () => list.reduce((sum, p) => sum + (p.buyPrice ?? 0) * p.stock, 0),
+    [list],
+  );
 
   // نمایش پنجره‌ای (windowed) لیست محصولات — با انبارهای بزرگ (چند هزار محصول)،
   // رندر کردن همه‌ی ردیف‌ها هم‌زمان کند و لگ‌دار می‌شود؛ به‌جای آن فقط بخشی از
@@ -194,7 +248,10 @@ function ProductsPageInner() {
   const visibleItems = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   const exportToExcel = async () => {
-    if (list.length === 0) { alert("محصولی برای خروجی وجود ندارد."); return; }
+    if (list.length === 0) {
+      alert("محصولی برای خروجی وجود ندارد.");
+      return;
+    }
 
     // داخل اپلیکیشن اندروید: دانلود فایل اکسل به‌طور قابل‌اعتماد در WebView کار
     // نمی‌کند (چه با دانلود مستقیم مرورگر، چه با پلاگین‌های نیتیو که در تست
@@ -211,10 +268,10 @@ function ProductsPageInner() {
     const rows = list.map((p) => ({
       "نام محصول": p.name,
       "قیمت فروش (تومان)": p.price,
-      "موجودی": p.stock,
-      "واحد": p.unit || "عدد",
+      موجودی: p.stock,
+      واحد: p.unit || "عدد",
       "ارزش موجودی (تومان)": p.price * p.stock,
-      "دسته‌بندی": p.category,
+      دسته‌بندی: p.category,
       "کد بارکد": p.code,
       "قیمت خرید (تومان)": p.buyPrice ?? "",
       "قیمت مصرف‌کننده (تومان)": p.consumerPrice ?? "",
@@ -223,14 +280,26 @@ function ProductsPageInner() {
       "حداقل تعداد عمده": p.wholesaleMinQty ?? "",
       "درصد تخفیف": p.discountPercent ?? "",
       "هشدار موجودی کم": p.lowStockThreshold ?? 5,
-      "توضیحات": p.description ?? "",
+      توضیحات: p.description ?? "",
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     // Set column widths
     ws["!cols"] = [
-      { wch: 25 }, { wch: 18 }, { wch: 10 }, { wch: 8 }, { wch: 20 },
-      { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 18 },
-      { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 25 },
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 20 },
+      { wch: 15 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 25 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
@@ -240,9 +309,24 @@ function ProductsPageInner() {
   const stockBadge = (p: Product) => {
     const s = stockStatus(p);
     const unitLabel = p.unit || "عدد";
-    if (s === "out") return <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded-md">اتمام موجودی</span>;
-    if (s === "low") return <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md flex items-center gap-0.5"><AlertTriangle className="h-2.5 w-2.5" />{formatNumber(p.stock)}</span>;
-    return <span className="text-[10px] text-muted-foreground">{formatNumber(p.stock)} {unitLabel}</span>;
+    if (s === "out")
+      return (
+        <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded-md">
+          اتمام موجودی
+        </span>
+      );
+    if (s === "low")
+      return (
+        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+          <AlertTriangle className="h-2.5 w-2.5" />
+          {formatNumber(p.stock)}
+        </span>
+      );
+    return (
+      <span className="text-[10px] text-muted-foreground">
+        {formatNumber(p.stock)} {unitLabel}
+      </span>
+    );
   };
 
   return (
@@ -250,7 +334,9 @@ function ProductsPageInner() {
       <div className="mb-4 flex items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-bold">محصولات</h1>
-          <p className="text-xs text-muted-foreground">{list.length.toLocaleString("fa-IR")} محصول ثبت شده</p>
+          <p className="text-xs text-muted-foreground">
+            {list.length.toLocaleString("fa-IR")} محصول ثبت شده
+          </p>
         </div>
         <div className="flex gap-1.5 flex-wrap justify-end">
           <button
@@ -263,6 +349,16 @@ function ProductsPageInner() {
           </button>
           {list.length > 0 && (
             <button
+              onClick={() => setShowBulkPrice(true)}
+              className="inline-flex items-center gap-1 rounded-xl border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+              title="تغییر قیمت گروهی"
+            >
+              <Percent className="h-3.5 w-3.5" />
+              تغییر قیمت
+            </button>
+          )}
+          {list.length > 0 && (
+            <button
               onClick={removeAll}
               className="inline-flex items-center gap-1 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive"
               title="حذف همه محصولات"
@@ -273,14 +369,20 @@ function ProductsPageInner() {
           )}
           <button
             data-tour="product-add"
-            onClick={() => { setEditTarget(null); setOpen(true); }}
+            onClick={() => {
+              setEditTarget(null);
+              setOpen(true);
+            }}
             className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-elegant"
           >
             <Plus className="h-3.5 w-3.5" />
             افزودن
           </button>
           {appSettings.showProductionFeature && (
-            <Link to="/production" className="inline-flex items-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+            <Link
+              to="/production"
+              className="inline-flex items-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary"
+            >
               فرمول تولید
             </Link>
           )}
@@ -296,7 +398,9 @@ function ProductsPageInner() {
           </div>
           {totalBuyValue > 0 && (
             <div className="rounded-2xl border border-border bg-card p-3">
-              <div className="text-[10px] text-muted-foreground mb-1">ارزش کل موجودی (قیمت خرید)</div>
+              <div className="text-[10px] text-muted-foreground mb-1">
+                ارزش کل موجودی (قیمت خرید)
+              </div>
               <div className="text-sm font-bold text-green-600">{formatToman(totalBuyValue)}</div>
             </div>
           )}
@@ -305,20 +409,44 @@ function ProductsPageInner() {
 
       {/* Action toolbar */}
       <div className="mb-3 grid grid-cols-5 gap-1.5">
-        <Link to="/voice-products" data-tour="product-voice" className="inline-flex items-center justify-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-2 py-2 text-[11px] font-medium text-primary">
+        <Link
+          to="/voice-products"
+          data-tour="product-voice"
+          className="inline-flex items-center justify-center gap-1 rounded-xl border border-primary/40 bg-primary/5 px-2 py-2 text-[11px] font-medium text-primary"
+        >
           <Mic className="h-3.5 w-3.5" /> ثبت صوتی
         </Link>
-        <button onClick={() => setShowImport(true)} className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
+        <button
+          onClick={() => setShowImport(true)}
+          className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]"
+        >
           <Upload className="h-3.5 w-3.5" /> ورود گروهی
         </button>
-        <Link to="/quick-add" className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
+        <Link
+          to="/quick-add"
+          className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]"
+        >
           <Zap className="h-3.5 w-3.5" /> ثبت سریع
         </Link>
-        <Link to="/purchases" className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]">
+        <Link
+          to="/purchases"
+          className="inline-flex items-center justify-center gap-1 rounded-xl border border-border bg-card px-2 py-2 text-[11px]"
+        >
           <ShoppingBag className="h-3.5 w-3.5" /> فاکتور خرید
         </Link>
-        <button onClick={() => { setSelectMode((v) => !v); clearSelection(); }} className={`inline-flex items-center justify-center gap-1 rounded-xl border px-2 py-2 text-[11px] ${selectMode ? "border-primary bg-primary/5 text-primary" : "border-border bg-card"}`}>
-          {selectMode ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />} انتخاب گروهی
+        <button
+          onClick={() => {
+            setSelectMode((v) => !v);
+            clearSelection();
+          }}
+          className={`inline-flex items-center justify-center gap-1 rounded-xl border px-2 py-2 text-[11px] ${selectMode ? "border-primary bg-primary/5 text-primary" : "border-border bg-card"}`}
+        >
+          {selectMode ? (
+            <CheckSquare className="h-3.5 w-3.5" />
+          ) : (
+            <Square className="h-3.5 w-3.5" />
+          )}{" "}
+          انتخاب گروهی
         </button>
       </div>
 
@@ -352,7 +480,8 @@ function ProductsPageInner() {
         </div>
         {catList.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">
-            هنوز دسته‌بندی نساخته‌اید. با «مدیریت دسته‌ها» دسته بسازید (مثلاً لبنیات، نوشیدنی) تا محصولات‌تان مرتب شوند.
+            هنوز دسته‌بندی نساخته‌اید. با «مدیریت دسته‌ها» دسته بسازید (مثلاً لبنیات، نوشیدنی) تا
+            محصولات‌تان مرتب شوند.
           </p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
@@ -401,13 +530,22 @@ function ProductsPageInner() {
 
       {/* نماها: همه / رو به اتمام / نزدیک انقضا */}
       <div className="mb-3 flex gap-1.5 overflow-x-auto">
-        {([
-          { key: "all",    label: "همه محصولات", count: list.length,  icon: Package },
-          { key: "low",    label: "رو به اتمام",  count: lowCount,     icon: AlertTriangle },
-          ...(expiryCount > 0 || list.some((p) => p.expiryAt)
-            ? [{ key: "expiry" as const, label: "نزدیک انقضا", count: expiryCount, icon: CalendarClock }]
-            : []),
-        ] as const).map(({ key, label, count, icon: Icon }) => (
+        {(
+          [
+            { key: "all", label: "همه محصولات", count: list.length, icon: Package },
+            { key: "low", label: "رو به اتمام", count: lowCount, icon: AlertTriangle },
+            ...(expiryCount > 0 || list.some((p) => p.expiryAt)
+              ? [
+                  {
+                    key: "expiry" as const,
+                    label: "نزدیک انقضا",
+                    count: expiryCount,
+                    icon: CalendarClock,
+                  },
+                ]
+              : []),
+          ] as const
+        ).map(({ key, label, count, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setView(key as typeof view)}
@@ -430,14 +568,39 @@ function ProductsPageInner() {
       {selectMode && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 p-2 text-xs">
           <span className="font-medium">{selected.size.toLocaleString("fa-IR")} انتخاب شده</span>
-          <button onClick={selectAll} className="rounded-md border border-border bg-background px-2 py-1">انتخاب همه</button>
-          <button onClick={clearSelection} className="rounded-md border border-border bg-background px-2 py-1">پاک کردن</button>
+          <button
+            onClick={selectAll}
+            className="rounded-md border border-border bg-background px-2 py-1"
+          >
+            انتخاب همه
+          </button>
+          <button
+            onClick={clearSelection}
+            className="rounded-md border border-border bg-background px-2 py-1"
+          >
+            پاک کردن
+          </button>
           <div className="flex-1" />
-          <button onClick={generateBarcodesForSelected} disabled={selected.size === 0} className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 disabled:opacity-50">
+          <button
+            onClick={generateBarcodesForSelected}
+            disabled={selected.size === 0}
+            className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-1 disabled:opacity-50"
+          >
             <Barcode className="h-3.5 w-3.5" /> تولید بارکد
           </button>
-          <button onClick={printSelected} disabled={selected.size === 0} className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-primary-foreground disabled:opacity-50">
+          <button
+            onClick={printSelected}
+            disabled={selected.size === 0}
+            className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-primary-foreground disabled:opacity-50"
+          >
             <Printer className="h-3.5 w-3.5" /> چاپ
+          </button>
+          <button
+            onClick={() => setShowBulkPrice(true)}
+            disabled={selected.size === 0}
+            className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-1 text-amber-800 disabled:opacity-50"
+          >
+            <Percent className="h-3.5 w-3.5" /> تغییر قیمت
           </button>
         </div>
       )}
@@ -454,9 +617,15 @@ function ProductsPageInner() {
           {visibleItems.map((p) => {
             const isSel = selected.has(p.id);
             return (
-              <li key={p.id} className={`flex items-center gap-3 rounded-xl border bg-card p-3 shadow-card ${isSel ? "border-primary" : "border-border"}`}>
+              <li
+                key={p.id}
+                className={`flex items-center gap-3 rounded-xl border bg-card p-3 shadow-card ${isSel ? "border-primary" : "border-border"}`}
+              >
                 {selectMode && (
-                  <button onClick={() => toggleSelect(p.id)} className="grid h-8 w-8 place-items-center rounded-lg text-primary">
+                  <button
+                    onClick={() => toggleSelect(p.id)}
+                    className="grid h-8 w-8 place-items-center rounded-lg text-primary"
+                  >
                     {isSel ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5" />}
                   </button>
                 )}
@@ -467,15 +636,20 @@ function ProductsPageInner() {
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="truncate font-medium">{p.name}</span>
                     {p.category && (
-                      <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] text-secondary-foreground">{p.category}</span>
+                      <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] text-secondary-foreground">
+                        {p.category}
+                      </span>
                     )}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-xs flex-wrap">
                     <span className="font-medium text-primary">
-                      {formatToman(p.price)}{p.unit && p.unit !== "عدد" ? ` / ${p.unit}` : ""}
+                      {formatToman(p.price)}
+                      {p.unit && p.unit !== "عدد" ? ` / ${p.unit}` : ""}
                     </span>
                     {!!p.discountPercent && (
-                      <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">٪{formatNumber(p.discountPercent)} تخفیف</span>
+                      <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+                        ٪{formatNumber(p.discountPercent)} تخفیف
+                      </span>
                     )}
                     {stockBadge(p)}
                     {(() => {
@@ -501,12 +675,21 @@ function ProductsPageInner() {
                         ارزش: {formatToman(p.price * p.stock)}
                       </span>
                     )}
-                    {p.code && <span className="text-muted-foreground" dir="ltr">{p.code.slice(0, 16)}</span>}
+                    {p.code && (
+                      <span className="text-muted-foreground" dir="ltr">
+                        {p.code.slice(0, 16)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-0.5">
                   {p.code ? (
-                    <button data-tour="product-barcode" onClick={() => setViewBarcode(p)} className="grid h-8 w-8 place-items-center rounded-lg text-foreground hover:bg-secondary" title="مشاهده بارکد">
+                    <button
+                      data-tour="product-barcode"
+                      onClick={() => setViewBarcode(p)}
+                      className="grid h-8 w-8 place-items-center rounded-lg text-foreground hover:bg-secondary"
+                      title="مشاهده بارکد"
+                    >
                       <Barcode className="h-4 w-4" />
                     </button>
                   ) : (
@@ -514,7 +697,7 @@ function ProductsPageInner() {
                       onClick={() => {
                         const taken = new Set(list.map((x) => x.code).filter(Boolean));
                         const code = generateUniqueCode(taken);
-                        setList(list.map((x) => x.id === p.id ? { ...x, code } : x));
+                        setList(list.map((x) => (x.id === p.id ? { ...x, code } : x)));
                       }}
                       data-tour="product-barcode"
                       className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
@@ -550,8 +733,8 @@ function ProductsPageInner() {
             onClick={() => setVisibleCount((c) => c + PRODUCT_PAGE_SIZE)}
             className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-semibold text-foreground hover:bg-secondary"
           >
-            نمایش {formatNumber(Math.min(PRODUCT_PAGE_SIZE, filtered.length - visibleItems.length))} محصول بعدی
-            ({formatNumber(visibleItems.length)} از {formatNumber(filtered.length)})
+            نمایش {formatNumber(Math.min(PRODUCT_PAGE_SIZE, filtered.length - visibleItems.length))}{" "}
+            محصول بعدی ({formatNumber(visibleItems.length)} از {formatNumber(filtered.length)})
           </button>
         </div>
       )}
@@ -560,7 +743,10 @@ function ProductsPageInner() {
         <ProductModal
           initialCode={incomingCode ?? ""}
           catList={catList}
-          onClose={() => { setOpen(false); if (incomingCode) navigate({ search: {} }); }}
+          onClose={() => {
+            setOpen(false);
+            if (incomingCode) navigate({ search: {} });
+          }}
           onSave={onCreate}
         />
       )}
@@ -585,8 +771,25 @@ function ProductsPageInner() {
 
       <Suspense fallback={null}>
         {showImport && <BulkImportModal onClose={() => setShowImport(false)} />}
-        {viewBarcode && <BarcodeViewModal product={viewBarcode} onClose={() => setViewBarcode(null)} />}
-        {printTargets && <BarcodePrintModal items={printTargets} onClose={() => setPrintTargets(null)} />}
+        {showBulkPrice && (
+          <BulkPriceChangeModal
+            products={list}
+            filtered={filtered}
+            selectedIds={selected}
+            categories={catList}
+            onClose={() => setShowBulkPrice(false)}
+            onApply={(next) => {
+              setList(next);
+              setShowBulkPrice(false);
+            }}
+          />
+        )}
+        {viewBarcode && (
+          <BarcodeViewModal product={viewBarcode} onClose={() => setViewBarcode(null)} />
+        )}
+        {printTargets && (
+          <BarcodePrintModal items={printTargets} onClose={() => setPrintTargets(null)} />
+        )}
       </Suspense>
     </Layout>
   );
@@ -594,12 +797,19 @@ function ProductsPageInner() {
 
 // ─── Product Modal ────────────────────────────────────────────────────────────
 
-const inputCls = "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
+const inputCls =
+  "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
 
 /** ورودی قیمت با جداکننده هزارگان زنده */
 function PriceInput({
-  value, onChange, placeholder,
-}: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   const display = value ? formatNumber(parseNumberInput(value)) : "";
   return (
     <input
@@ -632,44 +842,69 @@ function ProductModal({
 }) {
   const [appSettings] = settings.useAll();
   const [unitDefs, setUnitDefs] = useState<UnitDef[]>(() => getUnitDefs());
-  useEffect(() => { setUnitDefs(getUnitDefs()); }, [appSettings.units]);
+  useEffect(() => {
+    setUnitDefs(getUnitDefs());
+  }, [appSettings.units]);
   const [showAddUnit, setShowAddUnit] = useState(false);
   const [newUnitName, setNewUnitName] = useState("");
   const [newUnitDecimal, setNewUnitDecimal] = useState(true);
 
-  const [name, setName]       = useState(initial?.name ?? "");
-  const [price, setPrice]     = useState(initial ? String(initial.price) : "");
-  const [category, setCat]    = useState(initial?.category ?? "");
-  const [code, setCode]       = useState(initial?.code ?? initialCode);
-  const [stock, setStock]     = useState(initial ? String(initial.stock) : "0");
-  const [desc, setDesc]       = useState(initial?.description ?? "");
-  const [lowThreshold, setLow]= useState(initial?.lowStockThreshold ? String(initial.lowStockThreshold) : "5");
-  const [unit, setUnit]       = useState(initial?.unit ?? COUNT_UNIT);
+  const [name, setName] = useState(initial?.name ?? "");
+  const [price, setPrice] = useState(initial ? String(initial.price) : "");
+  const [category, setCat] = useState(initial?.category ?? "");
+  const [code, setCode] = useState(initial?.code ?? initialCode);
+  const [stock, setStock] = useState(initial ? String(initial.stock) : "0");
+  const [desc, setDesc] = useState(initial?.description ?? "");
+  const [lowThreshold, setLow] = useState(
+    initial?.lowStockThreshold ? String(initial.lowStockThreshold) : "5",
+  );
+  const [unit, setUnit] = useState(initial?.unit ?? COUNT_UNIT);
   // فیلدهای اختیاری — صرفاً پیشنهادی، هیچ‌کدام الزامی نیستند
   const [showOptional, setShowOptional] = useState(
-    !!(initial?.buyPrice || initial?.consumerPrice || initial?.sellerPrice || initial?.discountPercent || initial?.wholesalePrice),
+    !!(
+      initial?.buyPrice ||
+      initial?.consumerPrice ||
+      initial?.sellerPrice ||
+      initial?.discountPercent ||
+      initial?.wholesalePrice
+    ),
   );
-  const [buyPrice, setBuyPrice]           = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
-  const [consumerPrice, setConsumerPrice] = useState(initial?.consumerPrice ? String(initial.consumerPrice) : "");
-  const [sellerPrice, setSellerPrice]     = useState(initial?.sellerPrice ? String(initial.sellerPrice) : "");
-  const [discount, setDiscount]           = useState(initial?.discountPercent ? String(initial.discountPercent) : "");
-  const [wholesalePrice, setWholesalePrice] = useState(initial?.wholesalePrice ? String(initial.wholesalePrice) : "");
-  const [wholesaleMinQty, setWholesaleMinQty] = useState(initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "");
+  const [buyPrice, setBuyPrice] = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
+  const [consumerPrice, setConsumerPrice] = useState(
+    initial?.consumerPrice ? String(initial.consumerPrice) : "",
+  );
+  const [sellerPrice, setSellerPrice] = useState(
+    initial?.sellerPrice ? String(initial.sellerPrice) : "",
+  );
+  const [discount, setDiscount] = useState(
+    initial?.discountPercent ? String(initial.discountPercent) : "",
+  );
+  const [wholesalePrice, setWholesalePrice] = useState(
+    initial?.wholesalePrice ? String(initial.wholesalePrice) : "",
+  );
+  const [wholesaleMinQty, setWholesaleMinQty] = useState(
+    initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "",
+  );
   // تاریخ انقضا — فقط در صورت فعال کردن کاربر نمایش داده و ذخیره می‌شود
   const nowJ = toJalali(Date.now()) ?? { jy: 1404, jm: 1, jd: 1, h: 0, min: 0 };
-  const initExpJ = initial?.expiryAt ? toJalali(initial.expiryAt) ?? nowJ : nowJ;
+  const initExpJ = initial?.expiryAt ? (toJalali(initial.expiryAt) ?? nowJ) : nowJ;
   const [hasExpiry, setHasExpiry] = useState(!!initial?.expiryAt);
   const [ejy, setEjy] = useState(initExpJ.jy);
   const [ejm, setEjm] = useState(initExpJ.jm);
   const [ejd, setEjd] = useState(initExpJ.jd);
   const expDaysInMonth = jalaliMonthLength(ejy, ejm);
-  useEffect(() => { if (ejd > expDaysInMonth) setEjd(expDaysInMonth); }, [expDaysInMonth, ejd]);
+  useEffect(() => {
+    if (ejd > expDaysInMonth) setEjd(expDaysInMonth);
+  }, [expDaysInMonth, ejd]);
   const EXP_YEARS = Array.from({ length: 8 }, (_, i) => nowJ.jy + i);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const priceNum = parseNumberInput(price);
-    if (!name.trim() || !priceNum) { alert("نام و قیمت الزامی است."); return; }
+    if (!name.trim() || !priceNum) {
+      alert("نام و قیمت الزامی است.");
+      return;
+    }
     const discountNum = Math.max(0, Math.min(100, parseNumberInput(discount)));
     const data: Omit<Product, "id"> = {
       name: name.trim(),
@@ -710,33 +945,55 @@ function ProductModal({
   const handleRemoveUnit = (e: React.MouseEvent, u: UnitDef) => {
     e.stopPropagation();
     if (u.name === COUNT_UNIT) return;
-    if (!confirm(`واحد «${u.name}» حذف شود؟ محصولاتی که قبلاً با این واحد ثبت شده‌اند تغییری نمی‌کنند.`)) return;
+    if (
+      !confirm(
+        `واحد «${u.name}» حذف شود؟ محصولاتی که قبلاً با این واحد ثبت شده‌اند تغییری نمی‌کنند.`,
+      )
+    )
+      return;
     const next = removeUnitDef(u.name);
     setUnitDefs(next);
     if (unit === u.name) setUnit(COUNT_UNIT);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-md rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl max-h-[90vh] overflow-y-auto">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold">{isEdit ? "ویرایش محصول" : "افزودن محصول جدید"}</h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <Field label="نام محصول *">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً: شیر پرچرب کاله"
-              className={inputCls} />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="مثلاً: شیر پرچرب کاله"
+              className={inputCls}
+            />
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
               <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
             </Field>
             <Field label={unit !== COUNT_UNIT ? `موجودی (${unit})` : "موجودی انبار"}>
-              <input value={stock} onChange={(e) => setStock(e.target.value)} inputMode="decimal" placeholder="۰"
-                className={inputCls} />
+              <input
+                value={stock}
+                onChange={(e) => setStock(e.target.value)}
+                inputMode="decimal"
+                placeholder="۰"
+                className={inputCls}
+              />
             </Field>
           </div>
           <Field label="واحد فروش">
@@ -745,7 +1002,9 @@ function ProductModal({
                 <span
                   key={u.name}
                   className={`inline-flex items-center overflow-hidden rounded-xl border text-xs font-medium transition ${
-                    unit === u.name ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"
+                    unit === u.name
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-background text-muted-foreground"
                   }`}
                 >
                   <button type="button" onClick={() => setUnit(u.name)} className="px-3 py-2">
@@ -780,11 +1039,18 @@ function ProductModal({
                   className="flex-1 rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
                 />
                 <label className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-                  <input type="checkbox" checked={newUnitDecimal} onChange={(e) => setNewUnitDecimal(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={newUnitDecimal}
+                    onChange={(e) => setNewUnitDecimal(e.target.checked)}
+                  />
                   اعشاری
                 </label>
-                <button type="button" onClick={confirmAddUnit}
-                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground">
+                <button
+                  type="button"
+                  onClick={confirmAddUnit}
+                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground"
+                >
                   افزودن
                 </button>
               </div>
@@ -792,22 +1058,43 @@ function ProductModal({
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="دسته‌بندی">
-              <select value={category} onChange={(e) => setCat(e.target.value)}
-                className={inputCls}>
+              <select
+                value={category}
+                onChange={(e) => setCat(e.target.value)}
+                className={inputCls}
+              >
                 <option value="">— بدون دسته —</option>
-                {catList.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                {catList.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </Field>
             <Field label="هشدار موجودی کم">
-              <input value={lowThreshold} onChange={(e) => setLow(e.target.value)} inputMode="numeric" placeholder="۵"
-                className={inputCls} />
+              <input
+                value={lowThreshold}
+                onChange={(e) => setLow(e.target.value)}
+                inputMode="numeric"
+                placeholder="۵"
+                className={inputCls}
+              />
             </Field>
           </div>
           <Field label="کد بارکد / QR">
             <div className="flex gap-2">
-              <input value={code} onChange={(e) => setCode(e.target.value)} dir="ltr" placeholder="اختیاری"
-                className={inputCls} />
-              <button type="button" onClick={genCode} className="shrink-0 rounded-xl border border-border px-3 text-xs">
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                dir="ltr"
+                placeholder="اختیاری"
+                className={inputCls}
+              />
+              <button
+                type="button"
+                onClick={genCode}
+                className="shrink-0 rounded-xl border border-border px-3 text-xs"
+              >
                 تولید
               </button>
             </div>
@@ -828,22 +1115,29 @@ function ProductModal({
               <div className="grid grid-cols-3 gap-1.5">
                 <select value={ejd} onChange={(e) => setEjd(+e.target.value)} className={inputCls}>
                   {Array.from({ length: expDaysInMonth }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>{formatNumber(d)}</option>
+                    <option key={d} value={d}>
+                      {formatNumber(d)}
+                    </option>
                   ))}
                 </select>
                 <select value={ejm} onChange={(e) => setEjm(+e.target.value)} className={inputCls}>
                   {JMONTHS_LONG.map((m, i) => (
-                    <option key={m} value={i + 1}>{m}</option>
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
                   ))}
                 </select>
                 <select value={ejy} onChange={(e) => setEjy(+e.target.value)} className={inputCls}>
                   {EXP_YEARS.map((y) => (
-                    <option key={y} value={y}>{formatNumber(y)}</option>
+                    <option key={y} value={y}>
+                      {formatNumber(y)}
+                    </option>
                   ))}
                 </select>
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                محصولاتی که کمتر از ۳۰ روز تا انقضایشان مانده، در تب «نزدیک انقضا» نمایش داده می‌شوند.
+                محصولاتی که کمتر از ۳۰ روز تا انقضایشان مانده، در تب «نزدیک انقضا» نمایش داده
+                می‌شوند.
               </p>
             </Field>
           )}
@@ -864,8 +1158,13 @@ function ProductModal({
                   <PriceInput value={buyPrice} onChange={setBuyPrice} placeholder="—" />
                 </Field>
                 <Field label="درصد تخفیف">
-                  <input value={discount} onChange={(e) => setDiscount(e.target.value)} inputMode="numeric" placeholder="۰"
-                    className={inputCls} />
+                  <input
+                    value={discount}
+                    onChange={(e) => setDiscount(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="۰"
+                    className={inputCls}
+                  />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -891,13 +1190,20 @@ function ProductModal({
                 </Field>
               </div>
               <p className="text-[11px] text-muted-foreground leading-5">
-                در صورت وارد کردن «قیمت عمده»، هنگام ثبت فاکتور می‌توانید با یک کلیک قیمت هر ردیف را به قیمت عمده تغییر دهید.
-                اگر «حداقل تعداد» را هم وارد کنید، وقتی تعداد فاکتور به آن حد رسید قیمت به‌طور خودکار عمده حساب می‌شود.
+                در صورت وارد کردن «قیمت عمده»، هنگام ثبت فاکتور می‌توانید با یک کلیک قیمت هر ردیف را
+                به قیمت عمده تغییر دهید. اگر «حداقل تعداد» را هم وارد کنید، وقتی تعداد فاکتور به آن
+                حد رسید قیمت به‌طور خودکار عمده حساب می‌شود.
               </p>
               {parseNumberInput(buyPrice) > 0 && parseNumberInput(price) > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   سود هر واحد:{" "}
-                  <span className={parseNumberInput(price) >= parseNumberInput(buyPrice) ? "font-semibold text-green-600" : "font-semibold text-destructive"}>
+                  <span
+                    className={
+                      parseNumberInput(price) >= parseNumberInput(buyPrice)
+                        ? "font-semibold text-green-600"
+                        : "font-semibold text-destructive"
+                    }
+                  >
                     {formatToman(parseNumberInput(price) - parseNumberInput(buyPrice))}
                   </span>
                 </p>
@@ -906,19 +1212,27 @@ function ProductModal({
           )}
 
           <Field label="توضیحات">
-            <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} placeholder="توضیحات اضافی (اختیاری)"
-              className={`${inputCls} resize-none`} />
+            <textarea
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              rows={2}
+              placeholder="توضیحات اضافی (اختیاری)"
+              className={`${inputCls} resize-none`}
+            />
           </Field>
           {appSettings.showProductionFeature && (
             <Link
               to="/production"
               className="block rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] leading-5 text-primary"
             >
-              این محصول ساخته می‌شود؟ فرمول مواد اولیه را در بخش «تولید» تعریف کنید تا با هر فروش، مواد از انبار کم شود.
+              این محصول ساخته می‌شود؟ فرمول مواد اولیه را در بخش «تولید» تعریف کنید تا با هر فروش،
+              مواد از انبار کم شود.
             </Link>
           )}
-          <button type="submit"
-            className="mt-2 w-full rounded-xl bg-gradient-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-elegant">
+          <button
+            type="submit"
+            className="mt-2 w-full rounded-xl bg-gradient-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-elegant"
+          >
             {isEdit ? "ذخیره تغییرات" : "ذخیره محصول"}
           </button>
         </form>
@@ -959,7 +1273,10 @@ function CategoryManager({
     save(list.filter((c) => c.id !== id));
   };
 
-  const startEdit = (c: Category) => { setEditId(c.id); setEditName(c.name); };
+  const startEdit = (c: Category) => {
+    setEditId(c.id);
+    setEditName(c.name);
+  };
   const commitEdit = () => {
     if (!editName.trim() || !editId) return;
     save(list.map((c) => (c.id === editId ? { ...c, name: editName.trim() } : c)));
@@ -967,32 +1284,57 @@ function CategoryManager({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold">مدیریت دسته‌بندی‌ها</h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <ul className="mb-3 space-y-2 max-h-52 overflow-y-auto">
           {list.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+            <li
+              key={c.id}
+              className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2"
+            >
               {editId === c.id ? (
                 <>
-                  <input value={editName} onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 bg-transparent text-sm outline-none" autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") commitEdit(); }} />
-                  <button onClick={commitEdit} className="text-xs font-semibold text-primary">ذخیره</button>
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="flex-1 bg-transparent text-sm outline-none"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitEdit();
+                    }}
+                  />
+                  <button onClick={commitEdit} className="text-xs font-semibold text-primary">
+                    ذخیره
+                  </button>
                 </>
               ) : (
                 <>
                   <span className="flex-1 text-sm">{c.name}</span>
-                  <button onClick={() => startEdit(c)} className="text-muted-foreground hover:text-primary">
+                  <button
+                    onClick={() => startEdit(c)}
+                    className="text-muted-foreground hover:text-primary"
+                  >
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
-                  <button onClick={() => remove(c.id)} className="text-destructive hover:text-destructive/80">
+                  <button
+                    onClick={() => remove(c.id)}
+                    className="text-destructive hover:text-destructive/80"
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </>
@@ -1007,9 +1349,17 @@ function CategoryManager({
             onChange={(e) => setNewName(e.target.value)}
             placeholder="نام دسته جدید..."
             className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
           />
-          <button onClick={add} className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          <button
+            onClick={add}
+            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
             <Plus className="h-4 w-4" />
           </button>
         </div>
@@ -1028,5 +1378,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ProductsPage() {
-  return <AuthGuard><ProductsPageInner /></AuthGuard>;
+  return (
+    <AuthGuard>
+      <ProductsPageInner />
+    </AuthGuard>
+  );
 }

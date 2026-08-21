@@ -13,9 +13,10 @@ import {
   formatJalaliDateTime,
   PAYMENT_LABEL,
   COUNT_UNIT,
+  formatChequeDue,
   type Invoice,
 } from "@/lib/store";
-import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import { printFitAssets, type PaperSize } from "@/lib/print";
 
 // ─── مدل داده ───────────────────────────────────────────────────────────────
@@ -63,14 +64,7 @@ export type TplBlock = {
   fields: TplField[];
 };
 
-export type TplColumnKey =
-  | "index"
-  | "name"
-  | "unit"
-  | "qty"
-  | "price"
-  | "discount"
-  | "total";
+export type TplColumnKey = "index" | "name" | "unit" | "qty" | "price" | "discount" | "total";
 
 export type TplColumn = { key: TplColumnKey; label: string; enabled: boolean };
 
@@ -130,12 +124,15 @@ export function tplId(): string {
 }
 
 /** فیلدهایی از قالب که کاربر خواسته هنگام ثبت فاکتور در برنامه پر شوند */
-export function checkoutFields(t?: Partial<InvoiceTemplate> | null): { id: string; label: string; blockTitle?: string }[] {
+export function checkoutFields(
+  t?: Partial<InvoiceTemplate> | null,
+): { id: string; label: string; blockTitle?: string }[] {
   if (!t?.enabled || !Array.isArray(t.blocks)) return [];
   const out: { id: string; label: string; blockTitle?: string }[] = [];
   for (const b of t.blocks) {
     for (const f of b.fields ?? []) {
-      if (f.askAtCheckout) out.push({ id: f.id, label: f.label || "بدون عنوان", blockTitle: b.title });
+      if (f.askAtCheckout)
+        out.push({ id: f.id, label: f.label || "بدون عنوان", blockTitle: b.title });
     }
   }
   return out;
@@ -336,7 +333,12 @@ export function itemUnitLabel(unit?: string): string {
   return (unit && unit.trim()) || COUNT_UNIT;
 }
 
-function cellValue(inv: Invoice, key: TplColumnKey, item: Invoice["items"][number], i: number): string {
+function cellValue(
+  inv: Invoice,
+  key: TplColumnKey,
+  item: Invoice["items"][number],
+  i: number,
+): string {
   switch (key) {
     case "index":
       return (i + 1).toLocaleString("fa-IR");
@@ -410,8 +412,14 @@ export function buildTemplatedInvoiceHTML(
       ? `<tr><td>مالیات${amounts.taxPercent ? ` (${formatNumber(amounts.taxPercent)}٪)` : ""}</td><td>${formatAmount(amounts.tax)} ${currencyLabel()}</td></tr>`
       : "",
     `<tr class="grand"><td>جمع کل</td><td>${formatAmount(amounts.total)} ${currencyLabel()}</td></tr>`,
-    amounts.paid ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(amounts.paid)} ${currencyLabel()}</td></tr>` : "",
-    amounts.checkAmount
+    amounts.paid
+      ? `<tr><td>پرداخت نقدی</td><td>${formatAmount(amounts.paid)} ${currencyLabel()}</td></tr>`
+      : "",
+    ...invoiceCheques(inv).map(
+      (c, i) =>
+        `<tr><td>${esc(chequeLineLabel(c, i, formatChequeDue))}</td><td>${formatAmount(c.amount)} ${currencyLabel()}</td></tr>`,
+    ),
+    amounts.checkAmount && invoiceCheques(inv).length === 0
       ? `<tr><td>مبلغ چک${inv.checkNumber ? ` (${esc(inv.checkNumber)})` : ""}</td><td>${formatAmount(amounts.checkAmount)} ${currencyLabel()}</td></tr>`
       : "",
     amounts.remaining > 0

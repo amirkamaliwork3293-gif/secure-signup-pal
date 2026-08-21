@@ -17,11 +17,19 @@ import {
   isWeightUnit,
   applyProductDiscount,
   PAYMENT_LABEL,
+  reminders,
+  chequeDueTimestamp,
   type Customer,
   type CustomerInfo,
   type PaymentMethod,
+  type InvoiceCheque,
 } from "@/lib/store";
-import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
+import {
+  lineTotal,
+  invoiceTotals,
+  withSyncedChequeFields,
+  invoiceCheques,
+} from "@/lib/invoice-math";
 import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import {
@@ -44,8 +52,36 @@ import {
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
+import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
+function scheduleChequeReminders(
+  inv: {
+    cheques?: InvoiceCheque[];
+    checkDueDate?: string;
+    checkAmount?: number;
+    checkNumber?: string;
+  },
+  customerLabel: string,
+) {
+  const list = invoiceCheques(inv);
+  for (const ch of list) {
+    const dueAt = chequeDueTimestamp(ch.dueDate);
+    if (!dueAt) continue;
+    const bits = [
+      ch.amount > 0 ? formatToman(ch.amount) : "",
+      ch.bankName,
+      ch.sayadi ? `صیادی ${ch.sayadi}` : ch.serial ? `سریال ${ch.serial}` : "",
+    ].filter(Boolean);
+    reminders.add({
+      title: `سررسید چک ${customerLabel}`,
+      note: bits.join(" — ") || "چک دریافتی",
+      dueAt,
+      customerName: customerLabel,
+    });
+  }
+}
+
 export function InvoiceWorkspace() {
   const [inv, setInv] = invoice.useCurrent();
   const [board, tabs] = invoice.useTabs();
@@ -56,9 +92,12 @@ export function InvoiceWorkspace() {
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(inv.paymentMethod ?? "cash");
   const [paidAmount, setPaidAmount] = useState<number>(inv.paidAmount ?? 0);
-  const [checkAmount, setCheckAmount] = useState<number>(inv.checkAmount ?? 0);
-  const [checkNumber, setCheckNumber] = useState<string>(inv.checkNumber ?? "");
-  const [checkDueDate, setCheckDueDate] = useState<string>(inv.checkDueDate ?? "");
+  const [cheques, setCheques] = useState<InvoiceCheque[]>(() => {
+    const existing = invoiceCheques(inv);
+    return existing.length
+      ? existing.map((c) => ({ ...c, id: c.id === "legacy" ? cryptoId() : c.id }))
+      : [];
+  });
   const [notes, setNotes] = useState<string>(inv.notes ?? "");
   const [showSearch, setShowSearch] = useState(false);
   const [showDiscount, setShowDiscount] = useState(
@@ -84,16 +123,18 @@ export function InvoiceWorkspace() {
   const deferred = paymentMethod === "credit" || paymentMethod === "check";
   const baseTotal = invoiceTotals(inv).total;
   const paidNow = Math.min(baseTotal, Math.max(0, Math.round(paidAmount || 0)));
+  const enteredCheques = cheques.reduce((s, c) => s + Math.max(0, Math.round(c.amount || 0)), 0);
   const checkNow =
     paymentMethod === "check"
-      ? Math.min(
-          baseTotal - paidNow,
-          Math.max(0, Math.round(checkAmount || baseTotal - paidNow)),
-        )
+      ? Math.min(baseTotal - paidNow, Math.max(0, enteredCheques || baseTotal - paidNow))
       : 0;
+  const customerName = [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim();
   // خانه‌های سفارشی «طراح فاکتور» که کاربر خواسته هنگام ثبت فاکتور پر شوند
   const askFields = useMemo(
-    () => checkoutFields(normalizeTemplate(appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined)),
+    () =>
+      checkoutFields(
+        normalizeTemplate(appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined),
+      ),
     [appSettings.invoiceTemplate],
   );
   const filledFieldsCount = askFields.filter((f) => (customFields[f.id] ?? "").trim()).length;
@@ -104,9 +145,22 @@ export function InvoiceWorkspace() {
     paymentMethod,
     customFields: Object.keys(customFields).length ? customFields : undefined,
     paidAmount: deferred ? paidNow : undefined,
-    checkAmount: paymentMethod === "check" ? checkNow : undefined,
-    checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
-    checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
+    ...(paymentMethod === "check"
+      ? withSyncedChequeFields({
+          ...inv,
+          cheques: cheques.map((c) => ({
+            ...c,
+            amount: c.amount > 0 ? c.amount : 0,
+            drawerName: c.drawerName || customerName || undefined,
+          })),
+          checkAmount: checkNow,
+        })
+      : {
+          checkAmount: undefined,
+          checkNumber: undefined,
+          checkDueDate: undefined,
+          cheques: undefined,
+        }),
     notes: notes.trim() ? notes.trim() : undefined,
   };
   const totals = invoiceTotals(draftInvoice);
@@ -116,13 +170,38 @@ export function InvoiceWorkspace() {
     setCustomer(inv.customer ?? {});
     setPaymentMethod(inv.paymentMethod ?? "cash");
     setPaidAmount(inv.paidAmount ?? 0);
-    setCheckAmount(inv.checkAmount ?? 0);
-    setCheckNumber(inv.checkNumber ?? "");
-    setCheckDueDate(inv.checkDueDate ?? "");
+    const existing = invoiceCheques(inv);
+    if (existing.length) {
+      setCheques(existing.map((c) => ({ ...c, id: c.id === "legacy" ? cryptoId() : c.id })));
+    } else if ((inv.paymentMethod ?? "cash") === "check") {
+      setCheques([
+        emptyCheque({
+          amount: inv.checkAmount ?? 0,
+          drawerName:
+            [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ") ||
+            undefined,
+        }),
+      ]);
+    } else {
+      setCheques([]);
+    }
     setNotes(inv.notes ?? "");
     setShowCustomer(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inv.id]);
+
+  useEffect(() => {
+    if (paymentMethod === "check" && cheques.length === 0) {
+      setCheques([
+        emptyCheque({
+          amount: Math.max(0, baseTotal - paidNow),
+          drawerName: customerName || undefined,
+        }),
+      ]);
+    }
+    // فقط وقتی روش پرداخت عوض می‌شود؛ پر کردن خودکار نباید هنگام تایپ مبلغ بازنشانی شود
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethod]);
 
   const update = (productId: string, delta: number) => {
     setInv((prev) => {
@@ -178,6 +257,27 @@ export function InvoiceWorkspace() {
     // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از «جمع کل پس از تخفیف» بیشتر باشند
     const paid = paidNow;
     const chk = checkNow;
+    const customerLabel = customerName || "مشتری";
+    let chequeList: InvoiceCheque[] = cheques.map((c) => ({
+      ...c,
+      drawerName: c.drawerName?.trim() || customerLabel,
+    }));
+    const chequeSum = chequeList.reduce((s, c) => s + Math.max(0, Math.round(c.amount || 0)), 0);
+    if (paymentMethod === "check") {
+      if (chequeList.length === 0) {
+        chequeList = [emptyCheque({ amount: chk, drawerName: customerLabel })];
+      } else if (chequeSum <= 0 && chk > 0) {
+        chequeList = [{ ...chequeList[0], amount: chk }];
+      } else {
+        chequeList = chequeList.map((c, i) =>
+          i === 0 && c.amount <= 0 && chk > 0 ? { ...c, amount: chk } : c,
+        );
+      }
+    }
+    const chequePayload =
+      paymentMethod === "check"
+        ? withSyncedChequeFields({ ...inv, cheques: chequeList, checkAmount: chk })
+        : {};
     const finalInv = {
       ...inv,
       customer,
@@ -188,20 +288,21 @@ export function InvoiceWorkspace() {
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
       shopLogoUrl: appSettings.logoUrl || undefined,
       paidAmount: paymentMethod === "credit" || paymentMethod === "check" ? paid : undefined,
-      checkAmount: paymentMethod === "check" ? chk : undefined,
-      checkNumber: paymentMethod === "check" && checkNumber.trim() ? checkNumber.trim() : undefined,
-      checkDueDate: paymentMethod === "check" && checkDueDate ? checkDueDate : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
+      ...chequePayload,
     };
     invoice.archive(finalInv);
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
       const debt = Math.max(0, baseTotal - paid);
-      if (debt > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
+      if (debt > 0)
+        customers.recordInvoiceDebt(customer, finalInv, { amount: debt, note: "فاکتور نسیه" });
       else if (hasCustomer) customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
-      if (chk > 0) customers.recordInvoiceDebt(customer, finalInv, { amount: chk, note: "چک دریافتی" });
+      if (chk > 0)
+        customers.recordInvoiceDebt(customer, finalInv, { amount: chk, note: "چک دریافتی" });
       else if (hasCustomer) customers.findOrCreate(customer);
+      scheduleChequeReminders(finalInv, customerLabel);
     } else if (hasCustomer) {
       // نقد/کارت با مشتری مشخص: هیچ بدهی‌ای ثبت نمی‌شود، اما مشتری در «مشتریان» ذخیره/به‌روز می‌شود
       customers.findOrCreate(customer);
@@ -209,9 +310,7 @@ export function InvoiceWorkspace() {
     setCustomer({});
     setPaymentMethod("cash");
     setPaidAmount(0);
-    setCheckAmount(0);
-    setCheckNumber("");
-    setCheckDueDate("");
+    setCheques([]);
     setNotes("");
     setCustomerQ("");
     setShowCustomer(false);
@@ -238,7 +337,10 @@ export function InvoiceWorkspace() {
 
   const customerMatches =
     customerQ.trim().length > 0
-      ? filterAndRankSearch(allCustomers, customerQ, (c) => [...personNameSearchFields(c), c.phone]).slice(0, 6)
+      ? filterAndRankSearch(allCustomers, customerQ, (c) => [
+          ...personNameSearchFields(c),
+          c.phone,
+        ]).slice(0, 6)
       : [];
 
   // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست
@@ -552,8 +654,8 @@ export function InvoiceWorkspace() {
             فیلدهای سفارشی فاکتور
           </h3>
           <p className="mb-3 text-[11px] text-muted-foreground">
-            این خانه‌ها را خودتان در «طراح فاکتور» تعریف کرده‌اید. هرچه اینجا بنویسید، روی
-            فاکتور چاپی همین فاکتور می‌نشیند. خالی بگذارید تا نمایش داده نشود.
+            این خانه‌ها را خودتان در «طراح فاکتور» تعریف کرده‌اید. هرچه اینجا بنویسید، روی فاکتور
+            چاپی همین فاکتور می‌نشیند. خالی بگذارید تا نمایش داده نشود.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             {askFields.map((f) => (
@@ -564,9 +666,7 @@ export function InvoiceWorkspace() {
                 </label>
                 <input
                   value={customFields[f.id] ?? ""}
-                  onChange={(e) =>
-                    setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))
-                  }
+                  onChange={(e) => setCustomFields((p) => ({ ...p, [f.id]: e.target.value }))}
                   placeholder={f.label}
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                 />
@@ -608,7 +708,11 @@ export function InvoiceWorkspace() {
                       <span
                         className={`shrink-0 ${b > 0 ? "text-destructive" : b < 0 ? "text-sky-600" : "text-muted-foreground"}`}
                       >
-                        {b > 0 ? `بدهکار ${formatToman(b)}` : b < 0 ? `طلبکار ${formatToman(-b)}` : ""}
+                        {b > 0
+                          ? `بدهکار ${formatToman(b)}`
+                          : b < 0
+                            ? `طلبکار ${formatToman(-b)}`
+                            : ""}
                       </span>
                     </button>
                   );
@@ -659,73 +763,107 @@ export function InvoiceWorkspace() {
                 onChange={(e) => {
                   const on = e.target.checked;
                   setShowDiscount(on);
-                  if (!on) setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }));
+                  if (!on)
+                    setInv((prev) =>
+                      recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }),
+                    );
                 }}
                 className="h-4 w-4 accent-[var(--primary)]"
               />
-              <span className="text-xs font-semibold text-muted-foreground">اعمال تخفیف روی کل فاکتور</span>
+              <span className="text-xs font-semibold text-muted-foreground">
+                اعمال تخفیف روی کل فاکتور
+              </span>
             </label>
-            {showDiscount && (<>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-muted-foreground">درصد تخفیف</span>
-                <input
-                  value={inv.discountPercent ? formatNumber(inv.discountPercent) : ""}
-                  onChange={(e) => {
-                    const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
-                    setInv((prev) => recalc({ ...prev, discountPercent: v || undefined, discountAmount: undefined }));
-                  }}
-                  placeholder="۰"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-muted-foreground">مبلغ تخفیف</span>
-                <input
-                  value={inv.discountAmount ? formatNumber(inv.discountAmount) : ""}
-                  onChange={(e) => {
-                    const v = Math.max(0, parseNumberInput(e.target.value));
-                    setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: v || undefined }));
-                  }}
-                  placeholder="۰"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
-              </label>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {[5, 10, 15, 20].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setInv((prev) => recalc({ ...prev, discountPercent: p, discountAmount: undefined }))}
-                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-                >
-                  {formatNumber(p)}٪
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setInv((prev) => recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }))}
-                className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-              >
-                حذف تخفیف
-              </button>
-            </div>
-            {totals.discount > 0 && (
-              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
-                <span>جمع اقلام: <b className="block text-foreground">{formatToman(totals.subtotal)}</b></span>
-                <span>
-                  تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
-                  <b className="block text-primary">{formatToman(totals.discount)}</b>
-                </span>
-                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
-              </div>
+            {showDiscount && (
+              <>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted-foreground">درصد تخفیف</span>
+                    <input
+                      value={inv.discountPercent ? formatNumber(inv.discountPercent) : ""}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
+                        setInv((prev) =>
+                          recalc({
+                            ...prev,
+                            discountPercent: v || undefined,
+                            discountAmount: undefined,
+                          }),
+                        );
+                      }}
+                      placeholder="۰"
+                      inputMode="numeric"
+                      dir="ltr"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted-foreground">مبلغ تخفیف</span>
+                    <input
+                      value={inv.discountAmount ? formatNumber(inv.discountAmount) : ""}
+                      onChange={(e) => {
+                        const v = Math.max(0, parseNumberInput(e.target.value));
+                        setInv((prev) =>
+                          recalc({
+                            ...prev,
+                            discountPercent: undefined,
+                            discountAmount: v || undefined,
+                          }),
+                        );
+                      }}
+                      placeholder="۰"
+                      inputMode="numeric"
+                      dir="ltr"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </label>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[5, 10, 15, 20].map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() =>
+                        setInv((prev) =>
+                          recalc({ ...prev, discountPercent: p, discountAmount: undefined }),
+                        )
+                      }
+                      className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                    >
+                      {formatNumber(p)}٪
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInv((prev) =>
+                        recalc({ ...prev, discountPercent: undefined, discountAmount: undefined }),
+                      )
+                    }
+                    className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                  >
+                    حذف تخفیف
+                  </button>
+                </div>
+                {totals.discount > 0 && (
+                  <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                    <span>
+                      جمع اقلام:{" "}
+                      <b className="block text-foreground">{formatToman(totals.subtotal)}</b>
+                    </span>
+                    <span>
+                      تخفیف
+                      {totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}:{" "}
+                      <b className="block text-primary">{formatToman(totals.discount)}</b>
+                    </span>
+                    <span>
+                      قابل پرداخت:{" "}
+                      <b className="block text-foreground">{formatToman(totals.total)}</b>
+                    </span>
+                  </div>
+                )}
+              </>
             )}
-            </>)}
           </div>
         )}
         {/* مالیات کل فاکتور — اختیاری، دقیقاً با همان الگوی تخفیف */}
@@ -742,58 +880,69 @@ export function InvoiceWorkspace() {
                 }}
                 className="h-4 w-4 accent-[var(--primary)]"
               />
-              <span className="text-xs font-semibold text-muted-foreground">اعمال مالیات روی کل فاکتور</span>
+              <span className="text-xs font-semibold text-muted-foreground">
+                اعمال مالیات روی کل فاکتور
+              </span>
             </label>
-            {showTax && (<>
-            <div className="mt-2">
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-muted-foreground">درصد مالیات</span>
-                <input
-                  value={inv.taxPercent ? formatNumber(inv.taxPercent) : ""}
-                  onChange={(e) => {
-                    const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
-                    setInv((prev) => recalc({ ...prev, taxPercent: v || undefined }));
-                  }}
-                  placeholder="۰"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
-              </label>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {[9, 10].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: p }))}
-                  className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-                >
-                  {formatNumber(p)}٪
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: undefined }))}
-                className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-              >
-                حذف مالیات
-              </button>
-            </div>
-            {totals.tax > 0 && (
-              <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
-                <span>
-                  {totals.discount > 0 ? "پس از تخفیف" : "جمع اقلام"}:{" "}
-                  <b className="block text-foreground">{formatToman(totals.subtotal - totals.discount)}</b>
-                </span>
-                <span>
-                  مالیات{totals.taxPercent ? ` (٪${formatNumber(totals.taxPercent)})` : ""}:{" "}
-                  <b className="block text-primary">{formatToman(totals.tax)}</b>
-                </span>
-                <span>قابل پرداخت: <b className="block text-foreground">{formatToman(totals.total)}</b></span>
-              </div>
+            {showTax && (
+              <>
+                <div className="mt-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted-foreground">
+                      درصد مالیات
+                    </span>
+                    <input
+                      value={inv.taxPercent ? formatNumber(inv.taxPercent) : ""}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.min(100, parseNumberInput(e.target.value)));
+                        setInv((prev) => recalc({ ...prev, taxPercent: v || undefined }));
+                      }}
+                      placeholder="۰"
+                      inputMode="numeric"
+                      dir="ltr"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                  </label>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[9, 10].map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: p }))}
+                      className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                    >
+                      {formatNumber(p)}٪
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setInv((prev) => recalc({ ...prev, taxPercent: undefined }))}
+                    className="rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
+                  >
+                    حذف مالیات
+                  </button>
+                </div>
+                {totals.tax > 0 && (
+                  <div className="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                    <span>
+                      {totals.discount > 0 ? "پس از تخفیف" : "جمع اقلام"}:{" "}
+                      <b className="block text-foreground">
+                        {formatToman(totals.subtotal - totals.discount)}
+                      </b>
+                    </span>
+                    <span>
+                      مالیات{totals.taxPercent ? ` (٪${formatNumber(totals.taxPercent)})` : ""}:{" "}
+                      <b className="block text-primary">{formatToman(totals.tax)}</b>
+                    </span>
+                    <span>
+                      قابل پرداخت:{" "}
+                      <b className="block text-foreground">{formatToman(totals.total)}</b>
+                    </span>
+                  </div>
+                )}
+              </>
             )}
-            </>)}
           </div>
         )}
         <div className="mb-2 text-xs font-semibold text-muted-foreground">روش پرداخت</div>
@@ -807,6 +956,14 @@ export function InvoiceWorkspace() {
                 onClick={() => {
                   setPaymentMethod(m);
                   setInv((prev) => ({ ...prev, paymentMethod: m }));
+                  if (m === "check" && cheques.length === 0) {
+                    setCheques([
+                      emptyCheque({
+                        amount: Math.max(0, baseTotal - paidNow),
+                        drawerName: customerName || undefined,
+                      }),
+                    ]);
+                  }
                 }}
                 className={`rounded-xl px-2 py-2 text-xs sm:text-sm font-medium transition ${
                   active
@@ -835,8 +992,13 @@ export function InvoiceWorkspace() {
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b></span>
-              <span>باقی‌مانده (نسیه): <b className="text-destructive">{formatToman(totals.remaining)}</b></span>
+              <span>
+                جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b>
+              </span>
+              <span>
+                باقی‌مانده (نسیه):{" "}
+                <b className="text-destructive">{formatToman(totals.remaining)}</b>
+              </span>
             </div>
           </div>
         )}
@@ -844,54 +1006,33 @@ export function InvoiceWorkspace() {
         {/* پرداخت با چک */}
         {paymentMethod === "check" && inv.items.length > 0 && (
           <div className="mt-3 space-y-2 rounded-xl border border-dashed border-border bg-background/50 p-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground">مبلغ نقدی (اختیاری)</label>
-                <input
-                  value={paidAmount ? formatNumber(paidAmount) : ""}
-                  onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
-                  placeholder="۰"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground">مبلغ چک</label>
-                <input
-                  value={
-                    checkAmount
-                      ? formatNumber(checkAmount)
-                      : formatNumber(Math.max(0, totals.total - totals.paid))
-                  }
-                  onChange={(e) => setCheckAmount(parseNumberInput(e.target.value))}
-                  placeholder="۰"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                مبلغ نقدی (اختیاری)
+              </label>
               <input
-                value={checkNumber}
-                onChange={(e) => setCheckNumber(e.target.value)}
-                placeholder="شماره چک (اختیاری)"
+                value={paidAmount ? formatNumber(paidAmount) : ""}
+                onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
+                placeholder="۰"
+                inputMode="numeric"
+                dir="ltr"
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
               />
-              <input
-                type="date"
-                value={checkDueDate ? checkDueDate.slice(0, 10) : ""}
-                onChange={(e) => setCheckDueDate(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-                title="تاریخ سررسید چک"
-              />
             </div>
+            <ChequeEditor
+              cheques={cheques}
+              onChange={setCheques}
+              remaining={Math.max(0, totals.total - totals.paid)}
+              customerName={customerName}
+            />
             <div className="text-[11px] text-muted-foreground">
-              جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b> · بدهی مشتری (چک):{" "}
-              <b className="text-destructive">{formatToman(totals.checkAmount)}</b>
+              جمع کل: <b className="text-foreground">{formatToman(totals.total)}</b> · بدهی مشتری
+              (چک): <b className="text-destructive">{formatToman(totals.checkAmount)}</b>
               {totals.remaining > 0 && (
-                <> · مانده: <b className="text-destructive">{formatToman(totals.remaining)}</b></>
+                <>
+                  {" "}
+                  · مانده: <b className="text-destructive">{formatToman(totals.remaining)}</b>
+                </>
               )}
             </div>
           </div>
@@ -900,7 +1041,10 @@ export function InvoiceWorkspace() {
 
       {/* توضیحات فاکتور (اختیاری) */}
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
-        <label htmlFor="invoice-notes" className="mb-2 block text-xs font-semibold text-muted-foreground">
+        <label
+          htmlFor="invoice-notes"
+          className="mb-2 block text-xs font-semibold text-muted-foreground"
+        >
           توضیحات فاکتور (اختیاری)
         </label>
         <textarea
@@ -1058,11 +1202,17 @@ export function InvoiceWorkspace() {
                       defaultValue={Math.round((item.quantity - Math.floor(item.quantity)) * 1000)}
                       key={`${item.productId}-g-${item.quantity}`}
                       onBlur={(e) => {
-                        const gram = Math.max(0, Math.min(999, Math.round(parseNumberInput(e.target.value))));
+                        const gram = Math.max(
+                          0,
+                          Math.min(999, Math.round(parseNumberInput(e.target.value))),
+                        );
                         const kg = Math.floor(item.quantity);
                         const q = kg + gram / 1000;
                         if (q > 0 && q !== item.quantity) setQuantity(item.productId, q);
-                        else e.target.value = String(Math.round((item.quantity - Math.floor(item.quantity)) * 1000));
+                        else
+                          e.target.value = String(
+                            Math.round((item.quantity - Math.floor(item.quantity)) * 1000),
+                          );
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") (e.target as HTMLInputElement).blur();

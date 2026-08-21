@@ -130,6 +130,28 @@ export type CustomerInfo = {
 
 export type PaymentMethod = "cash" | "card" | "credit" | "check";
 
+/**
+ * یک برگ چک دریافتی — منطبق با روال صیادی ایران.
+ * تاریخ سررسید به‌صورت ISO (YYYY-MM-DD) یا شمسی (YYYY/MM/DD) ذخیره می‌شود.
+ */
+export type InvoiceCheque = {
+  id: string;
+  /** مبلغ این برگ چک (تومان) */
+  amount: number;
+  /** شماره سریال چک (اختیاری) */
+  serial?: string;
+  /** شناسه صیادی ۱۶ رقمی */
+  sayadi?: string;
+  /** نام بانک عهده */
+  bankName?: string;
+  /** تاریخ سررسید */
+  dueDate?: string;
+  /** نام صادرکننده / عهده (معمولاً مشتری) */
+  drawerName?: string;
+  /** شماره حساب عهده (اختیاری) */
+  accountNumber?: string;
+};
+
 export const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cash: "نقد",
   card: "کارت",
@@ -153,12 +175,18 @@ export type Invoice = {
   paymentMethod?: PaymentMethod;
   /** مبلغ نقد پرداخت‌شده (برای نسیهٔ جزئی یا فاکتور چک با پیش‌پرداخت نقدی) */
   paidAmount?: number;
-  /** مبلغ چک صادرشده توسط مشتری (برای روش پرداخت «چک») */
+  /** مبلغ چک صادرشده توسط مشتری (برای روش پرداخت «چک») — مجموع چک‌ها */
   checkAmount?: number;
-  /** شماره چک — اختیاری */
+  /** شماره چک — اختیاری؛ برای سازگاری با فاکتورهای قدیمیِ تک‌چکی */
   checkNumber?: string;
-  /** تاریخ سررسید چک (ISO) — اختیاری */
+  /** تاریخ سررسید چک (ISO یا شمسی YYYY/MM/DD) — اختیاری؛ سررسیدِ زودترین چک */
   checkDueDate?: string;
+  /**
+   * فهرست چک‌های دریافتی برای یک خرید (سیستم صیادی ایران).
+   * مشتری ممکن است چند برگ چک با سررسیدهای مختلف بدهد.
+   * فیلدهای checkAmount / checkNumber / checkDueDate برای سازگاری نگه داشته شده‌اند.
+   */
+  cheques?: InvoiceCheque[];
   /** توضیحات اختیاری فاکتور — در صورت وجود، روی فاکتور چاپی/PDF/اشتراک‌گذاری هم نمایش داده می‌شود */
   notes?: string;
   /** جمع اقلام پیش از تخفیف کل فاکتور */
@@ -286,9 +314,19 @@ const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
   string,
-  | "products" | "categories" | "invoices" | "current_invoice" | "settings"
-  | "customers" | "students" | "purchases" | "expenses" | "reminders"
-  | "accounts" | "account_txs" | "production"
+  | "products"
+  | "categories"
+  | "invoices"
+  | "current_invoice"
+  | "settings"
+  | "customers"
+  | "students"
+  | "purchases"
+  | "expenses"
+  | "reminders"
+  | "accounts"
+  | "account_txs"
+  | "production"
 > = {
   [PRODUCTS_KEY]: "products",
   [CATEGORIES_KEY]: "categories",
@@ -380,7 +418,13 @@ export type AppSettings = {
 };
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 const DEFAULT_SETTINGS: AppSettings = {
   shopName: "فروشگاه من",
@@ -724,7 +768,9 @@ export async function hydrateFromCloud(userId: string) {
           if (raw == null) continue;
           pendingPush[field] = JSON.parse(raw);
           markDirty([field]);
-        } catch { /* مقدار خراب — نادیده */ }
+        } catch {
+          /* مقدار خراب — نادیده */
+        }
       }
       markCloudHydrated();
       return; // بلوک finally صف را flush می‌کند
@@ -796,7 +842,10 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", () => {
     if (!cloudUserId) return;
     retryDelay = 5000;
-    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     if (Object.keys(pendingPush).length > 0) {
       flushCloudPush();
     }
@@ -807,7 +856,10 @@ if (typeof window !== "undefined") {
   // اجرای بعدی برنامه دوباره می‌فرستد — پس در بدترین حالت هم چیزی گم نمی‌شود.)
   const flushNow = () => {
     if (!cloudUserId || Object.keys(pendingPush).length === 0) return;
-    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    if (pushTimer) {
+      clearTimeout(pushTimer);
+      pushTimer = null;
+    }
     void flushCloudPush();
   };
   document.addEventListener("visibilitychange", () => {
@@ -830,7 +882,12 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
         return;
       }
       const detail = (
-        e as CustomEvent<{ key?: string; baseKey?: string; scopeChanged?: boolean; value?: unknown }>
+        e as CustomEvent<{
+          key?: string;
+          baseKey?: string;
+          scopeChanged?: boolean;
+          value?: unknown;
+        }>
       ).detail;
       if (detail?.scopeChanged) {
         setState(read(key, fallback));
@@ -1162,7 +1219,8 @@ export const purchases = {
         const newProduct: Product = {
           id: cryptoId(),
           name: item.name.trim() || "کالای بدون نام",
-          price: item.sellPrice && item.sellPrice > 0 ? item.sellPrice : Math.round(item.buyPrice * 1.3),
+          price:
+            item.sellPrice && item.sellPrice > 0 ? item.sellPrice : Math.round(item.buyPrice * 1.3),
           category,
           code: "",
           stock: item.quantity,
@@ -1304,7 +1362,8 @@ export function expensesTotal(list: Expense[]): number {
 /** جمع هزینه‌ها به تفکیک دسته، مرتب‌شده از بیشترین به کمترین */
 export function expensesByCategory(list: Expense[]): { category: string; total: number }[] {
   const map = new Map<string, number>();
-  for (const e of list) map.set(e.category || "متفرقه", (map.get(e.category || "متفرقه") || 0) + (e.amount || 0));
+  for (const e of list)
+    map.set(e.category || "متفرقه", (map.get(e.category || "متفرقه") || 0) + (e.amount || 0));
   return [...map.entries()]
     .map(([category, total]) => ({ category, total }))
     .sort((a, b) => b.total - a.total);
@@ -1322,12 +1381,18 @@ export const expenses = {
   },
   update: (updated: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
-    write(EXPENSES_KEY, list.map((e) => (e.id === updated.id ? updated : e)));
+    write(
+      EXPENSES_KEY,
+      list.map((e) => (e.id === updated.id ? updated : e)),
+    );
     syncExpenseAccountTx(updated);
   },
   remove: (id: string) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
-    write(EXPENSES_KEY, list.filter((e) => e.id !== id));
+    write(
+      EXPENSES_KEY,
+      list.filter((e) => e.id !== id),
+    );
     removeExpenseAccountTx(id);
   },
 };
@@ -1396,14 +1461,14 @@ export function reminderStatus(r: Reminder): ReminderStatus {
 
 /** لیست یادآوری‌های فعال (انجام‌نشده)، مرتب‌شده بر اساس فوریت سررسید */
 export function activeReminders(list: Reminder[]): Reminder[] {
-  return list
-    .filter((r) => !r.done)
-    .sort((a, b) => a.dueAt - b.dueAt);
+  return list.filter((r) => !r.done).sort((a, b) => a.dueAt - b.dueAt);
 }
 
 /** تعداد یادآوری‌های امروز یا عقب‌افتاده — برای نشان (badge) در نوار پایین */
 export function dueReminderCount(list: Reminder[]): number {
-  return list.filter((r) => !r.done && (reminderStatus(r) === "overdue" || reminderStatus(r) === "due-today")).length;
+  return list.filter(
+    (r) => !r.done && (reminderStatus(r) === "overdue" || reminderStatus(r) === "due-today"),
+  ).length;
 }
 
 export const reminders = {
@@ -1419,12 +1484,18 @@ export const reminders = {
 
   update: (updated: Reminder) => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
-    write(REMINDERS_KEY, list.map((r) => (r.id === updated.id ? updated : r)));
+    write(
+      REMINDERS_KEY,
+      list.map((r) => (r.id === updated.id ? updated : r)),
+    );
   },
 
   remove: (id: string) => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
-    write(REMINDERS_KEY, list.filter((r) => r.id !== id));
+    write(
+      REMINDERS_KEY,
+      list.filter((r) => r.id !== id),
+    );
   },
 
   /** انجام‌شده علامت بزن؛ اگر تکرارشونده باشد، یادآوری بعدی خودکار ساخته می‌شود */
@@ -1453,7 +1524,10 @@ export const reminders = {
   /** برگرداندن یک یادآوری انجام‌شده به حالت فعال */
   markUndone: (id: string) => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
-    write(REMINDERS_KEY, list.map((r) => (r.id === id ? { ...r, done: false, doneAt: undefined } : r)));
+    write(
+      REMINDERS_KEY,
+      list.map((r) => (r.id === id ? { ...r, done: false, doneAt: undefined } : r)),
+    );
   },
 };
 
@@ -1463,8 +1537,14 @@ export type Account = {
   id: string;
   /** نام حساب/کارت، مثلاً «کارت ملی بانک» یا «صندوق فروشگاه» */
   name: string;
-  /** شماره کارت (اختیاری) — فقط برای مرجع؛ در نمایش، پوشیده می‌شود */
+  /** شماره کارت (اختیاری) — ۱۶ رقم */
   cardNumber?: string;
+  /** شماره شبا (اختیاری) — IR + ۲۴ رقم */
+  iban?: string;
+  /** نام صاحب حساب — روی کارت نمایش داده می‌شود و برای ارسال به مشتری استفاده می‌شود */
+  holderName?: string;
+  /** نام بانک — اگر خالی باشد از روی شماره کارت تشخیص داده می‌شود */
+  bankName?: string;
   /** موجودی اولیه هنگام تعریف حساب */
   openingBalance: number;
   createdAt: number;
@@ -1486,7 +1566,10 @@ export type AccountTx = {
 export function accountBalance(account: Account, txs: AccountTx[]): number {
   return txs
     .filter((t) => t.accountId === account.id)
-    .reduce((sum, t) => sum + (t.type === "deposit" ? t.amount : -t.amount), account.openingBalance);
+    .reduce(
+      (sum, t) => sum + (t.type === "deposit" ? t.amount : -t.amount),
+      account.openingBalance,
+    );
 }
 
 /** نمایش پوشیده‌ی شماره کارت، مثلاً «•••• •••• •••• ۱۲۳۴» */
@@ -1509,13 +1592,22 @@ export const accounts = {
 
   update: (updated: Account) => {
     const list = read<Account[]>(ACCOUNTS_KEY, []);
-    write(ACCOUNTS_KEY, list.map((a) => (a.id === updated.id ? updated : a)));
+    write(
+      ACCOUNTS_KEY,
+      list.map((a) => (a.id === updated.id ? updated : a)),
+    );
   },
 
   /** حذف حساب همراه با تمام تراکنش‌های مربوط به آن */
   remove: (id: string) => {
-    write(ACCOUNTS_KEY, read<Account[]>(ACCOUNTS_KEY, []).filter((a) => a.id !== id));
-    write(ACCOUNT_TXS_KEY, read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.accountId !== id));
+    write(
+      ACCOUNTS_KEY,
+      read<Account[]>(ACCOUNTS_KEY, []).filter((a) => a.id !== id),
+    );
+    write(
+      ACCOUNT_TXS_KEY,
+      read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.accountId !== id),
+    );
   },
 };
 
@@ -1531,11 +1623,17 @@ export const accountTxs = {
 
   update: (updated: AccountTx) => {
     const list = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
-    write(ACCOUNT_TXS_KEY, list.map((t) => (t.id === updated.id ? updated : t)));
+    write(
+      ACCOUNT_TXS_KEY,
+      list.map((t) => (t.id === updated.id ? updated : t)),
+    );
   },
 
   remove: (id: string) => {
-    write(ACCOUNT_TXS_KEY, read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.id !== id));
+    write(
+      ACCOUNT_TXS_KEY,
+      read<AccountTx[]>(ACCOUNT_TXS_KEY, []).filter((t) => t.id !== id),
+    );
   },
 };
 
@@ -1595,7 +1693,10 @@ export const production = {
   },
 
   remove: (id: string) => {
-    write(PRODUCTION_KEY, read<ProductionEvent[]>(PRODUCTION_KEY, []).filter((e) => e.id !== id));
+    write(
+      PRODUCTION_KEY,
+      read<ProductionEvent[]>(PRODUCTION_KEY, []).filter((e) => e.id !== id),
+    );
   },
 };
 
@@ -1698,7 +1799,11 @@ export const customers = {
    * ثبت خودکار بدهی برای فاکتور نسیه. مشتری موجود (بر اساس تلفن یا نام) پیدا
    * می‌شود و در غیر این صورت ساخته می‌شود.
    */
-  recordInvoiceDebt: (info: CustomerInfo, inv: Invoice, opts?: { amount?: number; note?: string }) => {
+  recordInvoiceDebt: (
+    info: CustomerInfo,
+    inv: Invoice,
+    opts?: { amount?: number; note?: string },
+  ) => {
     const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
     if (!name && !info.phone?.trim()) return;
     const debtAmount = Math.max(0, Math.round(opts?.amount ?? inv.total));
@@ -1791,7 +1896,9 @@ function todayStartTs(): number {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tehran",
-    year: "numeric", month: "2-digit", day: "2-digit",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   }).format(now);
   return new Date(parts + "T00:00:00+03:30").getTime();
 }
@@ -1863,7 +1970,12 @@ export const students = {
   getAll: () => read<Student[]>(STUDENTS_KEY, []),
   save: (list: Student[]) => write(STUDENTS_KEY, list),
 
-  add: (s: Omit<Student, "id" | "createdAt" | "payments" | "nextDueAt" | "active"> & { nextDueAt?: number; active?: boolean }): Student => {
+  add: (
+    s: Omit<Student, "id" | "createdAt" | "payments" | "nextDueAt" | "active"> & {
+      nextDueAt?: number;
+      active?: boolean;
+    },
+  ): Student => {
     const nextDueAt = s.nextDueAt ?? s.startDate + s.periodDays * 86_400_000;
     const created: Student = {
       ...s,
@@ -1879,11 +1991,17 @@ export const students = {
 
   update: (updated: Student) => {
     const list = read<Student[]>(STUDENTS_KEY, []);
-    write(STUDENTS_KEY, list.map((s) => (s.id === updated.id ? updated : s)));
+    write(
+      STUDENTS_KEY,
+      list.map((s) => (s.id === updated.id ? updated : s)),
+    );
   },
 
   remove: (id: string) => {
-    write(STUDENTS_KEY, read<Student[]>(STUDENTS_KEY, []).filter((s) => s.id !== id));
+    write(
+      STUDENTS_KEY,
+      read<Student[]>(STUDENTS_KEY, []).filter((s) => s.id !== id),
+    );
   },
 
   /** ثبت پرداخت و پیش‌بردن سررسید بعدی */
@@ -1911,13 +2029,22 @@ export const students = {
   },
 
   /** پرداخت یک قسط مشخص */
-  payInstallment: (studentId: string, installmentId: string, opts?: { amount?: number; note?: string }) => {
+  payInstallment: (
+    studentId: string,
+    installmentId: string,
+    opts?: { amount?: number; note?: string },
+  ) => {
     const list = read<Student[]>(STUDENTS_KEY, []);
     const next = list.map((s) => {
       if (s.id !== studentId) return s;
       const installments = (s.installments ?? []).map((i) =>
         i.id === installmentId && !i.paidAt
-          ? { ...i, paidAt: Date.now(), paidAmount: opts?.amount ?? i.amount, note: opts?.note ?? i.note }
+          ? {
+              ...i,
+              paidAt: Date.now(),
+              paidAmount: opts?.amount ?? i.amount,
+              note: opts?.note ?? i.note,
+            }
           : i,
       );
       const target = installments.find((i) => i.id === installmentId);
@@ -2011,7 +2138,9 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
         quantity: 1,
         buyPrice: p.buyPrice,
         unit: p.unit,
-        discountPercent: hasDiscount ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0)) : undefined,
+        discountPercent: hasDiscount
+          ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0))
+          : undefined,
         originalPrice: hasDiscount ? p.price : undefined,
       },
     ];
@@ -2044,7 +2173,9 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
         quantity: qty,
         buyPrice: p.buyPrice,
         unit: p.unit,
-        discountPercent: hasDiscount ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0)) : undefined,
+        discountPercent: hasDiscount
+          ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0))
+          : undefined,
         originalPrice: hasDiscount ? p.price : undefined,
       },
     ];
@@ -2061,7 +2192,7 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
 export function applyProductDiscount(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent) || 0));
   if (!d) return p.price;
-  return Math.round(p.price * (100 - d) / 100);
+  return Math.round((p.price * (100 - d)) / 100);
 }
 
 /**
@@ -2112,8 +2243,12 @@ export type CurrencyUnit = "toman" | "rial";
 let cachedCurrencyUnit: CurrencyUnit | null = null;
 if (typeof window !== "undefined") {
   // با هر تغییر تنظیمات (یا تعویض کاربر) کش واحد نمایش باطل می‌شود
-  window.addEventListener("store-change", () => { cachedCurrencyUnit = null; });
-  window.addEventListener("storage", () => { cachedCurrencyUnit = null; });
+  window.addEventListener("store-change", () => {
+    cachedCurrencyUnit = null;
+  });
+  window.addEventListener("storage", () => {
+    cachedCurrencyUnit = null;
+  });
 }
 
 export function getCurrencyUnit(): CurrencyUnit {
@@ -2143,21 +2278,27 @@ export function formatToman(n: number): string {
 // Independent of the host ICU calendar so results are identical across browsers/OSes and
 // always match the official Iranian Solar Hijri calendar.
 
-function div(a: number, b: number): number { return ~~(a / b); }
+function div(a: number, b: number): number {
+  return ~~(a / b);
+}
 
 /** Convert Gregorian (gy, gm, gd) → Julian Day Number */
 function g2d(gy: number, gm: number, gd: number): number {
-  let d = div((gy + div(gm - 8, 6) + 100100) * 1461, 4)
-    + div(153 * ((gm + 9) % 12) + 2, 5)
-    + gd - 34840408;
+  let d =
+    div((gy + div(gm - 8, 6) + 100100) * 1461, 4) +
+    div(153 * ((gm + 9) % 12) + 2, 5) +
+    gd -
+    34840408;
   d = d - div(div(gy + 100100 + div(gm - 8, 6), 100) * 3, 4) + 752;
   return d;
 }
 
 /** Is a given Jalali year a leap year (Khayyam-Borkowski algorithm)? */
 function jalCal(jy: number): { leap: number; gy: number; march: number } {
-  const breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210,
-    1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178];
+  const breaks = [
+    -61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394,
+    2456, 3178,
+  ];
   const bl = breaks.length;
   const gy = jy + 621;
   let leapJ = -14;
@@ -2211,19 +2352,30 @@ function d2j(jdn: number): { jy: number; jm: number; jd: number } {
 function d2g(jdn: number): { gy: number; gm: number; gd: number } {
   let j = 4 * jdn + 139361631;
   j = j + div(div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908;
-  const i = div((j % 1461), 4) * 5 + 308;
+  const i = div(j % 1461, 4) * 5 + 308;
   const gd = div(i % 153, 5) + 1;
-  const gm = ((div(i, 153)) % 12) + 1;
+  const gm = (div(i, 153) % 12) + 1;
   const gy = div(j, 1461) - 100100 + div(8 - gm, 6);
   return { gy, gm, gd };
 }
 
 /** Extract Gregorian y/m/d/h/m in Asia/Tehran regardless of host timezone. */
-function tehranParts(d: Date): { y: number; m: number; day: number; h: number; min: number; dow: number } {
+function tehranParts(d: Date): {
+  y: number;
+  m: number;
+  day: number;
+  h: number;
+  min: number;
+  dow: number;
+} {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Tehran",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
     weekday: "short",
   }).formatToParts(d);
   const map: Record<string, string> = {};
@@ -2245,14 +2397,30 @@ const FA_DIGITS = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
 function toFa(s: string | number): string {
   return String(s).replace(/[0-9]/g, (d) => FA_DIGITS[+d]);
 }
-function pad2(n: number): string { return n < 10 ? "0" + n : String(n); }
+function pad2(n: number): string {
+  return n < 10 ? "0" + n : String(n);
+}
 
-export const JMONTHS_LONG = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
-  "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+export const JMONTHS_LONG = [
+  "فروردین",
+  "اردیبهشت",
+  "خرداد",
+  "تیر",
+  "مرداد",
+  "شهریور",
+  "مهر",
+  "آبان",
+  "آذر",
+  "دی",
+  "بهمن",
+  "اسفند",
+];
 const JMONTHS_SHORT = JMONTHS_LONG; // Persian months don't have a distinct short form
 const WEEKDAYS_FA = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
 
-export function toJalali(ts: number | string | Date): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
+export function toJalali(
+  ts: number | string | Date,
+): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return null;
   const g = tehranParts(d);
@@ -2285,10 +2453,7 @@ export function formatJalaliShort(ts: number | string | Date): string {
 // Jalali → Julian Day Number (inverse of d2j)
 function j2d(jy: number, jm: number, jd: number): number {
   const r = jalCal(jy);
-  return g2d(r.gy, 3, r.march)
-    + (jm - 1) * 31
-    - div(jm, 7) * (jm - 7)
-    + jd - 1;
+  return g2d(r.gy, 3, r.march) + (jm - 1) * 31 - div(jm, 7) * (jm - 7) + jd - 1;
 }
 
 /** تعداد روزهای یک ماه شمسی (برای ساخت لیست انتخابی روز در فرم‌ها) */
@@ -2299,9 +2464,7 @@ export function jalaliMonthLength(jy: number, jm: number): number {
 }
 
 /** Convert a Jalali date (interpreted in Asia/Tehran) to a UTC timestamp (ms). */
-export function jalaliToTimestamp(
-  jy: number, jm: number, jd: number, h = 0, min = 0,
-): number {
+export function jalaliToTimestamp(jy: number, jm: number, jd: number, h = 0, min = 0): number {
   const g = d2g(j2d(jy, jm, jd));
   // Guess as if the wall-clock were UTC, then correct by Tehran's offset.
   const guess = Date.UTC(g.gy, g.gm - 1, g.gd, h, min, 0);
@@ -2320,7 +2483,9 @@ export function parseJalaliInput(s: string): { jy: number; jm: number; jd: numbe
     .trim();
   const m = en.match(/^(\d{3,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
   if (!m) return null;
-  const jy = +m[1], jm = +m[2], jd = +m[3];
+  const jy = +m[1],
+    jm = +m[2],
+    jd = +m[3];
   if (jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
   return { jy, jm, jd };
 }
@@ -2335,7 +2500,8 @@ export function parseTimeInput(s: string): { h: number; min: number } | null {
     .trim();
   const withColon = en.match(/^(\d{1,2}):(\d{1,2})$/);
   if (withColon) {
-    const h = +withColon[1], min = +withColon[2];
+    const h = +withColon[1],
+      min = +withColon[2];
     if (h < 0 || h > 23 || min < 0 || min > 59) return null;
     return { h, min };
   }
@@ -2361,6 +2527,56 @@ export function toJalaliInputTime(ts: number | string | Date): string {
   const j = toJalali(ts);
   if (!j) return "";
   return `${pad2(j.h)}:${pad2(j.min)}`;
+}
+
+/** تاریخ میلادی YYYY-MM-DD به وقت تهران */
+export function isoDateFromTimestamp(ts: number | string | Date): string {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** تبدیل ورودی شمسی YYYY/MM/DD به ISO میلادی YYYY-MM-DD */
+export function jalaliInputToIsoDate(s: string): string {
+  const p = parseJalaliInput(s);
+  if (!p) return "";
+  const ts = jalaliToTimestamp(p.jy, p.jm, p.jd, 12, 0);
+  return isoDateFromTimestamp(ts);
+}
+
+/** ISO میلادی یا شمسی → رشته‌ی ویرایش شمسی YYYY/MM/DD */
+export function toJalaliInputFromDue(due?: string): string {
+  if (!due) return "";
+  const parsed = parseJalaliInput(due);
+  if (parsed) return `${parsed.jy}/${pad2(parsed.jm)}/${pad2(parsed.jd)}`;
+  return toJalaliInputDate(due);
+}
+
+/** نمایش تاریخ سررسید چک به شمسی، چه ISO باشد چه شمسی ذخیره‌شده */
+export function formatChequeDue(due?: string): string {
+  if (!due) return "";
+  const parsed = parseJalaliInput(due);
+  if (parsed) return `${toFa(parsed.jy)}/${toFa(pad2(parsed.jm))}/${toFa(pad2(parsed.jd))}`;
+  return formatJalaliDate(due);
+}
+
+/** timestamp سررسید چک برای یادآوری — ظهر به وقت تهران تا اختلاف روز پیش نیاید */
+export function chequeDueTimestamp(due?: string): number | null {
+  if (!due) return null;
+  const parsed = parseJalaliInput(due);
+  if (parsed) return jalaliToTimestamp(parsed.jy, parsed.jm, parsed.jd, 9, 0);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(due.trim());
+  if (iso) {
+    const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T09:00:00+03:30`);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const t = Date.parse(due);
+  return Number.isFinite(t) ? t : null;
 }
 
 /**

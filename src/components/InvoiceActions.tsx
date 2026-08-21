@@ -9,8 +9,17 @@ import { createPortal } from "react-dom";
 import { Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 import type { Invoice } from "@/lib/store";
-import { settings, formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, formatNumber, currencyLabel } from "@/lib/store";
-import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import {
+  settings,
+  formatJalaliDate,
+  formatJalaliDateTime,
+  PAYMENT_LABEL,
+  formatAmount,
+  formatNumber,
+  currencyLabel,
+  formatChequeDue,
+} from "@/lib/store";
+import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import {
   printHtml,
   OLD_APP_MESSAGE,
@@ -56,10 +65,9 @@ export function buildInvoiceHTML(
   if (tpl.enabled) return buildTemplatedInvoiceHTML(inv, tpl, fontSize, paper);
   const date = formatJalaliDateTime(inv.createdAt);
   const customer = inv.customer;
-  const customerName =
-    customer
-      ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
-      : "—";
+  const customerName = customer
+    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
+    : "—";
 
   const t = invoiceTotals(inv);
   const rows = inv.items
@@ -73,12 +81,10 @@ export function buildInvoiceHTML(
         }</td>
         <td class="qty">${qtyWithUnit(item)}</td>
         <td class="price">${
-          item.originalPrice
-            ? `<s>${formatAmount(item.originalPrice)}</s> `
-            : ""
+          item.originalPrice ? `<s>${formatAmount(item.originalPrice)}</s> ` : ""
         }${formatAmount(item.price)}</td>
         <td class="sum">${formatAmount(lineTotal(item))}</td>
-      </tr>`
+      </tr>`,
     )
     .join("");
 
@@ -86,14 +92,12 @@ export function buildInvoiceHTML(
   const fs = fontSize;
   const compact = paper === "A5";
   const fit = printFitAssets(paper);
-  const checkDue = inv.checkDueDate
-    ? new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        timeZone: "Asia/Tehran",
-      }).format(new Date(inv.checkDueDate))
-    : "";
+  const chequeRows = invoiceCheques(inv)
+    .map(
+      (c, i) =>
+        `<div class="row"><span>${escHtml(chequeLineLabel(c, i, formatChequeDue))}</span><span>${formatAmount(c.amount)} ${currencyLabel()}</span></div>`,
+    )
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -177,7 +181,7 @@ export function buildInvoiceHTML(
       ${t.tax ? `<div class="row"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${formatAmount(t.tax)} ${currencyLabel()}</span></div>` : ""}
       <div class="row grand"><span>جمع کل</span><span>${formatAmount(t.total)} ${currencyLabel()}</span></div>
       ${t.paid ? `<div class="row"><span>پرداخت نقدی</span><span>${formatAmount(t.paid)} ${currencyLabel()}</span></div>` : ""}
-      ${t.checkAmount ? `<div class="row"><span>مبلغ چک${inv.checkNumber ? ` (${escHtml(inv.checkNumber)})` : ""}${checkDue ? ` — سررسید ${escHtml(checkDue)}` : ""}</span><span>${formatAmount(t.checkAmount)} ${currencyLabel()}</span></div>` : ""}
+      ${chequeRows || (t.checkAmount ? `<div class="row"><span>مبلغ چک${inv.checkNumber ? ` (${escHtml(inv.checkNumber)})` : ""}</span><span>${formatAmount(t.checkAmount)} ${currencyLabel()}</span></div>` : "")}
       ${t.remaining > 0 ? `<div class="row due"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${formatAmount(t.remaining)} ${currencyLabel()}</span></div>` : ""}
     </div>
   </div>
@@ -205,7 +209,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
       <div class="row">
         <div class="name">${it.name}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
         <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(lineTotal(it))}</span></div>
-      </div>`
+      </div>`,
     )
     .join("");
   return `<!DOCTYPE html>
@@ -256,7 +260,13 @@ ${t.discount ? `<div class="line"><span>تخفیف${t.discountPercent ? ` (${for
 ${t.tax ? `<div class="line"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${fmt(t.tax)}</span></div>` : ""}
 <div class="total"><span>جمع کل</span><span>${fmt(t.total)} ${currencyLabel()}</span></div>
 ${t.paid ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(t.paid)}</span></div>` : ""}
-${t.checkAmount ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
+${invoiceCheques(inv)
+  .map(
+    (c, i) =>
+      `<div class="line"><span>${escHtml(chequeLineLabel(c, i, formatChequeDue))}</span><span>${fmt(c.amount)}</span></div>`,
+  )
+  .join("")}
+${t.checkAmount && invoiceCheques(inv).length === 0 ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
 ${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${fmt(t.remaining)}</span></div>` : ""}
 <div class="foot">با تشکر از خرید شما</div>
 </body></html>`;
@@ -267,10 +277,9 @@ ${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "
 export function buildShareText(inv: Invoice): string {
   const date = formatJalaliDate(inv.createdAt);
   const customer = inv.customer;
-  const customerName =
-    customer
-      ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
-      : "";
+  const customerName = customer
+    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
+    : "";
   // متن اشتراکی هم باید دقیقاً همان اعداد فاکتور چاپی را نشان بدهد؛ قبلاً فقط
   // «جمع کل» را داشت و مشتری با جمع‌زدن ردیف‌ها به عدد دیگری می‌رسید.
   const t = invoiceTotals(inv);
@@ -282,7 +291,7 @@ export function buildShareText(inv: Invoice): string {
     `─────────────────`,
     ...inv.items.map(
       (item) =>
-        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(lineTotal(item))} ${currencyLabel()}`
+        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(lineTotal(item))} ${currencyLabel()}`,
     ),
     `─────────────────`,
     t.discount || t.tax ? `جمع اقلام: ${formatAmount(t.subtotal)} ${currencyLabel()}` : "",
@@ -294,7 +303,13 @@ export function buildShareText(inv: Invoice): string {
       : "",
     `💰 جمع کل: ${formatAmount(t.total)} ${currencyLabel()}`,
     t.paid ? `پرداخت نقدی: ${formatAmount(t.paid)} ${currencyLabel()}` : "",
-    t.checkAmount ? `مبلغ چک: ${formatAmount(t.checkAmount)} ${currencyLabel()}` : "",
+    ...invoiceCheques(inv).map(
+      (c, i) =>
+        `${chequeLineLabel(c, i, formatChequeDue)}: ${formatAmount(c.amount)} ${currencyLabel()}`,
+    ),
+    t.checkAmount && invoiceCheques(inv).length === 0
+      ? `مبلغ چک: ${formatAmount(t.checkAmount)} ${currencyLabel()}`
+      : "",
     t.remaining > 0 ? `مانده: ${formatAmount(t.remaining)} ${currencyLabel()}` : "",
   ].filter(Boolean);
   return lines.join("\n");
@@ -477,45 +492,45 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
 
       {paperMenu &&
         createPortal(
-        <div
-          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 p-4 sm:items-center"
-          onClick={() => setPaperMenu(false)}
-        >
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xl"
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 p-4 sm:items-center"
+            onClick={() => setPaperMenu(false)}
           >
-            <div className="text-sm font-bold">اندازه کاغذ چاپ</div>
-            <p className="text-[11px] leading-5 text-muted-foreground">
-              متن فاکتور روی کاغذ انتخابی در یک صفحه جا می‌گیرد و به صفحه دوم نمی‌رود.
-            </p>
-            <div className="grid gap-1.5">
-              {PAPER_SIZES.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => void handlePrint(p.id)}
-                  className={`rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                    paper === p.id
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border bg-background hover:bg-accent"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setPaperMenu(false)}
-              className="w-full rounded-xl border border-border py-2 text-sm"
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xl"
             >
-              انصراف
-            </button>
-          </div>
-        </div>,
-        document.body,
-      )}
+              <div className="text-sm font-bold">اندازه کاغذ چاپ</div>
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                متن فاکتور روی کاغذ انتخابی در یک صفحه جا می‌گیرد و به صفحه دوم نمی‌رود.
+              </p>
+              <div className="grid gap-1.5">
+                {PAPER_SIZES.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => void handlePrint(p.id)}
+                    className={`rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                      paper === p.id
+                        ? "bg-primary text-primary-foreground"
+                        : "border border-border bg-background hover:bg-accent"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaperMenu(false)}
+                className="w-full rounded-xl border border-border py-2 text-sm"
+              >
+                انصراف
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {messaging && (
         <InvoiceMessageDialog

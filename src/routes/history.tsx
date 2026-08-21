@@ -5,21 +5,56 @@ import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseCard } from "@/routes/purchases";
 import {
-  invoice, products, purchases, formatToman, formatNumber, formatJalaliDateTime, settings,
-  PAYMENT_LABEL, parseNumberInput, applyProductDiscount, recalc, isWeightUnit,
-  toJalaliInputDate, toJalaliInputTime, parseJalaliInput, parseTimeInput, jalaliToTimestamp, toJalali,
-  type Invoice, type InvoiceItem, type Product, type PaymentMethod, type Purchase,
+  invoice,
+  products,
+  purchases,
+  formatToman,
+  formatNumber,
+  formatJalaliDateTime,
+  settings,
+  PAYMENT_LABEL,
+  parseNumberInput,
+  applyProductDiscount,
+  recalc,
+  isWeightUnit,
+  toJalaliInputDate,
+  toJalaliInputTime,
+  parseJalaliInput,
+  parseTimeInput,
+  jalaliToTimestamp,
+  toJalali,
+  formatChequeDue,
+  type Invoice,
+  type InvoiceItem,
+  type Product,
+  type PaymentMethod,
+  type Purchase,
 } from "@/lib/store";
-import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import {
+  invoiceTotals,
+  lineTotal,
+  invoiceCheques,
+  withSyncedChequeFields,
+} from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import {
   History as HistoryIcon,
-  ChevronDown, ChevronUp,
-  User, Pencil, Trash2, Check, X, Calendar,
-  Search, PlusCircle, Wallet,
-  Receipt, ShoppingBag,
+  ChevronDown,
+  ChevronUp,
+  User,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  Calendar,
+  Search,
+  PlusCircle,
+  Wallet,
+  Receipt,
+  ShoppingBag,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -38,10 +73,22 @@ export const Route = createFileRoute("/history")({
 
 /** یک سطر از خلاصه‌ی مبالغ فاکتور */
 function Row({
-  label, value, bold, tone,
-}: { label: string; value: string; bold?: boolean; tone?: "primary" | "destructive" }) {
+  label,
+  value,
+  bold,
+  tone,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  tone?: "primary" | "destructive";
+}) {
   const color =
-    tone === "primary" ? "text-primary" : tone === "destructive" ? "text-destructive" : "text-foreground";
+    tone === "primary"
+      ? "text-primary"
+      : tone === "destructive"
+        ? "text-destructive"
+        : "text-foreground";
   return (
     <div className="flex justify-between gap-2">
       <span className="text-muted-foreground">{label}</span>
@@ -66,7 +113,9 @@ function EditableItem({
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{item.name}</div>
-          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(lineTotal(item))}</div>
+          <div className="text-[11px] text-muted-foreground">
+            جمع: {formatToman(lineTotal(item))}
+          </div>
         </div>
         <QuantityStepper
           value={item.quantity}
@@ -89,7 +138,9 @@ function EditableItem({
         <input
           inputMode="numeric"
           value={item.price.toLocaleString("fa-IR")}
-          onChange={(e) => onChange({ ...item, price: Math.max(0, parseNumberInput(e.target.value)) })}
+          onChange={(e) =>
+            onChange({ ...item, price: Math.max(0, parseNumberInput(e.target.value)) })
+          }
           className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
         />
         <span className="text-[11px] text-muted-foreground">تومان</span>
@@ -149,15 +200,20 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const saveEdit = () => {
     // پارس تاریخ/ساعت شمسی
     const jd = parseJalaliInput(dateStr);
-    if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
+    if (!jd) {
+      setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲");
+      return;
+    }
     // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
     const prevTime = toJalali(saved.createdAt);
-    const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
+    const tm =
+      parseTimeInput(timeStr) ??
+      (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
     // بازمحاسبه با recalc — تخفیف فاکتور (درصدی یا مبلغی) حفظ و دوباره اعمال
     // می‌شود. قبلاً اینجا فقط جمع خام اقلام حساب می‌شد و تخفیفِ فاکتور بعد از هر
     // ویرایش از جمع کل حذف می‌شد، در حالی‌که سطر «تخفیف» روی فاکتور چاپی می‌ماند.
-    const updated = recalc({ ...draft, createdAt: newCreatedAt });
+    const updated = recalc(withSyncedChequeFields({ ...draft, createdAt: newCreatedAt }));
     invoice.updateHistory(updated);
     setSaved(updated);
     setDraft(updated);
@@ -189,7 +245,12 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       ...d,
       items: [
         ...d.items,
-        { productId: `manual-${Date.now()}`, name, price: manualPrice, quantity: Math.max(1, manualQty) },
+        {
+          productId: `manual-${Date.now()}`,
+          name,
+          price: manualPrice,
+          quantity: Math.max(1, manualQty),
+        },
       ],
     }));
     setManualName("");
@@ -203,11 +264,26 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       const exists = d.items.find((i) => i.productId === p.id);
       const effective = applyProductDiscount(p);
       if (exists) {
-        return { ...d, items: d.items.map((i) => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i) };
+        return {
+          ...d,
+          items: d.items.map((i) =>
+            i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i,
+          ),
+        };
       }
       return {
         ...d,
-        items: [...d.items, { productId: p.id, name: p.name, price: effective, quantity: 1, buyPrice: p.buyPrice, unit: p.unit }],
+        items: [
+          ...d.items,
+          {
+            productId: p.id,
+            name: p.name,
+            price: effective,
+            quantity: 1,
+            buyPrice: p.buyPrice,
+            unit: p.unit,
+          },
+        ],
       };
     });
     setAddQuery("");
@@ -237,7 +313,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
         >
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="break-words text-sm font-semibold text-primary">{formatToman(saved.total)}</span>
+              <span className="break-words text-sm font-semibold text-primary">
+                {formatToman(saved.total)}
+              </span>
               {hasCustomer && <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
               {saved.paymentMethod && (
                 <span className="rounded-md bg-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -249,12 +327,17 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               {formatJalaliDateTime(saved.createdAt)} · {saved.items.length} قلم
             </div>
           </div>
-          {isOpen
-            ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+          {isOpen ? (
+            <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
         </button>
 
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="mt-2 flex flex-wrap items-center justify-end gap-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           <InvoiceActions inv={printInv} size="sm" />
 
           <button
@@ -281,14 +364,15 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       {/* محتوا */}
       {isOpen && (
         <div className="border-t border-border px-4 pb-4 pt-3 space-y-3">
-
           {/* اطلاعات مشتری */}
           {hasCustomer && !editing && (
             <div className="rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">مشتری: </span>
               {[customer?.firstName, customer?.lastName].filter(Boolean).join(" ")}
               {customer?.phone && (
-                <span className="mr-2" dir="ltr">{customer.phone}</span>
+                <span className="mr-2" dir="ltr">
+                  {customer.phone}
+                </span>
               )}
             </div>
           )}
@@ -304,8 +388,13 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               )}
               <ul className="space-y-1">
                 {saved.items.map((item) => (
-                  <li key={item.productId} className="flex justify-between text-xs text-muted-foreground">
-                    <span>{item.name} × {item.quantity.toLocaleString("fa-IR")}</span>
+                  <li
+                    key={item.productId}
+                    className="flex justify-between text-xs text-muted-foreground"
+                  >
+                    <span>
+                      {item.name} × {item.quantity.toLocaleString("fa-IR")}
+                    </span>
                     <span>{formatToman(lineTotal(item))}</span>
                   </li>
                 ))}
@@ -313,7 +402,8 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               {/* خلاصه‌ی مبالغ — عیناً همان چیزی که روی فاکتور چاپی می‌آید */}
               {(() => {
                 const t = invoiceTotals(saved);
-                const showBreakdown = t.discount > 0 || t.tax > 0 || t.paid > 0 || t.checkAmount > 0;
+                const showBreakdown =
+                  t.discount > 0 || t.tax > 0 || t.paid > 0 || t.checkAmount > 0;
                 if (!showBreakdown) return null;
                 return (
                   <div className="space-y-1 rounded-lg border border-border bg-background px-3 py-2 text-xs">
@@ -333,7 +423,16 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                     )}
                     <Row label="جمع کل" value={formatToman(t.total)} bold />
                     {t.paid > 0 && <Row label="پرداخت نقدی" value={formatToman(t.paid)} />}
-                    {t.checkAmount > 0 && <Row label="مبلغ چک" value={formatToman(t.checkAmount)} />}
+                    {invoiceCheques(saved).map((c, i) => (
+                      <Row
+                        key={c.id}
+                        label={`چک ${formatNumber(i + 1)}${c.bankName ? ` · ${c.bankName}` : ""}${c.dueDate ? ` — ${formatChequeDue(c.dueDate)}` : ""}${c.sayadi ? ` · صیادی ${c.sayadi}` : c.serial ? ` · ${c.serial}` : ""}`}
+                        value={formatToman(c.amount)}
+                      />
+                    ))}
+                    {t.checkAmount > 0 && invoiceCheques(saved).length === 0 && (
+                      <Row label="مبلغ چک" value={formatToman(t.checkAmount)} />
+                    )}
                     {t.remaining > 0 && (
                       <Row label="مانده" value={formatToman(t.remaining)} tone="destructive" />
                     )}
@@ -354,7 +453,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <div className="space-y-1.5">
                   <JalaliDateSelect
                     value={dateStr}
-                    onChange={(v) => { setDateStr(v); setDateErr(null); }}
+                    onChange={(v) => {
+                      setDateStr(v);
+                      setDateErr(null);
+                    }}
                     yearsBack={3}
                   />
                   <TimeSelect value={timeStr} onChange={setTimeStr} />
@@ -367,7 +469,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <input
                   value={draft.customer?.firstName ?? ""}
                   onChange={(e) =>
-                    setDraft((d) => ({ ...d, customer: { ...d.customer, firstName: e.target.value } }))
+                    setDraft((d) => ({
+                      ...d,
+                      customer: { ...d.customer, firstName: e.target.value },
+                    }))
                   }
                   placeholder="نام"
                   className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
@@ -375,7 +480,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <input
                   value={draft.customer?.lastName ?? ""}
                   onChange={(e) =>
-                    setDraft((d) => ({ ...d, customer: { ...d.customer, lastName: e.target.value } }))
+                    setDraft((d) => ({
+                      ...d,
+                      customer: { ...d.customer, lastName: e.target.value },
+                    }))
                   }
                   placeholder="نام خانوادگی"
                   className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
@@ -397,12 +505,27 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <Wallet className="h-3.5 w-3.5" /> روش پرداخت
                 </div>
-                <div className="flex gap-1.5">
-                  {(["cash","card","credit"] as PaymentMethod[]).map((m) => (
+                <div className="flex flex-wrap gap-1.5">
+                  {(["cash", "card", "credit", "check"] as PaymentMethod[]).map((m) => (
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setDraft((d) => ({ ...d, paymentMethod: m }))}
+                      onClick={() =>
+                        setDraft((d) => {
+                          if (m === "check" && invoiceCheques(d).length === 0) {
+                            return {
+                              ...d,
+                              paymentMethod: m,
+                              cheques: [
+                                emptyCheque({
+                                  amount: invoiceTotals(d).total - (d.paidAmount || 0),
+                                }),
+                              ],
+                            };
+                          }
+                          return { ...d, paymentMethod: m };
+                        })
+                      }
                       className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                         draft.paymentMethod === m
                           ? "bg-primary text-primary-foreground"
@@ -413,6 +536,20 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                     </button>
                   ))}
                 </div>
+                {draft.paymentMethod === "check" && (
+                  <ChequeEditor
+                    cheques={invoiceCheques(draft).map((c) =>
+                      c.id === "legacy" ? { ...c, id: `ch-${c.serial || c.dueDate || "1"}` } : c,
+                    )}
+                    onChange={(next) =>
+                      setDraft((d) => withSyncedChequeFields({ ...d, cheques: next }))
+                    }
+                    remaining={Math.max(0, invoiceTotals(draft).total - (draft.paidAmount || 0))}
+                    customerName={[draft.customer?.firstName, draft.customer?.lastName]
+                      .filter(Boolean)
+                      .join(" ")}
+                  />
+                )}
               </div>
 
               {/* توضیحات */}
@@ -457,7 +594,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                           className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
                         >
                           <span className="truncate">{p.name}</span>
-                          <span className="shrink-0 text-muted-foreground">{formatToman(applyProductDiscount(p))}</span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {formatToman(applyProductDiscount(p))}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -492,7 +631,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                       <input
                         inputMode="numeric"
                         value={formatNumber(manualQty)}
-                        onChange={(e) => setManualQty(Math.max(1, parseNumberInput(e.target.value) || 1))}
+                        onChange={(e) =>
+                          setManualQty(Math.max(1, parseNumberInput(e.target.value) || 1))
+                        }
                         placeholder="تعداد"
                         className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
                       />
@@ -507,7 +648,12 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => { setShowManual(false); setManualName(""); setManualPrice(0); setManualQty(1); }}
+                        onClick={() => {
+                          setShowManual(false);
+                          setManualName("");
+                          setManualPrice(0);
+                          setManualQty(1);
+                        }}
                         className="rounded-lg border border-border px-3 py-1.5 text-[11px]"
                       >
                         لغو
@@ -527,7 +673,11 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                       value={draft.discountPercent ? formatNumber(draft.discountPercent) : ""}
                       onChange={(e) => {
                         const v = Math.min(100, Math.max(0, parseNumberInput(e.target.value)));
-                        setDraft((d) => ({ ...d, discountPercent: v || undefined, discountAmount: undefined }));
+                        setDraft((d) => ({
+                          ...d,
+                          discountPercent: v || undefined,
+                          discountAmount: undefined,
+                        }));
                       }}
                       placeholder="درصد"
                       className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
@@ -540,7 +690,11 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                       value={draft.discountAmount ? formatNumber(draft.discountAmount) : ""}
                       onChange={(e) => {
                         const v = Math.max(0, parseNumberInput(e.target.value));
-                        setDraft((d) => ({ ...d, discountAmount: v || undefined, discountPercent: undefined }));
+                        setDraft((d) => ({
+                          ...d,
+                          discountAmount: v || undefined,
+                          discountPercent: undefined,
+                        }));
                       }}
                       placeholder="مبلغ"
                       className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
@@ -552,7 +706,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
               {/* مالیات کل فاکتور — درصدی و اختیاری، روی «جمع اقلام − تخفیف» */}
               <div className="rounded-xl border border-border bg-background p-2">
-                <div className="mb-1.5 text-[11px] text-muted-foreground">مالیات کل فاکتور (اختیاری)</div>
+                <div className="mb-1.5 text-[11px] text-muted-foreground">
+                  مالیات کل فاکتور (اختیاری)
+                </div>
                 <div className="flex items-center gap-1">
                   <input
                     inputMode="numeric"
@@ -624,7 +780,10 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmDelete(false);
+          }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -636,21 +795,32 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
             </p>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id, { restock: true }); setConfirmDelete(false); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                invoice.deleteFromHistory(saved.id, { restock: true });
+                setConfirmDelete(false);
+              }}
               className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
             >
               حذف فاکتور + برگشت کالاها به انبار
             </button>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); invoice.deleteFromHistory(saved.id); setConfirmDelete(false); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                invoice.deleteFromHistory(saved.id);
+                setConfirmDelete(false);
+              }}
               className="w-full rounded-xl border border-destructive/40 py-2.5 text-sm font-medium text-destructive"
             >
               فقط حذف فاکتور (بدون تغییر موجودی)
             </button>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDelete(false);
+              }}
               className="w-full rounded-xl border border-border py-2.5 text-sm"
             >
               انصراف
@@ -702,7 +872,7 @@ export function HistoryPageInner() {
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list, searchQ, range]);
 
   const filteredPurchases = useMemo(() => {
@@ -714,7 +884,7 @@ export function HistoryPageInner() {
       p.supplierName,
       ...p.items.map((i) => i.name),
     ]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [purchaseList, searchQ, range]);
 
   const activeList = category === "sale" ? list : purchaseList;
@@ -726,14 +896,18 @@ export function HistoryPageInner() {
 
   return (
     <Layout>
-      <h1 data-tour="history-intro" className="mb-3 text-lg font-bold">تاریخچه فاکتورها</h1>
+      <h1 data-tour="history-intro" className="mb-3 text-lg font-bold">
+        تاریخچه فاکتورها
+      </h1>
 
       {/* دسته‌بندی: فاکتور فروش / فاکتور خرید */}
       <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">
         <button
           onClick={() => setCategory("sale")}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
-            category === "sale" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            category === "sale"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
           <Receipt className="h-3.5 w-3.5" />
@@ -742,7 +916,9 @@ export function HistoryPageInner() {
         <button
           onClick={() => setCategory("purchase")}
           className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
-            category === "purchase" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            category === "purchase"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
           }`}
         >
           <ShoppingBag className="h-3.5 w-3.5" />
@@ -762,7 +938,10 @@ export function HistoryPageInner() {
                 className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-8 text-sm outline-none focus:border-primary"
               />
               {searchQ && (
-                <button onClick={() => setSearchQ("")} className="absolute left-2 top-2.5 text-muted-foreground">
+                <button
+                  onClick={() => setSearchQ("")}
+                  className="absolute left-2 top-2.5 text-muted-foreground"
+                >
                   <X className="h-4 w-4" />
                 </button>
               )}
@@ -825,7 +1004,10 @@ export function HistoryPageInner() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setFromDate(""); setToDate(""); }}
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                  }}
                   className="rounded-lg border border-border px-2.5 py-1 text-[11px] text-muted-foreground"
                 >
                   حذف فیلتر
@@ -840,7 +1022,9 @@ export function HistoryPageInner() {
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <HistoryIcon className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
-            {category === "sale" ? "هنوز فاکتور فروشی ثبت نشده است." : "هنوز فاکتور خریدی ثبت نشده است."}
+            {category === "sale"
+              ? "هنوز فاکتور فروشی ثبت نشده است."
+              : "هنوز فاکتور خریدی ثبت نشده است."}
           </p>
         </div>
       ) : activeFiltered.length === 0 ? (
@@ -851,7 +1035,9 @@ export function HistoryPageInner() {
       ) : (
         <>
           {(searchQ.trim() || range.from || range.to) && (
-            <p className="mb-2 text-xs text-muted-foreground">{formatNumber(activeFiltered.length)} فاکتور یافت شد</p>
+            <p className="mb-2 text-xs text-muted-foreground">
+              {formatNumber(activeFiltered.length)} فاکتور یافت شد
+            </p>
           )}
           {category === "sale" ? (
             <ul className="space-y-2">
@@ -873,5 +1059,9 @@ export function HistoryPageInner() {
 }
 
 function HistoryPage() {
-  return <AuthGuard><HistoryPageInner /></AuthGuard>;
+  return (
+    <AuthGuard>
+      <HistoryPageInner />
+    </AuthGuard>
+  );
 }

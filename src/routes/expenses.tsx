@@ -842,45 +842,45 @@ function AccountsPanel() {
             const hasFace = !!(a.cardNumber || a.iban);
             return (
               <li key={a.id} className="rounded-2xl border border-border bg-card p-2.5 shadow-card">
-                <div className="flex items-start gap-1">
-                  <div className="min-w-0 flex-1">
-                    <IranianBankCard
-                      account={a}
-                      shopName={appSettings.shopName}
-                      balance={balance}
-                      expanded={hasFace ? cardOpen : true}
-                      onExpandedChange={(open) => {
-                        setOpenCardId(open ? a.id : null);
-                        if (!open) {
-                          setTxFormFor((id) => (id === a.id ? null : id));
-                          setOpenHistoryFor((id) => (id === a.id ? null : id));
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="flex shrink-0 gap-1 pt-1">
-                    <button
-                      onClick={() => {
-                        setEditingAccount(a);
-                        setShowAccountForm(false);
-                      }}
-                      className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
-                      title="ویرایش حساب"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`حساب «${a.name}» و تراکنش‌های آن حذف شود؟`))
-                          accountsStore.remove(a.id);
-                      }}
-                      className="grid h-7 w-7 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
-                      title="حذف حساب"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
+                <IranianBankCard
+                  account={a}
+                  shopName={appSettings.shopName}
+                  balance={balance}
+                  expanded={hasFace ? cardOpen : true}
+                  onExpandedChange={(open) => {
+                    setOpenCardId(open ? a.id : null);
+                    if (!open) {
+                      setTxFormFor((id) => (id === a.id ? null : id));
+                      setOpenHistoryFor((id) => (id === a.id ? null : id));
+                    }
+                  }}
+                  actions={
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingAccount(a);
+                          setShowAccountForm(false);
+                        }}
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
+                        title="ویرایش حساب"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(`حساب «${a.name}» و تراکنش‌های آن حذف شود؟`))
+                            accountsStore.remove(a.id);
+                        }}
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
+                        title="حذف حساب"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  }
+                />
 
                 {(!hasFace || cardOpen) && (
                   <div className="mt-2 flex gap-1.5">

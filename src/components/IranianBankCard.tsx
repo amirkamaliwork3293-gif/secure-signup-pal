@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Copy, Check, Share2, CreditCard, Landmark, ChevronDown } from "lucide-react";
 import type { Account } from "@/lib/store";
 import { formatToman, formatNumber } from "@/lib/store";
@@ -122,11 +122,12 @@ export function IranianBankCardFace({
   const holder = account.holderName || account.name;
   const theme = resolveCardTheme(account);
   const grouped = card ? formatCardNumberDisplay(card, false) : "";
+  const groups = grouped.split(/\s+/).filter(Boolean);
   const ink = theme.darkText ? "text-slate-800" : "text-white";
   const muted = theme.darkText ? "text-slate-500" : "text-white/70";
 
   return (
-    <div className="w-full md:mx-auto md:max-w-[20rem] [perspective:1100px]">
+    <div className="mx-auto w-full [perspective:900px] pb-2">
       <div className="relative aspect-[1.586/1] w-full" style={{ transform: "rotateX(7deg)" }}>
         <div
           className="absolute inset-x-3 bottom-0 h-4 rounded-full blur-md"
@@ -178,14 +179,22 @@ export function IranianBankCardFace({
 
             <div>
               {card ? (
-                <div className="font-mono text-[17px] font-semibold tracking-[0.2em] sm:text-[19px]">
-                  {grouped}
+                <div
+                  className="flex w-full justify-between gap-x-2 font-mono text-[17px] font-semibold tracking-[0.08em] tabular-nums sm:text-[19px]"
+                  dir="ltr"
+                >
+                  {groups.map((g, i) => (
+                    <span key={i}>{g}</span>
+                  ))}
                 </div>
               ) : (
                 <div className={`text-[11px] ${muted}`}>شماره کارت ثبت نشده</div>
               )}
               {iban && (
-                <div className={`mt-1 font-mono text-[10px] tracking-wide ${muted}`}>
+                <div
+                  className={`mt-1 truncate font-mono text-[10px] tracking-wide ${muted}`}
+                  dir="ltr"
+                >
                   {formatIbanDisplay(iban, false)}
                 </div>
               )}
@@ -208,12 +217,14 @@ export function IranianBankCard({
   balance,
   expanded,
   onExpandedChange,
+  actions,
 }: {
   account: Account;
   shopName?: string;
   balance?: number;
   expanded?: boolean;
   onExpandedChange?: (open: boolean) => void;
+  actions?: ReactNode;
 }) {
   const [copied, setCopied] = useState<"card" | "iban" | "all" | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -293,56 +304,60 @@ export function IranianBankCard({
             </div>
           )}
         </div>
+        {actions}
       </div>
     );
   }
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 rounded-xl px-1 py-1 text-right transition-colors hover:bg-accent/60"
-      >
-        <span
-          className="relative h-9 w-[3.35rem] shrink-0 overflow-hidden rounded-lg"
-          style={{
-            background: `linear-gradient(145deg, ${theme.from}, ${theme.to})`,
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,.35), 0 4px 8px -4px rgba(0,0,0,.25)",
-          }}
-          aria-hidden
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-1 py-1 text-right transition-colors hover:bg-accent/60"
         >
-          <span className="absolute -left-2 -top-3 h-7 w-7 rounded-full bg-white/25" />
           <span
-            className={`absolute bottom-1 left-1 font-mono text-[8px] tracking-wider ${
-              theme.darkText ? "text-slate-700" : "text-white/90"
-            }`}
-            dir="ltr"
+            className="relative h-9 w-[3.35rem] shrink-0 overflow-hidden rounded-lg"
+            style={{
+              background: `linear-gradient(145deg, ${theme.from}, ${theme.to})`,
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,.35), 0 4px 8px -4px rgba(0,0,0,.25)",
+            }}
+            aria-hidden
           >
-            {last4 ? formatNumber(last4) : "IBAN"}
+            <span className="absolute -left-2 -top-3 h-7 w-7 rounded-full bg-white/25" />
+            <span
+              className={`absolute bottom-1 left-1 font-mono text-[8px] tracking-wider ${
+                theme.darkText ? "text-slate-700" : "text-white/90"
+              }`}
+              dir="ltr"
+            >
+              {last4 ? formatNumber(last4) : "IBAN"}
+            </span>
           </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold leading-tight">
-            {account.name}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-semibold leading-tight">
+              {account.name}
+            </span>
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground" dir="ltr">
+              {bank ? `${bank}  ` : ""}
+              {last4 ? `•••• ${formatNumber(last4)}` : "شبا ثبت‌شده"}
+            </span>
           </span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground" dir="ltr">
-            {bank ? `${bank}  ` : ""}
-            {last4 ? `•••• ${formatNumber(last4)}` : "شبا ثبت‌شده"}
-          </span>
-        </span>
-        {typeof balance === "number" && (
-          <span
-            className={`shrink-0 text-[12px] font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}
-          >
-            {formatToman(balance)}
-          </span>
-        )}
-        <ChevronDown
-          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
+          {typeof balance === "number" && (
+            <span
+              className={`shrink-0 text-[12px] font-bold ${balance < 0 ? "text-destructive" : "text-foreground"}`}
+            >
+              {formatToman(balance)}
+            </span>
+          )}
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+        {actions}
+      </div>
 
       {open && (
         <div className="mt-3 space-y-3">

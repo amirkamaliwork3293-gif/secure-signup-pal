@@ -1545,6 +1545,11 @@ export type Account = {
   holderName?: string;
   /** نام بانک — اگر خالی باشد از روی شماره کارت تشخیص داده می‌شود */
   bankName?: string;
+  /**
+   * رنگ کارت انتخاب‌شده توسط کاربر.
+   * شناسه پالت (mint, sky, …) یا کد هگز مثل `#22D3EE`.
+   */
+  cardColor?: string;
   /** موجودی اولیه هنگام تعریف حساب */
   openingBalance: number;
   createdAt: number;

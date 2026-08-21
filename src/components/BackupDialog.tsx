@@ -418,6 +418,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           نام: a.name,
           "صاحب حساب": a.holderName ?? "",
           بانک: a.bankName ?? "",
+          "رنگ کارت": a.cardColor ?? "",
           "شماره کارت": a.cardNumber ?? "",
           شبا: a.iban ?? "",
           "موجودی اولیه": a.openingBalance,

@@ -34,7 +34,8 @@ import {
   type AccountTx,
 } from "@/lib/store";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
-import { IranianBankCard, MiniBankChip } from "@/components/IranianBankCard";
+import { IranianBankCard, MiniBankChip, CardColorPicker } from "@/components/IranianBankCard";
+import { defaultCardColorId } from "@/lib/card-theme";
 import { bankFromCardNumber, digitsOnly, IRAN_BANK_NAMES, normalizeIban } from "@/lib/iran-banks";
 import {
   Wallet,
@@ -780,6 +781,7 @@ function AccountsPanel() {
   const [txFormFor, setTxFormFor] = useState<string | null>(null);
   const [editingTx, setEditingTx] = useState<AccountTx | null>(null);
   const [openHistoryFor, setOpenHistoryFor] = useState<string | null>(null);
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
 
   const totalBalance = accountsList.reduce((s, a) => s + accountBalance(a, txsList), 0);
 
@@ -836,13 +838,27 @@ function AccountsPanel() {
                 </li>
               );
             }
+            const cardOpen = openCardId === a.id;
+            const hasFace = !!(a.cardNumber || a.iban);
             return (
-              <li key={a.id} className="rounded-2xl border border-border bg-card p-3 shadow-card">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
-                    {a.name}
+              <li key={a.id} className="rounded-2xl border border-border bg-card p-2.5 shadow-card">
+                <div className="flex items-start gap-1">
+                  <div className="min-w-0 flex-1">
+                    <IranianBankCard
+                      account={a}
+                      shopName={appSettings.shopName}
+                      balance={balance}
+                      expanded={hasFace ? cardOpen : true}
+                      onExpandedChange={(open) => {
+                        setOpenCardId(open ? a.id : null);
+                        if (!open) {
+                          setTxFormFor((id) => (id === a.id ? null : id));
+                          setOpenHistoryFor((id) => (id === a.id ? null : id));
+                        }
+                      }}
+                    />
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 gap-1 pt-1">
                     <button
                       onClick={() => {
                         setEditingAccount(a);
@@ -866,33 +882,33 @@ function AccountsPanel() {
                   </div>
                 </div>
 
-                <IranianBankCard account={a} shopName={appSettings.shopName} balance={balance} />
-
-                <div className="mt-2 flex gap-1.5">
-                  <button
-                    onClick={() => {
-                      setTxFormFor(txFormFor === a.id && !editingTx ? null : a.id);
-                      setEditingTx(null);
-                    }}
-                    className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-[11px] font-medium hover:bg-accent"
-                  >
-                    <ArrowDownCircle className="h-3.5 w-3.5 text-success" />
-                    <ArrowUpCircle className="h-3.5 w-3.5 text-destructive -mr-1" />
-                    ثبت واریز / برداشت
-                  </button>
-                  {accountTxs.length > 0 && (
+                {(!hasFace || cardOpen) && (
+                  <div className="mt-2 flex gap-1.5">
                     <button
-                      onClick={() => setOpenHistoryFor(openHistoryFor === a.id ? null : a.id)}
-                      className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                      onClick={() => {
+                        setTxFormFor(txFormFor === a.id && !editingTx ? null : a.id);
+                        setEditingTx(null);
+                      }}
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border py-1.5 text-[11px] font-medium hover:bg-accent"
                     >
-                      {openHistoryFor === a.id
-                        ? "بستن تاریخچه"
-                        : `تاریخچه (${formatNumber(accountTxs.length)})`}
+                      <ArrowDownCircle className="h-3.5 w-3.5 text-success" />
+                      <ArrowUpCircle className="h-3.5 w-3.5 text-destructive -mr-1" />
+                      ثبت واریز / برداشت
                     </button>
-                  )}
-                </div>
+                    {accountTxs.length > 0 && (
+                      <button
+                        onClick={() => setOpenHistoryFor(openHistoryFor === a.id ? null : a.id)}
+                        className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                      >
+                        {openHistoryFor === a.id
+                          ? "بستن تاریخچه"
+                          : `تاریخچه (${formatNumber(accountTxs.length)})`}
+                      </button>
+                    )}
+                  </div>
+                )}
 
-                {txFormFor === a.id && (
+                {(!hasFace || cardOpen) && txFormFor === a.id && (
                   <AccountTxForm
                     key={editingTx?.id ?? "new"}
                     accountId={a.id}
@@ -904,7 +920,7 @@ function AccountsPanel() {
                   />
                 )}
 
-                {openHistoryFor === a.id && (
+                {(!hasFace || cardOpen) && openHistoryFor === a.id && (
                   <ul className="mt-2 space-y-1 border-t border-border pt-2">
                     {accountTxs.map((t) => (
                       <li
@@ -987,6 +1003,7 @@ function AccountForm({
     initial?.bankName ?? bankFromCardNumber(initial?.cardNumber) ?? "",
   );
   const [openingBalance, setOpeningBalance] = useState(initial?.openingBalance ?? 0);
+  const [cardColor, setCardColor] = useState(initial?.cardColor ?? defaultCardColorId(initial));
   const [err, setErr] = useState<string | null>(null);
 
   const detected = bankFromCardNumber(cardNumber);
@@ -1012,6 +1029,7 @@ function AccountForm({
       cardNumber: card || undefined,
       iban: sheba || undefined,
       bankName: bankName.trim() || detected || undefined,
+      cardColor,
       openingBalance,
     });
   };
@@ -1067,6 +1085,9 @@ function AccountForm({
             </option>
           ))}
         </select>
+      </Field>
+      <Field label="رنگ کارت">
+        <CardColorPicker value={cardColor} onChange={setCardColor} />
       </Field>
       <Field label="موجودی اولیه (تومان)">
         <input

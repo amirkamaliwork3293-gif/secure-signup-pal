@@ -12,6 +12,7 @@
  *   reminder            یادآوری با تاریخ شمسی و ساعت
  *   open_invoice        باز کردن فاکتورهای یک مشتری
  *   query               سؤال گزارشی (فقط خواندن)
+ *   manual_ledger       ثبت فروش/سود/یادداشت روزانه بدون فاکتور
  *   invoice_item        پیش‌فرض: همان رفتار فعلی «ثبت صوتی فاکتور»
  *   unknown             هیچ‌کدام
  *
@@ -29,6 +30,8 @@ import {
   type Customer,
   type Expense,
   type Invoice,
+  type ManualLedgerEntry,
+  type ManualLedgerKind,
   type Product,
 } from "@/lib/store";
 import {
@@ -40,7 +43,12 @@ import {
   type ParsedCandidate,
 } from "@/lib/voice/persian-nlu";
 import { parseProductVoiceText, type ParsedProductItem } from "@/lib/voice/product-nlu";
-import { buildQueryAnswer, type QueryKind, type QueryRange, type QuerySpec } from "@/lib/voice/assistant-queries";
+import {
+  buildQueryAnswer,
+  type QueryKind,
+  type QueryRange,
+  type QuerySpec,
+} from "@/lib/voice/assistant-queries";
 
 // ─── انواع ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +57,8 @@ export type AssistantContext = {
   customers: Customer[];
   invoices: Invoice[];
   expenses: Expense[];
+  /** ثبت‌های دستی فروش/سود روز — برای پاسخ گزارش‌ها */
+  manualLedger?: ManualLedgerEntry[];
   /** «اکنون» — فقط برای تاریخ‌های نسبی و تست */
   now?: number;
 };
@@ -125,6 +135,15 @@ export type AssistantIntent =
       candidates: CustomerCandidate[];
       invoices: Invoice[];
       clearWinner: boolean;
+    }
+  | {
+      kind: "manual_ledger";
+      raw: string;
+      entryKind: ManualLedgerKind;
+      amount: number;
+      title: string;
+      at: number;
+      dateSpoken: boolean;
     }
   | { kind: "invoice_item"; raw: string; result: ParseResult }
   | { kind: "unknown"; raw: string; reason: string };
@@ -371,6 +390,11 @@ const RE_PRODUCT_ADD =
 const RE_TO_INVOICE = /به فاکتور|روی فاکتور|تو فاکتور/;
 const RE_OPEN_INVOICE =
   /فاکتور.{0,48}(باز کن|بازکن|نشون بده|نشان بده|بیار|بده ببینم|پیدا کن|چیه|چیست|کجاست)|باز کن.{0,24}فاکتور|(برو( به)?|ببر( به)?) فاکتور/;
+/** ثبت فروش/سود روزانه بدون فاکتور — جدا از سؤال «چقدر فروختم» */
+const RE_MANUAL_SALES = /فروش|فروشم|فروختم|درآمد|درامد/;
+const RE_MANUAL_PROFIT = /سود|سودم|سوددهی|سوداوری|درآوردم|در اوردم/;
+const RE_LEDGER_WRITE = /ثبت کن|ثبت بکن|بنویس|یادداشت|بزن تو گزارش/;
+const RE_QUESTION_MARKERS = /چقدر|چقد|چنده|چیه|چیست|گزارش|\bبگو\b/;
 
 /** نشانه‌ی سؤال / گزارش — برای جدا کردن پرسش از دستور ثبت */
 function looksLikeQuestion(norm: string): boolean {
@@ -460,13 +484,14 @@ function detectQuery(norm: string): QuerySpec | null {
     /چند\s*تا\s*بدهکار|چندتا بدهکار|تعداد بدهکار|بدهکارها|بدهکاران|جمع بدهی|چقدر طلب|طلبم چقدر/.test(
       norm,
     );
-  const genericCreditors = /چند\s*تا\s*طلبکار|چندتا طلبکار|طلبکارها|طلبکاران|جمع طلبکاری/.test(norm);
+  const genericCreditors = /چند\s*تا\s*طلبکار|چندتا طلبکار|طلبکارها|طلبکاران|جمع طلبکاری/.test(
+    norm,
+  );
   if (genericDebtors) return { kind: "debtors" };
   if (genericCreditors) return { kind: "creditors" };
 
   if (
-    (/(وضعیت حساب|حسابش|مانده حساب)/.test(norm) ||
-      (/(بدهکار|طلبکار|بدهی)/.test(norm) && q)) &&
+    (/(وضعیت حساب|حسابش|مانده حساب)/.test(norm) || (/(بدهکار|طلبکار|بدهی)/.test(norm) && q)) &&
     !genericDebtors &&
     !genericCreditors
   ) {
@@ -483,11 +508,7 @@ function detectQuery(norm: string): QuerySpec | null {
     return { kind: "profit", range };
   }
 
-  if (
-    /(فروش|فروختم|فروشم|درآمد)/.test(norm) &&
-    !RE_PRODUCT_ADD.test(norm) &&
-    reportCue
-  ) {
+  if (/(فروش|فروختم|فروشم|درآمد)/.test(norm) && !RE_PRODUCT_ADD.test(norm) && reportCue) {
     return { kind: "sales", range };
   }
 
@@ -653,6 +674,114 @@ const EXPENSE_NOISE = new Set([
 function isExpenseNoise(t: string): boolean {
   if (EXPENSE_NOISE.has(t) || isWhenNoise(t)) return true;
   return /^(هزینه|خرج)/.test(t);
+}
+
+const LEDGER_NOISE = new Set([
+  "است",
+  "هست",
+  "شد",
+  "شده",
+  "بود",
+  "بوده",
+  "میشه",
+  "بشه",
+  "من",
+  "رو",
+  "را",
+  "هم",
+  "مبلغ",
+  "ثبت",
+  "کن",
+  "بنویس",
+  "بزن",
+  "یه",
+  "یک",
+  "و",
+  "تو",
+  "در",
+  "گزارش",
+  "دفتر",
+  "داشتم",
+  "کردم",
+  "فروختم",
+  "فروش",
+  "فروشم",
+  "سود",
+  "سودم",
+  "سوددهی",
+  "درآمد",
+  "درامد",
+  "تومان",
+  "تومن",
+  "ریال",
+]);
+
+function isLedgerNoise(t: string): boolean {
+  if (LEDGER_NOISE.has(t) || isWhenNoise(t)) return true;
+  return /^(درآوردم|گیرم|یادداشت)/.test(t);
+}
+
+function hasSpokenMoney(norm: string): boolean {
+  const runs = collectAmountRuns(tokensOf(norm));
+  return runs.some((r) => r.hasAnchor || r.amount >= 1000);
+}
+
+/**
+ * «امروز صد میلیون فروش داشتم» ثبت است؛ «امروز چقدر فروش داشتم» سؤال است.
+ * مبلغ + (فروش/سود/درآمد/ثبت کن) و بدون واژه‌ی پرسشی.
+ */
+function looksLikeManualLedger(norm: string): boolean {
+  if (RE_QUESTION_MARKERS.test(norm)) return false;
+  if (RE_PRICE_EDIT.test(norm) || RE_PRODUCT_ADD.test(norm) || RE_REMINDER.test(norm)) return false;
+  if (RE_OPEN_INVOICE.test(norm) || RE_TO_INVOICE.test(norm)) return false;
+  if (
+    RE_LEDGER.test(norm) ||
+    RE_CREDITOR.test(norm) ||
+    RE_SETTLE.test(norm) ||
+    RE_DEBTOR.test(norm)
+  )
+    return false;
+  if (RE_EXPENSE.test(norm) && !RE_MANUAL_SALES.test(norm) && !RE_MANUAL_PROFIT.test(norm))
+    return false;
+  if (!hasSpokenMoney(norm)) return false;
+  if (RE_MANUAL_SALES.test(norm) || RE_MANUAL_PROFIT.test(norm) || RE_LEDGER_WRITE.test(norm))
+    return true;
+  // «امروز ۱۰۰ میلیون داشتم» بدون واژه فروش/سود — برای فروشنده معمولاً یعنی فروش روز
+  if (/(داشتم|کردم|بود)/.test(norm) && !looksLikeInvoiceCommand(norm)) return true;
+  return false;
+}
+
+function parseManualLedger(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
+  const now = ctx.now ?? Date.now();
+  const when = extractWhen(raw, now, 12);
+  const work = when.restNorm || norm;
+  const { amount, restTokens } = extractAmount(tokensOf(work));
+  if (amount <= 0) {
+    return {
+      kind: "unknown",
+      raw,
+      reason:
+        "مبلغ را نفهمیدم. مثلاً بگویید «امروز صد میلیون فروش داشتم» یا «پنجاه میلیون سود کردم».",
+    };
+  }
+  const hasSales = RE_MANUAL_SALES.test(norm);
+  const hasProfit = RE_MANUAL_PROFIT.test(norm);
+  let entryKind: ManualLedgerKind = "sales";
+  if (hasProfit && !hasSales) entryKind = "profit";
+  else if (hasSales) entryKind = "sales";
+  else if (RE_LEDGER_WRITE.test(norm) && !hasSales && !hasProfit) entryKind = "note";
+  const cleaned = joinClean(restTokens, isLedgerNoise);
+  const fallback =
+    entryKind === "profit" ? "سود روز" : entryKind === "note" ? "یادداشت روز" : "فروش روز";
+  return {
+    kind: "manual_ledger",
+    raw,
+    entryKind,
+    amount,
+    title: cleaned || fallback,
+    at: when.dateSpoken || when.timeSpoken ? when.at : now,
+    dateSpoken: when.dateSpoken,
+  };
 }
 
 const PRICE_EDIT_NOISE = new Set([
@@ -1190,13 +1319,14 @@ function parseOpenInvoice(raw: string, norm: string, ctx: AssistantContext): Ass
  * تشخیص نیت یک دستور صوتی. ترتیب بررسی مهم است:
  *   ۱) یادآوری
  *   ۲) باز کردن فاکتور — پیش از بدهی، چون «فاکتور آقای …» نام مشتری دارد
- *   ۳) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» / «چقدر سود داشتم» فقط سؤال است
- *   ۴) ویرایش قیمت
- *   ۵) افزودن محصول به فهرست کالاها
- *   ۶) بدهی / طلبکاری / تسویه مشتری
- *   ۷) هزینه
- *   ۸) فاکتور فقط اگر کالا تطبیق شد یا جمله واقعاً دستور ثبت کالا باشد
- *   ۹) وگرنه unknown با راهنما — نه «کالایی پیدا نشد»
+ *   ۳) ثبت فروش/سود دستی — پیش از سؤال، چون «امروز صد میلیون فروش داشتم» ثبت است نه پرسش
+ *   ۴) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» / «چقدر سود داشتم» فقط سؤال است
+ *   ۵) ویرایش قیمت
+ *   ۶) افزودن محصول به فهرست کالاها
+ *   ۷) بدهی / طلبکاری / تسویه مشتری
+ *   ۸) هزینه
+ *   ۹) فاکتور فقط اگر کالا تطبیق شد یا جمله واقعاً دستور ثبت کالا باشد
+ *   ۱۰) وگرنه unknown با راهنما — نه «کالایی پیدا نشد»
  */
 export function parseAssistantCommand(text: string, context: AssistantContext): AssistantIntent {
   const raw = (text ?? "").trim();
@@ -1205,6 +1335,7 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
 
   if (RE_REMINDER.test(norm)) return parseReminder(raw, norm, context);
   if (RE_OPEN_INVOICE.test(norm)) return parseOpenInvoice(raw, norm, context);
+  if (looksLikeManualLedger(norm)) return parseManualLedger(raw, norm, context);
 
   const query = detectQuery(norm);
   if (query) {
@@ -1217,6 +1348,7 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
         invoices: context.invoices,
         customers: context.customers,
         expenses: context.expenses,
+        manualLedger: context.manualLedger,
         now: context.now,
       }),
     };
@@ -1253,7 +1385,7 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
     kind: "unknown",
     raw,
     reason:
-      "متوجه نشدم. می‌توانید دستور ثبت بدهید (مثل «۲ تا نون» یا «آقای … بدهکار است») یا سؤال بپرسید (مثل «امروز چقدر سود داشتم»).",
+      "متوجه نشدم. می‌توانید دستور ثبت بدهید (مثل «۲ تا نون»، «امروز صد میلیون فروش داشتم» یا «آقای … بدهکار است») یا سؤال بپرسید (مثل «امروز چقدر سود داشتم»).",
   };
 }
 

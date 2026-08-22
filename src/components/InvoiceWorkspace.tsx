@@ -463,8 +463,8 @@ export function InvoiceWorkspace() {
           <Receipt className="h-10 w-10 opacity-80" />
         </div>
 
-        {/* Action buttons */}
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        {/* Action buttons — کالای دستی همیشه دیده می‌شود، نه فقط بعد از جستجو */}
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Link
             to="/scan"
             data-tour="invoice-scan"
@@ -482,6 +482,7 @@ export function InvoiceWorkspace() {
             ثبت صوتی
           </Link>
           <button
+            type="button"
             onClick={() => {
               setShowSearch((v) => !v);
               setTimeout(() => searchRef.current?.focus(), 100);
@@ -490,6 +491,21 @@ export function InvoiceWorkspace() {
           >
             <Search className="h-4 w-4" />
             جستجو
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowManualItem((v) => !v);
+              if (!showManualItem) setShowSearch(false);
+            }}
+            className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium backdrop-blur transition ${
+              showManualItem
+                ? "bg-background text-primary shadow-sm"
+                : "bg-background/15 hover:bg-background/25"
+            }`}
+          >
+            <NotebookPen className="h-4 w-4" />
+            کالای دستی
           </button>
         </div>
 
@@ -545,20 +561,16 @@ export function InvoiceWorkspace() {
                 </button>
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setShowManualItem((v) => !v)}
-              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-background/10 py-1.5 text-[11px] font-medium backdrop-blur hover:bg-background/20"
-            >
-              <NotebookPen className="h-3 w-3" />
-              افزودن کالای دستی (خارج از انبار)
-            </button>
           </div>
         )}
 
         {/* فرم افزودن کالای دستی — کالایی که در انبار ثبت نیست، فقط نام و قیمت */}
         {showManualItem && (
           <div className="mt-2 space-y-2 rounded-xl bg-background/90 p-3 text-foreground">
+            <div className="text-xs font-semibold">کالای دستی (خارج از انبار)</div>
+            <p className="text-[11px] text-muted-foreground">
+              فقط روی همین فاکتور می‌نشیند و موجودی انبار را کم نمی‌کند.
+            </p>
             <input
               value={manualName}
               onChange={(e) => setManualName(e.target.value)}
@@ -1068,9 +1080,10 @@ export function InvoiceWorkspace() {
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <ScanLine className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
-            فاکتور خالی است. بارکد اسکن کنید یا محصول جستجو کنید.
+            فاکتور خالی است. بارکد اسکن کنید، محصول جستجو کنید، یا کالای خارج از انبار را دستی اضافه
+            کنید.
           </p>
-          <div className="mt-4 flex justify-center gap-2">
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
               to="/scan"
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
@@ -1078,6 +1091,17 @@ export function InvoiceWorkspace() {
               <ScanLine className="h-4 w-4" />
               اسکن
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setShowManualItem(true);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary"
+            >
+              <NotebookPen className="h-4 w-4" />
+              کالای دستی
+            </button>
           </div>
         </div>
       ) : (

@@ -112,6 +112,10 @@ const cases: { input: string; expect: Expect }[] = [
   },
   { input: "فاکتور آقای کمالی را باز کن", expect: { kind: "open_invoice" } },
   { input: "یادآوری پرداخت بدهی ساعت ۱۳:۳۰ تاریخ ۴/۴/۱۴۰۵", expect: { kind: "reminder" } },
+  { input: "امروز صد میلیون فروش داشتم", expect: { kind: "manual_ledger" } },
+  { input: "پنجاه میلیون سود کردم", expect: { kind: "manual_ledger" } },
+  { input: "امروز ۱۰۰ میلیون فروش داشتم", expect: { kind: "manual_ledger" } },
+  { input: "امروز صد میلیون داشتم", expect: { kind: "manual_ledger" } },
 ];
 
 let failed = 0;
@@ -133,9 +137,13 @@ for (const c of cases) {
           : intent.kind === "unknown"
             ? ` reason=${intent.reason}`
             : "";
-    console.error(`FAIL: «${c.input}» → ${intent.kind}${extra} (expected ${JSON.stringify(c.expect)})`);
+    console.error(
+      `FAIL: «${c.input}» → ${intent.kind}${extra} (expected ${JSON.stringify(c.expect)})`,
+    );
   } else {
-    console.log(`ok: «${c.input}» → ${intent.kind}${intent.kind === "query" ? "/" + intent.queryKind : ""}`);
+    console.log(
+      `ok: «${c.input}» → ${intent.kind}${intent.kind === "query" ? "/" + intent.queryKind : ""}`,
+    );
   }
 }
 
@@ -151,13 +159,40 @@ if (profit.kind !== "query" || !profit.answer.includes("سود")) {
   process.exit(1);
 }
 const status = parseAssistantCommand("آقای کمالی چقدر بدهکاره", ctx);
-if (status.kind !== "query" || !status.answer.includes("بدهکار") || !status.answer.includes("کمالی")) {
+if (
+  status.kind !== "query" ||
+  !status.answer.includes("بدهکار") ||
+  !status.answer.includes("کمالی")
+) {
   console.error("customer_status answer missing", status);
   process.exit(1);
 }
 const chatter = parseAssistantCommand("هوا امروز خیلی خوبه", ctx);
 if (chatter.kind !== "unknown" || /کالا/.test(chatter.reason)) {
   console.error("chatter should not look like a missing product", chatter);
+  process.exit(1);
+}
+const spokenSales = parseAssistantCommand("امروز صد میلیون فروش داشتم", ctx);
+if (
+  spokenSales.kind !== "manual_ledger" ||
+  spokenSales.entryKind !== "sales" ||
+  spokenSales.amount !== 100_000_000
+) {
+  console.error("spoken sales ledger missing", spokenSales);
+  process.exit(1);
+}
+const spokenProfit = parseAssistantCommand("پنجاه میلیون سود کردم", ctx);
+if (
+  spokenProfit.kind !== "manual_ledger" ||
+  spokenProfit.entryKind !== "profit" ||
+  spokenProfit.amount !== 50_000_000
+) {
+  console.error("spoken profit ledger missing", spokenProfit);
+  process.exit(1);
+}
+const stillQuery = parseAssistantCommand("امروز چقدر فروش داشتم", ctx);
+if (stillQuery.kind !== "query" || stillQuery.queryKind !== "sales") {
+  console.error("sales question should stay a query", stillQuery);
   process.exit(1);
 }
 console.log("answer checks passed");

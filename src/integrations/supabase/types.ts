@@ -331,6 +331,7 @@ export type Database = {
           customers: Json
           expenses: Json
           invoices: Json
+          manual_ledger: Json
           products: Json
           production: Json
           purchases: Json
@@ -348,6 +349,7 @@ export type Database = {
           customers?: Json
           expenses?: Json
           invoices?: Json
+          manual_ledger?: Json
           products?: Json
           production?: Json
           purchases?: Json
@@ -365,6 +367,7 @@ export type Database = {
           customers?: Json
           expenses?: Json
           invoices?: Json
+          manual_ledger?: Json
           products?: Json
           production?: Json
           purchases?: Json

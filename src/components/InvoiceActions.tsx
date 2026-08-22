@@ -449,14 +449,10 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
     <>
       <button
         type="button"
-        onClick={() => void handlePrint(paper)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setPaperMenu(true);
-        }}
+        onClick={() => setPaperMenu(true)}
         disabled={printing}
         className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
-        title="پرینت فاکتور (یک ضربه)"
+        title="پرینت فاکتور"
       >
         <Printer className={iconSize} />
         {showLabels && <span>پرینت</span>}

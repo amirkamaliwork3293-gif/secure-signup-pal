@@ -202,7 +202,18 @@ export type Invoice = {
    * کلید = شناسه‌ی فیلد در قالب فاکتور.
    */
   customFields?: Record<string, string>;
+  /**
+   * عنوان سند چاپی — مثلاً «پیش‌فاکتور». خالی یعنی همان «فاکتور فروش».
+   * روی فاکتور ثبت‌شده در تاریخچه ذخیره نمی‌شود.
+   */
+  documentTitle?: string;
 };
+
+/** عنوان نمایشی سند فاکتور (چاپ / پیش‌نمایش / PDF) */
+export function invoiceDocumentTitle(inv: Pick<Invoice, "documentTitle">): string {
+  const t = inv.documentTitle?.trim();
+  return t || "فاکتور فروش";
+}
 
 // ─── Purchase invoices (خرید از تامین‌کننده) ─────────────────────────────────
 
@@ -1125,7 +1136,7 @@ export const invoice = {
 
   useHistory: () => useStore<Invoice[]>(HISTORY_KEY, []),
   getHistory: () => read<Invoice[]>(HISTORY_KEY, []),
-  archive: (inv: Invoice) => {
+  archive: (inv: Invoice): Invoice => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
     // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
@@ -1134,7 +1145,11 @@ export const invoice = {
     inv.createdAt = finalizedAt;
     // بازمحاسبه‌ی نهایی: مبلغ ثبت‌شده در تاریخچه همیشه با اقلام و تخفیف همان
     // لحظه می‌خواند، حتی اگر فراخوان یادش رفته باشد recalc را صدا بزند.
-    const stamped: Invoice = recalc({ ...inv, createdAt: finalizedAt });
+    const stamped: Invoice = recalc({
+      ...inv,
+      createdAt: finalizedAt,
+      documentTitle: undefined,
+    });
     // لاگ تولید باید قبل از کسر موجودی باشد تا «موجودی ازپیش‌تولیدشده» درست تشخیص داده شود.
     logProductionSales(stamped);
     // کسر موجودی در یک نوشتن اتمی — تا تعداد در «محصولات» و «انبار» یکی بماند
@@ -1150,6 +1165,7 @@ export const invoice = {
     } else {
       writeBoard({ open: filtered, activeId: filtered[0].id });
     }
+    return stamped;
   },
   updateHistory: (updated: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);

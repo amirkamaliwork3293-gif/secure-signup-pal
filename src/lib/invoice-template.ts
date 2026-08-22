@@ -14,6 +14,7 @@ import {
   PAYMENT_LABEL,
   COUNT_UNIT,
   formatChequeDue,
+  invoiceDocumentTitle,
   type Invoice,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
@@ -373,6 +374,7 @@ export function buildTemplatedInvoiceHTML(
   const accent = t.accent || "#1e3a8a";
   const cols = t.columns.filter((c) => c.enabled);
   const shopName = inv.shopName || "فروشگاه";
+  const docTitle = inv.documentTitle?.trim() || t.title || invoiceDocumentTitle(inv);
 
   const blocksHtml = t.blocks
     .filter((b) => b.fields.length > 0)
@@ -437,12 +439,11 @@ export function buildTemplatedInvoiceHTML(
 <html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>${esc(t.title)} ${inv.id.toUpperCase()}</title>
+<title>${esc(docTitle)} ${inv.id.toUpperCase()}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
   ${fit.css}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;font-size:${fs}px;color:#111;direction:rtl;padding:${pad}px;background:#fff}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:#111;direction:rtl;padding:${pad}px;background:#fff}
   .sheet{border:1.5px solid ${accent};border-radius:10px;overflow:hidden}
   .top{display:flex;align-items:center;gap:10px;padding:${compact ? 8 : 12}px ${compact ? 10 : 14}px;background:linear-gradient(90deg, ${accent}14, transparent)}
   .top .logo{width:${compact ? 44 : 58}px;height:${compact ? 44 : 58}px;object-fit:contain;border-radius:8px;background:#fff;flex-shrink:0}
@@ -486,7 +487,7 @@ export function buildTemplatedInvoiceHTML(
       <h1>${esc(shopName)}</h1>
       ${t.subtitle ? `<p>${esc(t.subtitle)}</p>` : ""}
     </div>
-    <div class="title">${esc(t.title)}</div>
+    <div class="title">${esc(docTitle)}</div>
   </div>
   ${blocksHtml}
   <div class="block"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>

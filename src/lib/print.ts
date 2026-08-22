@@ -8,16 +8,32 @@
  *   2. مرورگر وب                      → چاپ از طریق iframe مخفی
  *   3. هیچ‌کدام در دسترس نبود          → false برمی‌گردد تا caller مسیر جایگزین
  *      (دانلود فایل و…) را ارائه کند.
+ *
+ * دانلود با لینک blob: یا window.open در WebView صفحه را عوض می‌کند و کاربر
+ * از برنامه خارج می‌شود — این مسیرها فقط در مرورگر واقعی استفاده می‌شوند.
  */
+
+import { isWebView } from "@/lib/isWebView";
 
 type PrinterPlugin = {
   print?: (opts: { content: string; name?: string; orientation?: string }) => Promise<void>;
 };
 type FilesystemPlugin = {
-  writeFile?: (opts: { path: string; data: string; directory: string; recursive?: boolean }) => Promise<{ uri: string }>;
+  writeFile?: (opts: {
+    path: string;
+    data: string;
+    directory: string;
+    recursive?: boolean;
+  }) => Promise<{ uri: string }>;
 };
 type SharePlugin = {
-  share?: (opts: { title?: string; text?: string; url?: string; files?: string[]; dialogTitle?: string }) => Promise<unknown>;
+  share?: (opts: {
+    title?: string;
+    text?: string;
+    url?: string;
+    files?: string[];
+    dialogTitle?: string;
+  }) => Promise<unknown>;
 };
 
 type CapacitorGlobal = {
@@ -109,16 +125,39 @@ export function isNativeApp(): boolean {
   }
 }
 
+/** WebView اپ یا Capacitor — اینجا blob/window.open صفحه را خراب می‌کند */
+export function isAppShell(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return isNativeApp() || isWebView();
+  } catch {
+    return isNativeApp();
+  }
+}
+
+function nativePlugins() {
+  if (typeof window === "undefined") return undefined;
+  return window.Capacitor?.Plugins;
+}
+
 function nativePrinter() {
-  if (typeof window === "undefined") return null;
-  const p = window.Capacitor?.Plugins?.Printer;
+  const p = nativePlugins()?.Printer;
   return p && typeof p.print === "function" ? p : null;
 }
 
+/** آیا پل نیتیو برای نوشتن فایل و اشتراک وجود دارد؟ */
+export function canNativeFileShare(): boolean {
+  const plugins = nativePlugins();
+  return !!(plugins?.Filesystem?.writeFile && plugins?.Share?.share);
+}
+
+let printInFlight = false;
+
 /** چاپ HTML کامل (شامل <html>...). خروجی: آیا چاپ آغاز شد؟ */
 export async function printHtml(html: string, title = "چاپ"): Promise<boolean> {
-  // مسیر ۱: پلاگین چاپ نیتیو (نسخه APK جدید)
-  if (isNativeApp()) {
+  if (printInFlight) return true;
+  printInFlight = true;
+  try {
     const printer = nativePrinter();
     if (printer) {
       try {
@@ -128,12 +167,16 @@ export async function printHtml(html: string, title = "چاپ"): Promise<boolean
         console.warn("[print] native print failed", e);
       }
     }
-    // WebView بدون پلاگین: window.print بی‌اثر است — تلاش نکن.
-    return false;
-  }
 
-  // مسیر ۲: مرورگر وب — iframe مخفی
-  return iframePrint(html);
+    // در پوسته اپ، window.open صفحه WebView را عوض می‌کند — فقط iframe.
+    if (isAppShell()) {
+      return await iframePrint(html, { allowWindowFallback: false });
+    }
+
+    return await iframePrint(html, { allowWindowFallback: true });
+  } finally {
+    printInFlight = false;
+  }
 }
 
 function inferIframeSize(html: string): { width: string; height: string } {
@@ -143,7 +186,7 @@ function inferIframeSize(html: string): { width: string; height: string } {
   return { width: "210mm", height: "297mm" };
 }
 
-function iframePrint(html: string): Promise<boolean> {
+function iframePrint(html: string, opts: { allowWindowFallback: boolean }): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const iframe = document.createElement("iframe");
@@ -164,7 +207,11 @@ function iframePrint(html: string): Promise<boolean> {
 
       const cleanup = () => {
         setTimeout(() => {
-          try { document.body.removeChild(iframe); } catch { /* ignore */ }
+          try {
+            document.body.removeChild(iframe);
+          } catch {
+            /* ignore */
+          }
         }, 60_000); // پس از بسته‌شدن دیالوگ چاپ، با تاخیر امن حذف می‌شود
       };
 
@@ -172,7 +219,7 @@ function iframePrint(html: string): Promise<boolean> {
       const doPrint = () => {
         if (fired) return;
         fired = true;
-        // فرصت برای بارگذاری فونت/تصاویر و اجرای اسکریپت مقیاس داخل iframe
+        // فونت از گوگل لود نمی‌شود؛ کمی صبر برای layout کافی است
         setTimeout(() => {
           try {
             const win = iframe.contentWindow;
@@ -184,18 +231,20 @@ function iframePrint(html: string): Promise<boolean> {
           } catch (e) {
             console.warn("[print] iframe print failed", e);
             cleanup();
-            resolve(fallbackWindowPrint(html));
+            if (opts.allowWindowFallback) resolve(fallbackWindowPrint(html));
+            else resolve(false);
           }
-        }, 850);
+        }, 220);
       };
 
       iframe.onload = doPrint;
       iframe.srcdoc = html;
       // اگر onload به هر دلیل اجرا نشد
-      setTimeout(doPrint, 2000);
+      setTimeout(doPrint, 1200);
     } catch (e) {
       console.warn("[print] iframe setup failed", e);
-      resolve(fallbackWindowPrint(html));
+      if (opts.allowWindowFallback) resolve(fallbackWindowPrint(html));
+      else resolve(false);
     }
   });
 }
@@ -208,23 +257,36 @@ function fallbackWindowPrint(html: string): boolean {
     win.document.write(html);
     win.document.close();
     win.focus();
-    setTimeout(() => { try { win.print(); } catch { /* ignore */ } }, 850);
+    setTimeout(() => {
+      try {
+        win.print();
+      } catch {
+        /* ignore */
+      }
+    }, 280);
     return true;
   } catch {
     return false;
   }
 }
 
-/** دانلود یک فایل از Blob — در مرورگر وب */
-export function downloadBlob(blob: Blob, filename: string) {
+/** دانلود یک فایل از Blob — فقط مرورگر وب. در اپ/WebView هرگز صدا زده نشود. */
+export function downloadBlob(blob: Blob, filename: string): boolean {
+  if (typeof document === "undefined") return false;
+  if (isAppShell()) {
+    console.warn("[print] skip blob download inside app webview");
+    return false;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return true;
 }
 
 // ─── ذخیره فایل (وب + اپ اندروید) ───────────────────────────────────────────
@@ -242,43 +304,86 @@ export async function saveBase64File(
   mime: string,
 ): Promise<boolean> {
   const data = base64.includes(",") ? base64.split(",")[1] : base64;
+  const plugins = nativePlugins();
+  const fs = plugins?.Filesystem;
+  const share = plugins?.Share;
 
-  if (isNativeApp()) {
-    const plugins = window.Capacitor?.Plugins;
-    const fs = plugins?.Filesystem;
-    const share = plugins?.Share;
-    if (fs?.writeFile) {
-      try {
-        const res = await fs.writeFile({ path: filename, data, directory: "CACHE" });
-        if (share?.share) {
-          await share.share({
+  // اول پل نیتیو — هم Capacitor و هم WebViewای که پلاگین دارد
+  if (fs?.writeFile) {
+    try {
+      const res = await fs.writeFile({ path: filename, data, directory: "CACHE" });
+      if (share?.share) {
+        await share
+          .share({
             title: filename,
             files: [res.uri],
-            dialogTitle: "ذخیره یا ارسال فایل",
-          }).catch(() => { /* کاربر پنجره را بست — فایل نوشته شده است */ });
-        }
-        return true;
-      } catch (e) {
-        console.warn("[print] native save failed", e);
+            dialogTitle: "ذخیره در گالری یا ارسال",
+          })
+          .catch(() => {
+            /* کاربر پنجره را بست — فایل نوشته شده است */
+          });
       }
+      return true;
+    } catch (e) {
+      console.warn("[print] native save failed", e);
     }
-    return false;
   }
+
+  // داخل اپ بدون پلاگین: لینک دانلود WebView را می‌بندد — انجام نده
+  if (isAppShell()) return false;
 
   // وب: تبدیل base64 به Blob و دانلود معمولی
   try {
     const bin = atob(data);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    downloadBlob(new Blob([bytes], { type: mime }), filename);
-    return true;
+    return downloadBlob(new Blob([bytes], { type: mime }), filename);
   } catch {
     return false;
   }
 }
 
+/** چند فایل (مثلاً صفحات فاکتور) را یکجا در اپ به اشتراک بگذار */
+export async function saveBase64Files(
+  files: { base64: string; filename: string; mime: string }[],
+): Promise<boolean> {
+  if (!files.length) return false;
+  if (files.length === 1) {
+    return saveBase64File(files[0].base64, files[0].filename, files[0].mime);
+  }
+  const plugins = nativePlugins();
+  const fs = plugins?.Filesystem;
+  const share = plugins?.Share;
+  if (fs?.writeFile && share?.share) {
+    try {
+      const uris: string[] = [];
+      for (const f of files) {
+        const data = f.base64.includes(",") ? f.base64.split(",")[1] : f.base64;
+        const res = await fs.writeFile({ path: f.filename, data, directory: "CACHE" });
+        if (res?.uri) uris.push(res.uri);
+      }
+      if (uris.length) {
+        await share
+          .share({
+            title: files[0].filename,
+            files: uris,
+            dialogTitle: "ذخیره در گالری یا ارسال",
+          })
+          .catch(() => {});
+        return true;
+      }
+    } catch (e) {
+      console.warn("[print] native multi-save failed", e);
+    }
+  }
+  return saveBase64File(files[0].base64, files[0].filename, files[0].mime);
+}
+
 /** ذخیره PDF ساخته‌شده با jsPDF — وب: دانلود، اپ: ذخیره + اشتراک */
-export async function savePdf(pdf: { output: (type: "datauristring") => string }, filename: string): Promise<boolean> {
+export async function savePdf(
+  pdf: { output: (type: "datauristring") => string },
+  filename: string,
+): Promise<boolean> {
   return saveBase64File(pdf.output("datauristring"), filename, "application/pdf");
 }
 

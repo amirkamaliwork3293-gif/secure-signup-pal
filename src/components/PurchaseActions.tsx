@@ -9,8 +9,23 @@
 import { useState } from "react";
 import { Printer, Share2, Receipt, FileDown } from "lucide-react";
 import type { Purchase } from "@/lib/store";
-import { formatJalaliDate, formatJalaliDateTime, PAYMENT_LABEL, formatAmount, currencyLabel } from "@/lib/store";
-import { printHtml, OLD_APP_MESSAGE, isNativeApp, saveBase64File, downloadBlob } from "@/lib/print";
+import {
+  formatJalaliDate,
+  formatJalaliDateTime,
+  PAYMENT_LABEL,
+  formatAmount,
+  currencyLabel,
+} from "@/lib/store";
+import {
+  printHtml,
+  OLD_APP_MESSAGE,
+  isNativeApp,
+  isAppShell,
+  canNativeFileShare,
+  saveBase64File,
+  downloadBlob,
+} from "@/lib/print";
+import { shareText } from "@/lib/openExternal";
 import { purchaseLineTotal } from "@/lib/invoice-math";
 
 // ─── HTML فاکتور خرید (A4) ──────────────────────────────────────────────────
@@ -38,9 +53,8 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>فاکتور خرید ${p.id.toUpperCase()}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;font-size:${fontSize}px;color:#111;padding:24px 32px;direction:rtl}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fontSize}px;color:#111;padding:24px 32px;direction:rtl}
   .header{text-align:center;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
   .header h1{font-size:${Math.round(fontSize * 1.54)}px;font-weight:700}
   .header p{font-size:${Math.round(fontSize * 0.85)}px;color:#555;margin-top:4px}
@@ -108,9 +122,8 @@ export function buildThermalPurchaseHTML(p: Purchase): string {
 <title>فاکتور خرید ${p.id.toUpperCase()}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
-  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
   .center{text-align:center}
   .shop{font-weight:700;font-size:14px}
   .muted{color:#444;font-size:10.5px}
@@ -158,7 +171,8 @@ function buildPurchaseShareText(p: Purchase): string {
     p.note ? `📝 یادداشت: ${p.note}` : "",
     `─────────────────`,
     ...p.items.map(
-      (item) => `• ${item.name}  ×${item.quantity}  =  ${formatAmount(purchaseLineTotal(item))} ${currencyLabel()}`,
+      (item) =>
+        `• ${item.name}  ×${item.quantity}  =  ${formatAmount(purchaseLineTotal(item))} ${currencyLabel()}`,
     ),
     `─────────────────`,
     `💰 جمع کل: ${formatAmount(p.total)} ${currencyLabel()}`,
@@ -182,13 +196,17 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
   const handlePrint = async () => {
     const html = buildPurchaseHTML(p, fontSize);
     const ok = await printHtml(html, `فاکتور خرید ${p.id.toUpperCase()}`);
-    if (!ok) alert(OLD_APP_MESSAGE);
+    if (!ok) {
+      alert(isAppShell() ? "چاپ سیستم در این نسخه اپ باز نشد." : OLD_APP_MESSAGE);
+    }
   };
 
   const handleThermalPrint = async () => {
     const html = buildThermalPurchaseHTML(p);
     const ok = await printHtml(html, `فاکتور خرید ${p.id.toUpperCase()}`);
-    if (!ok) alert(OLD_APP_MESSAGE);
+    if (!ok) {
+      alert(isAppShell() ? "چاپ حرارتی در این نسخه اپ در دسترس نیست." : OLD_APP_MESSAGE);
+    }
   };
 
   const handleSharePdf = async () => {
@@ -199,10 +217,19 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
       const pdf = await buildPurchasePdf(p);
       const filename = `فاکتور-خرید-${p.id.toUpperCase()}.pdf`;
 
-      if (isNativeApp()) {
+      if (canNativeFileShare() || isNativeApp()) {
         const dataUri = pdf.output("datauristring");
         const ok = await saveBase64File(dataUri, filename, "application/pdf");
-        if (!ok) alert(OLD_APP_MESSAGE);
+        if (!ok) {
+          alert(isAppShell() ? "ذخیره فایل در این نسخه اپ پشتیبانی نمی‌شود." : OLD_APP_MESSAGE);
+        }
+        return;
+      }
+
+      if (isAppShell()) {
+        alert(
+          "در اپ نمی‌توان فایل را با لینک دانلود گرفت چون از برنامه خارج می‌شوید. از دکمه پرینت استفاده کنید.",
+        );
         return;
       }
 
@@ -217,7 +244,7 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
           await nav.share({ files: [file], title: filename });
           return;
         } catch {
-          // کاربر لغو کرد — به دانلود ساده برمی‌گردیم
+          /* کاربر لغو کرد — به دانلود ساده برمی‌گردیم */
         }
       }
       downloadBlob(blob, filename);
@@ -231,29 +258,11 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
 
   const handleShare = async () => {
     const text = buildPurchaseShareText(p);
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `فاکتور خرید ${p.shopName || "فروشگاه"}`, text });
-        return;
-      } catch {
-        // ادامه به fallback
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      alert("متن فاکتور کپی شد!");
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      alert("متن فاکتور کپی شد!");
-    }
+    const result = await shareText({
+      title: `فاکتور خرید ${p.shopName || "فروشگاه"}`,
+      text,
+    });
+    if (result === "copied") alert("متن فاکتور کپی شد.");
   };
 
   const btnBase =

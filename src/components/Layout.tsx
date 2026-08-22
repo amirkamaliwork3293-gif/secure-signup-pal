@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
-import { ReminderToast } from "@/components/ReminderToast";
+import { DueAlertsDialog } from "@/components/DueAlertsDialog";
 import { SmartAssistant } from "@/components/SmartAssistant";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { useState, useEffect } from "react";
@@ -146,8 +146,10 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 
-      {/* اعلان شناور یادآوری‌های سررسیدشده */}
-      {state.status === "authenticated" && appSettings.showRemindersFeature !== false && <ReminderToast />}
+      {/* پاپ‌آپ سررسید یادآوری و موعد تسویه مشتریان بدهکار */}
+      {state.status === "authenticated" && (
+        <DueAlertsDialog includeReminders={appSettings.showRemindersFeature !== false} />
+      )}
 
       {/* دستیار هوشمند صوتی — دکمه‌ی شناور + شیت پایین (کاملاً محلی، بدون AI/API) */}
       {state.status === "authenticated" && <SmartAssistant />}

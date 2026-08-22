@@ -8,6 +8,7 @@ import {
   reminderStatus,
   customers as customersStore,
   customerFullName,
+  customerBalance,
   formatNumber,
   formatJalaliDate,
   jalaliToTimestamp,
@@ -19,16 +20,35 @@ import {
   type Customer,
 } from "@/lib/store";
 import {
-  Bell, Plus, Trash2, Pencil, Check, X, Repeat, User, CalendarClock, ListChecks,
+  Bell,
+  Plus,
+  Trash2,
+  Pencil,
+  Check,
+  X,
+  Repeat,
+  User,
+  CalendarClock,
+  ListChecks,
+  Phone,
+  Send,
 } from "lucide-react";
+import { openExternal, telHref } from "@/lib/openExternal";
+import { DebtContactDialog } from "@/components/DebtContactDialog";
 
 export const Route = createFileRoute("/reminders")({
   head: () => ({
     meta: [
       { title: "یادآوری‌ها | KAMIX" },
-      { name: "description", content: "یادآوری وظایف، سررسیدها و پیگیری مشتریان — هیچ‌چیز از قلم نمی‌افتد." },
+      {
+        name: "description",
+        content: "یادآوری وظایف، سررسیدها و پیگیری مشتریان — هیچ‌چیز از قلم نمی‌افتد.",
+      },
       { property: "og:title", content: "یادآوری‌ها | KAMIX" },
-      { property: "og:description", content: "پیگیری مشتریان و وظایف کسب‌وکار را با یادآوری‌های زمان‌دار مدیریت کنید." },
+      {
+        property: "og:description",
+        content: "پیگیری مشتریان و وظایف کسب‌وکار را با یادآوری‌های زمان‌دار مدیریت کنید.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -57,6 +77,9 @@ function RemindersPageInner() {
   const [tab, setTab] = useState<Tab>("active");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [contactTarget, setContactTarget] = useState<{ customer: Customer; title: string } | null>(
+    null,
+  );
 
   const active = useMemo(() => activeReminders(list), [list]);
   const done = useMemo(
@@ -93,10 +116,12 @@ function RemindersPageInner() {
       )}
 
       <div className="mb-4 flex gap-2">
-        {([
-          ["active", `فعال (${formatNumber(active.length)})`],
-          ["done", `انجام‌شده (${formatNumber(done.length)})`],
-        ] as [Tab, string][]).map(([t, label]) => (
+        {(
+          [
+            ["active", `فعال (${formatNumber(active.length)})`],
+            ["done", `انجام‌شده (${formatNumber(done.length)})`],
+          ] as [Tab, string][]
+        ).map(([t, label]) => (
           <button
             key={t}
             type="button"
@@ -114,7 +139,10 @@ function RemindersPageInner() {
 
       {!showForm && !editingId && (
         <button
-          onClick={() => { setShowForm(true); setEditingId(null); }}
+          onClick={() => {
+            setShowForm(true);
+            setEditingId(null);
+          }}
           className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-foreground"
         >
           <Plus className="h-4 w-4" />
@@ -126,7 +154,10 @@ function RemindersPageInner() {
         <ReminderForm
           customers={customersList}
           onCancel={() => setShowForm(false)}
-          onSave={(r) => { remindersStore.add(r); setShowForm(false); }}
+          onSave={(r) => {
+            remindersStore.add(r);
+            setShowForm(false);
+          }}
         />
       )}
 
@@ -150,7 +181,10 @@ function RemindersPageInner() {
                 initial={r}
                 customers={customersList}
                 onCancel={() => setEditingId(null)}
-                onSave={(updated) => { remindersStore.update({ ...r, ...updated }); setEditingId(null); }}
+                onSave={(updated) => {
+                  remindersStore.update({ ...r, ...updated });
+                  setEditingId(null);
+                }}
               />
             ) : (
               <li key={r.id} className="rounded-2xl border border-border bg-card p-3 shadow-card">
@@ -158,7 +192,9 @@ function RemindersPageInner() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold">{r.title}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                      <span className={`rounded-full px-2 py-0.5 ${STATUS_META[reminderStatus(r)].className}`}>
+                      <span
+                        className={`rounded-full px-2 py-0.5 ${STATUS_META[reminderStatus(r)].className}`}
+                      >
                         {STATUS_META[reminderStatus(r)].label}
                       </span>
                       <span className="flex items-center gap-1">
@@ -178,7 +214,37 @@ function RemindersPageInner() {
                         </span>
                       )}
                     </div>
-                    {r.note && <div className="mt-1 text-[11px] text-muted-foreground">{r.note}</div>}
+                    {r.note && (
+                      <div className="mt-1 text-[11px] text-muted-foreground">{r.note}</div>
+                    )}
+                    {!r.done &&
+                      r.customerId &&
+                      (() => {
+                        const linked = customersList.find((c) => c.id === r.customerId);
+                        if (!linked) return null;
+                        const phone = linked.phone?.trim();
+                        return (
+                          <div className="mt-2 grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setContactTarget({ customer: linked, title: r.title })}
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-primary/10 py-1.5 text-[11px] font-semibold text-primary"
+                            >
+                              <Send className="h-3 w-3" />
+                              پیامک
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!phone}
+                              onClick={() => phone && openExternal(telHref(phone))}
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/10 py-1.5 text-[11px] font-semibold text-sky-700 disabled:opacity-40 dark:text-sky-400"
+                            >
+                              <Phone className="h-3 w-3" />
+                              تماس
+                            </button>
+                          </div>
+                        );
+                      })()}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <div className="flex gap-1">
@@ -200,14 +266,19 @@ function RemindersPageInner() {
                         </button>
                       )}
                       <button
-                        onClick={() => { setEditingId(r.id); setShowForm(false); }}
+                        onClick={() => {
+                          setEditingId(r.id);
+                          setShowForm(false);
+                        }}
                         className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
                         title="ویرایش"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => { if (confirm("این یادآوری حذف شود؟")) remindersStore.remove(r.id); }}
+                        onClick={() => {
+                          if (confirm("این یادآوری حذف شود؟")) remindersStore.remove(r.id);
+                        }}
                         className="grid h-7 w-7 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
                         title="حذف"
                       >
@@ -220,6 +291,19 @@ function RemindersPageInner() {
             ),
           )}
         </ul>
+      )}
+
+      {contactTarget && (
+        <DebtContactDialog
+          customer={contactTarget.customer}
+          heading="ارسال یادآوری به مشتری"
+          presetText={
+            customerBalance(contactTarget.customer) > 0
+              ? undefined
+              : `سلام ${customerFullName(contactTarget.customer)} عزیز،\nیادآوری: ${contactTarget.title}\nلطفاً پیگیری بفرمایید.`
+          }
+          onClose={() => setContactTarget(null)}
+        />
       )}
     </Layout>
   );
@@ -240,7 +324,7 @@ function ReminderForm({
   const [note, setNote] = useState(initial?.note ?? "");
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const nowJ = toJalali(Date.now()) ?? { jy: 1403, jm: 1, jd: 1, h: 9, min: 0 };
-  const initJ = initial ? toJalali(initial.dueAt) ?? nowJ : { ...nowJ, h: 9, min: 0 };
+  const initJ = initial ? (toJalali(initial.dueAt) ?? nowJ) : { ...nowJ, h: 9, min: 0 };
   const [jy, setJy] = useState(initJ.jy);
   const [jm, setJm] = useState(initJ.jm);
   const [jd, setJd] = useState(initJ.jd);
@@ -257,7 +341,10 @@ function ReminderForm({
   const YEARS = Array.from({ length: 4 }, (_, i) => nowJ.jy - 1 + i);
 
   const submit = () => {
-    if (!title.trim()) { setErr("عنوان یادآوری را وارد کنید."); return; }
+    if (!title.trim()) {
+      setErr("عنوان یادآوری را وارد کنید.");
+      return;
+    }
     const customer = customers.find((c) => c.id === customerId);
     onSave({
       title: title.trim(),
@@ -282,10 +369,16 @@ function ReminderForm({
 
       {customers.length > 0 && (
         <Field label="مرتبط با مشتری (اختیاری)">
-          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={INPUT}>
+          <select
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+            className={INPUT}
+          >
             <option value="">— بدون مشتری —</option>
             {customers.map((c) => (
-              <option key={c.id} value={c.id}>{customerFullName(c)}</option>
+              <option key={c.id} value={c.id}>
+                {customerFullName(c)}
+              </option>
             ))}
           </select>
         </Field>
@@ -295,17 +388,23 @@ function ReminderForm({
         <div className="grid grid-cols-3 gap-1.5">
           <select value={jd} onChange={(e) => setJd(+e.target.value)} className={SELECT}>
             {Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{formatNumber(d)}</option>
+              <option key={d} value={d}>
+                {formatNumber(d)}
+              </option>
             ))}
           </select>
           <select value={jm} onChange={(e) => setJm(+e.target.value)} className={SELECT}>
             {JMONTHS_LONG.map((name, i) => (
-              <option key={name} value={i + 1}>{name}</option>
+              <option key={name} value={i + 1}>
+                {name}
+              </option>
             ))}
           </select>
           <select value={jy} onChange={(e) => setJy(+e.target.value)} className={SELECT}>
             {YEARS.map((y) => (
-              <option key={y} value={y}>{formatNumber(y)}</option>
+              <option key={y} value={y}>
+                {formatNumber(y)}
+              </option>
             ))}
           </select>
         </div>
@@ -315,12 +414,16 @@ function ReminderForm({
         <div className="grid grid-cols-2 gap-1.5">
           <select value={hh} onChange={(e) => setHh(+e.target.value)} className={SELECT} dir="ltr">
             {Array.from({ length: 24 }, (_, i) => i).map((h) => (
-              <option key={h} value={h}>{formatNumber(String(h).padStart(2, "0"))}</option>
+              <option key={h} value={h}>
+                {formatNumber(String(h).padStart(2, "0"))}
+              </option>
             ))}
           </select>
           <select value={mm} onChange={(e) => setMm(+e.target.value)} className={SELECT} dir="ltr">
             {Array.from({ length: 60 }, (_, i) => i).map((m) => (
-              <option key={m} value={m}>{formatNumber(String(m).padStart(2, "0"))}</option>
+              <option key={m} value={m}>
+                {formatNumber(String(m).padStart(2, "0"))}
+              </option>
             ))}
           </select>
         </div>
@@ -332,7 +435,12 @@ function ReminderForm({
 
       <div className="rounded-xl border border-border bg-background p-3">
         <label className="flex items-center gap-2 text-xs font-medium">
-          <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} className="h-4 w-4" />
+          <input
+            type="checkbox"
+            checked={recurring}
+            onChange={(e) => setRecurring(e.target.checked)}
+            className="h-4 w-4"
+          />
           <Repeat className="h-3.5 w-3.5 text-primary" />
           یادآوری تکرارشونده
         </label>
@@ -342,15 +450,21 @@ function ReminderForm({
             <input
               inputMode="numeric"
               value={formatNumber(recurringDays)}
-              onChange={(e) => setRecurringDays(Math.max(1, +e.target.value.replace(/\D/g, "") || 1))}
+              onChange={(e) =>
+                setRecurringDays(Math.max(1, +e.target.value.replace(/\D/g, "") || 1))
+              }
               className="w-20 rounded-lg border border-input bg-card px-2 py-1.5 text-center outline-none focus:border-primary"
             />
-            <span className="text-muted-foreground">روز یک‌بار — پس از «انجام شد»، یادآوری بعدی خودکار ساخته می‌شود</span>
+            <span className="text-muted-foreground">
+              روز یک‌بار — پس از «انجام شد»، یادآوری بعدی خودکار ساخته می‌شود
+            </span>
           </div>
         )}
       </div>
 
-      {err && <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{err}</div>}
+      {err && (
+        <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{err}</div>
+      )}
 
       <div className="flex gap-2">
         <button
@@ -360,7 +474,10 @@ function ReminderForm({
           <Check className="h-4 w-4" />
           ذخیره یادآوری
         </button>
-        <button onClick={onCancel} className="flex items-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm">
+        <button
+          onClick={onCancel}
+          className="flex items-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm"
+        >
           <X className="h-4 w-4" />
           لغو
         </button>

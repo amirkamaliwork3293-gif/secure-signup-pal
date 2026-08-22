@@ -266,6 +266,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           نام: customerFullName(c),
           تلفن: c.phone ?? "",
           "مانده حساب": customerBalance(c),
+          "تاریخ تسویه": c.settlementDate ?? "",
           "تعداد تراکنش": c.txs?.length ?? 0,
           "تاریخ ثبت": d(c.createdAt),
           یادداشت: c.note ?? "",

@@ -112,6 +112,13 @@ export function toIntlPhone(phone: string): string {
   return digits;
 }
 
+/** لینک تماس تلفنی از شماره خام (ارقام فارسی/فاصله حذف می‌شود) */
+export function telHref(phone: string): string {
+  const trimmed = phone.trim();
+  if (!trimmed) return "";
+  return `tel:${trimmed.replace(/[^\d+]/g, "")}`;
+}
+
 /**
  * قبلاً لینک فروشگاه برای پیامک کوتاه می‌شد، اما طبق نیاز فعلی کاربر باید
  * همیشه همان لینک اصلی استفاده شود. این تابع برای سازگاری باقی مانده و دیگر

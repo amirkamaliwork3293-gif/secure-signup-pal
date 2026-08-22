@@ -280,11 +280,72 @@ export type Customer = {
   note?: string;
   createdAt: number;
   txs: CustomerTx[];
+  /**
+   * تاریخ تسویه توافقی (اختیاری) به‌صورت شمسی YYYY/MM/DD.
+   * اگر مانده بدهی صفر شود، هنگام ثبت پرداخت پاک می‌شود.
+   */
+  settlementDate?: string;
 };
 
 /** مانده حساب مشتری: مثبت یعنی بدهکار است */
 export function customerBalance(c: Customer): number {
   return c.txs.reduce((s, t) => s + (t.type === "debt" ? t.amount : -t.amount), 0);
+}
+
+/** وضعیت هشدار موعد تسویه مشتری بدهکار */
+export type SettlementAlertKind = "overdue" | "today" | "tomorrow";
+
+/** فاصله روز تا تاریخ شمسی YYYY/MM/DD (منفی = گذشته). نامعتبر → null */
+export function jalaliDaysFromToday(dateStr?: string): number | null {
+  if (!dateStr) return null;
+  const p = parseJalaliInput(dateStr);
+  if (!p) return null;
+  return Math.round((jalaliToTimestamp(p.jy, p.jm, p.jd, 0, 0) - todayStartTs()) / 86_400_000);
+}
+
+/**
+ * اگر مشتری بدهکار باشد و تاریخ تسویه امروز، فردا یا عقب‌افتاده باشد،
+ * نوع هشدار را برمی‌گرداند؛ در غیر این صورت null.
+ */
+export function settlementAlertKind(c: Customer): SettlementAlertKind | null {
+  if (customerBalance(c) <= 0) return null;
+  const days = jalaliDaysFromToday(c.settlementDate);
+  if (days == null) return null;
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return null;
+}
+
+/** مشتریان بدهکاری که موعد تسویه‌شان امروز، فردا یا گذشته است */
+export function dueSettlementCustomers(list: Customer[]): Array<{
+  customer: Customer;
+  kind: SettlementAlertKind;
+}> {
+  const rank: Record<SettlementAlertKind, number> = { overdue: 0, today: 1, tomorrow: 2 };
+  return list
+    .map((customer) => {
+      const kind = settlementAlertKind(customer);
+      return kind ? { customer, kind } : null;
+    })
+    .filter((x): x is { customer: Customer; kind: SettlementAlertKind } => x != null)
+    .sort(
+      (a, b) =>
+        rank[a.kind] - rank[b.kind] || customerBalance(b.customer) - customerBalance(a.customer),
+    );
+}
+
+/** متن آماده‌ی پیامک یادآور بدهی — قابل ویرایش قبل از ارسال نیمه‌دستی */
+export function buildDebtReminderText(c: Customer, shopName: string): string {
+  const amount = customerBalance(c);
+  const due = c.settlementDate ? formatJalaliYmd(c.settlementDate) : "";
+  const dueLine = due ? `\nموعد تسویه: ${due}` : "";
+  return (
+    `سلام ${customerFullName(c)} عزیز،\n` +
+    `یادآور بدهی شما به ${shopName || "فروشگاه ما"}:\n` +
+    `مبلغ: ${formatToman(amount)}${dueLine}\n` +
+    `لطفاً در اولین فرصت نسبت به تسویه اقدام بفرمایید. با تشکر.`
+  );
 }
 
 export function customerFullName(c: Customer): string {
@@ -1880,11 +1941,16 @@ export const customers = {
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
     write(
       CUSTOMERS_KEY,
-      list.map((c) =>
-        c.id === customerId
-          ? { ...c, txs: [{ ...tx, id: cryptoId(), at: tx.at ?? Date.now() }, ...c.txs] }
-          : c,
-      ),
+      list.map((c) => {
+        if (c.id !== customerId) return c;
+        const updated: Customer = {
+          ...c,
+          txs: [{ ...tx, id: cryptoId(), at: tx.at ?? Date.now() }, ...c.txs],
+        };
+        // با تسویه کامل بدهی، موعد تسویه دیگر معنا ندارد
+        if (customerBalance(updated) <= 0) updated.settlementDate = undefined;
+        return updated;
+      }),
     );
   },
 
@@ -2694,6 +2760,11 @@ export function formatChequeDue(due?: string): string {
   const parsed = parseJalaliInput(due);
   if (parsed) return `${toFa(parsed.jy)}/${toFa(pad2(parsed.jm))}/${toFa(pad2(parsed.jd))}`;
   return formatJalaliDate(due);
+}
+
+/** نمایش رشته تاریخ شمسی YYYY/MM/DD (ارقام فارسی) — موعد تسویه مشتری و مشابه آن */
+export function formatJalaliYmd(date?: string): string {
+  return formatChequeDue(date);
 }
 
 /** timestamp سررسید چک برای یادآوری — ظهر به وقت تهران تا اختلاف روز پیش نیاید */

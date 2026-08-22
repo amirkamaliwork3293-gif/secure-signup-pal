@@ -22,6 +22,10 @@ import {
   applyProductDiscount,
   PAYMENT_LABEL,
   isWeightUnit,
+  toJalaliInputDate,
+  formatJalaliYmd,
+  jalaliDaysFromToday,
+  settlementAlertKind,
   type Customer,
   type CustomerTx,
   type Product,
@@ -30,8 +34,10 @@ import {
 import { useAuth } from "@/lib/AuthContext";
 import { invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
-import { shareText } from "@/lib/openExternal";
+import { openExternal, shareText, toIntlPhone, telHref } from "@/lib/openExternal";
 import { isWebView } from "@/lib/isWebView";
+import { JalaliDateSelect } from "@/components/JalaliPickers";
+import { DebtContactDialog } from "@/components/DebtContactDialog";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import {
@@ -46,7 +52,6 @@ import {
   ArrowUpCircle,
   ChevronDown,
   Wallet,
-  Bell,
   MessageCircle,
   Send,
   Megaphone,
@@ -59,6 +64,7 @@ import {
   Contact,
   FileUp,
   ShoppingCart,
+  CalendarClock,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -106,6 +112,7 @@ function CustomersPageInner() {
   );
   const [reminderTarget, setReminderTarget] = useState<Customer | null>(null);
   const [showCampaign, setShowCampaign] = useState(false);
+  const [showDebtFollowup, setShowDebtFollowup] = useState(false);
   const [detailTarget, setDetailTarget] = useState<Customer | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<Customer | null>(null);
   const [contactsBusy, setContactsBusy] = useState(false);
@@ -163,7 +170,9 @@ function CustomersPageInner() {
         return true;
       })
       .sort((a, b) => customerBalance(b) - customerBalance(a));
-    return q ? filterAndRankSearch(statusFiltered, q, (c) => [...personNameSearchFields(c), c.phone]) : statusFiltered;
+    return q
+      ? filterAndRankSearch(statusFiltered, q, (c) => [...personNameSearchFields(c), c.phone])
+      : statusFiltered;
   }, [list, searchQ, filter]);
 
   /** اعمال نمایش انتخابی (پرخریدترین، کم‌خریدترین و…) */
@@ -172,13 +181,20 @@ function CustomersPageInner() {
     const st = (c: Customer) => buyStats.get(c.id) ?? { total: 0, count: 0, lastAt: 0 };
     const arr = [...filtered];
     switch (sortBy) {
-      case "topBuyer": return arr.sort((a, b) => st(b).total - st(a).total);
-      case "lowBuyer": return arr.sort((a, b) => st(a).total - st(b).total);
-      case "mostInvoices": return arr.sort((a, b) => st(b).count - st(a).count);
-      case "recent": return arr.sort((a, b) => st(b).lastAt - st(a).lastAt);
-      case "stale": return arr.sort((a, b) => st(a).lastAt - st(b).lastAt);
-      case "newest": return arr.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-      default: return arr;
+      case "topBuyer":
+        return arr.sort((a, b) => st(b).total - st(a).total);
+      case "lowBuyer":
+        return arr.sort((a, b) => st(a).total - st(b).total);
+      case "mostInvoices":
+        return arr.sort((a, b) => st(b).count - st(a).count);
+      case "recent":
+        return arr.sort((a, b) => st(b).lastAt - st(a).lastAt);
+      case "stale":
+        return arr.sort((a, b) => st(a).lastAt - st(b).lastAt);
+      case "newest":
+        return arr.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      default:
+        return arr;
     }
   }, [filtered, sortBy, buyStats]);
 
@@ -435,7 +451,10 @@ function CustomersPageInner() {
       {contactsMsg && (
         <div className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
           <span>{contactsMsg}</span>
-          <button onClick={() => setContactsMsg(null)} className="shrink-0 text-primary/70 hover:text-primary">
+          <button
+            onClick={() => setContactsMsg(null)}
+            className="shrink-0 text-primary/70 hover:text-primary"
+          >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -444,11 +463,22 @@ function CustomersPageInner() {
       {/* پنل پیامکی — ارسال گروهی */}
       <button
         onClick={() => setShowCampaign(true)}
-        className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10"
+        className="mb-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-4 py-2.5 text-xs font-semibold text-primary hover:bg-primary/10"
       >
         <Megaphone className="h-4 w-4" />
         پنل پیامکی — ارسال جشنواره / تخفیف / تبلیغ
       </button>
+
+      {/* پیگیری نیمه‌دستی بدهکاران — پیامک آماده + تماس */}
+      {totals.debtors > 0 && (
+        <button
+          onClick={() => setShowDebtFollowup(true)}
+          className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-destructive/40 bg-destructive/5 px-4 py-2.5 text-xs font-semibold text-destructive hover:bg-destructive/10"
+        >
+          <Send className="h-4 w-4" />
+          پیگیری بدهکاران — پیامک آماده و تماس ({formatNumber(totals.debtors)} نفر)
+        </button>
+      )}
 
       {/* دو بخش کاملاً مجزا: «طلب شما» و «بدهی شما» — هر کدام با دکمه ثبت مخصوص خودش */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -538,11 +568,15 @@ function CustomersPageInner() {
             onChange={(e) => setSortBy(e.target.value as SortBy)}
             title="نحوه نمایش مشتریان"
             className={`w-40 shrink-0 rounded-xl border bg-background px-2 py-2 text-xs outline-none focus:border-primary ${
-              sortBy === "default" ? "border-input text-muted-foreground" : "border-primary text-primary"
+              sortBy === "default"
+                ? "border-input text-muted-foreground"
+                : "border-primary text-primary"
             }`}
           >
             {(Object.keys(SORT_LABEL) as SortBy[]).map((k) => (
-              <option key={k} value={k}>{SORT_LABEL[k]}</option>
+              <option key={k} value={k}>
+                {SORT_LABEL[k]}
+              </option>
             ))}
           </select>
         </div>
@@ -577,7 +611,8 @@ function CustomersPageInner() {
 
       {sortBy !== "default" && (
         <p className="mb-2 text-[11px] text-muted-foreground">
-          نمایش بر اساس «{SORT_LABEL[sortBy]}» — مبلغ خرید هر مشتری از روی فاکتورهای ثبت‌شده محاسبه می‌شود.
+          نمایش بر اساس «{SORT_LABEL[sortBy]}» — مبلغ خرید هر مشتری از روی فاکتورهای ثبت‌شده محاسبه
+          می‌شود.
         </p>
       )}
 
@@ -658,10 +693,21 @@ function CustomersPageInner() {
       )}
 
       {reminderTarget && (
-        <ReminderModal customer={reminderTarget} onClose={() => setReminderTarget(null)} />
+        <DebtContactDialog customer={reminderTarget} onClose={() => setReminderTarget(null)} />
       )}
 
       {showCampaign && <SmsCampaignModal customers={list} onClose={() => setShowCampaign(false)} />}
+
+      {showDebtFollowup && (
+        <DebtFollowupModal
+          customers={list}
+          onClose={() => setShowDebtFollowup(false)}
+          onRemind={(c) => {
+            setShowDebtFollowup(false);
+            setReminderTarget(c);
+          }}
+        />
+      )}
 
       {detailTarget && (
         <CustomerDetailModal
@@ -706,6 +752,7 @@ function CustomersPageInner() {
 function CustomerCard({
   customer,
   onOpenDetail,
+  onRemind,
 }: {
   customer: Customer;
   onOpenDetail: () => void;
@@ -716,6 +763,9 @@ function CustomerCard({
   onRemind: () => void;
 }) {
   const balance = customerBalance(customer);
+  const dueKind = settlementAlertKind(customer);
+  const daysToDue = jalaliDaysFromToday(customer.settlementDate);
+  const canContact = !!customer.phone?.trim();
 
   return (
     <li className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
@@ -739,11 +789,32 @@ function CustomerCard({
                 تسویه
               </span>
             )}
+            {dueKind && (
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                  dueKind === "overdue"
+                    ? "bg-destructive text-destructive-foreground"
+                    : dueKind === "today"
+                      ? "bg-amber-500/20 text-amber-700 dark:text-amber-400"
+                      : "bg-primary/10 text-primary"
+                }`}
+              >
+                {dueKind === "overdue"
+                  ? "موعد گذشته"
+                  : dueKind === "today"
+                    ? "موعد امروز"
+                    : "موعد فردا"}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
             <span
               className={`font-semibold ${
-                balance > 0 ? "text-destructive" : balance < 0 ? "text-sky-700 dark:text-sky-400" : "text-green-600"
+                balance > 0
+                  ? "text-destructive"
+                  : balance < 0
+                    ? "text-sky-700 dark:text-sky-400"
+                    : "text-green-600"
               }`}
             >
               {balance > 0
@@ -758,10 +829,41 @@ function CustomerCard({
                 {customer.phone}
               </span>
             )}
+            {customer.settlementDate && balance > 0 && (
+              <span className="flex items-center gap-1">
+                <CalendarClock className="h-3 w-3" />
+                تسویه {formatJalaliYmd(customer.settlementDate)}
+                {daysToDue != null && daysToDue > 1 ? ` (${formatNumber(daysToDue)} روز)` : ""}
+              </span>
+            )}
           </div>
         </div>
         <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-muted-foreground" />
       </button>
+      {balance > 0 && (
+        <div className="grid grid-cols-2 gap-px border-t border-border bg-border">
+          <button
+            type="button"
+            onClick={onRemind}
+            className="inline-flex items-center justify-center gap-1.5 bg-card px-3 py-2 text-[11px] font-semibold text-primary hover:bg-primary/5"
+          >
+            <Send className="h-3.5 w-3.5" />
+            پیامک بدهی
+          </button>
+          <button
+            type="button"
+            disabled={!canContact}
+            onClick={() => {
+              const href = telHref(customer.phone || "");
+              if (href) openExternal(href);
+            }}
+            className="inline-flex items-center justify-center gap-1.5 bg-card px-3 py-2 text-[11px] font-semibold text-sky-700 hover:bg-sky-500/10 disabled:opacity-40 dark:text-sky-400"
+          >
+            <Phone className="h-3.5 w-3.5" />
+            تماس
+          </button>
+        </div>
+      )}
     </li>
   );
 }
@@ -807,12 +909,18 @@ function CustomerModal({
 }: {
   initial?: Customer;
   onClose: () => void;
-  onSave: (c: Pick<Customer, "firstName" | "lastName" | "phone" | "note">) => void;
+  onSave: (
+    c: Pick<Customer, "firstName" | "lastName" | "phone" | "note" | "settlementDate">,
+  ) => void;
 }) {
   const [firstName, setFirstName] = useState(initial?.firstName ?? "");
   const [lastName, setLastName] = useState(initial?.lastName ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
+  const [hasSettlement, setHasSettlement] = useState(!!initial?.settlementDate);
+  const [settlementDate, setSettlementDate] = useState(
+    initial?.settlementDate || toJalaliInputDate(Date.now()),
+  );
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -825,6 +933,7 @@ function CustomerModal({
       lastName: lastName.trim() || undefined,
       phone: phone.trim() || undefined,
       note: note.trim() || undefined,
+      settlementDate: hasSettlement ? settlementDate : undefined,
     });
   };
 
@@ -875,6 +984,31 @@ function CustomerModal({
             placeholder="یادداشت (اختیاری)"
             className={`${inputCls} resize-none`}
           />
+          <div className="rounded-xl border border-border bg-background p-3">
+            <label className="flex items-center gap-2 text-xs font-medium">
+              <input
+                type="checkbox"
+                checked={hasSettlement}
+                onChange={(e) => setHasSettlement(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <CalendarClock className="h-3.5 w-3.5 text-primary" />
+              تاریخ تسویه (اختیاری)
+            </label>
+            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+              اگر مشخص شود، یک روز قبل و در همان روز یک پاپ‌آپ یادآوری با پیامک و تماس باز می‌شود.
+            </p>
+            {hasSettlement && (
+              <div className="mt-2">
+                <JalaliDateSelect
+                  value={settlementDate}
+                  onChange={setSettlementDate}
+                  yearsBack={1}
+                  yearsForward={2}
+                />
+              </div>
+            )}
+          </div>
           <button
             type="submit"
             className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
@@ -900,6 +1034,10 @@ function TxModal({
 }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [hasSettlement, setHasSettlement] = useState(!!customer.settlementDate);
+  const [settlementDate, setSettlementDate] = useState(
+    customer.settlementDate || toJalaliInputDate(Date.now()),
+  );
   const isDebt = type === "debt";
   const balance = customerBalance(customer);
 
@@ -911,6 +1049,15 @@ function TxModal({
       return;
     }
     customers.addTx(customer.id, { type, amount: n, note: note.trim() || undefined });
+    if (isDebt) {
+      const latest = customers.getAll().find((c) => c.id === customer.id);
+      if (latest) {
+        customers.update({
+          ...latest,
+          settlementDate: hasSettlement ? settlementDate : undefined,
+        });
+      }
+    }
     onClose();
   };
 
@@ -990,6 +1137,30 @@ function TxModal({
             placeholder="بابت... (اختیاری)"
             className={inputCls}
           />
+          {isDebt && (
+            <div className="rounded-xl border border-border bg-background p-3">
+              <label className="flex items-center gap-2 text-xs font-medium">
+                <input
+                  type="checkbox"
+                  checked={hasSettlement}
+                  onChange={(e) => setHasSettlement(e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                تاریخ تسویه این بدهی (اختیاری)
+              </label>
+              {hasSettlement && (
+                <div className="mt-2">
+                  <JalaliDateSelect
+                    value={settlementDate}
+                    onChange={setSettlementDate}
+                    yearsBack={1}
+                    yearsForward={2}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="submit"
             className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white ${isDebt ? "bg-destructive" : "bg-green-600"}`}
@@ -1138,7 +1309,11 @@ function QuickEntryModal({
                                 : "text-green-600"
                           }`}
                         >
-                          {b > 0 ? `بدهکار ${formatToman(b)}` : b < 0 ? `طلبکار ${formatToman(-b)}` : "تسویه"}
+                          {b > 0
+                            ? `بدهکار ${formatToman(b)}`
+                            : b < 0
+                              ? `طلبکار ${formatToman(-b)}`
+                              : "تسویه"}
                         </span>
                       </button>
                     );
@@ -1206,35 +1381,24 @@ function CustomersPage() {
   );
 }
 
-// ─── مودال یادآور (واتساپ / پیامک) ─────────────────────────────────────────
+// ─── پیگیری بدهکاران (پیامک نیمه‌دستی + تماس) ────────────────────────────────
 
-function toIntlPhone(raw: string): string {
-  // فقط اعداد و تبدیل ارقام فارسی/عربی
-  const en = raw
-    .replace(/[\u06F0-\u06F9]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-    .replace(/[\u0660-\u0669]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
-  const digits = en.replace(/\D/g, "");
-  if (digits.startsWith("0098")) return digits.slice(2);
-  if (digits.startsWith("98")) return digits;
-  if (digits.startsWith("0")) return "98" + digits.slice(1);
-  if (digits.startsWith("9") && digits.length === 10) return "98" + digits;
-  return digits;
-}
-
-function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
-  const balance = customerBalance(customer);
-  const shopName = settings.get().shopName || "فروشگاه ما";
-  const defaultMsg =
-    `سلام ${customerFullName(customer)} عزیز،\n` +
-    `یادآور بدهی شما به ${shopName}:\n` +
-    `مبلغ: ${formatToman(balance)}\n` +
-    `لطفاً در اولین فرصت نسبت به تسویه اقدام بفرمایید. با تشکر.`;
-  const [text, setText] = useState(defaultMsg);
-  const [shareNotice, setShareNotice] = useState<string | null>(null);
-  const phoneRaw = customer.phone ?? "";
-  const intl = toIntlPhone(phoneRaw);
-  const waUrl = `https://wa.me/${intl}?text=${encodeURIComponent(text)}`;
-  const smsUrl = `sms:${phoneRaw}?body=${encodeURIComponent(text)}`;
+function DebtFollowupModal({
+  customers: list,
+  onClose,
+  onRemind,
+}: {
+  customers: Customer[];
+  onClose: () => void;
+  onRemind: (c: Customer) => void;
+}) {
+  const debtors = useMemo(
+    () =>
+      list
+        .filter((c) => customerBalance(c) > 0)
+        .sort((a, b) => customerBalance(b) - customerBalance(a)),
+    [list],
+  );
 
   return (
     <div
@@ -1242,71 +1406,91 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
+      role="dialog"
+      aria-modal="true"
     >
-      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-base font-bold">
-            <Bell className="h-4 w-4 text-primary" />
-            ارسال یادآور بدهی
-          </h3>
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
+        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-bold">
+              <Send className="h-4 w-4 text-primary" />
+              پیگیری بدهکاران
+            </h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              متن آماده را بفرستید یا تماس بگیرید — ارسال نیمه‌دستی از گوشی شماست.
+            </p>
+          </div>
           <button
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+            aria-label="بستن"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <p className="mb-3 text-xs text-muted-foreground">
-          به <strong className="text-foreground">{customerFullName(customer)}</strong> —{" "}
-          <span dir="ltr">{phoneRaw}</span>
-        </p>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={7}
-          className={`${inputCls} resize-none leading-6`}
-        />
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <a
-            href={waUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={onClose}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-green-700"
-          >
-            <MessageCircle className="h-4 w-4" />
-            واتساپ
-          </a>
-          <a
-            href={smsUrl}
-            onClick={onClose}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
-          >
-            <Send className="h-4 w-4" />
-            پیامک
-          </a>
+        <div className="flex-1 overflow-y-auto p-3">
+          {debtors.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">بدهکاری ثبت نشده است.</p>
+          ) : (
+            <ul className="space-y-2">
+              {debtors.map((c) => {
+                const dueKind = settlementAlertKind(c);
+                const phone = c.phone?.trim();
+                return (
+                  <li key={c.id} className="rounded-2xl border border-border bg-background p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{customerFullName(c)}</div>
+                        <div className="mt-0.5 text-xs font-semibold text-destructive">
+                          {formatToman(customerBalance(c))}
+                        </div>
+                        {c.settlementDate && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <CalendarClock className="h-3 w-3" />
+                            موعد {formatJalaliYmd(c.settlementDate)}
+                            {dueKind === "overdue"
+                              ? " · گذشته"
+                              : dueKind === "today"
+                                ? " · امروز"
+                                : dueKind === "tomorrow"
+                                  ? " · فردا"
+                                  : ""}
+                          </div>
+                        )}
+                        {phone ? (
+                          <div className="mt-0.5 text-[11px] text-muted-foreground" dir="ltr">
+                            {phone}
+                          </div>
+                        ) : (
+                          <div className="mt-0.5 text-[11px] text-destructive">بدون شماره تلفن</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onRemind(c)}
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-primary py-2 text-[11px] font-semibold text-primary-foreground"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        پیامک آماده
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!phone}
+                        onClick={() => phone && openExternal(telHref(phone))}
+                        className="inline-flex items-center justify-center gap-1 rounded-xl bg-sky-600 py-2 text-[11px] font-semibold text-white disabled:opacity-40"
+                      >
+                        <Phone className="h-3.5 w-3.5" />
+                        تماس
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-        <button
-          onClick={async () => {
-            const result = await shareText({
-              title: "یادآور بدهی",
-              text,
-            });
-            setShareNotice(
-              result === "shared"
-                ? "پنجره اشتراک باز شد؛ اگر متن داخل اپ نیامد، متن آماده کپی شده و Paste کنید."
-                : "متن آماده کپی شد؛ وارد روبیکا، بله یا ایتا شوید و Paste کنید.",
-            );
-          }}
-          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2.5 text-xs font-semibold hover:bg-accent"
-        >
-          <Share2 className="h-4 w-4" />
-          اشتراک‌گذاری در روبیکا / بله / ایتا / تلگرام ...
-        </button>
-        {shareNotice && <p className="mt-2 text-center text-[11px] text-primary">{shareNotice}</p>}
-        {!intl && (
-          <p className="mt-2 text-center text-[11px] text-destructive">شماره تلفن نامعتبر است.</p>
-        )}
       </div>
     </div>
   );
@@ -1317,6 +1501,12 @@ function ReminderModal({ customer, onClose }: { customer: Customer; onClose: () 
 type Audience = "all" | "debtors" | "creditors" | "settled";
 
 const TEMPLATES: { id: string; label: string; body: (shop: string) => string }[] = [
+  {
+    id: "debt",
+    label: "💰 یادآور بدهی",
+    body: (shop) =>
+      `مشتری گرامی،\nیادآور بدهی شما به ${shop}.\nلطفاً در اولین فرصت نسبت به تسویه حساب اقدام بفرمایید.\nبا تشکر.`,
+  },
   {
     id: "festival",
     label: "🎉 جشنواره",
@@ -1630,9 +1820,9 @@ function SmsCampaignModal({
           </div>
 
           <div className="rounded-xl bg-accent/50 p-2.5 text-[11px] leading-5 text-muted-foreground">
-            💡 اگر سوییچ «افزودن لینک صفحه فروشگاه» را روشن کنید، لینک عمومی فروشگاه هم به
-            پیامک و هم به متن اشتراک‌گذاری اضافه می‌شود. اگر می‌خواهید پیامک کوتاه‌تر باشد یا
-            نگران خرابی لینک در برخی اپراتورها/گوشی‌ها هستید، این سوییچ را خاموش بگذارید.
+            💡 اگر سوییچ «افزودن لینک صفحه فروشگاه» را روشن کنید، لینک عمومی فروشگاه هم به پیامک و
+            هم به متن اشتراک‌گذاری اضافه می‌شود. اگر می‌خواهید پیامک کوتاه‌تر باشد یا نگران خرابی
+            لینک در برخی اپراتورها/گوشی‌ها هستید، این سوییچ را خاموش بگذارید.
           </div>
         </div>
 
@@ -1663,7 +1853,9 @@ function SmsCampaignModal({
             <Share2 className="h-4 w-4" />
             اشتراک در روبیکا / بله / ایتا
           </button>
-          {shareNotice && <p className="text-center text-[11px] leading-5 text-primary">{shareNotice}</p>}
+          {shareNotice && (
+            <p className="text-center text-[11px] leading-5 text-primary">{shareNotice}</p>
+          )}
 
           {finalList.length === 0 ? (
             <button
@@ -1753,7 +1945,7 @@ function CustomerDetailModal({
   const [salesHistory] = invoice.useHistory();
   const [appSettings] = settings.useAll();
   const balance = customerBalance(customer);
-  const canRemind = balance > 0 && !!customer.phone;
+  const dueKind = settlementAlertKind(customer);
   const myInvoices = useMemo(
     () => invoicesOfCustomer(customer, salesHistory),
     [customer, salesHistory],
@@ -1772,13 +1964,19 @@ function CustomerDetailModal({
           <div className="min-w-0">
             <h3 className="truncate text-base font-bold">{customerFullName(customer)}</h3>
             {customer.phone && (
-              <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+              <span
+                className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
+                dir="ltr"
+              >
                 <Phone className="h-3 w-3" />
                 {customer.phone}
               </span>
             )}
           </div>
-          <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1800,6 +1998,19 @@ function CustomerDetailModal({
             <div className="mt-1 text-xl font-bold">
               {balance === 0 ? "تسویه است" : formatToman(Math.abs(balance))}
             </div>
+            {customer.settlementDate && balance > 0 && (
+              <div className="mt-1 flex items-center justify-center gap-1 text-[11px] opacity-80">
+                <CalendarClock className="h-3 w-3" />
+                موعد تسویه: {formatJalaliYmd(customer.settlementDate)}
+                {dueKind === "overdue"
+                  ? " · گذشته"
+                  : dueKind === "today"
+                    ? " · امروز"
+                    : dueKind === "tomorrow"
+                      ? " · فردا"
+                      : ""}
+              </div>
+            )}
           </div>
 
           {/* اقدامات سریع */}
@@ -1825,14 +2036,28 @@ function CustomerDetailModal({
               <ArrowDownCircle className="h-3.5 w-3.5" />
               ثبت پرداخت
             </button>
-            {canRemind && (
-              <button
-                onClick={onRemind}
-                className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
-              >
-                <Bell className="h-3.5 w-3.5" />
-                ارسال یادآور بدهی
-              </button>
+            {balance > 0 && (
+              <>
+                <button
+                  onClick={onRemind}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  پیامک بدهی
+                </button>
+                <button
+                  type="button"
+                  disabled={!customer.phone}
+                  onClick={() => {
+                    const href = telHref(customer.phone || "");
+                    if (href) openExternal(href);
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-500/20 disabled:opacity-40 dark:text-sky-400"
+                >
+                  <Phone className="h-3.5 w-3.5" />
+                  تماس
+                </button>
+              </>
             )}
           </div>
 
@@ -1920,14 +2145,22 @@ function CustomerDetailModal({
  * «حذف» را تایپ کند، و دقیقاً نوشته شده چه چیزی پاک می‌شود و چه چیزی نمی‌شود.
  */
 function DeleteAllCustomersDialog({
-  count, onConfirm, onCancel,
-}: { count: number; onConfirm: () => void; onCancel: () => void }) {
+  count,
+  onConfirm,
+  onCancel,
+}: {
+  count: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   const [typed, setTyped] = useState("");
   const ok = typed.trim() === "حذف";
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-foreground/50 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
       role="dialog"
       aria-modal="true"
     >
@@ -1938,17 +2171,15 @@ function DeleteAllCustomersDialog({
         </h3>
         <div className="space-y-2 text-xs leading-6 text-muted-foreground">
           <p>
-            با این کار <b className="text-foreground">{formatNumber(count)} مشتری</b> و
-            {" "}<b className="text-foreground">تمام سوابق بدهی و پرداخت آن‌ها</b> برای همیشه پاک می‌شود.
+            با این کار <b className="text-foreground">{formatNumber(count)} مشتری</b> و{" "}
+            <b className="text-foreground">تمام سوابق بدهی و پرداخت آن‌ها</b> برای همیشه پاک می‌شود.
             این عمل قابل بازگشت نیست.
           </p>
           <p className="rounded-xl border border-border bg-background p-2.5">
-            ✅ فاکتورهای فروش، هزینه‌ها، محصولات و بقیه‌ی اطلاعات شما دست‌نخورده باقی می‌ماند.
-            فقط فهرست مشتریان و دفتر بدهی‌شان حذف می‌شود.
+            ✅ فاکتورهای فروش، هزینه‌ها، محصولات و بقیه‌ی اطلاعات شما دست‌نخورده باقی می‌ماند. فقط
+            فهرست مشتریان و دفتر بدهی‌شان حذف می‌شود.
           </p>
-          <p>
-            پیشنهاد می‌کنیم قبل از ادامه، از «تنظیمات ← پشتیبان‌گیری» یک نسخه پشتیبان بگیرید.
-          </p>
+          <p>پیشنهاد می‌کنیم قبل از ادامه، از «تنظیمات ← پشتیبان‌گیری» یک نسخه پشتیبان بگیرید.</p>
           <p className="text-foreground">برای تایید، کلمه‌ی «حذف» را بنویسید:</p>
         </div>
         <input
@@ -1993,7 +2224,9 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paidAmount, setPaidAmount] = useState("");
 
-  const matches = searchQ.trim() ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code]).slice(0, 8) : [];
+  const matches = searchQ.trim()
+    ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code]).slice(0, 8)
+    : [];
 
   const addFromSearch = (p: Product) => {
     setCartInv((prev) => addProductToInvoice(prev, p));
@@ -2010,7 +2243,9 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   };
 
   const removeItem = (productId: string) => {
-    setCartInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+    setCartInv((prev) =>
+      recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }),
+    );
   };
 
   const addManualItem = () => {
@@ -2025,7 +2260,13 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
         ...prev,
         items: [
           ...prev.items,
-          { productId: `manual-${cryptoId()}`, name: manualName.trim(), price, quantity: qty, unit: "عدد" },
+          {
+            productId: `manual-${cryptoId()}`,
+            name: manualName.trim(),
+            price,
+            quantity: qty,
+            unit: "عدد",
+          },
         ],
       }),
     );
@@ -2036,7 +2277,11 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   };
 
   // مبالغ از منبع واحد invoice-math خوانده می‌شوند تا با فاکتور چاپی یکی باشند
-  const cartTotals = invoiceTotals({ ...cartInv, paymentMethod, paidAmount: parseNumberInput(paidAmount) });
+  const cartTotals = invoiceTotals({
+    ...cartInv,
+    paymentMethod,
+    paidAmount: parseNumberInput(paidAmount),
+  });
   const paid = paymentMethod === "credit" ? cartTotals.paid : cartTotals.total;
   const debt = paymentMethod === "credit" ? cartTotals.remaining : 0;
 
@@ -2045,7 +2290,11 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
       alert("حداقل یک کالا به فاکتور اضافه کنید.");
       return;
     }
-    const customerInfo = { firstName: customer.firstName, lastName: customer.lastName, phone: customer.phone };
+    const customerInfo = {
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      phone: customer.phone,
+    };
     const finalInv = recalc({
       ...cartInv,
       customer: customerInfo,
@@ -2076,7 +2325,10 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
             <ShoppingCart className="h-4 w-4 text-primary" />
             فاکتور فروش برای {customerFullName(customer)}
           </h3>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary">
+          <button
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-secondary"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -2101,7 +2353,9 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
                     className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
                   >
                     <span className="truncate font-medium">{p.name}</span>
-                    <span className="shrink-0 text-muted-foreground">{formatToman(applyProductDiscount(p))}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      {formatToman(applyProductDiscount(p))}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -2174,7 +2428,9 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{item.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{formatToman(item.price)} × {formatNumber(item.quantity)}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {formatToman(item.price)} × {formatNumber(item.quantity)}
+                    </div>
                   </div>
                   <QuantityStepper
                     value={item.quantity}

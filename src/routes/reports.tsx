@@ -213,6 +213,7 @@ function ReportsPageInner() {
     if (!from || !to) return null;
     const fromTs = jalaliToTimestamp(from.jy, from.jm, from.jd, 0, 0);
     const toTs = jalaliToTimestamp(to.jy, to.jm, to.jd, 23, 59) + 59_999;
+    if (fromTs > toTs) return null;
     return { fromTs, toTs };
   }, [range, fromStr, toStr]);
 
@@ -275,7 +276,13 @@ function ReportsPageInner() {
   const RangeButton = ({ value, icon: Icon }: { value: Range; icon: typeof Calendar }) => (
     <button
       type="button"
-      onClick={() => setRange(value)}
+      onClick={() => {
+        setRange(value);
+        if (value === "custom") {
+          setFromStr((prev) => prev || toJalaliInputDate(startOfMonth()));
+          setToStr((prev) => prev || toJalaliInputDate(Date.now()));
+        }
+      }}
       className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium transition ${
         range === value
           ? "bg-primary text-primary-foreground shadow-sm"
@@ -310,50 +317,68 @@ function ReportsPageInner() {
             <CalendarSearch className="h-3.5 w-3.5 text-primary" />
             انتخاب بازه (تاریخ شمسی)
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <label className="flex flex-1 items-center gap-2 text-xs">
-              <span className="w-8 shrink-0 text-muted-foreground">از:</span>
-              <input
+          <div className="flex flex-col gap-3">
+            <label className="block text-xs">
+              <span className="mb-1 block text-muted-foreground">از تاریخ</span>
+              <JalaliDateSelect
                 value={fromStr}
-                onChange={(e) => {
-                  setFromStr(e.target.value);
+                onChange={(v) => {
+                  setFromStr(v);
                   setRangeErr(null);
                 }}
-                placeholder="1403/05/12"
-                inputMode="numeric"
-                dir="ltr"
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 outline-none focus:border-primary"
+                yearsBack={5}
+                yearsForward={0}
               />
             </label>
-            <label className="flex flex-1 items-center gap-2 text-xs">
-              <span className="w-8 shrink-0 text-muted-foreground">تا:</span>
-              <input
+            <label className="block text-xs">
+              <span className="mb-1 block text-muted-foreground">تا تاریخ</span>
+              <JalaliDateSelect
                 value={toStr}
-                onChange={(e) => {
-                  setToStr(e.target.value);
+                onChange={(v) => {
+                  setToStr(v);
                   setRangeErr(null);
                 }}
-                placeholder="1403/05/20"
-                inputMode="numeric"
-                dir="ltr"
-                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 outline-none focus:border-primary"
+                yearsBack={5}
+                yearsForward={0}
               />
             </label>
-            <button
-              type="button"
-              onClick={() => {
-                const today = formatJalaliDate(Date.now());
-                setFromStr(today);
-                setToStr(today);
-              }}
-              className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
-            >
-              فقط امروز
-            </button>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const today = toJalaliInputDate(Date.now());
+                  setFromStr(today);
+                  setToStr(today);
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                فقط امروز
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFromStr(toJalaliInputDate(startOfMonth()));
+                  setToStr(toJalaliInputDate(Date.now()));
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                از اول ماه
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFromStr(toJalaliInputDate(startOfYear()));
+                  setToStr(toJalaliInputDate(Date.now()));
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+              >
+                از اول سال
+              </button>
+            </div>
           </div>
           {range === "custom" && !customRange && (fromStr || toStr) && (
             <div className="mt-2 text-[11px] text-destructive">
-              تاریخ نامعتبر است. فرمت درست: ۱۴۰۳/۰۵/۱۲
+              بازه نامعتبر است. تاریخ شروع باید قبل از تاریخ پایان باشد.
             </div>
           )}
           {customRange && (

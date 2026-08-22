@@ -50,9 +50,8 @@ import {
   Package,
   UserCheck,
   NotebookPen,
-  Eye,
 } from "lucide-react";
-import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
+import { InvoiceActions } from "@/components/InvoiceActions";
 import { InvoiceSavedDialog } from "@/components/InvoiceSavedDialog";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
@@ -117,7 +116,6 @@ export function InvoiceWorkspace() {
   const [manualQty, setManualQty] = useState("1");
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
-  const [proformaOpen, setProformaOpen] = useState(false);
   const [doneInv, setDoneInv] = useState<Invoice | null>(null);
 
   // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
@@ -169,16 +167,6 @@ export function InvoiceWorkspace() {
     notes: notes.trim() ? notes.trim() : undefined,
   };
   const totals = invoiceTotals(draftInvoice);
-
-  const printReadyInvoice = (documentTitle?: string): Invoice => ({
-    ...draftInvoice,
-    shopName: appSettings.shopName,
-    shopAddress: appSettings.storeAddress || undefined,
-    shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
-    shopLogoUrl: appSettings.logoUrl || undefined,
-    createdAt: Date.now(),
-    documentTitle,
-  });
 
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
@@ -468,8 +456,7 @@ export function InvoiceWorkspace() {
       >
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[11px] font-medium opacity-80">گام ۱ — افزودن کالا</div>
-            <div className="text-xs/5 opacity-80 mt-1">جمع کل فاکتور</div>
+            <div className="text-xs/5 opacity-80">جمع کل فاکتور</div>
             <div className="mt-1 text-2xl font-bold">{formatToman(totals.total)}</div>
             <div className="text-xs opacity-70 mt-0.5">{inv.items.length} قلم کالا</div>
           </div>
@@ -608,37 +595,55 @@ export function InvoiceWorkspace() {
         )}
 
         {/* Bottom buttons */}
-        <div className="mt-3 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowCustomer((v) => !v)}
+            className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
+          >
+            <User className="h-3.5 w-3.5" />
+            {showCustomer ? "بستن" : "مشتری"}
+          </button>
+
+          {askFields.length > 0 && (
             <button
-              type="button"
-              onClick={() => setShowCustomer((v) => !v)}
+              onClick={() => setShowFields((v) => !v)}
               className="flex shrink-0 items-center justify-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
             >
-              <User className="h-3.5 w-3.5" />
-              {showCustomer ? "بستن مشتری" : customerName ? `مشتری: ${customerName}` : "مشتری"}
+              <FileText className="h-3.5 w-3.5" />
+              {showFields ? "بستن" : "فیلدهای فاکتور"}
+              {filledFieldsCount > 0 && (
+                <span className="rounded-full bg-background px-1.5 text-[10px] font-bold text-primary">
+                  {formatNumber(filledFieldsCount)}
+                </span>
+              )}
             </button>
+          )}
 
-            {askFields.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowFields((v) => !v)}
-                className="flex shrink-0 items-center gap-1 rounded-xl bg-background/10 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-background/20"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                {showFields ? "بستن" : "فیلدهای فاکتور"}
-                {filledFieldsCount > 0 && (
-                  <span className="rounded-full bg-background px-1.5 text-[10px] font-bold text-primary">
-                    {formatNumber(filledFieldsCount)}
-                  </span>
-                )}
-              </button>
-            )}
-          </div>
-          <p className="text-[11px] leading-5 text-primary-foreground/80">
-            کالا را اضافه کنید، پایین صفحه مشتری و پرداخت را مشخص کنید، بعد پیش‌فاکتور ببینید یا ثبت
-            کنید.
-          </p>
+          {inv.items.length > 0 && (
+            <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
+              <InvoiceActions
+                inv={{
+                  ...draftInvoice,
+                  shopName: appSettings.shopName,
+                  shopAddress: appSettings.storeAddress || undefined,
+                  shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
+                  shopLogoUrl: appSettings.logoUrl || undefined,
+                  createdAt: Date.now(),
+                }}
+                size="sm"
+                showLabels={false}
+              />
+            </div>
+          )}
+
+          <button
+            onClick={checkout}
+            disabled={inv.items.length === 0}
+            className="flex w-full shrink-0 items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50 sm:w-auto"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            ثبت فاکتور
+          </button>
         </div>
       </section>
 
@@ -675,13 +680,10 @@ export function InvoiceWorkspace() {
       {/* Customer info panel */}
       {showCustomer && (
         <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-card">
-          <h3 className="mb-1 text-sm font-bold flex items-center gap-2">
+          <h3 className="mb-3 text-sm font-semibold flex items-center gap-2">
             <User className="h-4 w-4 text-primary" />
-            مشتری این فاکتور
+            اطلاعات مشتری (اختیاری)
           </h3>
-          <p className="mb-3 text-[11px] leading-5 text-muted-foreground">
-            برای فروش نقدی اختیاری است. برای نسیه یا چک حتماً نام یا تلفن را بنویسید.
-          </p>
 
           {/* انتخاب از مشتریان ذخیره‌شده */}
           <div className="relative mb-2">
@@ -753,12 +755,6 @@ export function InvoiceWorkspace() {
 
       {/* Payment method picker */}
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
-        <div className="mb-3">
-          <div className="text-sm font-bold">۲. تخفیف، مالیات و روش پرداخت</div>
-          <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
-            اگر تخفیف یا مالیات دارید همین‌جا بزنید. بعد نوع پرداخت را انتخاب کنید.
-          </p>
-        </div>
         {inv.items.length > 0 && (
           <div className="mb-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
             <label className="flex cursor-pointer items-center gap-2">
@@ -1047,9 +1043,11 @@ export function InvoiceWorkspace() {
 
       {/* توضیحات فاکتور (اختیاری) */}
       <div className="mb-4 rounded-2xl border border-border bg-card p-3 shadow-card">
-        <label htmlFor="invoice-notes" className="mb-2 block text-sm font-bold">
-          ۳. توضیحات فاکتور
-          <span className="mr-1 text-[11px] font-normal text-muted-foreground">(اختیاری)</span>
+        <label
+          htmlFor="invoice-notes"
+          className="mb-2 block text-xs font-semibold text-muted-foreground"
+        >
+          توضیحات فاکتور (اختیاری)
         </label>
         <textarea
           id="invoice-notes"
@@ -1062,12 +1060,9 @@ export function InvoiceWorkspace() {
       </div>
 
       {/* Items list */}
-      <div className="mb-2">
-        <h2 className="text-sm font-bold">۴. اقلام این فاکتور</h2>
-        <p className="text-[11px] leading-5 text-muted-foreground">
-          کالاها را از اسکن، صدا یا جستجو اضافه کنید. تعداد و قیمت را همین‌جا عوض کنید.
-        </p>
-      </div>
+      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
+        اقلام فاکتور ({inv.items.length})
+      </h2>
 
       {inv.items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
@@ -1302,53 +1297,6 @@ export function InvoiceWorkspace() {
         </ul>
       )}
 
-      <section className="mb-4 rounded-2xl border-2 border-primary/25 bg-card p-4 shadow-card">
-        <div className="mb-3">
-          <div className="text-base font-bold">۵. پیش‌فاکتور یا ثبت فاکتور</div>
-          <p className="mt-1 text-[12px] leading-6 text-muted-foreground">
-            <b className="text-foreground">پیش‌فاکتور</b> را بزرگ می‌بینید و می‌توانید چاپ کنید؛
-            هنوز ذخیره نمی‌شود و از انبار کم نمی‌شود.
-            <br />
-            <b className="text-foreground">ثبت فاکتور</b> فروش را قطعی می‌کند و در تاریخچه می‌ماند.
-            بعد از ثبت، می‌توانید ذخیره در گالری، ارسال برای مشتری یا پیش‌نمایش را انتخاب کنید.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={inv.items.length === 0}
-            onClick={() => setProformaOpen(true)}
-            className="flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-2xl border-2 border-primary bg-primary/10 px-2 py-3 text-primary transition hover:bg-primary/15 disabled:opacity-45"
-          >
-            <Eye className="h-7 w-7" />
-            <span className="text-base font-bold">پیش‌فاکتور</span>
-            <span className="text-[11px] font-medium text-primary/80">نمایش بزرگ و چاپ</span>
-          </button>
-          <button
-            type="button"
-            disabled={inv.items.length === 0}
-            onClick={checkout}
-            className="flex min-h-[5.5rem] flex-col items-center justify-center gap-1 rounded-2xl bg-primary px-2 py-3 text-primary-foreground shadow-elegant transition hover:opacity-95 disabled:opacity-45"
-          >
-            <CheckCircle2 className="h-7 w-7" />
-            <span className="text-base font-bold">ثبت فاکتور</span>
-            <span className="text-[11px] font-medium text-primary-foreground/85">
-              ذخیره در تاریخچه
-            </span>
-          </button>
-        </div>
-      </section>
-
-      {proformaOpen && inv.items.length > 0 && (
-        <InvoicePreviewModal
-          inv={printReadyInvoice("پیش‌فاکتور")}
-          heading="پیش‌فاکتور"
-          hint="این سند هنوز ثبت نشده. چاپ یا ارسال آن موجودی انبار را کم نمی‌کند. برای قطعی‌شدن فروش، «ثبت فاکتور» را بزنید."
-          allowSave
-          allowSend
-          onClose={() => setProformaOpen(false)}
-        />
-      )}
       {doneInv && <InvoiceSavedDialog inv={doneInv} onClose={() => setDoneInv(null)} />}
     </Layout>
   );

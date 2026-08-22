@@ -129,7 +129,11 @@ export function isNativeApp(): boolean {
 export function isAppShell(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    return isNativeApp() || isWebView();
+    if (isNativeApp() || isWebView()) return true;
+    const ua = navigator.userAgent || "";
+    // WebView سیستمی اندروید — لینک دانلود صفحه را عوض می‌کند
+    if (/Android/i.test(ua) && /; wv\)/i.test(ua)) return true;
+    return false;
   } catch {
     return isNativeApp();
   }

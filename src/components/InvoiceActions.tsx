@@ -18,12 +18,15 @@ import {
   formatNumber,
   currencyLabel,
   formatChequeDue,
+  invoiceDocumentTitle,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import {
   printHtml,
   OLD_APP_MESSAGE,
   isNativeApp,
+  isAppShell,
+  canNativeFileShare,
   saveBase64File,
   downloadBlob,
   printFitAssets,
@@ -38,6 +41,7 @@ import {
   type InvoiceTemplate,
 } from "@/lib/invoice-template";
 import { COUNT_UNIT } from "@/lib/store";
+import { shareText } from "@/lib/openExternal";
 
 function escHtml(s: unknown): string {
   return String(s ?? "")
@@ -89,6 +93,7 @@ export function buildInvoiceHTML(
     .join("");
 
   const shopName = inv.shopName || "فروشگاه";
+  const docTitle = invoiceDocumentTitle(inv);
   const fs = fontSize;
   const compact = paper === "A5";
   const fit = printFitAssets(paper);
@@ -104,12 +109,11 @@ export function buildInvoiceHTML(
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>فاکتور ${escHtml(inv.id.toUpperCase())}</title>
+<title>${escHtml(docTitle)} ${escHtml(inv.id.toUpperCase())}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
   ${fit.css}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;font-size:${fs}px;color:#1a2332;direction:rtl;padding:${compact ? 8 : 14}px;background:#fff}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:#1a2332;direction:rtl;padding:${compact ? 8 : 14}px;background:#fff}
   .sheet{border:1px solid #c9d4e0;border-radius:12px;overflow:hidden;background:#fff}
   .hero{display:flex;align-items:center;gap:12px;padding:${compact ? "10px 12px" : "14px 16px"};background:linear-gradient(135deg,#0b3d5c 0%,#145a86 55%,#1a6fa3 100%);color:#fff}
   .hero .logo{width:${compact ? 46 : 58}px;height:${compact ? 46 : 58}px;object-fit:contain;border-radius:10px;background:#fff;flex-shrink:0;padding:3px}
@@ -152,10 +156,10 @@ export function buildInvoiceHTML(
     ${inv.shopLogoUrl ? `<img class="logo" src="${escHtml(inv.shopLogoUrl)}" alt="لوگو"/>` : ""}
     <div class="who">
       <h1>${escHtml(shopName)}</h1>
-      <div class="sub">${escHtml([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join("  ·  ") || "فاکتور فروش کالا و خدمات")}</div>
+      <div class="sub">${escHtml([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join("  ·  ") || `${docTitle} کالا و خدمات`)}</div>
     </div>
     <div class="badge">
-      <div class="k">فاکتور فروش</div>
+      <div class="k">${escHtml(docTitle)}</div>
       <div class="v">${escHtml(inv.id.toUpperCase())}</div>
     </div>
   </div>
@@ -218,9 +222,8 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
 <title>فیش ${inv.id.toUpperCase()}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
-  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Vazirmatn',Tahoma,sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
   .center{text-align:center}
   .shop{font-weight:700;font-size:14px}
   .muted{color:#444;font-size:10.5px}
@@ -237,7 +240,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
 </style></head><body>
 ${inv.shopLogoUrl ? `<img class="logo" src="${inv.shopLogoUrl}" alt="لوگو" />` : ""}
 <div class="center shop">${shopName}</div>
-<div class="center muted">فاکتور فروش</div>
+<div class="center muted">${invoiceDocumentTitle(inv)}</div>
 ${
   inv.shopAddress || inv.shopPhone
     ? `<div class="center muted">${[inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join(" — ")}</div>`
@@ -284,7 +287,7 @@ export function buildShareText(inv: Invoice): string {
   // «جمع کل» را داشت و مشتری با جمع‌زدن ردیف‌ها به عدد دیگری می‌رسید.
   const t = invoiceTotals(inv);
   const lines = [
-    `🧾 فاکتور ${inv.shopName || "فروشگاه"}`,
+    `🧾 ${invoiceDocumentTitle(inv)} ${inv.shopName || "فروشگاه"}`,
     `📅 تاریخ: ${date}`,
     customerName ? `👤 مشتری: ${customerName}` : "",
     inv.notes ? `📝 توضیحات: ${inv.notes}` : "",
@@ -335,44 +338,72 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const [sharingPdf, setSharingPdf] = useState(false);
   const [messaging, setMessaging] = useState(false);
   const [paperMenu, setPaperMenu] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const handlePrint = async (chosen: PaperSize = paper) => {
+    if (printing) return;
     setPaperMenu(false);
+    setPrinting(true);
     if (chosen !== paper) {
       setSettings({ ...appSettings, invoicePaperSize: chosen });
     }
-    const html = buildInvoiceHTML(inv, fontSize, template, chosen);
-    const ok = await printHtml(html, `فاکتور ${inv.id.toUpperCase()}`);
-    if (!ok) alert(OLD_APP_MESSAGE);
+    try {
+      const html = buildInvoiceHTML(inv, fontSize, template, chosen);
+      const ok = await printHtml(html, `${invoiceDocumentTitle(inv)} ${inv.id.toUpperCase()}`);
+      if (!ok) {
+        alert(
+          isAppShell()
+            ? "چاپ سیستم در این نسخه اپ باز نشد. فاکتور را از پیش‌نمایش داخل برنامه ببینید."
+            : OLD_APP_MESSAGE,
+        );
+      }
+    } finally {
+      setPrinting(false);
+    }
   };
 
-  // ── چاپ حرارتی ۸۰ میلی‌متر ────────────────────────────────────────────────
   const handleThermalPrint = async () => {
-    const html = buildThermalInvoiceHTML(inv);
-    const ok = await printHtml(html, `فیش ${inv.id.toUpperCase()}`);
-    if (!ok) alert(OLD_APP_MESSAGE);
+    if (printing) return;
+    setPrinting(true);
+    try {
+      const html = buildThermalInvoiceHTML(inv);
+      const ok = await printHtml(html, `فیش ${inv.id.toUpperCase()}`);
+      if (!ok) {
+        alert(isAppShell() ? "چاپ حرارتی در این نسخه اپ در دسترس نیست." : OLD_APP_MESSAGE);
+      }
+    } finally {
+      setPrinting(false);
+    }
   };
 
-  // ── ارسال فایل PDF فاکتور (دستی — از طریق واتساپ/شبکه‌های اجتماعی) ────────
-  // اپ اندروید: فایل نوشته و پنجره اشتراک سیستمی (شامل واتساپ) باز می‌شود.
-  // مرورگر وب: در صورت پشتیبانی از اشتراک فایل، مستقیم به‌اشتراک گذاشته می‌شود؛
-  // در غیر این صورت فایل دانلود می‌شود تا کاربر خودش در واتساپ/تلگرام ضمیمه کند.
   const handleSharePdf = async () => {
     if (sharingPdf) return;
     setSharingPdf(true);
     try {
       const { buildInvoicePdf } = await import("@/lib/invoice-pdf");
       const pdf = await buildInvoicePdf(inv);
-      const filename = `فاکتور-${inv.id.toUpperCase()}.pdf`;
+      const filename = `${invoiceDocumentTitle(inv)}-${inv.id.toUpperCase()}.pdf`;
 
-      if (isNativeApp()) {
+      if (canNativeFileShare() || isNativeApp()) {
         const dataUri = pdf.output("datauristring");
         const ok = await saveBase64File(dataUri, filename, "application/pdf");
-        if (!ok) alert(OLD_APP_MESSAGE);
+        if (!ok) {
+          alert(
+            isAppShell()
+              ? "ذخیره فایل در این نسخه اپ پشتیبانی نمی‌شود. از پرینت یا پیش‌نمایش استفاده کنید."
+              : OLD_APP_MESSAGE,
+          );
+        }
         return;
       }
 
-      // مرورگر وب
+      if (isAppShell()) {
+        alert(
+          "در اپ نمی‌توان فایل را با لینک دانلود گرفت چون از برنامه خارج می‌شوید. از دکمه پرینت استفاده کنید.",
+        );
+        return;
+      }
+
       const blob = pdf.output("blob") as Blob;
       const file = new File([blob], filename, { type: "application/pdf" });
       const nav = navigator as Navigator & {
@@ -384,7 +415,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
           await nav.share({ files: [file], title: filename });
           return;
         } catch {
-          // کاربر لغو کرد یا خطا — به دانلود ساده برمی‌گردیم
+          /* کاربر لغو کرد — به دانلود ساده برمی‌گردیم */
         }
       }
       downloadBlob(blob, filename);
@@ -396,37 +427,14 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
     }
   };
 
-  // ── اشتراک‌گذاری (متنی) ──────────────────────────────────────────────────
   const handleShare = async () => {
     const text = buildShareText(inv);
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `فاکتور ${inv.shopName || "فروشگاه"}`,
-          text,
-        });
-        return;
-      } catch {
-        // ادامه به fallback
-      }
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      alert("متن فاکتور کپی شد!");
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      alert("متن فاکتور کپی شد!");
-    }
+    const result = await shareText({
+      title: `${invoiceDocumentTitle(inv)} ${inv.shopName || "فروشگاه"}`,
+      text,
+      fallbackPhones: inv.customer?.phone ? [inv.customer.phone] : undefined,
+    });
+    if (result === "copied") alert("متن فاکتور کپی شد.");
   };
 
   const btnBase =
@@ -441,9 +449,14 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
     <>
       <button
         type="button"
-        onClick={() => setPaperMenu(true)}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="پرینت فاکتور"
+        onClick={() => void handlePrint(paper)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setPaperMenu(true);
+        }}
+        disabled={printing}
+        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
+        title="پرینت فاکتور (یک ضربه)"
       >
         <Printer className={iconSize} />
         {showLabels && <span>پرینت</span>}

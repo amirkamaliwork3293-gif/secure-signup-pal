@@ -14,6 +14,7 @@ import {
   formatJalaliDate,
   PAYMENT_LABEL,
   formatChequeDue,
+  invoiceDocumentTitle,
   type Invoice,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
@@ -118,7 +119,9 @@ function drawHeader(
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
   ctx.fillStyle = MUTED;
   ctx.fillText(
-    pageNo === 1 ? "فاکتور فروش" : `ادامه فاکتور — صفحه ${formatNumber(pageNo)}`,
+    pageNo === 1
+      ? invoiceDocumentTitle(inv)
+      : `ادامه ${invoiceDocumentTitle(inv)} — صفحه ${formatNumber(pageNo)}`,
     PAGE_W / 2,
     y,
   );
@@ -378,18 +381,16 @@ function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
   ctx.fillText(`با تشکر از خرید شما — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);
 }
 
-/** ساخت PDF چندصفحه‌ای فاکتور — خروجی آماده savePdf / save */
-export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
-  // اطمینان از آماده‌بودن فونت‌های وب پیش از رندر روی canvas
+async function renderInvoiceCanvases(inv: Invoice): Promise<HTMLCanvasElement[]> {
   try {
     await (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts?.ready;
   } catch {
     /* ignore */
   }
 
-  const pdf = new jsPDF({ unit: "mm", format: "a4" });
   const logoImg = await loadLogoImage(inv.shopLogoUrl);
   const items = inv.items;
+  const pages: HTMLCanvasElement[] = [];
   let pageNo = 1;
   let i = 0;
 
@@ -398,7 +399,6 @@ export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
     let y = drawHeader(ctx, inv, pageNo, logoImg);
     y = drawTableHead(ctx, y);
 
-    // جا برای پانویس + جدول مبالغ (که حالا چند سطر دارد، نه فقط «جمع کل»)
     const reservedBottom = MARGIN + 14 * SCALE;
     const totalsH = totalBlockHeight(inv);
     while (i < items.length && y + ROW_H + totalsH <= PAGE_H - reservedBottom) {
@@ -412,12 +412,27 @@ export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
       drawFooter(ctx, y, inv);
     }
 
-    if (pageNo > 1) pdf.addPage();
-    pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, 210, 297);
-
+    pages.push(canvas);
     if (isLast) break;
     pageNo++;
   }
 
+  return pages;
+}
+
+/** تصویر JPEG هر صفحه فاکتور — برای گالری / اشتراک در اپ، بدون لینک دانلود */
+export async function buildInvoiceImageDataUrls(inv: Invoice): Promise<string[]> {
+  const pages = await renderInvoiceCanvases(inv);
+  return pages.map((c) => c.toDataURL("image/jpeg", 0.92));
+}
+
+/** ساخت PDF چندصفحه‌ای فاکتور — خروجی آماده savePdf / save */
+export async function buildInvoicePdf(inv: Invoice): Promise<jsPDF> {
+  const pdf = new jsPDF({ unit: "mm", format: "a4" });
+  const pages = await renderInvoiceCanvases(inv);
+  pages.forEach((canvas, idx) => {
+    if (idx > 0) pdf.addPage();
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, 210, 297);
+  });
   return pdf;
 }

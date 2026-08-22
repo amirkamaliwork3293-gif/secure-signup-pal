@@ -88,7 +88,9 @@ export function InvoiceWorkspace() {
   const [inv, setInv] = invoice.useCurrent();
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
-  const [showCustomer, setShowCustomer] = useState(false);
+  const [showCustomer, setShowCustomer] = useState(
+    () => !!(inv.customer?.firstName?.trim() || inv.customer?.lastName?.trim() || inv.customer?.phone?.trim()),
+  );
   const [showFields, setShowFields] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [customer, setCustomer] = useState<CustomerInfo>(inv.customer ?? {});
@@ -189,7 +191,9 @@ export function InvoiceWorkspace() {
       setCheques([]);
     }
     setNotes(inv.notes ?? "");
-    setShowCustomer(false);
+    setShowCustomer(
+      !!(inv.customer?.firstName?.trim() || inv.customer?.lastName?.trim() || inv.customer?.phone?.trim()),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inv.id]);
 

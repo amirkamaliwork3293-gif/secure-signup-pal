@@ -38,6 +38,8 @@ export type ParsedItem = {
 export type ParseResult = {
   items: ParsedItem[];
   customerName?: string;
+  /** موبایل ایرانی نرمال‌شده (۰۹xxxxxxxxx) اگر در جمله گفته شده باشد */
+  customerPhone?: string;
   paymentMethod?: PaymentMethod;
 };
 
@@ -194,15 +196,156 @@ function extractPaymentMethod(s: string): { method?: PaymentMethod; rest: string
   return { method, rest: rest.replace(/\s+/g, " ").trim() };
 }
 
-function extractCustomer(s: string): { name?: string; rest: string } {
-  // «برای رضا» / «واسه آقای رضایی» — حداکثر دو توکن بعد از «برای/واسه»
-  const m = s.match(/(?:برای|واسه|به اسم)\s+(\S+(?:\s+\S+)?)/);
-  if (!m) return { rest: s };
-  const name = m[1].trim();
-  const rest = (s.slice(0, m.index) + " " + s.slice((m.index ?? 0) + m[0].length))
-    .replace(/\s+/g, " ")
+const NAME_HONORIFICS = new Set([
+  "اقا",
+  "اقای",
+  "خانم",
+  "خانوم",
+  "جناب",
+  "حاج",
+  "حاجی",
+  "مهندس",
+  "دکتر",
+  "سید",
+  "استاد",
+  "سرکار",
+]);
+
+const CUSTOMER_STOP = new Set([
+  "با",
+  "شماره",
+  "تلفن",
+  "موبایل",
+  "همراه",
+  "نسیه",
+  "نقد",
+  "نقدی",
+  "کارت",
+  "کارتخوان",
+  "و",
+]);
+
+/** موبایل ایرانی → ۰۹xxxxxxxxx (ارقام جمله قبلاً لاتین شده‌اند) */
+function compactIranMobile(raw: string): string | undefined {
+  const d = raw.replace(/\s+/g, "");
+  let national = d;
+  if (d.startsWith("98") && d.length === 12) national = "0" + d.slice(2);
+  else if (/^9\d{9}$/.test(d)) national = "0" + d;
+  return /^09\d{9}$/.test(national) ? national : undefined;
+}
+
+function extractPhone(s: string): { phone?: string; rest: string } {
+  const keyword = s.match(
+    /(?:با\s+)?(?:شماره\s+)?(?:تلفن|موبایل|همراه)(?:\s+شماره)?\s*((?:98|0)?9(?:\s*\d){9})/,
+  );
+  const withNumber = keyword
+    ? null
+    : s.match(/با\s+شماره\s*((?:98|0)?9(?:\s*\d){9})/);
+  const hit = keyword || withNumber;
+  if (hit) {
+    const phone = compactIranMobile(hit[1]);
+    if (phone) {
+      const rest = (s.slice(0, hit.index) + " " + s.slice((hit.index ?? 0) + hit[0].length))
+        .replace(/\s+/g, " ")
+        .trim();
+      return { phone, rest };
+    }
+  }
+  if (/(برای|واسه|به اسم|به نام|اقای|اقا|خانم|خانوم|شماره|تلفن)/.test(s)) {
+    const end = s.match(/((?:98|0)?9(?:\s*\d){9})\s*$/);
+    if (end) {
+      const phone = compactIranMobile(end[1]);
+      if (phone) return { phone, rest: s.slice(0, end.index).replace(/\s+/g, " ").trim() };
+    }
+  }
+  return { rest: s };
+}
+
+function hasQuantityCue(s: string): boolean {
+  if (/\d+(\.\d+)?\s*(تا|عدد|کیلو|گرم|دونه|دونا)/.test(s)) return true;
+  const tokens = s.split(" ").filter(Boolean);
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (!(tokens[i] in NUMBER_WORDS) && !/^\d+(\.\d+)?$/.test(tokens[i])) continue;
+    if (COUNT_WORDS.has(tokens[i + 1]) || KILO_WORDS.has(tokens[i + 1]) || GRAM_WORDS.has(tokens[i + 1]))
+      return true;
+  }
+  return false;
+}
+
+function isNameStop(t: string): boolean {
+  if (t in NUMBER_WORDS) return true;
+  if (/^\d+(\.\d+)?$/.test(t)) return true;
+  if (COUNT_WORDS.has(t) || KILO_WORDS.has(t) || GRAM_WORDS.has(t)) return true;
+  if (t in FRACTION_KG) return true;
+  return CUSTOMER_STOP.has(t);
+}
+
+function takePersonName(tokens: string[]): { name: string; used: number } {
+  let i = 0;
+  while (i < tokens.length && NAME_HONORIFICS.has(tokens[i])) i++;
+  const start = i;
+  while (i < tokens.length && i - start < 4) {
+    if (NAME_HONORIFICS.has(tokens[i])) {
+      i++;
+      continue;
+    }
+    if (isNameStop(tokens[i])) break;
+    i++;
+  }
+  const name = tokens
+    .slice(start, i)
+    .filter((t) => !NAME_HONORIFICS.has(t))
+    .join(" ")
     .trim();
-  return { name, rest };
+  return { name, used: i };
+}
+
+function findCustomerMarker(tokens: string[]): { index: number; length: number } | null {
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === "برای" || tokens[i] === "واسه") return { index: i, length: 1 };
+    if (tokens[i] === "به" && (tokens[i + 1] === "اسم" || tokens[i + 1] === "نام")) {
+      return { index: i, length: 2 };
+    }
+  }
+  return null;
+}
+
+/**
+ * نام مشتری و تلفن را از جمله جدا می‌کند تا وارد تجزیه‌ی کالا نشوند.
+ * «برای آقای امیر احمدی با شماره تلفن ۰۹۱۲…» → نام «امیر احمدی» + تلفن.
+ * «برای رضا دو تا نان» همچنان فقط «رضا» را برمی‌دارد (عدد/تا مرز نام است).
+ */
+function extractCustomer(s: string): { name?: string; phone?: string; rest: string } {
+  const ph = extractPhone(s);
+  const tokens = ph.rest.split(" ").filter(Boolean);
+  const marker = findCustomerMarker(tokens);
+  if (marker) {
+    const after = tokens.slice(marker.index + marker.length);
+    const taken = takePersonName(after);
+    const rest = [
+      ...tokens.slice(0, marker.index),
+      ...after.slice(Math.max(taken.used, 0)),
+    ]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { name: taken.name || undefined, phone: ph.phone, rest };
+  }
+
+  // دنباله‌ی فقط مشتری: «آقای امیر احمدی با شماره …» بدون «برای»
+  const honIdx = tokens.findIndex((t) => NAME_HONORIFICS.has(t));
+  if (honIdx >= 0 && (ph.phone || !hasQuantityCue(ph.rest))) {
+    const taken = takePersonName(tokens.slice(honIdx));
+    if (taken.name) {
+      const rest = [...tokens.slice(0, honIdx), ...tokens.slice(honIdx + taken.used)]
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return { name: taken.name, phone: ph.phone, rest };
+    }
+  }
+
+  return { phone: ph.phone, rest: ph.rest };
 }
 
 // ─── تجزیه‌ی یک بخش (clause) به مقدار/واحد/عبارت محصول ────────────────────────
@@ -624,6 +767,7 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
   return {
     items,
     customerName: cust.name,
+    customerPhone: cust.phone,
     paymentMethod: pay.method,
   };
 }

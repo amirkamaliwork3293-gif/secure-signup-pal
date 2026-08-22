@@ -10,12 +10,26 @@ import {
   formatNumber,
   stockStatus,
   isWeightUnit,
+  customers,
+  customerFullName,
+  recalc,
   type Product,
   type Invoice,
+  type Customer,
+  type CustomerInfo,
 } from "@/lib/store";
+import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { parseVoiceText, type ParsedItem, type ParsedCandidate } from "@/lib/voice/persian-nlu";
+import {
+  customerHasInfo,
+  customerInfoFromVoice,
+  maybeFillCustomerPhone,
+  type VoiceCustomerHit,
+} from "@/lib/voice/invoice-customer";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseVoiceInvoiceLLM } from "@/lib/api/voice.functions";
+import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
 import {
   Mic,
   MicOff,
@@ -26,6 +40,12 @@ import {
   Loader2,
   Keyboard,
   Sparkles,
+  Eye,
+  Pencil,
+  Trash2,
+  Minus,
+  User,
+  Receipt,
 } from "lucide-react";
 
 export const Route = createFileRoute("/voice")({
@@ -55,6 +75,8 @@ function vibrate(ms: number) {
 
 function VoicePageInner() {
   const [allProducts] = products.useAll();
+  const [allCustomers] = customers.useAll();
+  const [inv, setInv] = invoice.useCurrent();
   const recognizerRef = useRef<Recognizer | null>(null);
   const [engine, setEngine] = useState<SpeechEngine>("none");
   const [listening, setListening] = useState(false);
@@ -65,6 +87,9 @@ function VoicePageInner() {
   const [manualText, setManualText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [llmBusy, setLlmBusy] = useState(false);
+  const [customerChoices, setCustomerChoices] = useState<VoiceCustomerHit[]>([]);
+  const [editingDraft, setEditingDraft] = useState(false);
+  const [printPreview, setPrintPreview] = useState(false);
   // تشخیص فنی — فقط داخل اپ نیتیو (APK) برای فهمیدن علت کار نکردن میکروفون
   const [capInfo, setCapInfo] = useState<{ native: boolean; plugins: string[] } | null>(null);
 
@@ -114,14 +139,75 @@ function VoicePageInner() {
     return "ok";
   };
 
-  // اعمال مشتری/روش پرداخت روی فاکتور جاری (اختیاری)
-  const applyMeta = (customerName?: string, paymentMethod?: Invoice["paymentMethod"]) => {
-    if (!customerName && !paymentMethod) return;
+  // اعمال مشتری/تلفن/روش پرداخت روی پیش‌نویس فاکتور جاری — ثبت نهایی اینجا نیست
+  const applyMeta = (
+    customerName?: string,
+    customerPhone?: string,
+    paymentMethod?: Invoice["paymentMethod"],
+  ) => {
+    if (!customerName && !customerPhone && !paymentMethod) return;
     const current = invoice.getCurrent();
     const patched: Invoice = { ...current };
-    if (customerName) patched.customer = { ...(current.customer ?? {}), firstName: customerName };
+    if (customerName || customerPhone) {
+      const resolved = customerInfoFromVoice(
+        customerName,
+        customerPhone,
+        customers.getAll(),
+        current.customer,
+      );
+      patched.customer = resolved.info;
+      if (resolved.clearWinner) {
+        maybeFillCustomerPhone(resolved.candidates[0]?.customer, customerPhone);
+        setCustomerChoices([]);
+      } else if (resolved.candidates.length > 1) {
+        setCustomerChoices(resolved.candidates);
+      } else {
+        setCustomerChoices([]);
+      }
+    }
     if (paymentMethod) patched.paymentMethod = paymentMethod;
     invoice.save(patched);
+  };
+
+  const pickCustomer = (c: Customer) => {
+    const current = invoice.getCurrent();
+    const phone = current.customer?.phone || c.phone;
+    invoice.save({
+      ...current,
+      customer: { firstName: c.firstName, lastName: c.lastName, phone },
+    });
+    if (phone && !c.phone) maybeFillCustomerPhone(c, phone);
+    setCustomerChoices([]);
+  };
+
+  const updateDraftQty = (productId: string, delta: number) => {
+    setInv((prev) => {
+      const items = prev.items
+        .map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + delta } : i))
+        .filter((i) => i.quantity > 0);
+      return recalc({ ...prev, items });
+    });
+  };
+
+  const setDraftQty = (productId: string, quantity: number) => {
+    setInv((prev) => {
+      const items = prev.items
+        .map((i) => (i.productId === productId ? { ...i, quantity } : i))
+        .filter((i) => i.quantity > 0);
+      return recalc({ ...prev, items });
+    });
+  };
+
+  const removeDraftLine = (productId: string) => {
+    setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+  };
+
+  const saveDraftCustomer = (next: CustomerInfo) => {
+    setInv((prev) => ({ ...prev, customer: next }));
+  };
+
+  const selectDraftCustomer = (c: Customer) => {
+    saveDraftCustomer({ firstName: c.firstName, lastName: c.lastName, phone: c.phone });
   };
 
   // تبدیل ParsedItem به ResolvedItem و افزودن خودکار آیتم‌های مطمئن
@@ -153,21 +239,22 @@ function VoicePageInner() {
     setTranscript(trimmed);
 
     const parsed = parseVoiceText(trimmed, allProducts);
-    applyMeta(parsed.customerName, parsed.paymentMethod);
+    applyMeta(parsed.customerName, parsed.customerPhone, parsed.paymentMethod);
 
     let resolved = parsed.items.map(resolveItem);
 
     // اگر همه‌ی آیتم‌ها نامشخص بودند و آنلاین هستیم → تلاش با مدل زبانی (در صورت وجود کلید)
     const allWeak = resolved.length === 0 || resolved.every((r) => r.status === "unknown");
     const online = typeof navigator === "undefined" || navigator.onLine;
-    if (allWeak && online) {
+    const customerOnly = resolved.length === 0 && !!(parsed.customerName || parsed.customerPhone);
+    if (allWeak && online && !customerOnly) {
       setLlmBusy(true);
       try {
         const llm = await parseVoiceInvoiceLLM({
           data: { transcript: trimmed, productNames: allProducts.map((p) => p.name) },
         });
         if (llm.available && llm.items.length > 0) {
-          applyMeta(llm.customerName, llm.paymentMethod);
+          applyMeta(llm.customerName, parsed.customerPhone, llm.paymentMethod);
           // هر آیتم LLM را با همان منطق محلی روی محصول پیشنهادی تطبیق و افزوده می‌کنیم
           resolved = llm.items.map((it) => {
             const clause = `${formatNumber(it.quantity)} ${it.unit} ${it.productName}`;
@@ -193,7 +280,8 @@ function VoicePageInner() {
     }
 
     // اگر بعد از تلاش محلی و LLM چیزی استخراج نشد، یک سطر «پیدا نشد» با گزینه افزودن محصول نشان بده
-    if (resolved.length === 0) {
+    // (مگر این‌که فقط نام/تلفن مشتری گفته شده باشد)
+    if (resolved.length === 0 && !(parsed.customerName || parsed.customerPhone)) {
       resolved = [{
         key: Math.random().toString(36).slice(2),
         rawClause: trimmed,
@@ -214,6 +302,7 @@ function VoicePageInner() {
     setError(null);
     setNotice(null);
     setResults([]);
+    setCustomerChoices([]);
     setTranscript("");
     setListening(true);
     await rec.start({
@@ -270,8 +359,8 @@ function VoicePageInner() {
         ثبت صوتی فاکتور
       </h1>
       <p className="mb-4 text-sm text-muted-foreground">
-        دکمه را نگه دارید یا بزنید و نام و مقدار کالا را بگویید — مثلاً «دو ربع گوجه و نیم کیلو
-        پنیر».
+        کالا را بگویید و اگر خواستید نام مشتری و تلفن را هم اضافه کنید — مثلاً «دو تا تیشرت و سه تا
+        شلوار برای آقای امیر احمدی با شماره تلفن ۰۹۱۲۱۲۳۴۵۶۷». ثبت نهایی در بخش فاکتور است.
       </p>
 
       {/* دکمه میکروفون */}
@@ -317,7 +406,7 @@ function VoicePageInner() {
             value={manualText}
             onChange={(e) => setManualText(e.target.value)}
             rows={2}
-            placeholder="مثلاً: سه تا نان و نیم کیلو پنیر"
+            placeholder="مثلاً: دو تا تیشرت و سه تا شلوار برای آقای امیر احمدی"
             className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
           <div className="mt-2 flex gap-2">
@@ -355,6 +444,7 @@ function VoicePageInner() {
             onClick={() => {
               setTranscript("");
               setResults([]);
+              setCustomerChoices([]);
             }}
             className="text-muted-foreground hover:text-destructive"
           >
@@ -414,13 +504,72 @@ function VoicePageInner() {
         ))}
       </ul>
 
-      {results.length > 0 && (
+      {customerChoices.length > 0 && (
+        <div className="mt-3 rounded-2xl border border-border bg-card p-3 shadow-card">
+          <div className="mb-2 text-sm">
+            <span className="text-muted-foreground">کدام مشتری؟ </span>
+            <span className="font-medium">
+              «{[inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" ")}»
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {customerChoices.map((hit) => (
+              <button
+                key={hit.customer.id}
+                type="button"
+                onClick={() => pickCustomer(hit.customer)}
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm hover:bg-accent"
+              >
+                {customerFullName(hit.customer)}
+                {hit.customer.phone && (
+                  <span className="mr-1 text-xs text-muted-foreground" dir="ltr">
+                    {hit.customer.phone}
+                  </span>
+                )}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setCustomerChoices([])}
+              className="rounded-xl border border-dashed border-border px-3 py-2 text-sm text-muted-foreground"
+            >
+              همین نام بماند
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(inv.items.length > 0 || customerHasInfo(inv.customer)) && (
+        <VoiceDraftPreview
+          inv={inv}
+          customers={allCustomers}
+          editing={editingDraft}
+          onToggleEdit={() => setEditingDraft((v) => !v)}
+          onShowPrint={() => setPrintPreview(true)}
+          onQty={updateDraftQty}
+          onSetQty={setDraftQty}
+          onRemove={removeDraftLine}
+          onCustomer={saveDraftCustomer}
+          onPickCustomer={selectDraftCustomer}
+        />
+      )}
+
+      {(results.length > 0 || inv.items.length > 0 || customerHasInfo(inv.customer)) && (
         <Link
           to="/"
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground"
         >
-          مشاهده فاکتور
+          <Receipt className="h-4 w-4" />
+          ادامه و ثبت نهایی در فاکتور
         </Link>
+      )}
+
+      {printPreview && (
+        <InvoicePreviewModal
+          inv={inv}
+          heading="پیش‌نمایش فاکتور"
+          onClose={() => setPrintPreview(false)}
+        />
       )}
 
       {/* تشخیص فنی — فقط داخل اپ نیتیو نمایش داده می‌شود (برای رفع اشکال میکروفون) */}
@@ -537,6 +686,229 @@ function UnknownRow({ item, onDiscard }: { item: ResolvedItem; onDiscard: () => 
             نادیده بگیر
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function VoiceDraftPreview({
+  inv,
+  customers: customerList,
+  editing,
+  onToggleEdit,
+  onShowPrint,
+  onQty,
+  onSetQty,
+  onRemove,
+  onCustomer,
+  onPickCustomer,
+}: {
+  inv: Invoice;
+  customers: Customer[];
+  editing: boolean;
+  onToggleEdit: () => void;
+  onShowPrint: () => void;
+  onQty: (productId: string, delta: number) => void;
+  onSetQty: (productId: string, quantity: number) => void;
+  onRemove: (productId: string) => void;
+  onCustomer: (c: CustomerInfo) => void;
+  onPickCustomer: (c: Customer) => void;
+}) {
+  const [q, setQ] = useState("");
+  const totals = invoiceTotals(inv);
+  const cust = inv.customer ?? {};
+  const matches =
+    q.trim().length > 0
+      ? filterAndRankSearch(customerList, q, (c) => [...personNameSearchFields(c), c.phone ?? ""]).slice(
+          0,
+          6,
+        )
+      : [];
+
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-card p-4 shadow-card">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-bold">
+          <Eye className="h-4 w-4 text-primary" />
+          پیش‌نمایش فاکتور
+        </h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onToggleEdit}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {editing ? "بستن ویرایش" : "ویرایش دستی"}
+          </button>
+          <button
+            type="button"
+            onClick={onShowPrint}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            مشاهده کامل
+          </button>
+        </div>
+      </div>
+
+      {inv.items.length === 0 ? (
+        <p className="mb-3 text-xs text-muted-foreground">هنوز کالایی به فاکتور اضافه نشده است.</p>
+      ) : (
+        <ul className="mb-3 space-y-2">
+          {inv.items.map((item) => (
+            <li
+              key={item.productId}
+              className="flex items-center justify-between gap-2 rounded-xl border border-border/70 bg-background px-3 py-2 text-sm"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{item.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  {formatToman(item.price)}
+                  {item.unit && isWeightUnit(item.unit) ? ` / ${item.unit}` : ""}
+                </div>
+              </div>
+              {editing ? (
+                <div className="flex items-center gap-1">
+                  {isWeightUnit(item.unit) ? (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      dir="ltr"
+                      value={String(item.quantity)}
+                      onChange={(e) => {
+                        const n = Number(e.target.value.replace(",", "."));
+                        if (Number.isFinite(n) && n > 0) onSetQty(item.productId, n);
+                      }}
+                      className="w-16 rounded-lg border border-input bg-background px-1.5 py-1 text-center text-xs"
+                    />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onQty(item.productId, -1)}
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-border"
+                        aria-label="کم کردن"
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="min-w-6 text-center text-xs font-medium">
+                        {formatNumber(item.quantity)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onQty(item.productId, 1)}
+                        className="grid h-7 w-7 place-items-center rounded-lg border border-border"
+                        aria-label="زیاد کردن"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onRemove(item.productId)}
+                    className="grid h-7 w-7 place-items-center rounded-lg text-destructive"
+                    aria-label="حذف کالا"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="shrink-0 text-xs text-muted-foreground">
+                  {formatNumber(item.quantity)}
+                  {item.unit && isWeightUnit(item.unit) ? ` ${item.unit}` : " عدد"} ·{" "}
+                  {formatToman(lineTotal(item))}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mb-3 rounded-xl border border-dashed border-border bg-background p-3">
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+          <User className="h-3.5 w-3.5 text-primary" />
+          مشتری و تلفن
+        </div>
+        {editing ? (
+          <div className="space-y-2">
+            <div className="relative">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="جستجو در مشتریان ذخیره‌شده..."
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+              {matches.length > 0 && (
+                <div className="absolute inset-x-0 top-full z-30 mt-1 max-h-40 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                  {matches.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        onPickCustomer(c);
+                        setQ("");
+                      }}
+                      className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
+                    >
+                      <span className="truncate font-medium">{customerFullName(c)}</span>
+                      {c.phone && (
+                        <span dir="ltr" className="shrink-0 text-muted-foreground">
+                          {c.phone}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={cust.firstName ?? ""}
+                onChange={(e) => onCustomer({ ...cust, firstName: e.target.value })}
+                placeholder="نام"
+                className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+              <input
+                value={cust.lastName ?? ""}
+                onChange={(e) => onCustomer({ ...cust, lastName: e.target.value })}
+                placeholder="نام خانوادگی"
+                className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
+            </div>
+            <input
+              value={cust.phone ?? ""}
+              onChange={(e) => onCustomer({ ...cust, phone: e.target.value })}
+              placeholder="شماره تلفن"
+              inputMode="tel"
+              dir="ltr"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
+        ) : customerHasInfo(cust) ? (
+          <div className="text-sm">
+            <span className="font-medium">
+              {[cust.firstName, cust.lastName].filter(Boolean).join(" ") || "مشتری"}
+            </span>
+            {cust.phone && (
+              <span className="mr-2 text-muted-foreground" dir="ltr">
+                {cust.phone}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">مشتری گفته نشده — می‌توانید دستی وارد کنید.</p>
+        )}
+      </div>
+
+      <div className="text-sm font-semibold">
+        جمع کل: {formatToman(totals.total)}
+        {inv.items.length > 0 && (
+          <span className="mr-2 text-xs font-normal text-muted-foreground">
+            ({formatNumber(inv.items.length)} قلم)
+          </span>
+        )}
       </div>
     </div>
   );

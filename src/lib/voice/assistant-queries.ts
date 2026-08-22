@@ -17,11 +17,13 @@ import {
   formatToman,
   invoicesOfCustomer,
   jalaliToTimestamp,
+  manualLedgerTotals,
   stockStatus,
   toJalali,
   type Customer,
   type Expense,
   type Invoice,
+  type ManualLedgerEntry,
   type Product,
 } from "@/lib/store";
 import { discountFactor, invoiceTotals, lineTotal } from "@/lib/invoice-math";
@@ -60,6 +62,7 @@ export type QueryContext = {
   invoices: Invoice[];
   customers: Customer[];
   expenses: Expense[];
+  manualLedger?: ManualLedgerEntry[];
   /** «اکنون» — فقط برای تست/محاسبه‌ی بازه‌ها */
   now?: number;
 };
@@ -150,6 +153,17 @@ function expensesInRange(expenseList: Expense[], range: QueryRange, now: number)
   return expenseList.filter((e) => e.at >= from && e.at < to);
 }
 
+function ledgerInRange(
+  list: ManualLedgerEntry[] | undefined,
+  range: QueryRange,
+  now: number,
+): ManualLedgerEntry[] {
+  if (!list?.length) return [];
+  if (range === "all") return list;
+  const { from, to } = rangeBounds(range, now);
+  return list.filter((e) => e.at >= from && e.at < to);
+}
+
 function defaultRangeFor(kind: QueryKind): QueryRange {
   switch (kind) {
     case "profit":
@@ -234,7 +248,10 @@ export function productProfitRows(productList: Product[], invoices: Invoice[]): 
   }));
 }
 
-function totalProfit(productList: Product[], invoices: Invoice[]): {
+function totalProfit(
+  productList: Product[],
+  invoices: Invoice[],
+): {
   profit: number;
   sales: number;
   count: number;
@@ -512,10 +529,17 @@ export function creditorsText(customerList: Customer[], limit = 3): string {
   return [head, ...rest].join("\n");
 }
 
-export function todaysSalesText(invoices: Invoice[], now = Date.now()): string {
+export function todaysSalesText(
+  invoices: Invoice[],
+  now = Date.now(),
+  ledger?: ManualLedgerEntry[],
+): string {
   const { total, count } = todaysSalesTotal(invoices, now);
-  if (count === 0) return "امروز هنوز فاکتوری ثبت نشده است.";
-  return `فروش امروز: ${formatToman(total)} در ${formatNumber(count)} فاکتور`;
+  const man = manualLedgerTotals(ledgerInRange(ledger, "today", now)).sales;
+  if (count === 0 && man <= 0) return "امروز هنوز فاکتور یا فروش دستی‌ای ثبت نشده است.";
+  if (count === 0) return `فروش امروز: ${formatToman(man)} (ثبت دستی، بدون فاکتور)`;
+  if (man <= 0) return `فروش امروز: ${formatToman(total)} در ${formatNumber(count)} فاکتور`;
+  return `فروش امروز: ${formatToman(total + man)} — فاکتور ${formatToman(total)} (${formatNumber(count)} فاکتور) + دستی ${formatToman(man)}`;
 }
 
 export function thisMonthExpensesText(expenseList: Expense[], now = Date.now()): string {
@@ -524,15 +548,23 @@ export function thisMonthExpensesText(expenseList: Expense[], now = Date.now()):
   return `جمع هزینه‌های این ماه: ${formatToman(total)}`;
 }
 
-export function salesText(invoices: Invoice[], range: QueryRange, now: number): string {
+export function salesText(
+  invoices: Invoice[],
+  range: QueryRange,
+  now: number,
+  ledger?: ManualLedgerEntry[],
+): string {
   const { total, count } = salesTotal(invoices, range, now);
+  const man = manualLedgerTotals(ledgerInRange(ledger, range, now)).sales;
   const label = rangePhrase(range);
-  if (count === 0) {
+  if (count === 0 && man <= 0) {
     return range === "today"
-      ? "امروز هنوز فاکتوری ثبت نشده است."
-      : `${label} فاکتوری ثبت نشده است.`;
+      ? "امروز هنوز فاکتور یا فروش دستی‌ای ثبت نشده است."
+      : `${label} فاکتور یا فروش دستی‌ای ثبت نشده است.`;
   }
-  return `فروش ${label}: ${formatToman(total)} در ${formatNumber(count)} فاکتور`;
+  if (count === 0) return `فروش ${label}: ${formatToman(man)} (ثبت دستی، بدون فاکتور)`;
+  if (man <= 0) return `فروش ${label}: ${formatToman(total)} در ${formatNumber(count)} فاکتور`;
+  return `فروش ${label}: ${formatToman(total + man)} — فاکتور ${formatToman(total)} (${formatNumber(count)} فاکتور) + دستی ${formatToman(man)}`;
 }
 
 export function expensesText(expenseList: Expense[], range: QueryRange, now: number): string {
@@ -551,19 +583,40 @@ export function profitText(
   invoices: Invoice[],
   range: QueryRange,
   now: number,
+  ledger?: ManualLedgerEntry[],
 ): string {
   const scoped = invoicesInRange(invoices, range, now);
+  const man = manualLedgerTotals(ledgerInRange(ledger, range, now));
   const label = rangePhrase(range);
-  if (scoped.length === 0) {
+  if (scoped.length === 0 && man.profit <= 0 && man.sales <= 0) {
     return range === "today"
-      ? "امروز هنوز فاکتوری ثبت نشده تا سود محاسبه شود."
-      : `${label} فاکتوری ثبت نشده تا سود محاسبه شود.`;
+      ? "امروز هنوز فاکتور یا سود دستی‌ای ثبت نشده تا سود محاسبه شود."
+      : `${label} فاکتور یا سود دستی‌ای ثبت نشده تا سود محاسبه شود.`;
   }
-  const s = totalProfit(productList, scoped);
-  if (s.missingCost) {
-    return `${label} فروش ${formatToman(s.sales)} بود، ولی چون قیمت خرید کالاها ثبت نشده سود قابل محاسبه نیست.`;
+  const s =
+    scoped.length > 0
+      ? totalProfit(productList, scoped)
+      : { profit: 0, sales: 0, count: 0, missingCost: false };
+  const combined = s.profit + man.profit;
+  const parts: string[] = [];
+  if (scoped.length > 0 && !s.missingCost) parts.push(`فاکتور ${formatToman(s.profit)}`);
+  if (man.profit > 0) parts.push(`دستی ${formatToman(man.profit)}`);
+  if (scoped.length > 0 && s.missingCost && man.profit <= 0) {
+    return (
+      `${label} فروش ${formatToman(s.sales)} بود، ولی چون قیمت خرید کالاها ثبت نشده سود فاکتور قابل محاسبه نیست.` +
+      (man.sales > 0 ? ` فروش دستی: ${formatToman(man.sales)}.` : "")
+    );
   }
-  return `سود ${label}: ${formatToman(s.profit)} (از ${formatNumber(s.count)} فاکتور، فروش ${formatToman(s.sales)})`;
+  if (parts.length === 0) {
+    return man.sales > 0
+      ? `${label} فروش دستی ${formatToman(man.sales)} ثبت شده، ولی سود دستی نوشته نشده است.`
+      : `سود ${label} هنوز قابل محاسبه نیست.`;
+  }
+  const extra = scoped.length > 0 ? ` (از ${formatNumber(s.count)} فاکتور)` : "";
+  return (
+    `سود ${label}: ${formatToman(combined)}${extra}` +
+    (parts.length > 1 ? ` — ${parts.join(" + ")}` : "")
+  );
 }
 
 export function netProfitText(
@@ -572,20 +625,26 @@ export function netProfitText(
   expenseList: Expense[],
   range: QueryRange,
   now: number,
+  ledger?: ManualLedgerEntry[],
 ): string {
   const scopedInv = invoicesInRange(invoices, range, now);
   const exp = expensesTotal(expenseList, range, now);
+  const man = manualLedgerTotals(ledgerInRange(ledger, range, now));
   const label = rangePhrase(range);
-  if (scopedInv.length === 0 && exp <= 0) {
+  if (scopedInv.length === 0 && exp <= 0 && man.profit <= 0 && man.sales <= 0) {
     return `${label} هنوز فروش یا هزینه‌ای ثبت نشده است.`;
   }
-  const s = totalProfit(productList, scopedInv);
-  if (s.missingCost && scopedInv.length > 0) {
-    return `${label} فروش ${formatToman(s.sales)} و هزینه ${formatToman(exp)} بود، ولی بدون قیمت خرید نمی‌توان سود خالص را حساب کرد.`;
+  const s =
+    scopedInv.length > 0
+      ? totalProfit(productList, scopedInv)
+      : { profit: 0, sales: 0, count: 0, missingCost: false };
+  if (s.missingCost && scopedInv.length > 0 && man.profit <= 0) {
+    return `${label} فروش ${formatToman(s.sales)} و هزینه ${formatToman(exp)} بود، ولی بدون قیمت خرید نمی‌توان سود خالص فاکتور را حساب کرد.`;
   }
-  const net = s.profit - exp;
+  const net = s.profit + man.profit - exp;
   const sign = net < 0 ? "زیان" : "سود خالص";
-  return `${sign} ${label}: ${formatToman(Math.abs(net))} — سود فروش ${formatToman(s.profit)} منهای هزینه ${formatToman(exp)}`;
+  const manBit = man.profit > 0 ? ` + سود دستی ${formatToman(man.profit)}` : "";
+  return `${sign} ${label}: ${formatToman(Math.abs(net))} — سود فروش ${formatToman(s.profit)}${manBit} منهای هزینه ${formatToman(exp)}`;
 }
 
 export function invoiceCountText(invoices: Invoice[], range: QueryRange, now: number): string {
@@ -636,18 +695,25 @@ export function snapshotText(
   customerList: Customer[],
   range: QueryRange,
   now: number,
+  ledger?: ManualLedgerEntry[],
 ): string {
   const scoped = invoicesInRange(invoices, range, now);
   const s = totalProfit(productList, scoped);
   const exp = expensesTotal(expenseList, range, now);
+  const man = manualLedgerTotals(ledgerInRange(ledger, range, now));
   const debts = debtorsSummary(customerList, 1);
   const label = rangePhrase(range);
-  const profitPart = s.missingCost
-    ? `سود: نامشخص (قیمت خرید ثبت نشده)`
-    : `سود: ${formatToman(s.profit)}`;
+  const profitPart =
+    s.missingCost && man.profit <= 0
+      ? `سود فاکتور: نامشخص (قیمت خرید ثبت نشده)`
+      : `سود: ${formatToman(s.profit + man.profit)}`;
+  const salesLine =
+    man.sales > 0
+      ? `فروش ${formatToman(s.sales + man.sales)} — فاکتور ${formatToman(s.sales)} در ${formatNumber(s.count)} فاکتور + دستی ${formatToman(man.sales)}`
+      : `فروش ${formatToman(s.sales)} در ${formatNumber(s.count)} فاکتور`;
   return [
     `گزارش ${label}:`,
-    `فروش ${formatToman(s.sales)} در ${formatNumber(s.count)} فاکتور`,
+    salesLine,
     profitPart,
     `هزینه ${formatToman(exp)}`,
     debts.count > 0
@@ -676,15 +742,15 @@ export function buildQueryAnswer(spec: QuerySpec, ctx: QueryContext): string {
     case "creditors":
       return creditorsText(ctx.customers);
     case "today_sales":
-      return todaysSalesText(ctx.invoices, now);
+      return todaysSalesText(ctx.invoices, now, ctx.manualLedger);
     case "month_expenses":
       return thisMonthExpensesText(ctx.expenses, now);
     case "profit":
-      return profitText(ctx.products, ctx.invoices, range, now);
+      return profitText(ctx.products, ctx.invoices, range, now, ctx.manualLedger);
     case "net_profit":
-      return netProfitText(ctx.products, ctx.invoices, ctx.expenses, range, now);
+      return netProfitText(ctx.products, ctx.invoices, ctx.expenses, range, now, ctx.manualLedger);
     case "sales":
-      return salesText(ctx.invoices, range, now);
+      return salesText(ctx.invoices, range, now, ctx.manualLedger);
     case "expenses":
       return expensesText(ctx.expenses, range, now);
     case "invoice_count":
@@ -701,6 +767,7 @@ export function buildQueryAnswer(spec: QuerySpec, ctx: QueryContext): string {
         ctx.customers,
         range,
         now,
+        ctx.manualLedger,
       );
   }
 }

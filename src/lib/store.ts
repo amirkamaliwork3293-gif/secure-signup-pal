@@ -313,6 +313,7 @@ const CUSTOMERS_KEY = "acc.customers.v1";
 const STUDENTS_KEY = "acc.students.v1";
 const PURCHASES_KEY = "acc.purchases.v1";
 const EXPENSES_KEY = "acc.expenses.v1";
+const MANUAL_LEDGER_KEY = "acc.manual_ledger.v1";
 const REMINDERS_KEY = "acc.reminders.v1";
 const ACCOUNTS_KEY = "acc.accounts.v1";
 const ACCOUNT_TXS_KEY = "acc.account_txs.v1";
@@ -334,6 +335,7 @@ const CLOUD_FIELDS: Record<
   | "students"
   | "purchases"
   | "expenses"
+  | "manual_ledger"
   | "reminders"
   | "accounts"
   | "account_txs"
@@ -348,6 +350,7 @@ const CLOUD_FIELDS: Record<
   [STUDENTS_KEY]: "students",
   [PURCHASES_KEY]: "purchases",
   [EXPENSES_KEY]: "expenses",
+  [MANUAL_LEDGER_KEY]: "manual_ledger",
   [REMINDERS_KEY]: "reminders",
   [ACCOUNTS_KEY]: "accounts",
   [ACCOUNT_TXS_KEY]: "account_txs",
@@ -712,6 +715,13 @@ async function flushCloudPush() {
         .upsert(payload as never, { onConflict: "user_id" });
       error = retry.error;
     }
+    if (error && /manual_ledger/.test(error.message) && "manual_ledger" in payload) {
+      delete payload.manual_ledger;
+      const retry = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      error = retry.error;
+    }
     if (error) throw error;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
@@ -811,6 +821,7 @@ export async function hydrateFromCloud(userId: string) {
     overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
     overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
     overwrite("production", PRODUCTION_KEY, (data as Record<string, unknown>).production);
+    overwrite("manual_ledger", MANUAL_LEDGER_KEY, (data as Record<string, unknown>).manual_ledger);
     markCloudHydrated();
   } catch (e) {
     console.error("[store] hydrate failed", e);
@@ -1441,6 +1452,105 @@ function removeExpenseAccountTx(expenseId: string) {
   const next = txs.filter((t) => t.expenseId !== expenseId);
   if (next.length !== txs.length) write(ACCOUNT_TXS_KEY, next);
 }
+
+// ─── Manual ledger (فروش/سود/یادداشت روزانه بدون فاکتور) ─────────────────────
+
+export type ManualLedgerKind = "sales" | "profit" | "note";
+
+export const MANUAL_LEDGER_LABEL: Record<ManualLedgerKind, string> = {
+  sales: "فروش دستی",
+  profit: "سود دستی",
+  note: "یادداشت",
+};
+
+/**
+ * ثبت دستی فروش، سود یا یادداشت روز — برای روزهایی که فاکتور صادر نمی‌شود
+ * یا کاربر می‌خواهد مبلغ جداگانه‌ای کنار فاکتورها در گزارش ماهانه ببیند.
+ */
+export type ManualLedgerEntry = {
+  id: string;
+  kind: ManualLedgerKind;
+  /** مبلغ به تومان؛ برای یادداشت متنی می‌تواند صفر باشد */
+  amount: number;
+  /** عنوان کوتاه، مثلاً «فروش بازار» یا «سود نقدی» */
+  title: string;
+  note?: string;
+  /** زمان این ثبت (معمولاً همان روز شمسی انتخاب‌شده) */
+  at: number;
+  source?: "manual" | "assistant";
+  createdAt: number;
+};
+
+export function emptyManualLedger(kind: ManualLedgerKind = "sales"): ManualLedgerEntry {
+  return {
+    id: cryptoId(),
+    kind,
+    amount: 0,
+    title: "",
+    at: Date.now(),
+    source: "manual",
+    createdAt: Date.now(),
+  };
+}
+
+export function manualLedgerInRange(
+  list: ManualLedgerEntry[],
+  from: number,
+  to: number,
+): ManualLedgerEntry[] {
+  return list.filter((e) => e.at >= from && e.at <= to);
+}
+
+export function manualLedgerTotals(list: ManualLedgerEntry[]): {
+  sales: number;
+  profit: number;
+  notes: number;
+  count: number;
+} {
+  let sales = 0;
+  let profit = 0;
+  let notes = 0;
+  for (const e of list) {
+    const n = e.amount || 0;
+    if (e.kind === "sales") sales += n;
+    else if (e.kind === "profit") profit += n;
+    else notes += n;
+  }
+  return { sales, profit, notes, count: list.length };
+}
+
+export const manualLedger = {
+  useAll: () => useStore<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []),
+  getAll: () => read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []),
+  save: (list: ManualLedgerEntry[]) => write(MANUAL_LEDGER_KEY, list),
+  add: (e: ManualLedgerEntry) => {
+    const list = read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []);
+    const created: ManualLedgerEntry = {
+      ...e,
+      id: e.id || cryptoId(),
+      createdAt: e.createdAt || Date.now(),
+      title: (e.title || "").trim() || MANUAL_LEDGER_LABEL[e.kind],
+      amount: Math.max(0, Math.round(e.amount || 0)),
+    };
+    write(MANUAL_LEDGER_KEY, [created, ...list]);
+    return created;
+  },
+  update: (updated: ManualLedgerEntry) => {
+    const list = read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []);
+    write(
+      MANUAL_LEDGER_KEY,
+      list.map((e) =>
+        e.id === updated.id ? { ...updated, title: (updated.title || "").trim() } : e,
+      ),
+    );
+  },
+  remove: (id: string) => {
+    write(
+      MANUAL_LEDGER_KEY,
+      read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []).filter((e) => e.id !== id),
+    );
+  },
+};
 
 // ─── Reminders (یادآوری‌ها — پیگیری وظایف و مشتریان) ─────────────────────────
 

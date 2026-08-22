@@ -22,11 +22,13 @@ import {
   accounts as accountsStore,
   accountTxs as accountTxsStore,
   production as productionStore,
+  manualLedger as ledgerStore,
   customerBalance,
   customerFullName,
   formatJalaliDateTime,
   formatJalaliDate,
   PAYMENT_LABEL,
+  MANUAL_LEDGER_LABEL,
   accountBalance,
   formatChequeDue,
 } from "@/lib/store";
@@ -112,6 +114,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
   const [accs] = accountsStore.useAll();
   const [txs] = accountTxsStore.useAll();
   const [prodEvents] = productionStore.useAll();
+  const [ledger] = ledgerStore.useAll();
 
   const counts: Record<SectionKey, number> = {
     products: prods.length,
@@ -175,6 +178,20 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       const unpaid = totals.reduce((s, t) => s + t.remaining, 0);
       if (unpaid > 0)
         addSummary("فاکتورهای نسیه/چک", invs.length, "مجموع مانده‌ی وصول‌نشده", unpaid);
+      if (ledger.length > 0) {
+        addSummary(
+          "فروش دستی",
+          ledger.filter((e) => e.kind === "sales").length,
+          "مجموع فروش بدون فاکتور",
+          ledger.filter((e) => e.kind === "sales").reduce((s, e) => s + (e.amount || 0), 0),
+        );
+        addSummary(
+          "سود دستی",
+          ledger.filter((e) => e.kind === "profit").length,
+          "مجموع سود ثبت‌شده دستی",
+          ledger.filter((e) => e.kind === "profit").reduce((s, e) => s + (e.amount || 0), 0),
+        );
+      }
     }
     if (selected.purchases) {
       addSummary(
@@ -319,6 +336,20 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       });
     }
 
+    if (selected.invoices && ledger.length > 0) {
+      out.push({
+        name: "فروش و سود دستی",
+        rows: ledger.map((e) => ({
+          نوع: MANUAL_LEDGER_LABEL[e.kind],
+          عنوان: e.title,
+          مبلغ: e.amount || 0,
+          تاریخ: d(e.at),
+          یادداشت: e.note ?? "",
+          منبع: e.source === "assistant" ? "دستیار هوشمند" : "ثبت دستی",
+        })),
+      });
+    }
+
     if (selected.purchases) {
       out.push({
         name: "فاکتورهای خرید",
@@ -451,7 +482,10 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       data.categories = cats;
     }
     if (selected.customers) data.customers = custs;
-    if (selected.invoices) data.invoices = invs;
+    if (selected.invoices) {
+      data.invoices = invs;
+      data.manualLedger = ledger;
+    }
     if (selected.purchases) data.purchases = purch;
     if (selected.expenses) data.expenses = exps;
     if (selected.reminders) data.reminders = rems;

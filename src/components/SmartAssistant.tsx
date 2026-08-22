@@ -44,11 +44,13 @@ import {
   COUNT_UNIT,
   dueReminderCount,
   emptyExpense,
+  emptyManualLedger,
   expenses as expensesStore,
   formatJalaliDateTime,
   formatNumber,
   formatToman,
   invoice,
+  manualLedger as ledgerStore,
   products as productsStore,
   reminders as remindersStore,
   settings,
@@ -224,13 +226,7 @@ function writeFabPos(pos: FabPos) {
   }
 }
 
-function DraggableAssistantFab({
-  raised,
-  onOpen,
-}: {
-  raised: boolean;
-  onOpen: () => void;
-}) {
+function DraggableAssistantFab({ raised, onOpen }: { raised: boolean; onOpen: () => void }) {
   const [pos, setPos] = useState<FabPos | null>(null);
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{
@@ -376,6 +372,7 @@ export function SmartAssistant() {
   const [allProducts] = productsStore.useAll();
   const [allCustomers] = customersStore.useAll();
   const [allExpenses] = expensesStore.useAll();
+  const [allLedger] = ledgerStore.useAll();
   const [history] = invoice.useHistory();
   const [remindersList] = remindersStore.useAll();
   const [appSettings] = settings.useAll();
@@ -415,8 +412,9 @@ export function SmartAssistant() {
       customers: allCustomers,
       invoices: history,
       expenses: allExpenses,
+      manualLedger: allLedger,
     }),
-    [allProducts, allCustomers, history, allExpenses],
+    [allProducts, allCustomers, history, allExpenses, allLedger],
   );
 
   // ─── عملیات نوشتن در store (همه با امضای موجود خودِ store) ─────────────────
@@ -657,6 +655,31 @@ export function SmartAssistant() {
               ]
                 .filter(Boolean)
                 .join(" · ") || undefined,
+          },
+        ];
+      }
+
+      case "manual_ledger": {
+        const kindLabel =
+          intent.entryKind === "profit" ? "سود" : intent.entryKind === "note" ? "یادداشت" : "فروش";
+        ledgerStore.add({
+          ...emptyManualLedger(intent.entryKind),
+          kind: intent.entryKind,
+          amount: intent.amount,
+          title: intent.title,
+          at: intent.at,
+          source: "assistant",
+        });
+        vibrate(40);
+        return [
+          {
+            key: newKey(),
+            heard,
+            status: "done",
+            title: `${kindLabel} روزانه «${intent.title}» به مبلغ ${formatToman(intent.amount)} در گزارش ثبت شد`,
+            detail: intent.dateSpoken
+              ? formatJalaliDateTime(intent.at)
+              : "در بخش گزارش سود و درآمد، دفتر فروش دستی قابل مشاهده است.",
           },
         ];
       }
@@ -1021,9 +1044,9 @@ export function SmartAssistant() {
               دستیار هوشمند
             </DrawerTitle>
             <DrawerDescription className="text-xs">
-              دستور بدهید یا سؤال بپرسید — مثلاً «امروز چقدر سود داشتم»، «این ماه چقدر فروختم»،
-              «آقای کمالی چقدر بدهکاره»، «۲ تا نون»، «آقای شهریاری طلبکار است»، یا «یادآوری پرداخت
-              بدهی ساعت ۱۳:۳۰ تاریخ ۴ تیر ۱۴۰۵».
+              دستور بدهید یا سؤال بپرسید — مثلاً «امروز صد میلیون فروش داشتم»، «پنجاه میلیون سود
+              کردم»، «امروز چقدر سود داشتم»، «این ماه چقدر فروختم»، «آقای کمالی چقدر بدهکاره»، «۲ تا
+              نون»، یا «یادآوری پرداخت بدهی ساعت ۱۳:۳۰ تاریخ ۴ تیر ۱۴۰۵».
             </DrawerDescription>
           </DrawerHeader>
 
@@ -1139,6 +1162,16 @@ export function SmartAssistant() {
                         {card.detail && (
                           <div className="mt-0.5 text-foreground/80">{card.detail}</div>
                         )}
+                        {/گزارش/.test(`${card.title} ${card.detail ?? ""}`) && (
+                          <Link
+                            to="/reports"
+                            onClick={closeSheet}
+                            className="mt-2 inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+                          >
+                            <BarChart3 className="h-3.5 w-3.5" />
+                            مشاهده گزارش
+                          </Link>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1155,6 +1188,14 @@ export function SmartAssistant() {
                           <Volume2 className="h-3.5 w-3.5" />
                           خواندن پاسخ
                         </button>
+                        <Link
+                          to="/reports"
+                          onClick={closeSheet}
+                          className="mt-2 mr-2 inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+                        >
+                          <BarChart3 className="h-3.5 w-3.5" />
+                          گزارش کامل
+                        </Link>
                       </div>
                     </div>
                   )}

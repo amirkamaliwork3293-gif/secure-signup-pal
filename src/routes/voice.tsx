@@ -159,7 +159,7 @@ function VoicePageInner() {
       if (resolved.clearWinner) {
         maybeFillCustomerPhone(resolved.candidates[0]?.customer, customerPhone);
         setCustomerChoices([]);
-      } else if (resolved.candidates.length > 1) {
+      } else if (resolved.candidates.length > 0) {
         setCustomerChoices(resolved.candidates);
       } else {
         setCustomerChoices([]);
@@ -352,6 +352,17 @@ function VoicePageInner() {
 
   const discardItem = (key: string) => setResults((prev) => prev.filter((x) => x.key !== key));
 
+  /** انصراف از ثبت صوتی: کالا و مشتری همین تب فاکتور پاک می‌شود، صفحه عوض نمی‌شود */
+  const discardVoiceDraft = () => {
+    const current = invoice.getCurrent();
+    invoice.save(recalc({ ...current, items: [], customer: {} }));
+    setResults([]);
+    setCustomerChoices([]);
+    setTranscript("");
+    setEditingDraft(false);
+    setError(null);
+  };
+
   return (
     <Layout>
       <h1 className="mb-1 flex items-center gap-2 text-lg font-bold">
@@ -441,12 +452,10 @@ function VoicePageInner() {
             <span className="font-medium">{transcript}</span>
           </div>
           <button
-            onClick={() => {
-              setTranscript("");
-              setResults([]);
-              setCustomerChoices([]);
-            }}
+            type="button"
+            onClick={discardVoiceDraft}
             className="text-muted-foreground hover:text-destructive"
+            aria-label="پاک کردن شنیده‌شده و پیش‌نویس صوتی"
           >
             <X className="h-4 w-4" />
           </button>
@@ -551,6 +560,7 @@ function VoicePageInner() {
           onRemove={removeDraftLine}
           onCustomer={saveDraftCustomer}
           onPickCustomer={selectDraftCustomer}
+          onDiscardAll={discardVoiceDraft}
         />
       )}
 
@@ -670,16 +680,12 @@ function UnknownRow({ item, onDiscard }: { item: ResolvedItem; onDiscard: () => 
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
       <div className="flex-1">
         <div className="font-semibold">محصولی برای «{item.productPhrase}» پیدا نشد</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          تا ثبت نهایی فاکتور در همین صفحه بمانید؛ نام را دوباره بگویید یا کالا را دستی ویرایش کنید.
+        </div>
         <div className="mt-2 flex gap-2">
-          <Link
-            to="/products"
-            search={{ code: item.productPhrase }}
-            className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            افزودن محصول
-          </Link>
           <button
+            type="button"
             onClick={onDiscard}
             className="rounded-lg border border-border px-3 py-1.5 text-xs"
           >
@@ -702,6 +708,7 @@ function VoiceDraftPreview({
   onRemove,
   onCustomer,
   onPickCustomer,
+  onDiscardAll,
 }: {
   inv: Invoice;
   customers: Customer[];
@@ -713,6 +720,7 @@ function VoiceDraftPreview({
   onRemove: (productId: string) => void;
   onCustomer: (c: CustomerInfo) => void;
   onPickCustomer: (c: Customer) => void;
+  onDiscardAll: () => void;
 }) {
   const [q, setQ] = useState("");
   const totals = invoiceTotals(inv);
@@ -748,6 +756,16 @@ function VoiceDraftPreview({
           >
             <Eye className="h-3.5 w-3.5" />
             مشاهده کامل
+          </button>
+          <button
+            type="button"
+            onClick={onDiscardAll}
+            className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+            aria-label="انصراف و پاک کردن همه چیزهایی که در ثبت صوتی اضافه شد"
+            title="انصراف — پاک کردن کالا و مشتری این پیش‌نویس"
+          >
+            <X className="h-3.5 w-3.5" />
+            انصراف
           </button>
         </div>
       </div>

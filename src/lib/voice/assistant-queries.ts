@@ -27,7 +27,7 @@ import {
   type Product,
 } from "@/lib/store";
 import { discountFactor, invoiceTotals, lineTotal } from "@/lib/invoice-math";
-import { scoreProduct } from "@/lib/voice/persian-nlu";
+import { isClearPersonWinner, matchPersons } from "@/lib/voice/person-match";
 
 export type QueryKind =
   | "most_profitable"
@@ -387,20 +387,11 @@ export function creditorsSummary(customerList: Customer[], limit = 3): DebtorsSu
 }
 
 function matchCustomerByName(name: string, list: Customer[]): Customer | null {
-  const phrase = name.trim();
-  if (!phrase) return null;
-  const scored = list
-    .map((c) => ({
-      customer: c,
-      score: Math.max(
-        scoreProduct(phrase, customerFullName(c)),
-        scoreProduct(phrase, c.firstName || ""),
-        c.lastName ? scoreProduct(phrase, c.lastName) : 0,
-      ),
-    }))
-    .filter((c) => c.score > 0.3)
-    .sort((a, b) => b.score - a.score);
-  return scored[0]?.customer ?? null;
+  const hits = matchPersons(name, list);
+  if (hits.length === 0) return null;
+  if (isClearPersonWinner(hits)) return hits[0].customer;
+  if (hits.length === 1 && hits[0].score >= 0.82) return hits[0].customer;
+  return null;
 }
 
 // ─── فروش و هزینه ─────────────────────────────────────────────────────────────
@@ -655,11 +646,18 @@ export function invoiceCountText(invoices: Invoice[], range: QueryRange, now: nu
 }
 
 export function customerStatusText(customerList: Customer[], name: string): string {
-  const c = matchCustomerByName(name, customerList);
-  if (!c) return `مشتری‌ای با نام «${name}» پیدا نشد.`;
+  const hits = matchPersons(name, customerList);
+  if (hits.length === 0) return `مشتری‌ای با نام «${name}» پیدا نشد.`;
+  // فامیلی تنها و چند هم‌فامیل → نپرسیدن باعث قاطی شدن علی/صدرا کمالی می‌شود
+  if (hits.length > 1 && !isClearPersonWinner(hits)) {
+    const names = hits.map((h) => customerFullName(h.customer)).join("، ");
+    return `چند مشتری شبیه «${name}» هست: ${names}. نام و فامیل را کامل بگویید تا قاطی نشود.`;
+  }
+  const c = hits[0].customer;
   const full = customerFullName(c);
   const balance = customerBalance(c);
-  if (balance > 0) return `«${full}» بدهکار است — مانده ${formatToman(balance)}`;
+  const due = c.settlementDate ? ` — موعد تسویه ${c.settlementDate}` : "";
+  if (balance > 0) return `«${full}» بدهکار است — مانده ${formatToman(balance)}${due}`;
   if (balance < 0) return `«${full}» طلبکار است — طلب ایشان ${formatToman(-balance)}`;
   return `حساب «${full}» تسویه است — مانده صفر.`;
 }

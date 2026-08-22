@@ -4,15 +4,10 @@
  * این لایه چیزی در «مشتریان» نمی‌سازد — فقط اطلاعات پیش‌نویس فاکتور را پر می‌کند.
  */
 
-import {
-  customerFullName,
-  customers,
-  type Customer,
-  type CustomerInfo,
-} from "@/lib/store";
-import { scoreProduct } from "@/lib/voice/persian-nlu";
+import { customers, type Customer, type CustomerInfo } from "@/lib/store";
+import { isClearPersonWinner, matchPersons, type PersonHit } from "@/lib/voice/person-match";
 
-export type VoiceCustomerHit = { customer: Customer; score: number };
+export type VoiceCustomerHit = PersonHit;
 
 export function splitPersonName(name: string): { firstName: string; lastName?: string } {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -22,25 +17,11 @@ export function splitPersonName(name: string): { firstName: string; lastName?: s
 }
 
 export function matchVoiceCustomers(phrase: string, list: Customer[]): VoiceCustomerHit[] {
-  if (!phrase.trim()) return [];
-  return list
-    .map((customer) => ({
-      customer,
-      score: Math.max(
-        scoreProduct(phrase, customerFullName(customer)),
-        scoreProduct(phrase, customer.firstName || ""),
-        customer.lastName ? scoreProduct(phrase, customer.lastName) : 0,
-      ),
-    }))
-    .filter((c) => c.score > 0.3)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4);
+  return matchPersons(phrase, list);
 }
 
 export function isClearCustomerWinner(hits: VoiceCustomerHit[]): boolean {
-  const [best, second] = hits;
-  if (!best) return false;
-  return best.score >= 0.6 && (!second || best.score - second.score >= 0.2);
+  return isClearPersonWinner(hits);
 }
 
 export function customerInfoFromVoice(

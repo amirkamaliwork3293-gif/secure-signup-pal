@@ -114,6 +114,19 @@ function check(label: string, ok: boolean, detail?: string) {
   check("spoken phone wins", hit.info.phone === "09121234567", hit.info.phone);
 }
 
+{
+  const list: Customer[] = [
+    { id: "c-sadra", firstName: "صدرا", lastName: "کمالی", createdAt: 1, txs: [] },
+  ];
+  const ali = customerInfoFromVoice("علی کمالی", undefined, list);
+  check("علی کمالی is not صدرا", !ali.clearWinner, JSON.stringify(ali.info));
+  check("علی کمالی stays a new name", ali.info.firstName === "علی" && ali.info.lastName === "کمالی", JSON.stringify(ali.info));
+  check("no sadra candidate", !ali.candidates.some((c) => c.customer.id === "c-sadra"));
+
+  const sadra = customerInfoFromVoice("صدرا کمالی", undefined, list);
+  check("صدرا کمالی matches", sadra.clearWinner && sadra.info.firstName === "صدرا");
+}
+
 if (failed) {
   console.error(`\n${failed} failed`);
   process.exit(1);

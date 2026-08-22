@@ -86,6 +86,7 @@ const cases: { input: string; expect: Expect }[] = [
   { input: "بهترین مشتری من کیه", expect: { kind: "query", queryKind: "best_customers" } },
   { input: "چند تا بدهکار دارم", expect: { kind: "query", queryKind: "debtors" } },
   { input: "آقای کمالی چقدر بدهکاره", expect: { kind: "query", queryKind: "customer_status" } },
+  { input: "آقای کمالی چقدر طلبکار است", expect: { kind: "query", queryKind: "customer_status" } },
   { input: "وضعیت حساب آقای کمالی", expect: { kind: "query", queryKind: "customer_status" } },
   { input: "گزارش امروز", expect: { kind: "query", queryKind: "snapshot" } },
   { input: "سود خالص این ماه", expect: { kind: "query", queryKind: "net_profit" } },
@@ -195,4 +196,102 @@ if (stillQuery.kind !== "query" || stillQuery.queryKind !== "sales") {
   console.error("sales question should stay a query", stillQuery);
   process.exit(1);
 }
+
+const sadra: Customer = {
+  id: "c-sadra",
+  firstName: "صدرا",
+  lastName: "کمالی",
+  createdAt: now - 86400000,
+  txs: [{ id: "t-sadra", type: "debt", amount: 180000, at: now - 86400000 }],
+};
+const sadraCtx: AssistantContext = { ...ctx, customers: [sadra] };
+
+const aliNew = parseAssistantCommand("علی کمالی ۳۰۰ هزار تومان بدهکار است", sadraCtx);
+if (
+  aliNew.kind !== "customer_debt" ||
+  aliNew.role !== "debtor" ||
+  aliNew.amount !== 300_000 ||
+  aliNew.clearWinner ||
+  aliNew.candidates.some((c) => c.customer.id === "c-sadra") ||
+  !aliNew.customerName.includes("علی")
+) {
+  console.error("علی کمالی must be a new debtor, not صدرا", aliNew);
+  process.exit(1);
+}
+
+const sadraHit = parseAssistantCommand("صدرا کمالی ۳۰۰ هزار تومان بدهکار است", sadraCtx);
+if (
+  sadraHit.kind !== "customer_debt" ||
+  !sadraHit.clearWinner ||
+  sadraHit.candidates[0]?.customer.id !== "c-sadra"
+) {
+  console.error("صدرا کمالی should match existing", sadraHit);
+  process.exit(1);
+}
+
+const dueDebt = parseAssistantCommand("آقای رضایی ۳۰۰ هزار تومان بدهکار تا تاریخ ۳۰ مهر", ctx);
+if (
+  dueDebt.kind !== "customer_debt" ||
+  dueDebt.role !== "debtor" ||
+  dueDebt.amount !== 300_000 ||
+  dueDebt.settlementDate !== "1405/07/30" ||
+  dueDebt.customerName !== "رضایی"
+) {
+  console.error("settlement date / رضا debt missing", dueDebt);
+  process.exit(1);
+}
+
+const duePhone = parseAssistantCommand(
+  "آقای رضایی ۳۰۰ هزار تومان بدهکار تا تاریخ ۳۰ مهر با شماره تلفن ۰۹۱۲۱۲۳۴۵۶۷",
+  ctx,
+);
+if (
+  duePhone.kind !== "customer_debt" ||
+  duePhone.phone !== "09121234567" ||
+  duePhone.settlementDate !== "1405/07/30"
+) {
+  console.error("debt phone + due date missing", duePhone);
+  process.exit(1);
+}
+
+const askAli = parseAssistantCommand("علی کمالی چقدر بدهکار است", sadraCtx);
+if (askAli.kind !== "query" || askAli.queryKind !== "customer_status") {
+  console.error("علی کمالی status should be a query", askAli);
+  process.exit(1);
+}
+if (/صدرا/.test(askAli.answer) || /۱۸۰/.test(askAli.answer) || /180/.test(askAli.answer)) {
+  console.error("should not answer صدرا's balance for علی", askAli.answer);
+  process.exit(1);
+}
+if (!/پیدا نشد/.test(askAli.answer)) {
+  console.error("علی کمالی should not be found among صدرا only", askAli.answer);
+  process.exit(1);
+}
+
+const askSadra = parseAssistantCommand("صدرا کمالی چقدر بدهکار است", sadraCtx);
+if (
+  askSadra.kind !== "query" ||
+  !askSadra.answer.includes("صدرا") ||
+  !askSadra.answer.includes("بدهکار")
+) {
+  console.error("صدرا status missing", askSadra);
+  process.exit(1);
+}
+
+const askCredit = parseAssistantCommand("آقای کمالی چقدر طلبکار است", ctx);
+if (askCredit.kind !== "query" || askCredit.queryKind !== "customer_status") {
+  console.error("طلبکار status should stay a query", askCredit);
+  process.exit(1);
+}
+
+const bothKamaliCtx: AssistantContext = {
+  ...ctx,
+  customers: [sadra, { ...kamali, firstName: "امیر", lastName: "کمالی" }],
+};
+const lastNameOnly = parseAssistantCommand("کمالی ۳۰۰ هزار تومان بدهکار است", bothKamaliCtx);
+if (lastNameOnly.kind !== "customer_debt" || lastNameOnly.clearWinner) {
+  console.error("bare last name must not auto-pick a کمالی", lastNameOnly);
+  process.exit(1);
+}
+
 console.log("answer checks passed");

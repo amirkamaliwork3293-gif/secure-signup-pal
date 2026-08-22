@@ -82,6 +82,8 @@ type ChoosePayload =
       settleAll: boolean;
       name: string;
       at?: number;
+      phone?: string;
+      settlementDate?: string;
     }
   | { type: "product-price"; options: ParsedCandidate[]; price: number; phrase: string }
   | { type: "invoice-item"; options: ParsedCandidate[]; item: ParsedItem }
@@ -430,20 +432,43 @@ export function SmartAssistant() {
     vibrate(40);
   };
 
+  const applyCustomerExtras = (
+    customerId: string,
+    extra?: { phone?: string; settlementDate?: string },
+  ) => {
+    if (!extra?.phone && !extra?.settlementDate) return;
+    const latest = customersStore.getAll().find((x) => x.id === customerId);
+    if (!latest) return;
+    const next = {
+      ...latest,
+      phone: extra.phone || latest.phone,
+      settlementDate:
+        extra.settlementDate && customerBalance(latest) > 0
+          ? extra.settlementDate
+          : latest.settlementDate,
+    };
+    if (next.phone === latest.phone && next.settlementDate === latest.settlementDate) return;
+    customersStore.update(next);
+  };
+
   const createCustomerWithTx = (
     name: string,
     amount: number,
     txType: "debt" | "payment",
     note: string,
     at?: number,
+    extra?: { phone?: string; settlementDate?: string },
   ): Customer => {
     const parts = name.split(" ").filter(Boolean);
     const created = customersStore.add({
       firstName: parts[0] || "مشتری",
       lastName: parts.slice(1).join(" ") || undefined,
       note: "ساخته‌شده با دستیار صوتی",
+      phone: extra?.phone,
+      settlementDate: extra?.settlementDate,
     });
     addCustomerTx(created, amount, txType, note, at);
+    applyCustomerExtras(created.id, extra);
     return created;
   };
 
@@ -454,6 +479,7 @@ export function SmartAssistant() {
     settleAll: boolean,
     name: string,
     at?: number,
+    extra?: { phone?: string; settlementDate?: string },
   ): Card => {
     const resolved = resolveCustomerTx(role, amount, settleAll, customer);
     if ("error" in resolved) {
@@ -470,23 +496,33 @@ export function SmartAssistant() {
           title: `مشتری‌ای با نام «${name}» پیدا نشد؛ برای تسویه باید از قبل در فهرست باشد.`,
         };
       }
-      target = createCustomerWithTx(name, resolved.amount, resolved.type, resolved.note, at);
+      target = createCustomerWithTx(
+        name,
+        resolved.amount,
+        resolved.type,
+        resolved.note,
+        at,
+        extra,
+      );
       createdNew = true;
     } else {
       addCustomerTx(target, resolved.amount, resolved.type, resolved.note, at);
+      applyCustomerExtras(target.id, extra);
     }
-    const who = customerFullName(target);
+    const latest = customersStore.getAll().find((x) => x.id === target.id) ?? target;
+    const who = customerFullName(latest);
     const dateBit = at ? ` — ${formatJalaliDateTime(at)}` : "";
+    const dueBit = latest.settlementDate ? ` — تسویه تا ${latest.settlementDate}` : "";
+    const phoneBit = latest.phone ? ` — ${latest.phone}` : "";
     return {
       key: newKey(),
       heard: name,
       status: "done",
-      title: `${formatToman(resolved.amount)} ${ledgerLabel(role)} برای «${who}» ثبت شد${dateBit}`,
+      title: `${formatToman(resolved.amount)} ${ledgerLabel(role)} برای «${who}» ثبت شد${dateBit}${dueBit}${phoneBit}`,
       detail: createdNew
         ? "این مشتری در فهرست نبود — مشتری جدید ساخته شد."
         : role === "settle"
-          ? customerBalance(customersStore.getAll().find((x) => x.id === target!.id) ?? target) ===
-            0
+          ? customerBalance(latest) === 0
             ? "حساب تسویه شد."
             : undefined
           : undefined,
@@ -588,6 +624,7 @@ export function SmartAssistant() {
     const heard = intent.raw;
     switch (intent.kind) {
       case "customer_debt": {
+        const extras = { phone: intent.phone, settlementDate: intent.settlementDate };
         if (intent.candidates.length === 0) {
           return [
             applyLedger(
@@ -597,6 +634,7 @@ export function SmartAssistant() {
               intent.settleAll,
               intent.customerName,
               intent.at,
+              extras,
             ),
           ];
         }
@@ -609,6 +647,7 @@ export function SmartAssistant() {
               intent.settleAll,
               intent.customerName,
               intent.at,
+              extras,
             ),
           ];
         }
@@ -628,6 +667,8 @@ export function SmartAssistant() {
               settleAll: intent.settleAll,
               name: intent.customerName,
               at: intent.at,
+              phone: intent.phone,
+              settlementDate: intent.settlementDate,
             },
           },
         ];
@@ -939,8 +980,11 @@ export function SmartAssistant() {
 
   const pickCustomer = (card: Card, customer: Customer) => {
     if (card.choose?.type !== "customer") return;
-    const { amount, role, settleAll, name, at } = card.choose;
-    const result = applyLedger(customer, role, amount, settleAll, name, at);
+    const { amount, role, settleAll, name, at, phone, settlementDate } = card.choose;
+    const result = applyLedger(customer, role, amount, settleAll, name, at, {
+      phone,
+      settlementDate,
+    });
     replaceCard(card.key, {
       status: result.status,
       title: result.title,
@@ -950,9 +994,12 @@ export function SmartAssistant() {
 
   const pickNewCustomer = (card: Card) => {
     if (card.choose?.type !== "customer") return;
-    const { amount, role, settleAll, name, at } = card.choose;
+    const { amount, role, settleAll, name, at, phone, settlementDate } = card.choose;
     if (role === "settle") return;
-    const result = applyLedger(undefined, role, amount, settleAll, name, at);
+    const result = applyLedger(undefined, role, amount, settleAll, name, at, {
+      phone,
+      settlementDate,
+    });
     replaceCard(card.key, {
       status: result.status,
       title: result.title,

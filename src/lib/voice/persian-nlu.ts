@@ -261,6 +261,24 @@ function extractPhone(s: string): { phone?: string; rest: string } {
   return { rest: s };
 }
 
+/** موبایل گفته‌شده در جمله، نرمال به ۰۹xxxxxxxxx */
+export function extractSpokenMobile(input: string): string | undefined {
+  return extractPhone(normalizeFa(input)).phone;
+}
+
+export function stripSpokenMobile(input: string): string {
+  const phone = extractSpokenMobile(input);
+  let s = normalizeFa(input);
+  s = s.replace(/(?:با\s+)?(?:شماره\s+)?(?:تلفن|موبایل|همراه)(?:\s+شماره)?/g, " ");
+  if (phone) {
+    const bare = phone.replace(/^0/, "");
+    s = s.replace(new RegExp(`(?:98|0)?${bare}`, "g"), " ");
+  } else {
+    s = s.replace(/(?:98|0)?9\d{9}/g, " ");
+  }
+  return s.replace(/\s+/g, " ").trim();
+}
+
 function hasQuantityCue(s: string): boolean {
   if (/\d+(\.\d+)?\s*(تا|عدد|کیلو|گرم|دونه|دونا)/.test(s)) return true;
   const tokens = s.split(" ").filter(Boolean);

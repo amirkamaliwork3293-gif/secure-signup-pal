@@ -27,6 +27,7 @@ import {
   jalaliToTimestamp,
   parseJalaliInput,
   toJalali,
+  toJalaliInputDate,
   type Customer,
   type Expense,
   type Invoice,
@@ -35,13 +36,16 @@ import {
   type Product,
 } from "@/lib/store";
 import {
+  extractSpokenMobile,
   matchProducts,
   normalizeFa,
   parseVoiceText,
   scoreProduct,
+  stripSpokenMobile,
   type ParseResult,
   type ParsedCandidate,
 } from "@/lib/voice/persian-nlu";
+import { isClearPersonWinner, matchPersons, scorePersonName } from "@/lib/voice/person-match";
 import { parseProductVoiceText, type ParsedProductItem } from "@/lib/voice/product-nlu";
 import {
   buildQueryAnswer,
@@ -83,8 +87,12 @@ export type AssistantIntent =
       role: CustomerLedgerRole;
       /** تسویه بدون مبلغ → کل مانده در لحظه‌ی اجرا */
       settleAll: boolean;
-      /** اگر کاربر تاریخ گفته باشد، زمان تراکنش */
+      /** اگر کاربر تاریخ تراکنش گفته باشد (نه موعد تسویه) */
       at?: number;
+      /** موعد تسویه شمسی YYYY/MM/DD — «تا تاریخ ۳۰ مهر» */
+      settlementDate?: string;
+      /** موبایل گفته‌شده همراه نام */
+      phone?: string;
       /** نزدیک‌ترین مشتری‌های موجود، مرتب بر اساس امتیاز */
       candidates: CustomerCandidate[];
       /** یک تطبیق واضح وجود دارد → بدون پرسیدن ثبت شود */
@@ -340,31 +348,13 @@ function joinClean(tokens: string[], isNoise: (t: string) => boolean): string {
     .trim();
 }
 
-// ─── تطبیق مشتری (همان امتیازدهی رشته‌ای محصولات) ─────────────────────────────
-
-/**
- * امتیاز تطبیق نام گفته‌شده با یک مشتری. از همان `scoreProduct` استفاده می‌شود
- * (تابع کاملاً عمومی روی دو رشته است) تا رفتار fuzzy در کل برنامه یکسان بماند.
- */
-function scoreCustomer(phrase: string, c: Customer): number {
-  const full = customerFullName(c);
-  return Math.max(
-    scoreProduct(phrase, full),
-    scoreProduct(phrase, c.firstName || ""),
-    c.lastName ? scoreProduct(phrase, c.lastName) : 0,
-  );
-}
+// ─── تطبیق مشتری (نام کوچک متفاوت = شخص دیگر، نه برنده‌ی فامیلی) ─────────────
 
 function matchCustomers(phrase: string, list: Customer[]): CustomerCandidate[] {
-  if (!phrase.trim()) return [];
-  return list
-    .map((customer) => ({ customer, score: scoreCustomer(phrase, customer) }))
-    .filter((c) => c.score > 0.3)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4);
+  return matchPersons(phrase, list).map((c) => ({ customer: c.customer, score: c.score }));
 }
 
-/** یک برنده‌ی واضح: امتیاز بالا و فاصله‌ی کافی از نفر دوم (مثل persian-nlu) */
+/** برنده‌ی واضح برای کالا — برای شخص از isClearPersonWinner استفاده می‌شود */
 function isClearWinner(scores: number[]): boolean {
   const [best, second] = scores;
   if (best === undefined) return false;
@@ -481,7 +471,7 @@ function detectQuery(norm: string): QuerySpec | null {
   }
 
   const genericDebtors =
-    /چند\s*تا\s*بدهکار|چندتا بدهکار|تعداد بدهکار|بدهکارها|بدهکاران|جمع بدهی|چقدر طلب|طلبم چقدر/.test(
+    /چند\s*تا\s*بدهکار|چندتا بدهکار|تعداد بدهکار|بدهکارها|بدهکاران|جمع بدهی|چقدر طلب(?!کار)|طلبم چقدر/.test(
       norm,
     );
   const genericCreditors = /چند\s*تا\s*طلبکار|چندتا طلبکار|طلبکارها|طلبکاران|جمع طلبکاری/.test(
@@ -629,6 +619,17 @@ const DEBT_NOISE = new Set([
   "بزن",
   "نسیه",
   "و",
+  "شماره",
+  "تلفن",
+  "موبایل",
+  "همراه",
+  "تا",
+  "تاریخ",
+  "مهلت",
+  "سررسید",
+  "موعد",
+  "تسویه",
+  "با",
 ]);
 
 function isDebtNoise(t: string): boolean {
@@ -1104,13 +1105,26 @@ function detectLedgerRole(norm: string): CustomerLedgerRole {
   return "debtor";
 }
 
+/** «تا تاریخ ۳۰ مهر» / «مهلت ۱۵ فروردین» → موعد تسویه، نه زمان ثبت تراکنش */
+function peelDueDate(raw: string, now: number): { dueAt?: number; restRaw: string } {
+  const semi = normalizeKeepSeparators(raw);
+  const m = semi.match(/\s+(تا(?:\s*تاریخ)?|مهلت|سررسید|موعد(?:\s*تسویه)?)\s+(.+)$/);
+  if (!m || m.index === undefined) return { restRaw: raw };
+  const dueWhen = extractWhen(m[2], now, 9);
+  if (!dueWhen.dateSpoken) return { restRaw: raw };
+  return { dueAt: dueWhen.at, restRaw: semi.slice(0, m.index).trim() };
+}
+
 // ─── نیت‌ها ───────────────────────────────────────────────────────────────────
 
 function parseCustomerDebt(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
   const now = ctx.now ?? Date.now();
-  const when = extractWhen(raw, now, 12);
+  const phone = extractSpokenMobile(raw);
+  const peeled = peelDueDate(stripSpokenMobile(raw), now);
+  const settlementDate = peeled.dueAt ? toJalaliInputDate(peeled.dueAt) : undefined;
+  const when = extractWhen(peeled.restRaw, now, 12);
   const role = detectLedgerRole(norm);
-  const work = when.restNorm || norm;
+  const work = when.restNorm || normalizeFa(peeled.restRaw) || norm;
   const { amount, restTokens } = extractAmount(tokensOf(work));
   const name = joinClean(restTokens, isDebtNoise);
   const settleAll = role === "settle" && amount <= 0;
@@ -1144,8 +1158,10 @@ function parseCustomerDebt(raw: string, norm: string, ctx: AssistantContext): As
     role,
     settleAll,
     at: when.dateSpoken || when.timeSpoken ? when.at : undefined,
+    settlementDate,
+    phone,
     candidates,
-    clearWinner: isClearWinner(candidates.map((c) => c.score)),
+    clearWinner: isClearPersonWinner(candidates),
   };
 }
 
@@ -1282,12 +1298,15 @@ function invoicesMatchingName(name: string, ctx: AssistantContext): Invoice[] {
   for (const inv of ctx.invoices) {
     const c = inv.customer;
     if (!c) continue;
-    const score = Math.max(
-      scoreProduct(name, [c.firstName, c.lastName].filter(Boolean).join(" ")),
-      scoreProduct(name, c.firstName || ""),
-      scoreProduct(name, c.lastName || ""),
-    );
-    if (score > 0.45) add(inv);
+    const fake = {
+      id: inv.id,
+      firstName: c.firstName || "",
+      lastName: c.lastName,
+      phone: c.phone,
+      createdAt: 0,
+      txs: [],
+    };
+    if (scorePersonName(name, fake) >= 0.4) add(inv);
   }
   return out;
 }
@@ -1309,7 +1328,7 @@ function parseOpenInvoice(raw: string, norm: string, ctx: AssistantContext): Ass
     customerName: name,
     candidates,
     invoices,
-    clearWinner: isClearWinner(candidates.map((c) => c.score)) || invoices.length > 0,
+    clearWinner: isClearPersonWinner(candidates),
   };
 }
 

@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import {
   addProductToInvoiceQty,
+  addCustomInvoiceLine,
   customerBalance,
   customerFullName,
   customers as customersStore,
@@ -49,6 +50,7 @@ import {
   formatJalaliDateTime,
   formatNumber,
   formatToman,
+  inventoryTrackingEnabled,
   invoice,
   manualLedger as ledgerStore,
   products as productsStore,
@@ -571,12 +573,24 @@ export function SmartAssistant() {
     navigate({ to: "/invoices", search: { q: name } });
   };
 
-  const addToInvoice = (product: Product, quantity: number): "ok" | "out" => {
-    if (stockStatus(product) === "out") return "out";
+  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): "ok" | "out" => {
+    if (inventoryTrackingEnabled() && stockStatus(product) === "out") return "out";
     const current = invoice.getCurrent();
-    invoice.save(addProductToInvoiceQty(current, product, quantity));
+    invoice.save(addProductToInvoiceQty(current, product, quantity, { unitPrice }));
     vibrate(40);
     return "ok";
+  };
+
+  const addCustomInvoiceItem = (item: ParsedItem) => {
+    invoice.save(
+      addCustomInvoiceLine(invoice.getCurrent(), {
+        name: item.productPhrase,
+        price: item.unitPrice ?? 0,
+        quantity: item.quantity,
+        unit: item.unit,
+      }),
+    );
+    vibrate(40);
   };
 
   // ─── تبدیل نیت به کارت نتیجه ───────────────────────────────────────────────
@@ -585,16 +599,29 @@ export function SmartAssistant() {
     items.map((item) => {
       const best = item.candidates[0];
       if (item.confidence === "none" || !best) {
+        if (item.productPhrase.trim()) {
+          addCustomInvoiceItem(item);
+          const priceBit = item.unitPrice
+            ? ` · ${formatToman(item.unitPrice)}`
+            : " — قیمت را در فاکتور می‌توانید عوض کنید";
+          return {
+            key: newKey(),
+            heard,
+            status: "done" as const,
+            title: "به فاکتور اضافه شد",
+            detail: `${item.productPhrase} — ${formatNumber(item.quantity)} ${item.unit}${priceBit}`,
+          };
+        }
         return {
           key: newKey(),
           heard,
           status: "unknown" as const,
           title: `کالایی برای «${item.productPhrase}» پیدا نشد`,
-          detail: "می‌توانید متن را ویرایش کنید یا این کالا را در بخش محصولات اضافه کنید.",
+          detail: "می‌توانید متن را ویرایش کنید.",
         };
       }
       if (item.confidence === "high") {
-        const res = addToInvoice(best.product, item.quantity);
+        const res = addToInvoice(best.product, item.quantity, item.unitPrice);
         if (res === "out") {
           return {
             key: newKey(),
@@ -608,7 +635,7 @@ export function SmartAssistant() {
           heard,
           status: "done" as const,
           title: "به فاکتور اضافه شد",
-          detail: `${best.product.name} — ${formatNumber(item.quantity)} ${item.unit} · ${formatToman(best.product.price)}`,
+          detail: `${best.product.name} — ${formatNumber(item.quantity)} ${item.unit} · ${formatToman(item.unitPrice ?? best.product.price)}`,
         };
       }
       return {
@@ -1045,14 +1072,14 @@ export function SmartAssistant() {
   const pickInvoiceProduct = (card: Card, product: Product) => {
     if (card.choose?.type !== "invoice-item") return;
     const { item } = card.choose;
-    const res = addToInvoice(product, item.quantity);
+    const res = addToInvoice(product, item.quantity, item.unitPrice);
     replaceCard(card.key, {
       status: res === "out" ? "unknown" : "done",
       title: res === "out" ? `موجودی «${product.name}» تمام شده است` : "به فاکتور اضافه شد",
       detail:
         res === "out"
           ? undefined
-          : `${product.name} — ${formatNumber(item.quantity)} ${product.unit ?? item.unit} · ${formatToman(product.price)}`,
+          : `${product.name} — ${formatNumber(item.quantity)} ${product.unit ?? item.unit} · ${formatToman(item.unitPrice ?? product.price)}`,
     });
   };
 

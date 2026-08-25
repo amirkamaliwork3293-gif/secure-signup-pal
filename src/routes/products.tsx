@@ -986,15 +986,21 @@ function ProductModal({
             <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
               <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
             </Field>
-            <Field label={unit !== COUNT_UNIT ? `موجودی (${unit})` : "موجودی انبار"}>
-              <input
-                value={stock}
-                onChange={(e) => setStock(e.target.value)}
-                inputMode="decimal"
-                placeholder="۰"
-                className={inputCls}
-              />
-            </Field>
+            {appSettings.trackInventory !== false && (
+              <Field
+                label={
+                  unit !== COUNT_UNIT ? `موجودی (${unit}) — اختیاری` : "موجودی انبار (اختیاری)"
+                }
+              >
+                <input
+                  value={stock}
+                  onChange={(e) => setStock(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="خالی بماند اگر انبار ندارید"
+                  className={inputCls}
+                />
+              </Field>
+            )}
           </div>
           <Field label="واحد فروش">
             <div className="flex flex-wrap gap-2">
@@ -1071,15 +1077,17 @@ function ProductModal({
                 ))}
               </select>
             </Field>
-            <Field label="هشدار موجودی کم">
-              <input
-                value={lowThreshold}
-                onChange={(e) => setLow(e.target.value)}
-                inputMode="numeric"
-                placeholder="۵"
-                className={inputCls}
-              />
-            </Field>
+            {appSettings.trackInventory !== false && (
+              <Field label="هشدار موجودی کم (اختیاری)">
+                <input
+                  value={lowThreshold}
+                  onChange={(e) => setLow(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="۵"
+                  className={inputCls}
+                />
+              </Field>
+            )}
           </div>
           <Field label="کد بارکد / QR">
             <div className="flex gap-2">

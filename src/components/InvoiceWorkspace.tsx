@@ -14,6 +14,7 @@ import {
   customerBalance,
   cryptoId,
   addProductToInvoice,
+  addCustomInvoiceLine,
   isWeightUnit,
   applyProductDiscount,
   PAYMENT_LABEL,
@@ -360,18 +361,11 @@ export function InvoiceWorkspace() {
       return;
     }
     setInv((prev) =>
-      recalc({
-        ...prev,
-        items: [
-          ...prev.items,
-          {
-            productId: `manual-${cryptoId()}`,
-            name: manualName.trim(),
-            price,
-            quantity: qty,
-            unit: "عدد",
-          },
-        ],
+      addCustomInvoiceLine(prev, {
+        name: manualName.trim(),
+        price,
+        quantity: qty,
+        unit: "عدد",
       }),
     );
     setManualName("");

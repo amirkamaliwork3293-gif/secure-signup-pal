@@ -45,6 +45,11 @@ import {
   type ParseResult,
   type ParsedCandidate,
 } from "@/lib/voice/persian-nlu";
+import {
+  NUMBER_WORDS,
+  collectAmountRuns,
+  tokenToNumber,
+} from "@/lib/voice/fa-amount";
 import { isClearPersonWinner, matchPersons, scorePersonName } from "@/lib/voice/person-match";
 import { parseProductVoiceText, type ParsedProductItem } from "@/lib/voice/product-nlu";
 import {
@@ -158,133 +163,6 @@ export type AssistantIntent =
 
 // ─── اعداد و مبالغ ────────────────────────────────────────────────────────────
 
-const NUMBER_WORDS: Record<string, number> = {
-  صفر: 0,
-  یک: 1,
-  یه: 1,
-  دو: 2,
-  سه: 3,
-  چهار: 4,
-  چار: 4,
-  پنج: 5,
-  پنح: 5,
-  شش: 6,
-  شیش: 6,
-  هفت: 7,
-  هشت: 8,
-  نه: 9,
-  ده: 10,
-  یازده: 11,
-  دوازده: 12,
-  سیزده: 13,
-  چهارده: 14,
-  پانزده: 15,
-  پونزده: 15,
-  شانزده: 16,
-  شونزده: 16,
-  هفده: 17,
-  هجده: 18,
-  هیجده: 18,
-  نوزده: 19,
-  بیست: 20,
-  سی: 30,
-  چهل: 40,
-  پنجاه: 50,
-  شصت: 60,
-  هفتاد: 70,
-  هشتاد: 80,
-  نود: 90,
-  صد: 100,
-  دویست: 200,
-  سیصد: 300,
-  چهارصد: 400,
-  پانصد: 500,
-  پونصد: 500,
-  ششصد: 600,
-  هفتصد: 700,
-  هشتصد: 800,
-  نهصد: 900,
-};
-
-const MULTIPLIERS: Record<string, number> = {
-  هزار: 1000,
-  هزارتا: 1000,
-  میلیون: 1_000_000,
-  ملیون: 1_000_000,
-  میلیارد: 1_000_000_000,
-  ملیارد: 1_000_000_000,
-};
-
-const CURRENCY_WORDS = new Set(["تومان", "تومن", "ریال"]);
-
-function tokenToNumber(t: string): number | undefined {
-  if (/^\d+(\.\d+)?$/.test(t)) return parseFloat(t);
-  if (t in NUMBER_WORDS) return NUMBER_WORDS[t];
-  return undefined;
-}
-
-function isNumberToken(t: string): boolean {
-  return tokenToNumber(t) !== undefined || t in MULTIPLIERS;
-}
-
-type AmountRun = {
-  amount: number;
-  /** ایندکس اولین توکن عددی */
-  from: number;
-  /** ایندکس بعد از آخرین توکن مصرف‌شده (شامل واحد پول) */
-  to: number;
-  /** واحد پول یا ضریب (هزار/میلیون) دیده شد → این عدد به‌احتمال زیاد «مبلغ» است */
-  hasAnchor: boolean;
-};
-
-/** همه‌ی عبارت‌های عددی یک جمله («۲۵۰ هزار تومان»، «۴۵ میلیون»، «۴۵۰۰۰») */
-function collectAmountRuns(tokens: string[]): AmountRun[] {
-  const runs: AmountRun[] = [];
-  let i = 0;
-  while (i < tokens.length) {
-    if (!isNumberToken(tokens[i])) {
-      i++;
-      continue;
-    }
-    let j = i;
-    let total = 0;
-    let current = 0;
-    let hasAnchor = false;
-    while (j < tokens.length) {
-      const t = tokens[j];
-      // «دویست و پنجاه» — «و» بین دو عدد بخشی از همان مبلغ است
-      if (t === "و" && j + 1 < tokens.length && isNumberToken(tokens[j + 1])) {
-        j++;
-        continue;
-      }
-      if (t in MULTIPLIERS) {
-        total += (current || 1) * MULTIPLIERS[t];
-        current = 0;
-        hasAnchor = true;
-        j++;
-        continue;
-      }
-      const n = tokenToNumber(t);
-      if (n === undefined) break;
-      current += n;
-      j++;
-    }
-    let end = j;
-    let rial = false;
-    if (end < tokens.length && CURRENCY_WORDS.has(tokens[end])) {
-      rial = tokens[end] === "ریال";
-      hasAnchor = true;
-      end++;
-    }
-    let amount = total + current;
-    // مبالغ همیشه به تومان ذخیره می‌شوند؛ ریال تقسیم بر ۱۰
-    if (rial) amount = Math.round(amount / 10);
-    if (amount > 0) runs.push({ amount, from: i, to: end, hasAnchor });
-    i = Math.max(end, i + 1);
-  }
-  return runs;
-}
-
 /**
  * انتخاب «مبلغ» از میان عبارت‌های عددی جمله: اولویت با عبارتی که واحد پول یا
  * ضریب (هزار/میلیون) دارد؛ در نبودش آخرین عبارت عددی. بقیه‌ی توکن‌ها برگردانده
@@ -364,19 +242,20 @@ function isClearWinner(scores: number[]): boolean {
 // ─── الگوهای تشخیص نیت ────────────────────────────────────────────────────────
 // همه‌ی الگوها روی متنِ نرمال‌شده نوشته شده‌اند (آ→ا، ي→ی، بدون نیم‌فاصله).
 
-const RE_REMINDER = /یاداور|یادم بنداز|یادم باشه|به یادم|یادآوری|الارم|یادم نره/;
+const RE_REMINDER =
+  /یاداور|یادم بنداز|یادم باشه|به یادم|یادآوری|الارم|آلارم|یادم نره|یادُم نره|ریمایندر|بیدارم کن|یاد من باش/;
 const RE_PRICE_EDIT =
   /ویرایش قیمت|تغییر قیمت|قیمت جدید|قیمتش? ?(رو|را)? ?(عوض|اصلاح|تغییر)|قیمت.*(بشه|بشود|بکن|کن|بذار|بزن)|قیمتش? ?(بشه|بشود)/;
 /** طلبکار = مشتری از ما طلب دارد (مانده منفی). جدا از «بدهکار». */
 const RE_CREDITOR = /طلبکار|(بهش|به او|بهشون) بدهکارم|بدهکارم به|به .{1,40} بدهکارم|از من طلب/;
-const RE_DEBTOR = /بدهکار|بدهی|طلب داره|طلب دارد|نسیه اش|نسیه/;
+const RE_DEBTOR = /بدهکار|بدهی|طلب داره|طلب دارد|نسیه اش|نسیه|بدهکاره|بدهکارشه|ازش طلب/;
 const RE_SETTLE = /تسویه|پرداخت کرد|واریز کرد|صاف کرد|حساب ?(رو|را)? ?داد|پس داد/;
 const RE_LEDGER = /طلبکار|بدهکار|بدهی|طلب|نسیه اش|تسویه|پرداخت کرد|واریز کرد/;
-const RE_EXPENSE = /هزینه|اجاره|قبض|حقوق|فیش|خرج/;
+const RE_EXPENSE = /هزینه|اجاره|قبض|حقوق|فیش|خرج|قسط|پول آب|پول برق|پول گاز|شارژ ساختمان/;
 const RE_APPLY_ALL = /همه|همشون|همه شون|تمام|هرچی|هر چی|هرچه/;
 /** افزودن کالا به فهرست محصولات — نه به فاکتور جاری */
 const RE_PRODUCT_ADD =
-  /ثبت محصول|محصول جدید|به محصولات|تو محصولات|در محصولات|موجودی .*اضافه|اضافه شود|اضافه بشه|اضافه کن|اضافه بکن/;
+  /ثبت محصول|محصول جدید|(?:به|تو|در|روی)\s+محصولات\w*|(?:به|تو|در)\s+کالاها?\w*|لیست کالا|موجودی .{0,24}اضافه/;
 const RE_TO_INVOICE = /به فاکتور|روی فاکتور|تو فاکتور/;
 const RE_OPEN_INVOICE =
   /فاکتور.{0,48}(باز کن|بازکن|نشون بده|نشان بده|بیار|بده ببینم|پیدا کن|چیه|چیست|کجاست)|باز کن.{0,24}فاکتور|(برو( به)?|ببر( به)?) فاکتور/;
@@ -518,10 +397,25 @@ function detectQuery(norm: string): QuerySpec | null {
   return null;
 }
 
+/** افزودن به فهرست محصولات — جمله‌بندی آزاد («به محصولاتم اضافه کن») */
+function looksLikeProductAdd(norm: string): boolean {
+  if (RE_TO_INVOICE.test(norm)) return false;
+  if (RE_PRODUCT_ADD.test(norm)) return true;
+  const catalog = /محصول|کالاها|لیست کالا/.test(norm);
+  const addToList = /اضافه(?:\s*(?:شود|بشه|کن(?:م|ید|ین)?|بکن(?:م)?))|بذار|بگذار/.test(norm);
+  if (addToList && catalog) return true;
+  // «۱۵۰ عدد پیراهن با قیمت ۲۰۰ هزار اضافه شود» بدون گفتن «محصولات»
+  if (/اضافه شود|اضافه بشه/.test(norm) && /قیمت|هر\s*عدد/.test(norm)) return true;
+  return false;
+}
+
 /** «۲ تا نون»، «سه عدد شیر»، «به فاکتور اضافه کن» — دستور ثبت فاکتور است */
 function looksLikeInvoiceCommand(norm: string): boolean {
   if (RE_TO_INVOICE.test(norm)) return true;
   if (/\d+(\.\d+)?\s*(تا|عدد|کیلو|کیلوگرم|گرم|دونه|دونا|تاي)/.test(norm)) return true;
+  if (/هر\s*(عدد|تا|دونه|کدوم|کدام)/.test(norm) && collectAmountRuns(tokensOf(norm)).some((r) => r.hasAnchor)) {
+    return true;
+  }
   const tokens = tokensOf(norm);
   for (let i = 0; i < tokens.length - 1; i++) {
     if (tokenToNumber(tokens[i]) === undefined) continue;
@@ -1227,11 +1121,23 @@ function parseReminder(raw: string, norm: string, ctx: AssistantContext): Assist
   };
 }
 
-const PRODUCT_ADD_NOISE =
-  /ثبت محصول|محصول جدید|به محصولات|تو محصولات|در محصولات|موجودی|اضافه شود|اضافه بشه|اضافه کن|اضافه بکن|اضافه/g;
+function stripProductAddNoise(norm: string): string {
+  return norm
+    .replace(/ثبت\s*محصول(ات)?/g, " ")
+    .replace(/محصول\s*جدید/g, " ")
+    .replace(/(?:به|تو|در|روی)\s+محصولات\w*/g, " ")
+    .replace(/محصولات\w*/g, " ")
+    .replace(/(?:به|تو|در)\s+کالاها?\w*/g, " ")
+    .replace(/لیست\s+کالاها?\w*/g, " ")
+    .replace(/موجودی/g, " ")
+    .replace(/اضافه(?:\s*(?:شود|بشه|کن(?:م|ید|ین)?|بکن(?:م)?))?/g, " ")
+    .replace(/بذار|بگذار/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseProductAdd(raw: string, norm: string): AssistantIntent {
-  const cleaned = norm.replace(PRODUCT_ADD_NOISE, " ").replace(/\s+/g, " ").trim();
+  const cleaned = stripProductAddNoise(norm);
   const result = parseProductVoiceText(cleaned || raw);
   const items = result.items.filter((i) => i.name.trim());
   if (items.length === 0) {
@@ -1239,7 +1145,7 @@ function parseProductAdd(raw: string, norm: string): AssistantIntent {
       kind: "unknown",
       raw,
       reason:
-        "مشخصات محصول را نفهمیدم. مثلاً بگویید «۱۵۰ عدد پیراهن با قیمت ۲۰۰ هزار تومان اضافه شود».",
+        "مشخصات محصول را نفهمیدم. مثلاً بگویید «۲۰ تا شلوار هر عدد یک میلیون تومان به محصولات اضافه کن».",
     };
   }
   return { kind: "product_add", raw, items };
@@ -1374,7 +1280,7 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   }
 
   if (RE_PRICE_EDIT.test(norm)) return parseProductPriceEdit(raw, norm, context);
-  if (RE_PRODUCT_ADD.test(norm) && !RE_TO_INVOICE.test(norm)) return parseProductAdd(raw, norm);
+  if (looksLikeProductAdd(norm)) return parseProductAdd(raw, norm);
   if (
     RE_LEDGER.test(norm) ||
     RE_CREDITOR.test(norm) ||
@@ -1386,8 +1292,9 @@ export function parseAssistantCommand(text: string, context: AssistantContext): 
   if (RE_EXPENSE.test(norm)) return parseExpense(raw, norm, context);
 
   const result = parseVoiceText(raw, context.products);
-  const anyProductHit = result.items.some((i) => i.candidates.length > 0);
-  if (anyProductHit || looksLikeInvoiceCommand(norm)) {
+  const anyCatalog = result.items.some((i) => i.candidates.length > 0);
+  const anyPricedCustom = result.items.some((i) => (i.unitPrice ?? 0) > 0);
+  if (anyCatalog || anyPricedCustom || looksLikeInvoiceCommand(norm)) {
     return { kind: "invoice_item", raw, result };
   }
 

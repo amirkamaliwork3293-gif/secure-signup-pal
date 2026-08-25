@@ -468,6 +468,11 @@ export type AppSettings = {
    * که تولید ندارند برنامه شلوغ نشود.
    */
   showProductionFeature?: boolean;
+  /**
+   * پیگیری موجودی انبار. پیش‌فرض فعال است.
+   * اگر false باشد موجودی هنگام ثبت فاکتور کم نمی‌شود و بخش انبار پنهان است.
+   */
+  trackInventory?: boolean;
   /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
@@ -511,6 +516,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showGoldFeature: false,
   showRemindersFeature: true,
   showProductionFeature: false,
+  trackInventory: true,
 };
 
 function getStorageScope() {
@@ -1226,7 +1232,9 @@ export const invoice = {
     logProductionSales(stamped);
     // کسر موجودی در یک نوشتن اتمی — تا تعداد در «محصولات» و «انبار» یکی بماند
     // و اگر یک کالا چند ردیف داشته باشد، موجودی دوبار از روی دادهٔ کهنه کم نشود.
-    reconcileStockForInvoiceEdit([], stamped.items);
+    if (inventoryTrackingEnabled()) {
+      reconcileStockForInvoiceEdit([], stamped.items);
+    }
     write(HISTORY_KEY, [stamped, ...hist]);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
@@ -1242,7 +1250,7 @@ export const invoice = {
   updateHistory: (updated: Invoice) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     const prev = hist.find((inv) => inv.id === updated.id);
-    if (prev) reconcileStockForInvoiceEdit(prev.items, updated.items);
+    if (prev && inventoryTrackingEnabled()) reconcileStockForInvoiceEdit(prev.items, updated.items);
     // مثل archive: مبالغ همیشه از روی اقلام و تخفیفِ ویرایش‌شده بازمحاسبه می‌شوند
     const fixed = recalc(updated);
     write(
@@ -1259,7 +1267,7 @@ export const invoice = {
   deleteFromHistory: (id: string, opts?: { restock?: boolean }) => {
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     const target = hist.find((inv) => inv.id === id);
-    if (opts?.restock && target) {
+    if (opts?.restock && target && inventoryTrackingEnabled()) {
       reconcileStockForInvoiceEdit(target.items, []);
     }
     write(
@@ -2350,17 +2358,29 @@ export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
  * تابع موجود `addProductToInvoice` دست‌نخورده می‌ماند؛ این نسخه مقدار دلخواه را
  * می‌گیرد: برای محصول وزنی مقدار را جمع می‌کند و برای محصول عددی هم همین‌طور.
  */
-export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: number): Invoice {
+export function addProductToInvoiceQty(
+  inv: Invoice,
+  p: Product,
+  quantity: number,
+  opts?: { unitPrice?: number },
+): Invoice {
   const qty = quantity > 0 ? quantity : 1;
-  const existing = inv.items.find((i) => i.productId === p.id);
+  const customPrice = opts?.unitPrice != null && opts.unitPrice > 0 ? opts.unitPrice : undefined;
+  const existing = inv.items.find(
+    (i) => i.productId === p.id && (customPrice == null || i.price === customPrice),
+  );
   let items;
   if (existing) {
     items = inv.items.map((i) =>
-      i.productId === p.id ? applyAutoWholesale({ ...i, quantity: i.quantity + qty }, p) : i,
+      i.productId === existing.productId && i.price === existing.price
+        ? customPrice != null
+          ? { ...i, quantity: i.quantity + qty, price: customPrice }
+          : applyAutoWholesale({ ...i, quantity: i.quantity + qty }, p)
+        : i,
     );
   } else {
-    const effectivePrice = applyProductDiscount(p);
-    const hasDiscount = effectivePrice < p.price;
+    const effectivePrice = customPrice ?? applyProductDiscount(p);
+    const hasDiscount = customPrice == null && effectivePrice < p.price;
     items = [
       ...inv.items,
       {
@@ -2376,9 +2396,43 @@ export function addProductToInvoiceQty(inv: Invoice, p: Product, quantity: numbe
         originalPrice: hasDiscount ? p.price : undefined,
       },
     ];
-    // If starting quantity already meets wholesale threshold, snap to wholesale
-    items = items.map((i) => (i.productId === p.id ? applyAutoWholesale(i, p) : i));
+    if (customPrice == null) {
+      items = items.map((i) => (i.productId === p.id ? applyAutoWholesale(i, p) : i));
+    }
   }
+  return recalc({ ...inv, items });
+}
+
+/** ردیف فاکتور آزاد — بدون وابستگی به فهرست محصولات و موجودی انبار */
+export function isManualInvoiceItem(item: InvoiceItem): boolean {
+  return item.productId.startsWith("manual-");
+}
+
+export function addCustomInvoiceLine(
+  inv: Invoice,
+  line: { name: string; price: number; quantity: number; unit?: string },
+): Invoice {
+  const qty = line.quantity > 0 ? line.quantity : 1;
+  const name = line.name.trim();
+  if (!name) return inv;
+  const unit = line.unit || COUNT_UNIT;
+  const price = Math.max(0, Math.round(line.price || 0));
+  const existing = inv.items.find(
+    (i) =>
+      isManualInvoiceItem(i) && i.name === name && i.price === price && (i.unit || COUNT_UNIT) === unit,
+  );
+  const items = existing
+    ? inv.items.map((i) => (i === existing ? { ...i, quantity: i.quantity + qty } : i))
+    : [
+        ...inv.items,
+        {
+          productId: `manual-${cryptoId()}`,
+          name,
+          price,
+          quantity: qty,
+          unit,
+        },
+      ];
   return recalc({ ...inv, items });
 }
 
@@ -2814,6 +2868,11 @@ export function stockStatus(p: Product): "ok" | "low" | "out" {
   const threshold = p.lowStockThreshold ?? 5;
   if (p.stock <= threshold) return "low";
   return "ok";
+}
+
+/** پیگیری موجودی انبار — پیش‌فرض روشن؛ فقط با خاموش‌کردن صریح در تنظیمات off می‌شود */
+export function inventoryTrackingEnabled(s?: AppSettings): boolean {
+  return (s ?? settings.get()).trackInventory !== false;
 }
 
 /** روزهای باقیمانده تا انقضا (منفی یعنی منقضی‌شده). اگر تاریخ انقضا ثبت نشده باشد null. */

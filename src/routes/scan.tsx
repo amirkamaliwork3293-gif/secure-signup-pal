@@ -3,7 +3,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
 import { Scanner } from "@/components/Scanner";
-import { products, invoice, addProductToInvoice, formatToman, stockStatus } from "@/lib/store";
+import {
+  products,
+  invoice,
+  addProductToInvoice,
+  formatToman,
+  stockStatus,
+  inventoryTrackingEnabled,
+} from "@/lib/store";
 import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
 export const Route = createFileRoute("/scan")({
@@ -32,7 +39,7 @@ function ScanPageInner() {
     const product = products.findByCode(code);
     if (product) {
       const status = stockStatus(product);
-      if (status === "out") {
+      if (inventoryTrackingEnabled() && status === "out") {
         setLast({ kind: "unknown", code: `اتمام موجودی: ${product.name}` });
         setPaused(true);
         return;
@@ -58,7 +65,7 @@ function ScanPageInner() {
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     const status = stockStatus(p);
-    if (status === "out") {
+    if (inventoryTrackingEnabled() && status === "out") {
       alert(`محصول "${p.name}" موجودی ندارد.`);
       return;
     }

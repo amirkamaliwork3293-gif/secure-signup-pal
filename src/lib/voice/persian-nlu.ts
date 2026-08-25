@@ -10,6 +10,13 @@
  */
 
 import { COUNT_UNIT, isWeightUnit, type Product, type PaymentMethod } from "@/lib/store";
+import {
+  NUMBER_WORDS,
+  isCurrencyWord,
+  isMultiplierWord,
+  peelUnitPrice,
+  tokenToNumber,
+} from "@/lib/voice/fa-amount";
 
 export type ParsedCandidate = { product: Product; score: number };
 
@@ -28,9 +35,11 @@ export type ParsedItem = {
    * سطح اطمینان:
    *  - high: یک تطبیق واضح → افزودن مستقیم
    *  - low: چند تطبیق نزدیک یا واحد نامطمئن → نیاز به تایید کاربر
-   *  - none: محصولی یافت نشد
+   *  - none: محصولی در فهرست نبود — می‌توان به‌صورت ردیف آزاد ثبت کرد
    */
   confidence: "high" | "low" | "none";
+  /** قیمت واحد گفته‌شده («هر عدد یک میلیون») — اگر نباشد از قیمت کالا استفاده می‌شود */
+  unitPrice?: number;
   /** کسر وزنی برای محصول عددی گفته شده (مثلاً «ربع» برای کالای عددی) → نیاز به تایید واحد */
   needsUnitConfirm?: boolean;
 };
@@ -80,49 +89,6 @@ export function normalizeFa(input: string): string {
 }
 
 // ─── اعداد و کسرها ────────────────────────────────────────────────────────────
-
-const NUMBER_WORDS: Record<string, number> = {
-  صفر: 0,
-  یک: 1,
-  یه: 1,
-  دو: 2,
-  سه: 3,
-  چهار: 4,
-  چار: 4,
-  پنج: 5,
-  پنح: 5,
-  شش: 6,
-  شیش: 6,
-  هفت: 7,
-  هشت: 8,
-  نه: 9,
-  ده: 10,
-  یازده: 11,
-  دوازده: 12,
-  سیزده: 13,
-  چهارده: 14,
-  پانزده: 15,
-  پونزده: 15,
-  شانزده: 16,
-  شونزده: 16,
-  هفده: 17,
-  هجده: 18,
-  هیجده: 18,
-  نوزده: 19,
-  بیست: 20,
-  // صدگان — برای مقادیر گرمی مثل «سیصد گرم» یا «هفتصد گرم» ضروری است
-  صد: 100,
-  دویست: 200,
-  سیصد: 300,
-  چهارصد: 400,
-  پانصد: 500,
-  پونصد: 500,
-  ششصد: 600,
-  هفتصد: 700,
-  هشتصد: 800,
-  نهصد: 900,
-  هزار: 1000,
-};
 
 /** کلمات کسری وزنی → مقدار به کیلوگرم */
 const FRACTION_KG: Record<string, number> = {
@@ -176,6 +142,15 @@ const STOPWORDS = new Set([
   "کن",
   "میخوام",
   "خواستم",
+  "قیمت",
+  "تومان",
+  "تومن",
+  "ریال",
+  "هر",
+  "میلیون",
+  "ملیون",
+  "هزار",
+  "میلیارد",
 ]);
 
 // ─── استخراج مشتری و روش پرداخت ───────────────────────────────────────────────
@@ -622,14 +597,20 @@ function reconcile(
  * برای تشخیص مرز بین دو قلم کالا وقتی فروشنده بدون «و» پشت سر هم می‌گوید
  * (مثلاً «۲ تا شیر ۳ تا پنیر صبا ۴ تا دستمال»).
  */
+function isInsideMoneyPhrase(tokens: string[], idx: number): boolean {
+  const from = Math.max(0, idx - 3);
+  const to = Math.min(tokens.length, idx + 4);
+  for (let i = from; i < to; i++) {
+    if (isMultiplierWord(tokens[i]) || isCurrencyWord(tokens[i]) || tokens[i] === "قیمت") return true;
+  }
+  return false;
+}
+
 function isQuantityStarter(tokens: string[], idx: number): boolean {
   const t = tokens[idx];
+  if (isInsideMoneyPhrase(tokens, idx)) return false;
   if (t in NUMBER_WORDS || t in FRACTION_KG) return true;
   if (/^\d+(\.\d+)?$/.test(t)) {
-    // یک رقم فقط وقتی «شروع مقدار قلم بعدی» تلقی می‌شود که بلافاصله یک واحد
-    // شمارشی/وزنی (تا/عدد/کیلو/گرم/...) بعدش بیاید (مثل «۳ تا پنیر»)؛ وگرنه رقمی
-    // مثل «۱۷» در «روژلب شماره ۱۷ شامپو» بخشی از نام/سایز کالای قبلی است، نه
-    // شروع یک قلم جدید.
     const next = tokens[idx + 1];
     return !!(next && isUnitOrCountWord(next));
   }
@@ -707,14 +688,24 @@ function splitIntoClauses(body: string): string[] {
     for (const part of parts) {
       const firstWord = part.split(" ")[0];
       const isFractionContinuation = merged.length > 0 && firstWord in FRACTION_KG;
-      // ادامه‌ی مقدار وزنی مرکب («دو کیلو و هفتصد گرم گوجه») — وقتی بخش قبلی
-      // هنوز فقط عدد/واحد بوده (نام کالایی نداشته) و بخش بعدی هم با یک عدد
-      // شروع می‌شود، این دو باید یک قلم واحد به‌حساب بیایند.
+      const prev = merged[merged.length - 1];
       const isWeightContinuation =
         merged.length > 0 &&
-        isQuantityOnlyBuffer(merged[merged.length - 1]) &&
+        isQuantityOnlyBuffer(prev) &&
         (/^\d+(\.\d+)?$/.test(firstWord) || firstWord in NUMBER_WORDS);
-      if (isFractionContinuation || isWeightContinuation) {
+      const isMoneyContinuation =
+        merged.length > 0 &&
+        (() => {
+          const prevToks = prev.split(" ").filter(Boolean);
+          const last = prevToks[prevToks.length - 1];
+          return (
+            (isMultiplierWord(last) || tokenToNumber(last) !== undefined || isCurrencyWord(last)) &&
+            (tokenToNumber(firstWord) !== undefined ||
+              isMultiplierWord(firstWord) ||
+              isCurrencyWord(firstWord))
+          );
+        })();
+      if (isFractionContinuation || isWeightContinuation || isMoneyContinuation) {
         merged[merged.length - 1] = `${merged[merged.length - 1]} و ${part}`;
       } else {
         merged.push(part);
@@ -740,24 +731,29 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
 
   const items: ParsedItem[] = [];
   for (const clause of clauses) {
-    const parsed = parseClause(clause);
+    const tokens = clause.split(" ").filter(Boolean);
+    const peeled = peelUnitPrice(tokens);
+    const parsed = parseClause(peeled.rest.join(" "));
     if (!parsed.productPhrase) continue;
 
     const candidates = matchProducts(parsed.productPhrase, products);
+    const quantity = parsed.count ?? parsed.weightKg ?? 1;
+    const unit =
+      parsed.spokenUnit === "kg"
+        ? "کیلوگرم"
+        : parsed.spokenUnit === "gram"
+          ? "گرم"
+          : COUNT_UNIT;
 
     if (candidates.length === 0) {
       items.push({
         rawClause: clause,
         productPhrase: parsed.productPhrase,
-        quantity: parsed.count ?? parsed.weightKg ?? 1,
-        unit:
-          parsed.spokenUnit === "kg"
-            ? "کیلوگرم"
-            : parsed.spokenUnit === "gram"
-              ? "گرم"
-              : COUNT_UNIT,
+        quantity,
+        unit,
         candidates: [],
         confidence: "none",
+        unitPrice: peeled.unitPrice,
       });
       continue;
     }
@@ -765,7 +761,6 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
     const best = candidates[0];
     const rec = reconcile(parsed, best.product);
 
-    // اطمینان: تطبیق واضح وقتی بهترین امتیاز بالا و به‌اندازه‌ی کافی جلوتر از دومی باشد
     const second = candidates[1];
     const clearWinner = best.score >= 0.6 && (!second || best.score - second.score >= 0.2);
     const confidence: ParsedItem["confidence"] =
@@ -779,6 +774,7 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
       candidates,
       confidence,
       needsUnitConfirm: rec.needsUnitConfirm,
+      unitPrice: peeled.unitPrice,
     });
   }
 

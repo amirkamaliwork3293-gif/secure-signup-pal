@@ -40,6 +40,7 @@ import {
   Coins,
   Bell,
   Factory,
+  Boxes,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -63,6 +64,7 @@ function SettingsPageInner() {
   const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
   const [showRemindersFeature, setShowRemindersFeature] = useState(appSettings.showRemindersFeature !== false);
   const [showProductionFeature, setShowProductionFeature] = useState(!!appSettings.showProductionFeature);
+  const [trackInventory, setTrackInventory] = useState(appSettings.trackInventory !== false);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
     appSettings.currencyUnit === "rial" ? "rial" : "toman",
   );
@@ -80,6 +82,7 @@ function SettingsPageInner() {
       showGoldFeature,
       showRemindersFeature,
       showProductionFeature,
+      trackInventory,
       currencyUnit,
     });
     // همگام‌سازی نام فروشگاه با پروفایل عمومی + منوی کافه (بدون دست‌زدن به سایر فیلدها)
@@ -339,6 +342,24 @@ function SettingsPageInner() {
           </label>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
             مخصوص کارگاه، کافه و تولیدی. با فعال‌شدن، بخش «تولید» اضافه می‌شود تا برای هر محصول فرمول مواد اولیه بسازید و با فروش، موجودی مواد خودکار کم شود. اگر تولید ندارید خاموش بماند تا برنامه شلوغ نشود.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Boxes className="h-4 w-4 text-primary" />
+              پیگیری موجودی انبار
+            </span>
+            <input
+              type="checkbox"
+              checked={trackInventory}
+              onChange={(e) => setTrackInventory(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            اگر خاموش باشد، هنگام ثبت فاکتور موجودی کم نمی‌شود، فیلد موجودی در محصولات اختیاری/پنهان است و بخش «انبار» از نوار پایین برداشته می‌شود. فاکتور زدن به فهرست کالا وابسته نیست.
           </p>
         </div>
       </Group>

@@ -7,6 +7,15 @@
 
 import { COUNT_UNIT, getUnitDefs, isWeightUnit, type UnitDef } from "@/lib/store";
 import { normalizeFa } from "@/lib/voice/persian-nlu";
+import {
+  CURRENCY_WORDS,
+  MULTIPLIERS,
+  NUMBER_WORDS,
+  extractLastAnchoredAmount,
+  isCurrencyWord,
+  isMultiplierWord,
+  tokenToNumber,
+} from "@/lib/voice/fa-amount";
 
 export type ParsedProductItem = {
   rawClause: string;
@@ -25,54 +34,6 @@ export type ParseProductResult = {
 
 // ─── اعداد ────────────────────────────────────────────────────────────────────
 
-const NUMBER_WORDS: Record<string, number> = {
-  صفر: 0,
-  یک: 1,
-  یه: 1,
-  دو: 2,
-  سه: 3,
-  چهار: 4,
-  چار: 4,
-  پنج: 5,
-  پنح: 5,
-  شش: 6,
-  شیش: 6,
-  هفت: 7,
-  هشت: 8,
-  نه: 9,
-  ده: 10,
-  یازده: 11,
-  دوازده: 12,
-  سیزده: 13,
-  چهارده: 14,
-  پانزده: 15,
-  پونزده: 15,
-  شانزده: 16,
-  شونزده: 16,
-  هفده: 17,
-  هجده: 18,
-  هیجده: 18,
-  نوزده: 19,
-  بیست: 20,
-  سی: 30,
-  چهل: 40,
-  پنجاه: 50,
-  شصت: 60,
-  هفتاد: 70,
-  هشتاد: 80,
-  نود: 90,
-  صد: 100,
-  دویست: 200,
-  سیصد: 300,
-  چهارصد: 400,
-  پانصد: 500,
-  پونصد: 500,
-  ششصد: 600,
-  هفتصد: 700,
-  هشتصد: 800,
-  نهصد: 900,
-};
-
 const FRACTION_KG: Record<string, number> = {
   ربع: 0.25,
   چارک: 0.25,
@@ -85,16 +46,6 @@ const FRACTION_KG: Record<string, number> = {
 const COUNT_WORDS = new Set(["عدد", "تا", "دونه", "دانه", "بسته", "شیشه", "بطری", "عددی", "تایی"]);
 const KILO_WORDS = new Set(["کیلو", "کیلوگرم", "کیلوگرام", "کیلگرم", "گیلو", "گیلوگرم"]);
 const GRAM_WORDS = new Set(["گرم", "گرمی"]);
-
-const CURRENCY_WORDS = new Set(["تومان", "تومن", "ریال", "ت", "ر"]);
-const MULTIPLIERS: Record<string, number> = {
-  هزار: 1000,
-  هزارتا: 1000,
-  k: 1000,
-  K: 1000,
-  میلیون: 1_000_000,
-  م: 1_000_000,
-};
 
 const PRICE_STOPWORDS = new Set([
   "قیمت",
@@ -145,138 +96,22 @@ function isUnitWord(t: string, unitMap: Map<string, string>): boolean {
   return unitMap.has(t) || KILO_WORDS.has(t) || GRAM_WORDS.has(t) || COUNT_WORDS.has(t);
 }
 
-function isMultiplierWord(t: string): boolean {
-  return t in MULTIPLIERS;
-}
-
 function isPriceAnchor(t: string): boolean {
-  return isMultiplierWord(t) || CURRENCY_WORDS.has(t);
-}
-
-// ─── پارس عدد فارسی ───────────────────────────────────────────────────────────
-
-function tokenToNumber(t: string): number | undefined {
-  if (/^\d+(\.\d+)?$/.test(t)) return parseFloat(t);
-  if (t in NUMBER_WORDS) return NUMBER_WORDS[t];
-  return undefined;
-}
-
-/** پارس عبارت عددی مثل «دویست و پنجاه» یا «250» از یک بازه توکن */
-function parseNumberPhrase(tokens: string[], start: number, end: number): number | undefined {
-  let total = 0;
-  let current = 0;
-  let i = start;
-  while (i < end) {
-    const t = tokens[i];
-    if (t === "و") {
-      i++;
-      continue;
-    }
-    const n = tokenToNumber(t);
-    if (n === undefined) return undefined;
-    // «دویست و پنجاه» → جمع
-    if (current > 0 && n < 100 && !/^\d+$/.test(t)) {
-      current += n;
-    } else if (current > 0) {
-      total += current;
-      current = n;
-    } else {
-      current = n;
-    }
-    i++;
-  }
-  return total + current;
+  return isMultiplierWord(t) || isCurrencyWord(t);
 }
 
 // ─── استخراج قیمت ─────────────────────────────────────────────────────────────
 
 type PriceExtract = { price?: number; restTokens: string[] };
 
-function parsePriceFromTokens(
-  tokens: string[],
-  start: number,
-  end: number,
-): { price: number; from: number; to: number } | null {
-  if (start >= end) return null;
-
-  let s = start;
-  let e = end;
-  let currency: "toman" | "rial" | undefined;
-
-  // واحد پول بلافاصله بعد از بازه عددی
-  if (e <= tokens.length && e > s && CURRENCY_WORDS.has(tokens[e - 1])) {
-    const w = tokens[e - 1];
-    if (w === "ریال" || w === "ر") currency = "rial";
-    else currency = "toman";
-    e--;
-  }
-
-  let multiplier = 1;
-  if (e > s && tokens[e - 1] in MULTIPLIERS) {
-    multiplier = MULTIPLIERS[tokens[e - 1]];
-    e--;
-  }
-
-  let numStart = e;
-  for (let back = 1; back <= 6 && e - back >= s; back++) {
-    const t = tokens[e - back];
-    if (t === "و" || tokenToNumber(t) !== undefined) numStart = e - back;
-    else if (t === "قیمت" || t === "با") {
-      numStart = e - back + 1;
-      break;
-    } else break;
-  }
-
-  if (numStart >= e) return null;
-  const rawNum = parseNumberPhrase(tokens, numStart, e);
-  if (rawNum === undefined || rawNum <= 0) return null;
-
-  let price = rawNum * multiplier;
-  if (currency === "rial") price = price / 10;
-
-  return { price, from: numStart, to: end };
-}
-
 function extractPrice(tokens: string[]): PriceExtract {
   if (tokens.length === 0) return { restTokens: [] };
-
-  // اول از انتها
-  const fromEnd = parsePriceFromTokens(tokens, 0, tokens.length);
-  if (fromEnd) {
-    const rest = tokens.slice(0, fromEnd.from).filter(
-      (t, i, arr) => !(i === arr.length - 1 && (t === "قیمت" || t === "با")),
-    );
-    return { price: fromEnd.price, restTokens: rest };
-  }
-
-  // سپس از ابتدا (مثلاً «5000 ریال آب معدنی»)
-  if (tokenToNumber(tokens[0]) !== undefined) {
-    let numEnd = 1;
-    while (numEnd < tokens.length && (tokens[numEnd] === "و" || tokenToNumber(tokens[numEnd]) !== undefined)) {
-      numEnd++;
-    }
-    let multEnd = numEnd;
-    let multiplier = 1;
-    if (multEnd < tokens.length && tokens[multEnd] in MULTIPLIERS) {
-      multiplier = MULTIPLIERS[tokens[multEnd]];
-      multEnd++;
-    }
-    let curEnd = multEnd;
-    let currency: "toman" | "rial" | undefined;
-    if (curEnd < tokens.length && CURRENCY_WORDS.has(tokens[curEnd])) {
-      const w = tokens[curEnd];
-      currency = w === "ریال" || w === "ر" ? "rial" : "toman";
-      curEnd++;
-    }
-    const rawNum = parseNumberPhrase(tokens, 0, numEnd);
-    if (rawNum !== undefined && rawNum > 0 && (currency || multiplier > 1 || curEnd > numEnd)) {
-      let price = rawNum * multiplier;
-      if (currency === "rial") price = price / 10;
-      return { price, restTokens: tokens.slice(curEnd) };
-    }
-  }
-
-  return { restTokens: tokens };
+  const hit = extractLastAnchoredAmount(tokens);
+  if (!hit) return { restTokens: tokens };
+  const rest = [...tokens.slice(0, hit.from), ...tokens.slice(hit.to)].filter(
+    (t, i, arr) => !(t === "قیمت" || t === "هر" || (t === "با" && i === arr.length - 1)),
+  );
+  return { price: hit.amount, restTokens: rest };
 }
 
 // ─── استخراج مقدار/واحد/نام از باقی‌مانده ─────────────────────────────────────
@@ -505,15 +340,15 @@ function hasProductNameTokens(segment: string, unitMap: Map<string, string>): bo
 }
 
 /** آیا «و» بین این دو توکن، جداکننده‌ی دو محصول است (نه «دویست و پنجاه») */
-function isProductSeparatorAnd(tokens: string[], andIdx: number, unitMap: Map<string, string>): boolean {
+function isProductSeparatorAnd(tokens: string[], andIdx: number, _unitMap: Map<string, string>): boolean {
   const prev = tokens[andIdx - 1];
   const next = tokens[andIdx + 1];
   if (!prev || !next) return false;
-  // «دویست و پنجاه هزار» — و بین اعداد
+  // «دویست و پنجاه هزار» / «یک میلیون و پانصد هزار» — و داخل مبلغ
   if (tokenToNumber(prev) !== undefined && tokenToNumber(next) !== undefined) return false;
   if (tokenToNumber(prev) !== undefined && isPriceAnchor(next)) return false;
+  if (isMultiplierWord(prev) && (tokenToNumber(next) !== undefined || isPriceAnchor(next))) return false;
   if (prev in NUMBER_WORDS && (next in NUMBER_WORDS || isPriceAnchor(next))) return false;
-  // «یک کیلو و نیم»
   if (next in FRACTION_KG) return false;
   return true;
 }

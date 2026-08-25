@@ -6,9 +6,11 @@ import {
   products,
   invoice,
   addProductToInvoiceQty,
+  addCustomInvoiceLine,
   formatToman,
   formatNumber,
   stockStatus,
+  inventoryTrackingEnabled,
   isWeightUnit,
   customers,
   customerFullName,
@@ -67,6 +69,7 @@ type ResolvedItem = {
   candidates: ParsedCandidate[];
   status: "added" | "choose" | "unknown" | "out";
   needsUnitConfirm?: boolean;
+  unitPrice?: number;
 };
 
 function vibrate(ms: number) {
@@ -130,13 +133,26 @@ function VoicePageInner() {
   }, []);
 
   // افزودن یک آیتم مشخص به فاکتور جاری (با بررسی موجودی)
-  const addToInvoice = (product: Product, quantity: number): "ok" | "out" => {
-    if (stockStatus(product) === "out") return "out";
+  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): "ok" | "out" => {
+    if (inventoryTrackingEnabled() && stockStatus(product) === "out") return "out";
     const current = invoice.getCurrent();
-    const next = addProductToInvoiceQty(current, product, quantity);
+    const next = addProductToInvoiceQty(current, product, quantity, { unitPrice });
     invoice.save(next);
     vibrate(40);
     return "ok";
+  };
+
+  const addCustomLine = (item: ParsedItem) => {
+    const current = invoice.getCurrent();
+    invoice.save(
+      addCustomInvoiceLine(current, {
+        name: item.productPhrase,
+        price: item.unitPrice ?? 0,
+        quantity: item.quantity,
+        unit: item.unit,
+      }),
+    );
+    vibrate(40);
   };
 
   // اعمال مشتری/تلفن/روش پرداخت روی پیش‌نویس فاکتور جاری — ثبت نهایی اینجا نیست
@@ -198,8 +214,18 @@ function VoicePageInner() {
     });
   };
 
-  const removeDraftLine = (productId: string) => {
-    setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+  const setDraftPrice = (productId: string, price: number) => {
+    if (price < 0) return;
+    setInv((prev) =>
+      recalc({
+        ...prev,
+        items: prev.items.map((i) =>
+          i.productId === productId
+            ? { ...i, price, discountPercent: undefined, originalPrice: undefined }
+            : i,
+        ),
+      }),
+    );
   };
 
   const saveDraftCustomer = (next: CustomerInfo) => {
@@ -221,12 +247,17 @@ function VoicePageInner() {
       unit: item.unit,
       candidates: item.candidates,
       needsUnitConfirm: item.needsUnitConfirm,
+      unitPrice: item.unitPrice,
     };
     if (item.confidence === "none" || item.candidates.length === 0) {
+      if (item.productPhrase.trim()) {
+        addCustomLine(item);
+        return { ...base, status: "added" };
+      }
       return { ...base, status: "unknown" };
     }
     if (item.confidence === "high") {
-      const res = addToInvoice(item.candidates[0].product, item.quantity);
+      const res = addToInvoice(item.candidates[0].product, item.quantity, item.unitPrice);
       return { ...base, status: res === "out" ? "out" : "added" };
     }
     return { ...base, status: "choose" };
@@ -335,7 +366,7 @@ function VoicePageInner() {
   const pickCandidate = (item: ResolvedItem, product: Product) => {
     const r = parseVoiceText(item.rawClause || product.name, [product]);
     const qty = r.items[0]?.quantity ?? item.quantity ?? 1;
-    const res = addToInvoice(product, qty);
+    const res = addToInvoice(product, qty, r.items[0]?.unitPrice);
     setResults((prev) =>
       prev.map((x) =>
         x.key === item.key
@@ -370,8 +401,8 @@ function VoicePageInner() {
         ثبت صوتی فاکتور
       </h1>
       <p className="mb-4 text-sm text-muted-foreground">
-        کالا را بگویید و اگر خواستید نام مشتری و تلفن را هم اضافه کنید — مثلاً «دو تا تیشرت و سه تا
-        شلوار برای آقای امیر احمدی با شماره تلفن ۰۹۱۲۱۲۳۴۵۶۷». ثبت نهایی در بخش فاکتور است.
+        کالا را با هر قیمتی بگویید — حتی اگر در فهرست محصولات نباشد. مثلاً «بیست تا دمپایی
+        هر عدد یک میلیون و پانصد هزار تومان». ثبت نهایی در بخش فاکتور است.
       </p>
 
       {/* دکمه میکروفون */}
@@ -558,6 +589,7 @@ function VoicePageInner() {
           onQty={updateDraftQty}
           onSetQty={setDraftQty}
           onRemove={removeDraftLine}
+          onSetPrice={setDraftPrice}
           onCustomer={saveDraftCustomer}
           onPickCustomer={selectDraftCustomer}
           onDiscardAll={discardVoiceDraft}
@@ -623,7 +655,7 @@ function AddedRow({ item }: { item: ResolvedItem }) {
         <div className="text-foreground/80">
           {p?.name ?? item.productPhrase} — {formatNumber(item.quantity)}
           {unitLabel(item, p)}
-          {p && <> · {formatToman(p.price)}</>}
+          {(item.unitPrice || p) && <> · {formatToman(item.unitPrice ?? p!.price)}</>}
         </div>
       </div>
     </div>
@@ -706,6 +738,7 @@ function VoiceDraftPreview({
   onQty,
   onSetQty,
   onRemove,
+  onSetPrice,
   onCustomer,
   onPickCustomer,
   onDiscardAll,
@@ -718,6 +751,7 @@ function VoiceDraftPreview({
   onQty: (productId: string, delta: number) => void;
   onSetQty: (productId: string, quantity: number) => void;
   onRemove: (productId: string) => void;
+  onSetPrice: (productId: string, price: number) => void;
   onCustomer: (c: CustomerInfo) => void;
   onPickCustomer: (c: Customer) => void;
   onDiscardAll: () => void;
@@ -782,8 +816,25 @@ function VoiceDraftPreview({
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{item.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {formatToman(item.price)}
-                  {item.unit && isWeightUnit(item.unit) ? ` / ${item.unit}` : ""}
+                  {editing ? (
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      dir="ltr"
+                      defaultValue={String(item.price || "")}
+                      onBlur={(e) => {
+                        const n = Number(e.target.value.replace(/[,٬]/g, ""));
+                        if (Number.isFinite(n) && n >= 0) onSetPrice(item.productId, n);
+                      }}
+                      className="mt-1 w-28 rounded-lg border border-input bg-background px-1.5 py-1 text-xs"
+                      aria-label="قیمت واحد"
+                    />
+                  ) : (
+                    <>
+                      {formatToman(item.price)}
+                      {item.unit && isWeightUnit(item.unit) ? ` / ${item.unit}` : ""}
+                    </>
+                  )}
                 </div>
               </div>
               {editing ? (

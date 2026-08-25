@@ -15,7 +15,7 @@ const nav = [
   { to: "/invoices",  label: "فاکتورها", icon: ListChecks, settingKey: null },
   { to: "/scan",      label: "اسکن",     icon: ScanLine, settingKey: null },
   { to: "/products",  label: "محصولات",  icon: Package,  settingKey: null },
-  { to: "/inventory", label: "انبار",    icon: Boxes,    settingKey: null },
+  { to: "/inventory", label: "انبار",    icon: Boxes,    settingKey: "trackInventory" },
   { to: "/menu",      label: "منو",      icon: UtensilsCrossed, settingKey: "showMenuFeature" },
   { to: "/customers", label: "مشتریان",  icon: Users,    settingKey: null },
   { to: "/expenses",  label: "هزینه‌ها", icon: Wallet,   settingKey: null },
@@ -40,7 +40,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const visibleNav = nav.filter((item) => {
     if (item.settingKey === null) return true;
     // «یادآوری‌ها» به‌صورت پیش‌فرض فعال است — فقط با غیرفعال‌سازی صریح در تنظیمات پنهان می‌شود
-    if (item.settingKey === "showRemindersFeature") return appSettings.showRemindersFeature !== false;
+    if (item.settingKey === "showRemindersFeature" || item.settingKey === "trackInventory") {
+      return appSettings[item.settingKey] !== false;
+    }
     return !!appSettings[item.settingKey];
   });
   const { state, signOut } = useAuth();

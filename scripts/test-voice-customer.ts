@@ -5,7 +5,19 @@
 
 import { parseVoiceText } from "../src/lib/voice/persian-nlu";
 import { customerInfoFromVoice, splitPersonName } from "../src/lib/voice/invoice-customer";
-import type { Customer, Product } from "../src/lib/store";
+import {
+  addCustomInvoiceLine,
+  addProductToInvoiceQty,
+  emptyInvoice,
+  isWeightUnit,
+  formatToman,
+  type Customer,
+  type Product,
+} from "../src/lib/store";
+import { invoiceTotals, lineTotal } from "../src/lib/invoice-math";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const shirt: Product = {
   id: "p-shirt",
@@ -84,6 +96,21 @@ function check(label: string, ok: boolean, detail?: string) {
   const r = parseVoiceText("دو تا نان", products);
   check("no customer on plain items", !r.customerName && !r.customerPhone, r.customerName);
   check("نان still parsed", r.items.length === 1, phrases(r));
+  check("نان is catalog high", r.items[0]?.confidence === "high", r.items[0]?.confidence);
+  check("نان qty 2", r.items[0]?.quantity === 2, String(r.items[0]?.quantity));
+  check("نان no peeled price", r.items[0]?.unitPrice === undefined, r.items[0]?.unitPrice);
+}
+
+{
+  const r = parseVoiceText("نان", products);
+  check("name-only نان", r.items.length === 1 && r.items[0].confidence === "high", phrases(r));
+  check("name-only qty 1", r.items[0]?.quantity === 1, String(r.items[0]?.quantity));
+}
+
+{
+  const r = parseVoiceText("۲ تا تیشرت و ۳ تا شلوار", products);
+  check("two catalog items", r.items.length === 2, phrases(r));
+  check("both high confidence", r.items.every((i) => i.confidence === "high"), r.items.map((i) => i.confidence).join(","));
 }
 
 {
@@ -125,6 +152,34 @@ function check(label: string, ok: boolean, detail?: string) {
 
   const sadra = customerInfoFromVoice("صدرا کمالی", undefined, list);
   check("صدرا کمالی matches", sadra.clearWinner && sadra.info.firstName === "صدرا");
+}
+
+{
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../src/routes/voice.tsx"),
+    "utf8",
+  );
+  check("voice page still defines removeDraftLine", /const removeDraftLine = /.test(src));
+  check("voice page still wires onRemove", /onRemove=\{removeDraftLine\}/.test(src));
+}
+
+{
+  const parsed = parseVoiceText("دو تا تیشرت", products);
+  check("catalog parse before add", parsed.items[0]?.confidence === "high");
+  const product = parsed.items[0].candidates[0].product;
+  let inv = addProductToInvoiceQty(emptyInvoice(), product, parsed.items[0].quantity);
+  check("catalog line added", inv.items.length === 1 && inv.items[0].name === "تیشرت", inv.items[0]);
+  inv = addCustomInvoiceLine(inv, { name: "دمپایی", price: 1_500_000, quantity: 20, unit: "عدد" });
+  check("custom line added beside catalog", inv.items.length === 2, inv.items.map((i) => i.name).join("|"));
+  const totals = invoiceTotals(inv);
+  check("draft totals finite", Number.isFinite(totals.total) && totals.total > 0, totals);
+  for (const item of inv.items) {
+    check(
+      `preview fields ${item.name}`,
+      Number.isFinite(lineTotal(item)) && typeof formatToman(item.price) === "string" && isWeightUnit(item.unit) === false,
+      { line: lineTotal(item), unit: item.unit },
+    );
+  }
 }
 
 if (failed) {

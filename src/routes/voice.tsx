@@ -228,6 +228,10 @@ function VoicePageInner() {
     );
   };
 
+  const removeDraftLine = (productId: string) => {
+    setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+  };
+
   const saveDraftCustomer = (next: CustomerInfo) => {
     setInv((prev) => ({ ...prev, customer: next }));
   };
@@ -269,62 +273,67 @@ function VoicePageInner() {
     if (!trimmed) return;
     setTranscript(trimmed);
 
-    const parsed = parseVoiceText(trimmed, allProducts);
-    applyMeta(parsed.customerName, parsed.customerPhone, parsed.paymentMethod);
+    try {
+      const parsed = parseVoiceText(trimmed, allProducts);
+      applyMeta(parsed.customerName, parsed.customerPhone, parsed.paymentMethod);
 
-    let resolved = parsed.items.map(resolveItem);
+      let resolved = parsed.items.map(resolveItem);
 
-    // اگر همه‌ی آیتم‌ها نامشخص بودند و آنلاین هستیم → تلاش با مدل زبانی (در صورت وجود کلید)
-    const allWeak = resolved.length === 0 || resolved.every((r) => r.status === "unknown");
-    const online = typeof navigator === "undefined" || navigator.onLine;
-    const customerOnly = resolved.length === 0 && !!(parsed.customerName || parsed.customerPhone);
-    if (allWeak && online && !customerOnly) {
-      setLlmBusy(true);
-      try {
-        const llm = await parseVoiceInvoiceLLM({
-          data: { transcript: trimmed, productNames: allProducts.map((p) => p.name) },
-        });
-        if (llm.available && llm.items.length > 0) {
-          applyMeta(llm.customerName, parsed.customerPhone, llm.paymentMethod);
-          // هر آیتم LLM را با همان منطق محلی روی محصول پیشنهادی تطبیق و افزوده می‌کنیم
-          resolved = llm.items.map((it) => {
-            const clause = `${formatNumber(it.quantity)} ${it.unit} ${it.productName}`;
-            const r = parseVoiceText(clause, allProducts);
-            return r.items[0]
-              ? resolveItem(r.items[0])
-              : ({
-                  key: Math.random().toString(36).slice(2),
-                  rawClause: it.productName,
-                  productPhrase: it.productName,
-                  quantity: it.quantity,
-                  unit: it.unit,
-                  candidates: [],
-                  status: "unknown",
-                } as ResolvedItem);
+      // اگر همه‌ی آیتم‌ها نامشخص بودند و آنلاین هستیم → تلاش با مدل زبانی (در صورت وجود کلید)
+      const allWeak = resolved.length === 0 || resolved.every((r) => r.status === "unknown");
+      const online = typeof navigator === "undefined" || navigator.onLine;
+      const customerOnly = resolved.length === 0 && !!(parsed.customerName || parsed.customerPhone);
+      if (allWeak && online && !customerOnly) {
+        setLlmBusy(true);
+        try {
+          const llm = await parseVoiceInvoiceLLM({
+            data: { transcript: trimmed, productNames: allProducts.map((p) => p.name) },
           });
+          if (llm.available && llm.items.length > 0) {
+            applyMeta(llm.customerName, parsed.customerPhone, llm.paymentMethod);
+            // هر آیتم LLM را با همان منطق محلی روی محصول پیشنهادی تطبیق و افزوده می‌کنیم
+            resolved = llm.items.map((it) => {
+              const clause = `${formatNumber(it.quantity)} ${it.unit} ${it.productName}`;
+              const r = parseVoiceText(clause, allProducts);
+              return r.items[0]
+                ? resolveItem(r.items[0])
+                : ({
+                    key: Math.random().toString(36).slice(2),
+                    rawClause: it.productName,
+                    productPhrase: it.productName,
+                    quantity: it.quantity,
+                    unit: it.unit,
+                    candidates: [],
+                    status: "unknown",
+                  } as ResolvedItem);
+            });
+          }
+        } catch {
+          /* بی‌سروصدا محلی می‌مانیم */
+        } finally {
+          setLlmBusy(false);
         }
-      } catch {
-        /* بی‌سروصدا محلی می‌مانیم */
-      } finally {
-        setLlmBusy(false);
       }
-    }
 
-    // اگر بعد از تلاش محلی و LLM چیزی استخراج نشد، یک سطر «پیدا نشد» با گزینه افزودن محصول نشان بده
-    // (مگر این‌که فقط نام/تلفن مشتری گفته شده باشد)
-    if (resolved.length === 0 && !(parsed.customerName || parsed.customerPhone)) {
-      resolved = [{
-        key: Math.random().toString(36).slice(2),
-        rawClause: trimmed,
-        productPhrase: trimmed,
-        quantity: 1,
-        unit: "عدد",
-        candidates: [],
-        status: "unknown",
-      }];
-    }
+      // اگر بعد از تلاش محلی و LLM چیزی استخراج نشد، یک سطر «پیدا نشد» نشان بده
+      // (مگر این‌که فقط نام/تلفن مشتری گفته شده باشد)
+      if (resolved.length === 0 && !(parsed.customerName || parsed.customerPhone)) {
+        resolved = [{
+          key: Math.random().toString(36).slice(2),
+          rawClause: trimmed,
+          productPhrase: trimmed,
+          quantity: 1,
+          unit: "عدد",
+          candidates: [],
+          status: "unknown",
+        }];
+      }
 
-    setResults(resolved);
+      setResults(resolved);
+    } catch (e) {
+      console.error(e);
+      setError("در تحلیل گفتار خطایی رخ داد. لطفاً دوباره بگویید یا متن را دستی وارد کنید.");
+    }
   };
 
   const startListening = async () => {
@@ -401,8 +410,8 @@ function VoicePageInner() {
         ثبت صوتی فاکتور
       </h1>
       <p className="mb-4 text-sm text-muted-foreground">
-        کالا را با هر قیمتی بگویید — حتی اگر در فهرست محصولات نباشد. مثلاً «بیست تا دمپایی
-        هر عدد یک میلیون و پانصد هزار تومان». ثبت نهایی در بخش فاکتور است.
+        کالا را بگویید — مثلاً «دو تا تیشرت و سه تا شلوار». اگر کالا در فهرست نباشد هم می‌توانید
+        با قیمت ثبت کنید. ثبت نهایی در بخش فاکتور است.
       </p>
 
       {/* دکمه میکروفون */}

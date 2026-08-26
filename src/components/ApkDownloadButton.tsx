@@ -15,7 +15,9 @@ export function ApkDownloadButton({ className = "" }: { className?: string }) {
   // داخل خود اپ اندروید نمایش داده نمی‌شود (پس از hydration بررسی می‌شود)
   const [native, setNative] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
-  useEffect(() => { setNative(isNativeApp()); }, []);
+  useEffect(() => {
+    setNative(isNativeApp());
+  }, []);
   if (native) return null;
 
   return (
@@ -47,8 +49,13 @@ export function ApkDownloadButton({ className = "" }: { className?: string }) {
             <ol className="space-y-1.5 text-[11px] leading-6 text-muted-foreground">
               <li>۱) پس از دانلود، فایل APK را باز کنید.</li>
               <li>۲) اگر پیام «Google Play Protect» ظاهر شد، طبق تصویر زیر عمل کنید:</li>
-              <li className="pl-3">• روی <strong className="text-foreground">More details</strong> بزنید.</li>
-              <li className="pl-3">• سپس گزینه <strong className="text-foreground">Install anyway</strong> را انتخاب کنید.</li>
+              <li className="pl-3">
+                • روی <strong className="text-foreground">More details</strong> بزنید.
+              </li>
+              <li className="pl-3">
+                • سپس گزینه <strong className="text-foreground">Install anyway</strong> را انتخاب
+                کنید.
+              </li>
               <li>۳) نصب کامل می‌شود و آیکون برنامه در صفحه گوشی ظاهر خواهد شد.</li>
             </ol>
             <div className="rounded-xl border border-border bg-background p-2">
@@ -57,10 +64,14 @@ export function ApkDownloadButton({ className = "" }: { className?: string }) {
                 alt="راهنمای تصویری نصب فایل APK KAMIX روی اندروید"
                 loading="lazy"
                 className="mx-auto w-full max-w-xs rounded-lg"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                }}
               />
             </div>
             <p className="rounded-lg bg-primary/5 px-2.5 py-2 text-[11px] leading-6 text-primary">
-              این پیام امنیتی طبیعی است — فقط به این دلیل نمایش داده می‌شود که برنامه از خارج فروشگاه Google Play نصب می‌شود. برنامه کاملاً امن است.
+              این پیام امنیتی طبیعی است — فقط به این دلیل نمایش داده می‌شود که برنامه از خارج
+              فروشگاه Google Play نصب می‌شود. برنامه کاملاً امن است.
             </p>
           </div>
         )}

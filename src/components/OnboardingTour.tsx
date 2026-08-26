@@ -16,6 +16,7 @@ import {
   TOUR_STAGES,
   waitForStoreHydration,
   isTourPage,
+  shouldShowApkWelcome,
   type TourStageId,
 } from "@/lib/onboarding";
 
@@ -240,9 +241,20 @@ export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
         return;
       }
       const profile = authState.status === "authenticated" ? authState.profile : null;
-      const eligible = resolveOnboardingEligibility(profile);
+      let eligible = false;
+      try {
+        eligible = resolveOnboardingEligibility(profile);
+      } catch {
+        setActive(false);
+        return;
+      }
       const s = settings.get();
       if (!eligible || s.onboardingDismissed) {
+        setActive(false);
+        return;
+      }
+      // تا وقتی پنجره‌ی دانلود اپ باز است، تور را شروع نکن
+      if (shouldShowApkWelcome()) {
         setActive(false);
         return;
       }
@@ -266,7 +278,15 @@ export function OnboardingTour({ replayNonce = 0 }: { replayNonce?: number }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, dismissed, started, completed.join("|"), authState.status]);
+  }, [
+    pathname,
+    dismissed,
+    started,
+    completed.join("|"),
+    authState.status,
+    appSettings.apkWelcomeDismissed,
+    appSettings.onboardingEligible,
+  ]);
 
   // بازپخش از آیکن «؟» — مرحله‌ی همین صفحه، حتی اگر قبلاً رد شده باشد
   useEffect(() => {

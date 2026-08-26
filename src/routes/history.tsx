@@ -210,16 +210,21 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       parseTimeInput(timeStr) ??
       (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
-    // بازمحاسبه با recalc — تخفیف فاکتور (درصدی یا مبلغی) حفظ و دوباره اعمال
-    // می‌شود. قبلاً اینجا فقط جمع خام اقلام حساب می‌شد و تخفیفِ فاکتور بعد از هر
-    // ویرایش از جمع کل حذف می‌شد، در حالی‌که سطر «تخفیف» روی فاکتور چاپی می‌ماند.
-    const updated = recalc(withSyncedChequeFields({ ...draft, createdAt: newCreatedAt }));
-    invoice.updateHistory(updated);
-    setSaved(updated);
-    setDraft(updated);
-    setEditing(false);
-    setAddQuery("");
-    setDateErr(null);
+    if (!Number.isFinite(newCreatedAt)) {
+      setDateErr("تاریخ نامعتبر است. تاریخ را دوباره انتخاب کنید.");
+      return;
+    }
+    try {
+      const updated = recalc(withSyncedChequeFields({ ...draft, createdAt: newCreatedAt }));
+      invoice.updateHistory(updated);
+      setSaved(updated);
+      setDraft(updated);
+      setEditing(false);
+      setAddQuery("");
+      setDateErr(null);
+    } catch {
+      setDateErr("ذخیره این تاریخ انجام نشد. تاریخ را دوباره انتخاب کنید.");
+    }
   };
 
   const handleDelete = (e: React.MouseEvent) => {

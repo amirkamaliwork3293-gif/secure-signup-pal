@@ -2,12 +2,11 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { LandingPage } from "@/components/LandingPage";
 import { isWebView } from "@/lib/isWebView";
+import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { ShieldOff, Lock, Clock, CalendarX } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
-const LoginPage = lazy(() =>
-  import("@/routes/login").then((m) => ({ default: m.LoginPage })),
-);
+const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 
 function LoginFallback() {
   return (
@@ -67,7 +66,8 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
         desc={
           <>
             کاربر <strong>{state.username}</strong> ثبت شده است.
-            <br />به‌محض تایید مدیر، با زدن «بررسی مجدد» وارد می‌شوید.
+            <br />
+            به‌محض تایید مدیر، با زدن «بررسی مجدد» وارد می‌شوید.
           </>
         }
         action={
@@ -81,6 +81,7 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
             <SignOutBtn onClick={signOut} />
           </div>
         }
+        extra={!isWebView() ? <PendingApkDownload /> : null}
       />
     );
   }
@@ -106,7 +107,8 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
         desc={
           <>
             مدت اشتراک <strong>{state.username}</strong> به پایان رسیده.
-            <br />برای تمدید، درخواست جدیدی ثبت کنید.
+            <br />
+            برای تمدید، درخواست جدیدی ثبت کنید.
           </>
         }
         action={
@@ -147,16 +149,42 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
 }
 
 function CenterMessage({
-  icon, iconBg, title, desc, action,
-}: { icon: ReactNode; iconBg: string; title: string; desc: ReactNode; action: ReactNode }) {
+  icon,
+  iconBg,
+  title,
+  desc,
+  action,
+  extra,
+}: {
+  icon: ReactNode;
+  iconBg: string;
+  title: string;
+  desc: ReactNode;
+  action: ReactNode;
+  extra?: ReactNode;
+}) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 text-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-6 py-10 text-center">
       <div className={`grid h-16 w-16 place-items-center rounded-2xl ${iconBg}`}>{icon}</div>
       <div>
         <h1 className="text-lg font-bold">{title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
       </div>
       {action}
+      {extra}
+    </div>
+  );
+}
+
+function PendingApkDownload() {
+  return (
+    <div className="w-full max-w-sm text-right">
+      <p className="mb-1 text-sm font-bold text-foreground">تا تایید مدیر، اپلیکیشن را نصب کنید</p>
+      <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
+        خیلی از کاربران لینک دانلود را نمی‌بینند؛ از همین‌جا فایل اندروید را بگیرید و طبق تصویر
+        راهنما نصب کنید. بعد از تایید، با همان یوزرنیم وارد اپ شوید.
+      </p>
+      <ApkDownloadButton className="w-full" />
     </div>
   );
 }

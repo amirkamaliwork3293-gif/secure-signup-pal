@@ -1,10 +1,5 @@
-import {
-  invoice,
-  isCloudHydrated,
-  products,
-  settings,
-  type AppSettings,
-} from "@/lib/store";
+import { invoice, isCloudHydrated, products, settings, type AppSettings } from "@/lib/store";
+import { isWebView } from "@/lib/isWebView";
 
 /**
  * تور فقط برای حساب‌هایی که از این تاریخ به بعد ساخته شده‌اند.
@@ -89,6 +84,31 @@ export function resolveOnboardingEligibility(profile?: EligibilityProfile | null
 
 export function isOnboardingEligible(): boolean {
   return settings.get().onboardingEligible === true;
+}
+
+/**
+ * پنجره‌ی دانلود اپ فقط برای تازه‌ثبت‌نام‌ها، فقط در سایت (نه داخل اپ)،
+ * و فقط قبل از شروع/اتمام آموزش — تا کاربران قدیمی هرگز نبینند.
+ */
+export function shouldShowApkWelcome(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (isWebView()) return false;
+    const s = settings.get();
+    if (s.onboardingEligible !== true) return false;
+    if (s.apkWelcomeDismissed === true) return false;
+    if (s.onboardingDismissed === true) return false;
+    const completed = s.onboardingCompletedSteps ?? [];
+    if (completed.length > 0) return false;
+    if ((s.onboardingStep ?? 0) > 1) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function dismissApkWelcome() {
+  patchSettings({ apkWelcomeDismissed: true });
 }
 
 export function isShopSetupDone(s: AppSettings): boolean {

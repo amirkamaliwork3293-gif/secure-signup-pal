@@ -8,6 +8,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { DueAlertsDialog } from "@/components/DueAlertsDialog";
 import { SmartAssistant } from "@/components/SmartAssistant";
 import { OnboardingTour } from "@/components/OnboardingTour";
+import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -156,6 +157,8 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* دستیار هوشمند صوتی — دکمه‌ی شناور + شیت پایین (کاملاً محلی، بدون AI/API) */}
       {state.status === "authenticated" && <SmartAssistant />}
 
+      {/* دانلود اپ برای تازه‌ثبت‌نام در سایت — قبل از تور آموزش */}
+      {state.status === "authenticated" && <ApkWelcomeDialog />}
       {/* تور شروع کار — لایه‌ی spotlight روی UI موجود، بدون تغییر منطق صفحات */}
       {state.status === "authenticated" && <OnboardingTour replayNonce={tourReplay} />}
 

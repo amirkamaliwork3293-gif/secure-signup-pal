@@ -11,6 +11,9 @@ import {
   formatNumber,
   stockStatus,
   parseNumberInput,
+  toDisplayAmount,
+  fromDisplayAmount,
+  currencyLabel,
   COUNT_UNIT,
   getUnitDefs,
   addUnitDef,
@@ -850,7 +853,7 @@ function ProductModal({
   const [newUnitDecimal, setNewUnitDecimal] = useState(true);
 
   const [name, setName] = useState(initial?.name ?? "");
-  const [price, setPrice] = useState(initial ? String(initial.price) : "");
+  const [price, setPrice] = useState(initial ? String(toDisplayAmount(initial.price)) : "");
   const [category, setCat] = useState(initial?.category ?? "");
   const [code, setCode] = useState(initial?.code ?? initialCode);
   const [stock, setStock] = useState(initial ? String(initial.stock) : "0");
@@ -869,18 +872,20 @@ function ProductModal({
       initial?.wholesalePrice
     ),
   );
-  const [buyPrice, setBuyPrice] = useState(initial?.buyPrice ? String(initial.buyPrice) : "");
+  const [buyPrice, setBuyPrice] = useState(
+    initial?.buyPrice ? String(toDisplayAmount(initial.buyPrice)) : "",
+  );
   const [consumerPrice, setConsumerPrice] = useState(
-    initial?.consumerPrice ? String(initial.consumerPrice) : "",
+    initial?.consumerPrice ? String(toDisplayAmount(initial.consumerPrice)) : "",
   );
   const [sellerPrice, setSellerPrice] = useState(
-    initial?.sellerPrice ? String(initial.sellerPrice) : "",
+    initial?.sellerPrice ? String(toDisplayAmount(initial.sellerPrice)) : "",
   );
   const [discount, setDiscount] = useState(
     initial?.discountPercent ? String(initial.discountPercent) : "",
   );
   const [wholesalePrice, setWholesalePrice] = useState(
-    initial?.wholesalePrice ? String(initial.wholesalePrice) : "",
+    initial?.wholesalePrice ? String(toDisplayAmount(initial.wholesalePrice)) : "",
   );
   const [wholesaleMinQty, setWholesaleMinQty] = useState(
     initial?.wholesaleMinQty ? String(initial.wholesaleMinQty) : "",
@@ -898,9 +903,15 @@ function ProductModal({
   }, [expDaysInMonth, ejd]);
   const EXP_YEARS = Array.from({ length: 8 }, (_, i) => nowJ.jy + i);
 
+  const unitMoney = currencyLabel();
+  const storedPrice = (raw: string): number | undefined => {
+    const n = fromDisplayAmount(parseNumberInput(raw));
+    return n > 0 ? n : undefined;
+  };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const priceNum = parseNumberInput(price);
+    const priceNum = fromDisplayAmount(parseNumberInput(price));
     if (!name.trim() || !priceNum) {
       alert("نام و قیمت الزامی است.");
       return;
@@ -915,13 +926,18 @@ function ProductModal({
       description: desc.trim() || undefined,
       lowStockThreshold: parseNumberInput(lowThreshold) || 5,
       unit,
-      buyPrice: parseNumberInput(buyPrice) || undefined,
-      consumerPrice: parseNumberInput(consumerPrice) || undefined,
-      sellerPrice: parseNumberInput(sellerPrice) || undefined,
+      buyPrice: storedPrice(buyPrice),
+      consumerPrice: storedPrice(consumerPrice),
+      sellerPrice: storedPrice(sellerPrice),
       discountPercent: discountNum || undefined,
-      wholesalePrice: parseNumberInput(wholesalePrice) || undefined,
+      wholesalePrice: storedPrice(wholesalePrice),
       wholesaleMinQty: parseNumberInput(wholesaleMinQty) || undefined,
-      expiryAt: hasExpiry ? jalaliToTimestamp(ejy, ejm, ejd, 23, 59) : undefined,
+      expiryAt: hasExpiry
+        ? (() => {
+            const t = jalaliToTimestamp(ejy, ejm, ejd, 23, 59);
+            return Number.isFinite(t) ? t : undefined;
+          })()
+        : undefined,
       recipe: initial?.recipe,
     };
     if (isEdit && initial) onSave({ ...data, id: initial.id });
@@ -983,7 +999,7 @@ function ProductModal({
             />
           </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (تومان) *` : "قیمت (تومان) *"}>
+            <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (${unitMoney}) *` : `قیمت (${unitMoney}) *`}>
               <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
             </Field>
             {appSettings.trackInventory !== false && (
@@ -1162,7 +1178,7 @@ function ProductModal({
           {showOptional && (
             <div className="space-y-3 rounded-xl border border-border bg-background/50 p-3">
               <div className="grid grid-cols-2 gap-2">
-                <Field label="قیمت خرید (برای سود)">
+                <Field label={`قیمت خرید (${unitMoney})`}>
                   <PriceInput value={buyPrice} onChange={setBuyPrice} placeholder="—" />
                 </Field>
                 <Field label="درصد تخفیف">
@@ -1176,15 +1192,15 @@ function ProductModal({
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Field label="قیمت مصرف‌کننده">
+                <Field label={`قیمت مصرف‌کننده (${unitMoney})`}>
                   <PriceInput value={consumerPrice} onChange={setConsumerPrice} placeholder="—" />
                 </Field>
-                <Field label="قیمت همکار / فروشنده">
+                <Field label={`قیمت همکار / فروشنده (${unitMoney})`}>
                   <PriceInput value={sellerPrice} onChange={setSellerPrice} placeholder="—" />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <Field label="قیمت عمده / کارتنی">
+                <Field label={`قیمت عمده / کارتنی (${unitMoney})`}>
                   <PriceInput value={wholesalePrice} onChange={setWholesalePrice} placeholder="—" />
                 </Field>
                 <Field label="حداقل تعداد برای قیمت عمده">
@@ -1202,17 +1218,22 @@ function ProductModal({
                 به قیمت عمده تغییر دهید. اگر «حداقل تعداد» را هم وارد کنید، وقتی تعداد فاکتور به آن
                 حد رسید قیمت به‌طور خودکار عمده حساب می‌شود.
               </p>
-              {parseNumberInput(buyPrice) > 0 && parseNumberInput(price) > 0 && (
+              {fromDisplayAmount(parseNumberInput(buyPrice)) > 0 &&
+                fromDisplayAmount(parseNumberInput(price)) > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   سود هر واحد:{" "}
                   <span
                     className={
-                      parseNumberInput(price) >= parseNumberInput(buyPrice)
+                      fromDisplayAmount(parseNumberInput(price)) >=
+                      fromDisplayAmount(parseNumberInput(buyPrice))
                         ? "font-semibold text-green-600"
                         : "font-semibold text-destructive"
                     }
                   >
-                    {formatToman(parseNumberInput(price) - parseNumberInput(buyPrice))}
+                    {formatToman(
+                      fromDisplayAmount(parseNumberInput(price)) -
+                        fromDisplayAmount(parseNumberInput(buyPrice)),
+                    )}
                   </span>
                 </p>
               )}

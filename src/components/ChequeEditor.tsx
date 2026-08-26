@@ -179,9 +179,12 @@ export function ChequeEditor({
                     toJalaliInputFromDue(c.dueDate) ||
                     toJalaliInputFromDue(isoDateFromTimestamp(Date.now()))
                   }
-                  onChange={(v) => update(c.id, { dueDate: jalaliInputToIsoDate(v) || v })}
-                  yearsBack={0}
-                  yearsForward={3}
+                  onChange={(v) => {
+                    const iso = jalaliInputToIsoDate(v);
+                    update(c.id, { dueDate: iso || v });
+                  }}
+                  yearsBack={2}
+                  yearsForward={4}
                 />
               </div>
 

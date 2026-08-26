@@ -473,7 +473,7 @@ export type AppSettings = {
    * اگر false باشد موجودی هنگام ثبت فاکتور کم نمی‌شود و بخش انبار پنهان است.
    */
   trackInventory?: boolean;
-  /** واحد نمایش مبالغ — پیش‌فرض تومان؛ مبالغ همیشه به تومان ذخیره می‌شوند */
+  /** واحد نمایش و ورود مبالغ — پیش‌فرض تومان؛ ذخیره همیشه به تومان است */
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
   invoiceTemplate?: { [key: string]: JsonValue };
@@ -495,6 +495,11 @@ export type AppSettings = {
    * کاربران قدیمی صریحاً false می‌شوند تا تور هیچ‌وقت برایشان باز نشود.
    */
   onboardingEligible?: boolean;
+  /**
+   * پنجره‌ی «دانلود اپ» قبل از آموزش برای کاربر تازه‌ثبت‌نام در سایت.
+   * true یعنی دیده/بسته شده و دیگر نشان داده نشود.
+   */
+  apkWelcomeDismissed?: boolean;
 };
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
@@ -2485,9 +2490,8 @@ export function formatNumber(n: number | string): string {
 }
 
 // ─── واحد نمایش مبالغ (تومان/ریال) ──────────────────────────────────────────
-// همه‌ی مبالغ همیشه «به تومان» ذخیره می‌شوند؛ این تنظیم فقط نمایش را تغییر می‌دهد.
-// ponytail: display-only conversion — ورودی‌ها همچنان به تومان هستند؛ اگر روزی
-// ورودِ ریالی لازم شد، باید یک fromDisplayAmount در تمام فرم‌های مبلغ اضافه شود.
+// همه‌ی مبالغ همیشه «به تومان» ذخیره می‌شوند؛ این تنظیم نمایش و ورودی را تغییر می‌دهد.
+// ورود در واحد نمایش (ریال یا تومان) با fromDisplayAmount به تومان تبدیل می‌شود.
 
 export type CurrencyUnit = "toman" | "rial";
 
@@ -2522,6 +2526,31 @@ export function formatAmount(n: number): string {
 /** نمایش کامل مبلغ با برچسب واحد، بر اساس انتخاب کاربر در تنظیمات */
 export function formatToman(n: number): string {
   return formatAmount(n) + " " + currencyLabel();
+}
+
+/**
+ * مبلغ ذخیره‌شده (تومان) → عددی که کاربر در واحد نمایش می‌بیند/وارد می‌کند.
+ * ریال = تومان × ۱۰. ورودی نامعتبر → ۰.
+ */
+export function toDisplayAmount(toman: number, unit: CurrencyUnit = getCurrencyUnit()): number {
+  const n = Number(toman);
+  if (!Number.isFinite(n) || n === 0) return 0;
+  return unit === "rial" ? Math.round(n * 10) : Math.round(n);
+}
+
+/**
+ * عدد تایپ‌شده در واحد نمایش → تومان برای ذخیره.
+ * ریال ÷ ۱۰ (گرد به نزدیک‌ترین تومان). ورودی نامعتبر → ۰.
+ */
+export function fromDisplayAmount(display: number, unit: CurrencyUnit = getCurrencyUnit()): number {
+  const n = Number(display);
+  if (!Number.isFinite(n) || n === 0) return 0;
+  return unit === "rial" ? Math.round(n / 10) : Math.round(n);
+}
+
+/** پارس ورودی مبلغ در واحد نمایش فعلی، خروجی همیشه تومان ذخیره‌ای است */
+export function parseDisplayAmountInput(s: string, unit: CurrencyUnit = getCurrencyUnit()): number {
+  return fromDisplayAmount(parseNumberInput(s), unit);
 }
 
 // ─── Jalali (Persian) date helpers ─────────────────────────────────────────
@@ -2672,12 +2701,17 @@ const WEEKDAYS_FA = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چها�
 export function toJalali(
   ts: number | string | Date,
 ): { jy: number; jm: number; jd: number; h: number; min: number; dow: number } | null {
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return null;
-  const g = tehranParts(d);
-  const jdn = g2d(g.y, g.m, g.day);
-  const j = d2j(jdn);
-  return { jy: j.jy, jm: j.jm, jd: j.jd, h: g.h, min: g.min, dow: g.dow };
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return null;
+    const g = tehranParts(d);
+    if (!Number.isFinite(g.y) || !Number.isFinite(g.m) || !Number.isFinite(g.day)) return null;
+    const jdn = g2d(g.y, g.m, g.day);
+    const j = d2j(jdn);
+    return { jy: j.jy, jm: j.jm, jd: j.jd, h: g.h, min: g.min, dow: g.dow };
+  } catch {
+    return null;
+  }
 }
 
 export function formatJalaliDate(ts: number | string | Date): string {
@@ -2709,20 +2743,42 @@ function j2d(jy: number, jm: number, jd: number): number {
 
 /** تعداد روزهای یک ماه شمسی (برای ساخت لیست انتخابی روز در فرم‌ها) */
 export function jalaliMonthLength(jy: number, jm: number): number {
-  const nextJy = jm === 12 ? jy + 1 : jy;
-  const nextJm = jm === 12 ? 1 : jm + 1;
-  return j2d(nextJy, nextJm, 1) - j2d(jy, jm, 1);
+  if (!Number.isFinite(jy) || !Number.isFinite(jm) || jm < 1 || jm > 12) {
+    return 30;
+  }
+  try {
+    const nextJy = jm === 12 ? jy + 1 : jy;
+    const nextJm = jm === 12 ? 1 : jm + 1;
+    const len = j2d(nextJy, nextJm, 1) - j2d(jy, jm, 1);
+    return len > 0 && len <= 31 ? len : jm <= 6 ? 31 : jm <= 11 ? 30 : 29;
+  } catch {
+    return jm <= 6 ? 31 : jm <= 11 ? 30 : 29;
+  }
 }
 
 /** Convert a Jalali date (interpreted in Asia/Tehran) to a UTC timestamp (ms). */
 export function jalaliToTimestamp(jy: number, jm: number, jd: number, h = 0, min = 0): number {
-  const g = d2g(j2d(jy, jm, jd));
-  // Guess as if the wall-clock were UTC, then correct by Tehran's offset.
-  const guess = Date.UTC(g.gy, g.gm - 1, g.gd, h, min, 0);
-  const t = tehranParts(new Date(guess));
-  const asUTCFromTehran = Date.UTC(t.y, t.m - 1, t.day, t.h, t.min, 0);
-  const offset = asUTCFromTehran - guess; // Tehran ahead of UTC in ms
-  return guess - offset;
+  try {
+    if (!Number.isFinite(jy) || !Number.isFinite(jm) || !Number.isFinite(jd)) return NaN;
+    const g = d2g(j2d(jy, jm, jd));
+    // Guess as if the wall-clock were UTC, then correct by Tehran's offset.
+    const guess = Date.UTC(g.gy, g.gm - 1, g.gd, h, min, 0);
+    const t = tehranParts(new Date(guess));
+    const asUTCFromTehran = Date.UTC(t.y, t.m - 1, t.day, t.h, t.min, 0);
+    const offset = asUTCFromTehran - guess; // Tehran ahead of UTC in ms
+    return guess - offset;
+  } catch {
+    return NaN;
+  }
+}
+
+/** تاریخ میلادی ISO مثل 2026-09-25 — نباید به‌عنوان شمسی پارس شود */
+function looksLikeIsoDate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(s.trim());
+  if (!m) return false;
+  const y = +m[1];
+  // سال میلادی رایج؛ سال شمسی ۱۳xx/۱۴xx با خط تیره را ISO نگیر
+  return y >= 1800 && y <= 2200;
 }
 
 /** Parse strings like `1403/05/12` (Persian/Arabic digits OK) into Jalali parts. */
@@ -2732,12 +2788,16 @@ export function parseJalaliInput(s: string): { jy: number; jm: number; jd: numbe
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
     .trim();
-  const m = en.match(/^(\d{3,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  // ISO میلادی (YYYY-MM-DD) را شمسی نگیر — باعث کرش «Invalid Jalali year» می‌شد
+  if (looksLikeIsoDate(en)) return null;
+  const m = en.match(/^(\d{3,4})([.\-/])(\d{1,2})\2(\d{1,2})$/);
   if (!m) return null;
   const jy = +m[1],
-    jm = +m[2],
-    jd = +m[3];
+    jm = +m[3],
+    jd = +m[4];
   if (jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+  // سال شمسی این برنامه در بازه‌ی ۱۲۰۰–۱۷۰۰ است؛ ۲۰۲۶ میلادی را رد کن
+  if (jy < 1200 || jy > 1700) return null;
   return { jy, jm, jd };
 }
 
@@ -2797,13 +2857,16 @@ export function jalaliInputToIsoDate(s: string): string {
   const p = parseJalaliInput(s);
   if (!p) return "";
   const ts = jalaliToTimestamp(p.jy, p.jm, p.jd, 12, 0);
+  if (!Number.isFinite(ts)) return "";
   return isoDateFromTimestamp(ts);
 }
 
 /** ISO میلادی یا شمسی → رشته‌ی ویرایش شمسی YYYY/MM/DD */
 export function toJalaliInputFromDue(due?: string): string {
   if (!due) return "";
-  const parsed = parseJalaliInput(due);
+  const trimmed = due.trim();
+  if (looksLikeIsoDate(trimmed)) return toJalaliInputDate(trimmed);
+  const parsed = parseJalaliInput(trimmed);
   if (parsed) return `${parsed.jy}/${pad2(parsed.jm)}/${pad2(parsed.jd)}`;
   return toJalaliInputDate(due);
 }

@@ -1371,3 +1371,136 @@ export const adminAckPasswordReset = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { success: true };
   });
+
+const USER_DATA_FIELDS = [
+  "products",
+  "categories",
+  "invoices",
+  "current_invoice",
+  "settings",
+  "customers",
+  "students",
+  "purchases",
+  "expenses",
+  "reminders",
+  "accounts",
+  "account_txs",
+  "production",
+  "manual_ledger",
+] as const;
+
+function previewFromRow(row: Record<string, unknown> | null | undefined) {
+  const products = Array.isArray(row?.products) ? (row!.products as { name?: unknown }[]) : [];
+  const invoices = Array.isArray(row?.invoices) ? (row!.invoices as unknown[]) : [];
+  return {
+    product_count: products.length,
+    invoice_count: invoices.length,
+    sample_names: products
+      .slice(0, 10)
+      .map((p) => String(p?.name ?? "").trim())
+      .filter(Boolean),
+  };
+}
+
+export type UserDataBackupPreview = {
+  id: string;
+  created_at: string;
+  product_count: number;
+  invoice_count: number;
+  sample_names: string[];
+};
+
+export const adminListUserDataBackups = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { user_id: string }) => {
+    if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
+    return { user_id: d.user_id };
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const supabaseAdmin = await admin();
+    const [{ data: live }, { data: rows, error }] = await Promise.all([
+      supabaseAdmin.from("user_data").select("*").eq("user_id", data.user_id).maybeSingle(),
+      supabaseAdmin
+        .from("user_data_backups")
+        .select("id, created_at, snapshot")
+        .eq("user_id", data.user_id)
+        .order("created_at", { ascending: false })
+        .limit(40),
+    ]);
+    if (error) throw new Error(error.message);
+    const backups: UserDataBackupPreview[] = (rows ?? []).map((r: { id: string; created_at: string; snapshot: unknown }) => ({
+      id: r.id,
+      created_at: r.created_at,
+      ...previewFromRow((r.snapshot || {}) as Record<string, unknown>),
+    }));
+    return {
+      live: previewFromRow((live || {}) as Record<string, unknown>),
+      backups,
+    };
+  });
+
+export const adminRestoreUserDataBackup = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { user_id: string; backup_id: string; admin_password: string }) => {
+    if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
+    if (!d.backup_id) throw new Error("شناسه نسخه پشتیبان لازم است.");
+    if (!d.admin_password) throw new Error("رمز ادمین لازم است.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    await requireAdminPassword(data.admin_password);
+    const supabaseAdmin = await admin();
+    await enforceRateLimit(
+      supabaseAdmin,
+      "admin-restore",
+      context.userId,
+      20,
+      3600,
+      "تعداد بازیابی در این ساعت به سقف رسیده است.",
+    );
+
+    const { data: backup, error: bErr } = await supabaseAdmin
+      .from("user_data_backups")
+      .select("id, user_id, snapshot, created_at")
+      .eq("id", data.backup_id)
+      .maybeSingle();
+    if (bErr || !backup) throw new Error(bErr?.message || "نسخه پشتیبان یافت نشد.");
+    if (backup.user_id !== data.user_id) throw new Error("این نسخه متعلق به این کاربر نیست.");
+
+    const snap = (backup.snapshot || {}) as Record<string, unknown>;
+    const { data: live } = await supabaseAdmin
+      .from("user_data")
+      .select("*")
+      .eq("user_id", data.user_id)
+      .maybeSingle();
+    if (live) {
+      await supabaseAdmin
+        .from("user_data_backups")
+        .insert({ user_id: data.user_id, snapshot: live })
+        .then(() => {}, () => {});
+    }
+
+    const payload: Record<string, unknown> = {
+      user_id: data.user_id,
+      updated_at: new Date().toISOString(),
+    };
+    for (const field of USER_DATA_FIELDS) {
+      if (field in snap) payload[field] = snap[field];
+    }
+
+    const { error: upErr } = await supabaseAdmin
+      .from("user_data")
+      .upsert(payload as never, { onConflict: "user_id" });
+    if (upErr) throw new Error(upErr.message);
+
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId,
+      action: "user_data_restored",
+      target: data.user_id,
+      detail: { backup_id: data.backup_id, backup_at: backup.created_at },
+    });
+    return { success: true, restored_at: backup.created_at as string };
+  });
+

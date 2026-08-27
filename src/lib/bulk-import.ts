@@ -87,11 +87,18 @@ function num(v: unknown): number {
 }
 
 export async function parseFile(file: File): Promise<ImportRow[]> {
+  const MAX_BYTES = 2 * 1024 * 1024;
+  const MAX_ROWS = 5000;
+  if (file.size > MAX_BYTES) {
+    throw new Error("حجم فایل بیش از ۲ مگابایت است.");
+  }
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
+  // cellFormula/cellHTML خاموش: فایل اکسل مخرب نباید فرمول یا HTML را اجرا/تزریق کند.
+  const wb = XLSX.read(buf, { type: "array", cellFormula: false, cellHTML: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const json: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
   if (json.length === 0) return [];
+  if (json.length > MAX_ROWS + 1) json.length = MAX_ROWS + 1;
 
   const headerRow = json[0].map((h) => normalizeHeader(String(h ?? "")));
   type Key = keyof Omit<ImportRow, "rowIndex" | "errors">;

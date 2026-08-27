@@ -12,6 +12,7 @@ import {
   enforceRateLimit,
   isLockedOut,
 } from "@/lib/rate-limit.server";
+import { SIGNUP_RATE_MESSAGE } from "@/lib/rate-limit-utils";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -207,7 +208,26 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       /** جایگزین متنی رسید (کد پیگیری + تاریخ واریز) وقتی کاربر عکس آپلود نمی‌کند */
       receipt_note?: string | null;
       phone?: string;
+      /** فیلد تله — باید خالی بماند. ربات‌ها معمولاً پرش می‌کنند. */
+      website?: string | null;
+      /** زمان شروع پر کردن فرم (Date.now سمت کلاینت) */
+      form_started_at?: number | null;
     }) => {
+      // تله را قبل از هر کار سنگین چک می‌کنیم تا ربات سهمیه را نسوزاند.
+      if (String(d.website ?? "").trim()) {
+        throw new Error("امکان ثبت درخواست الان وجود ندارد. کمی بعد دوباره تلاش کنید.");
+      }
+      const startedRaw = d.form_started_at;
+      if (startedRaw != null && startedRaw !== 0) {
+        const started = Number(startedRaw);
+        const now = Date.now();
+        if (!Number.isFinite(started) || started > now + 120_000 || started < now - 6 * 60 * 60 * 1000) {
+          throw new Error("لطفاً صفحه را تازه کنید و فرم را دوباره پر کنید.");
+        }
+        if (now - started < 1500) {
+          throw new Error("لطفاً چند ثانیه صبر کنید و دوباره ارسال کنید.");
+        }
+      }
       const first_name = requireName(d.first_name, "نام");
       const last_name = requireName(d.last_name, "نام خانوادگی");
       if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
@@ -239,10 +259,14 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const supabaseAdmin = await admin();
     const username = data.username;
+    const ip = clientIp();
 
-    // ثبت‌نام عمومی است: بدون محدودیت نرخ، یک اسکریپت در چند دقیقه صدها حساب
-    // واقعی می‌سازد (دقیقاً همان چیزی که در حادثه‌ی ۲۰۲۶-۰۸-۲۷ رخ داد).
-    await enforceRateLimit(supabaseAdmin, "signup", clientIp(), 5, 3600);
+    // دو لایه سقف: هر IP (شبکه‌های ایران اغلب CGNAT هستند پس سقف را کمی باز
+    // می‌گذاریم) + سقف سراسری که جلوی سیل ۳۰۰تایی از IPهای مختلف را می‌گیرد.
+    // نسخه‌ی قبلی فقط ۵/ساعت·IP بود و اگر IP تشخیص داده نمی‌شد همه‌ی کاربران
+    // یک سطل «unknown» را پر می‌کردند و ثبت‌نام کل سایت می‌خوابید.
+    await enforceRateLimit(supabaseAdmin, "signup-ip", ip, 12, 3600, SIGNUP_RATE_MESSAGE);
+    await enforceRateLimit(supabaseAdmin, "signup-global", "all", 80, 3600, SIGNUP_RATE_MESSAGE);
 
     // یوزرنیم ادمین رزرو است — اما پیام خطا باید **دقیقاً** همان پیام «تکراری»
     // باشد. پیام اختصاصی قبلی («این یوزرنیم رزرو شده است») به هر مهاجم ناشناسی
@@ -279,6 +303,19 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     // Create the auth user up front with the chosen password (profile stays pending)
     const phone = data.phone?.trim() || null;
+
+    if (phone) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabaseAdmin
+        .from("signup_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("phone", phone)
+        .eq("status", "pending")
+        .gte("created_at", since);
+      if ((count ?? 0) >= 3) {
+        throw new Error("با این شماره موبایل درخواست‌های زیادی در انتظار است. لطفاً کمی بعد تلاش کنید.");
+      }
+    }
 
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email: toEmail(username),
@@ -323,6 +360,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const optional: Record<string, unknown> = {};
     if (phone) optional.phone = phone;
     if (data.receipt_note) optional.receipt_note = data.receipt_note;
+    if (ip && ip !== "unknown") optional.client_ip = ip.slice(0, 80);
 
     let result = await supabaseAdmin
       .from("signup_requests")
@@ -330,7 +368,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       .select("id")
       .single();
 
-    if (/phone|receipt_note/i.test(result.error?.message || "")) {
+    if (/phone|receipt_note|client_ip/i.test(result.error?.message || "")) {
       // Column not yet migrated — retry with the base columns only
       result = await supabaseAdmin
         .from("signup_requests")
@@ -793,16 +831,54 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+async function requireAdminPassword(password: string): Promise<void> {
+  const expected = getAdminPassword();
+  if (!expected) throw new Error("پیکربندی ادمین ناقص است.");
+  const ok = await ctEqual(String(password ?? ""), expected);
+  if (!ok) throw new Error("رمز ادمین نادرست است.");
+}
+
 export const deleteUserAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { user_id: string }) => {
+  .inputValidator((d: { user_id: string; confirm_username: string; admin_password: string }) => {
     if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
-    return d;
+    if (!d.confirm_username?.trim()) throw new Error("برای حذف، یوزرنیم کاربر را تایپ کنید.");
+    if (!d.admin_password) throw new Error("رمز ادمین لازم است.");
+    return {
+      user_id: d.user_id,
+      confirm_username: d.confirm_username.trim().toLowerCase(),
+      admin_password: d.admin_password,
+    };
   })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     if (data.user_id === context.userId) throw new Error("نمی‌توانید حساب خود را حذف کنید.");
     const supabaseAdmin = await admin();
+
+    // حتی با نشست ادمین دزدیده‌شده، بدون رمز ادمین نمی‌توان کاربر را پاک کرد.
+    await requireAdminPassword(data.admin_password);
+
+    // سقف سخت: حداکثر ۳ حذف در ۳۰ دقیقه. در حادثه‌ی نفوذ، مهاجم همه‌ی کاربران
+    // را در چند ثانیه پاک کرد؛ با این سقف حتی اگر وارد پنل شود نمی‌تواند سایت
+    // را خالی کند.
+    await enforceRateLimit(
+      supabaseAdmin,
+      "admin-delete",
+      context.userId,
+      3,
+      1800,
+      "حذف کاربران موقتاً قفل است (حداکثر ۳ حذف در ۳۰ دقیقه). کمی بعد دوباره تلاش کنید.",
+    );
+
+    const { data: target } = await supabaseAdmin
+      .from("profiles")
+      .select("id, username")
+      .eq("id", data.user_id)
+      .maybeSingle();
+    if (!target) throw new Error("کاربر یافت نشد.");
+    if ((target.username || "").toLowerCase() !== data.confirm_username) {
+      throw new Error("یوزرنیم واردشده با این کاربر مطابقت ندارد.");
+    }
 
     // هیچ ادمینی نمی‌تواند ادمین دیگری را حذف کند. در حادثه‌ی نفوذ، مهاجم با
     // همین مسیر کاربران را پاک کرد؛ حساب‌های ادمین باید فقط از کنسول Supabase
@@ -822,7 +898,7 @@ export const deleteUserAccount = createServerFn({ method: "POST" })
 
     await auditLog(supabaseAdmin, {
       actor_id: context.userId, action: "user_deleted", target: data.user_id,
-      detail: { had_backup: !!live },
+      detail: { had_backup: !!live, username: target.username },
     });
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.user_id);
     if (error) throw new Error(error.message);
@@ -879,7 +955,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
     // سخت‌ترین سقف نرخ کل سامانه اینجاست: ۲ حساب آزمایشی در ۲۴ ساعت برای هر IP،
     // و حداکثر ۵۰ حساب آزمایشی در ساعت برای کل سرویس.
     await enforceRateLimit(supabaseAdmin, "trial", clientIp(), 2, 86400);
-    await enforceRateLimit(supabaseAdmin, "trial-global", "all", 50, 3600);
+    await enforceRateLimit(supabaseAdmin, "trial-global", "all", 20, 3600);
 
     const TAKEN = "این یوزرنیم قبلاً ثبت شده است.";
     const adminUser = getAdminUsername().toLowerCase();
@@ -1025,13 +1101,19 @@ export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
 // ─── Admin: reset a user's password ─────────────────────────────────────────
 export const adminResetUserPassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { user_id: string; new_password: string }) => {
+  .inputValidator((d: { user_id: string; new_password: string; admin_password: string }) => {
     if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
-    return { user_id: d.user_id, new_password: validatePassword(d.new_password) };
+    if (!d.admin_password) throw new Error("رمز ادمین لازم است.");
+    return {
+      user_id: d.user_id,
+      new_password: validatePassword(d.new_password),
+      admin_password: d.admin_password,
+    };
   })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     if (data.user_id === context.userId) throw new Error("نمی‌توانید رمز خود را از اینجا تغییر دهید.");
+    await requireAdminPassword(data.admin_password);
     const supabaseAdmin = await admin();
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
       password: data.new_password,

@@ -50,7 +50,7 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
     // در مرورگر وب → ابتدا صفحه‌ی معرفی نمایش داده می‌شود.
     return isWebView() || adminOnly ? (
       <Suspense fallback={<LoginFallback />}>
-        <LoginPage />
+        <LoginPage adminMode={adminOnly} />
       </Suspense>
     ) : (
       <LandingPage />

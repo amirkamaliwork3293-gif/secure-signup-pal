@@ -82,6 +82,8 @@ function RegisterPage() {
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
   const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
+  const [honeypot, setHoneypot] = useState("");
+  const formStartedAt = useRef(Date.now());
 
   const [card, setCard] = useState({
     card_number: "",
@@ -160,7 +162,10 @@ function RegisterPage() {
     if (!firstName.trim() || !lastName.trim()) { setError("نام و نام خانوادگی الزامی است."); return; }
     if (!usernameField.trim()) { setError("یوزرنیم الزامی است."); return; }
     if (!isValidIranPhone(phone)) { setError("شماره موبایل معتبر وارد کنید (مثل 09xxxxxxxxx)."); return; }
-    if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
+    if (password.length < 8 || !/[a-zA-Z؀-ۿ]/.test(password) || !/\d/.test(password)) {
+      setError("رمز عبور باید حداقل ۸ کاراکتر باشد و هم حرف و هم عدد داشته باشد.");
+      return;
+    }
     if (password !== password2) { setError("تکرار رمز عبور مطابقت ندارد."); return; }
     const note = receiptNote(receiptRef, receiptDate, receiptTime);
     if (!receiptFile && !note) {
@@ -210,6 +215,8 @@ function RegisterPage() {
           receipt_url: path,
           receipt_note: note,
           phone: phone.trim() || undefined,
+          website: honeypot,
+          form_started_at: formStartedAt.current,
         },
       });
       markPendingOnboarding(usernameField);
@@ -268,7 +275,7 @@ function RegisterPage() {
         </div>
       </div>
 
-      <div className="w-full max-w-md space-y-3 rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="relative w-full max-w-md space-y-3 rounded-2xl border border-border bg-card p-5 shadow-card">
         <div className="rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3 text-center text-xs font-semibold leading-6 text-primary">
           📱 پس از ثبت‌نام، لینک دانلود برنامه برای شما ارسال می‌شود.
         </div>
@@ -293,6 +300,20 @@ function RegisterPage() {
           placeholder="09xxxxxxxxx"
           dir="ltr"
         />
+
+        {/* تله برای ربات — از دید کاربر پنهان است؛ پر شدنش یعنی ارسال‌کننده انسان نیست */}
+        <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+          <label>
+            کد نمایندگی
+            <input
+              tabIndex={-1}
+              autoComplete="off"
+              name="company_fax_code"
+              value={honeypot}
+              onChange={(e) => setHoneypot(e.target.value)}
+            />
+          </label>
+        </div>
 
         {/* انتخاب رمز عبور همان ابتدا — پس از تایید مدیر، ورود فوری */}
         <div className="grid grid-cols-2 gap-3">

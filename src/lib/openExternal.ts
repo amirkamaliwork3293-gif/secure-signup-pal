@@ -59,8 +59,19 @@ export async function copyText(text: string): Promise<boolean> {
   return copyTextSafe(text);
 }
 
+/**
+ * اسکیم‌های مجاز. بدون این فهرست، اگر روزی مقداری که کاربر دیگری کنترل
+ * می‌کند (مثلاً لینک شبکه‌ی اجتماعی یک فروشگاه) به این تابع برسد، یک آدرس
+ * javascript: روی کلیک اجرا می‌شد — چون anchor.click() آن را اجرا می‌کند.
+ */
+const SAFE_SCHEMES = /^(https?|tel|sms|mailto|whatsapp|geo):/i;
+
 export function openExternal(url: string): void {
   if (typeof window === "undefined") return;
+  if (!SAFE_SCHEMES.test(String(url ?? "").trim())) {
+    console.warn("[openExternal] blocked unsupported scheme");
+    return;
+  }
 
   // داخل اپ اندروید: باز کردن با اپ پیش‌فرض سیستم (پیامک/واتساپ/مرورگر)
   if (isCapacitor()) {

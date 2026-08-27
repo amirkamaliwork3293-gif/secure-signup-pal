@@ -5,6 +5,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { DEFAULT_PLANS, normalizePlans, type PlansConfig } from "@/lib/plans";
+import {
+  auditLog,
+  clearRateLimit,
+  clientIp,
+  enforceRateLimit,
+  isLockedOut,
+} from "@/lib/rate-limit.server";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -43,15 +50,125 @@ function getAdminUsername(): string {
 function getAdminPassword(): string {
   return process.env.ADMIN_PASSWORD || "";
 }
-function ctEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
+/**
+ * مقایسه‌ی زمان‌ثابت واقعی.
+ *
+ * نسخه‌ی قبلی با `if (a.length !== b.length) return false` شروع می‌شد و در
+ * نتیجه **طول رمز ادمین** را از طریق زمان پاسخ لو می‌داد. اینجا ابتدا هر دو
+ * طرف SHA-256 می‌شوند تا همیشه دو رشته‌ی ۳۲ بایتی هم‌طول مقایسه شوند؛ طول
+ * ورودی هیچ اثری روی زمان اجرا ندارد.
+ */
+async function ctEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
   let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < va.length; i++) r |= va[i]! ^ vb[i]!;
   return r === 0;
 }
 
 function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
+}
+
+// ─── اعتبارسنجی مشترک ورودی‌های عمومی ───────────────────────────────────────
+// هر رشته‌ای که از اینترنت می‌آید سقف طول دارد. بدون سقف، یک مهاجم می‌تواند
+// با فیلدهای چندمگابایتی هم دیتابیس را پر کند و هم هزینه‌ی egress بسازد.
+const MAX_NAME = 60;
+const MAX_PHONE = 20;
+const MAX_NOTE = 500;
+const MAX_PASSWORD = 200;
+
+function cleanText(v: unknown, max: number): string {
+  // حذف کاراکترهای کنترلی (C0 و DEL) — فاصله و خط تیره دست‌نخورده می‌مانند
+  let out = "";
+  for (const ch of String(v ?? "")) {
+    const c = ch.codePointAt(0)!;
+    if (c >= 32 && c !== 127) out += ch;
+  }
+  return out.trim().slice(0, max);
+}
+
+function requireName(v: unknown, field: string): string {
+  const s = cleanText(v, MAX_NAME);
+  if (!s) throw new Error(`${field} الزامی است.`);
+  return s;
+}
+
+/**
+ * سیاست رمز عبور: حداقل ۸ کاراکتر و ترکیبی از حروف و عدد.
+ * (قبلاً فقط ۶ کاراکتر بدون هیچ شرطی — رمزهایی مثل «123456» مجاز بودند.)
+ */
+function validatePassword(p: unknown): string {
+  const s = String(p ?? "");
+  if (s.length < 8) throw new Error("رمز عبور باید حداقل ۸ کاراکتر باشد.");
+  if (s.length > MAX_PASSWORD) throw new Error("رمز عبور بیش از حد طولانی است.");
+  if (!/[a-zA-Z؀-ۿ]/.test(s) || !/\d/.test(s)) {
+    throw new Error("رمز عبور باید هم حرف و هم عدد داشته باشد.");
+  }
+  return s;
+}
+
+/** رمز تصادفی ۳۲ بایتی — هرگز به مرورگر فرستاده نمی‌شود. */
+function randomSecret(): string {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * ورود سمت سرور با کلید عمومی (anon) — خروجی، نشست آماده برای کلاینت است.
+ * کلاینت دیگر رمز ادمین را به Supabase نمی‌فرستد؛ فقط نشست را set می‌کند.
+ */
+async function serverSignIn(email: string, password: string) {
+  const { createClient } = await import("@supabase/supabase-js");
+  const url = process.env.SUPABASE_URL;
+  const anon = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !anon) throw new Error("پیکربندی Supabase ناقص است.");
+  const client = createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false, storage: undefined },
+  });
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (error || !data.session) throw new Error(error?.message || "ورود ناموفق بود.");
+  return data.session;
+}
+
+async function admin() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin;
+}
+
+/**
+ * یافتن حساب auth ادمین.
+ *
+ * نسخه‌ی قبلی فقط `listUsers({ page: 1, perPage: 200 })` را می‌گشت. اگر تعداد
+ * کاربران از ۲۰۰ بیشتر می‌شد (مثلاً با سیل ثبت‌نام خودکار) ممکن بود ادمین در
+ * آن صفحه نباشد و مسیر «ساخت ادمین» اجرا شود که با خطای «ایمیل تکراری» ورود
+ * ادمین را کاملاً از کار می‌انداخت. اینجا id از روی profiles خوانده می‌شود
+ * (O(1)) و پیمایش فقط fallback است.
+ */
+async function findAdminAuthUser(supabaseAdmin: any, expectedUser: string) {
+  const { data: prof } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("username", expectedUser.toLowerCase())
+    .maybeSingle();
+  if (prof?.id) {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(prof.id);
+    if (data?.user?.email === ADMIN_EMAIL) return data.user;
+  }
+  for (let page = 1; page <= 20; page++) {
+    const { data } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    const users = data?.users ?? [];
+    const hit = users.find((u: any) => u.email === ADMIN_EMAIL);
+    if (hit) return hit;
+    if (users.length < 200) break;
+  }
+  return null;
 }
 
 // یوزرنیم مبنای ایمیل داخلی ورود کاربر است (username@kamali.local)، بنابراین
@@ -91,27 +208,48 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       receipt_note?: string | null;
       phone?: string;
     }) => {
-      if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
+      const first_name = requireName(d.first_name, "نام");
+      const last_name = requireName(d.last_name, "نام خانوادگی");
       if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
         throw new Error(USERNAME_HINT);
       }
-      if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
+      const password = validatePassword(d.password);
       if (!VALID_PLANS.includes(d.plan)) throw new Error("پلن نامعتبر است.");
       if (d.plan === "trial") throw new Error("برای نسخه تست از فرم اختصاصی استفاده کنید.");
       if (!d.payment_confirmed) throw new Error("لطفاً تایید کنید که پرداخت انجام شده است.");
       // یا عکس رسید، یا اطلاعات متنی واریز — یکی از این دو الزامی است
-      if (!d.receipt_url && !d.receipt_note?.trim()) {
+      const receipt_note = cleanText(d.receipt_note ?? "", MAX_NOTE);
+      const receipt_url = d.receipt_url ? cleanText(d.receipt_url, 300) : null;
+      if (!receipt_url && !receipt_note) {
         throw new Error("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری و تاریخ واریز را بنویسید.");
       }
-      if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) {
-        throw new Error("این یوزرنیم رزرو شده است.");
-      }
-      return d;
+      return {
+        first_name,
+        last_name,
+        username: d.username.trim().toLowerCase(),
+        password,
+        plan: d.plan,
+        payment_confirmed: d.payment_confirmed,
+        receipt_url,
+        receipt_note,
+        phone: cleanText(d.phone ?? "", MAX_PHONE),
+      };
     },
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const username = data.username.trim().toLowerCase();
+    const supabaseAdmin = await admin();
+    const username = data.username;
+
+    // ثبت‌نام عمومی است: بدون محدودیت نرخ، یک اسکریپت در چند دقیقه صدها حساب
+    // واقعی می‌سازد (دقیقاً همان چیزی که در حادثه‌ی ۲۰۲۶-۰۸-۲۷ رخ داد).
+    await enforceRateLimit(supabaseAdmin, "signup", clientIp(), 5, 3600);
+
+    // یوزرنیم ادمین رزرو است — اما پیام خطا باید **دقیقاً** همان پیام «تکراری»
+    // باشد. پیام اختصاصی قبلی («این یوزرنیم رزرو شده است») به هر مهاجم ناشناسی
+    // اجازه می‌داد یوزرنیم ادمین را با آزمون‌وخطا پیدا کند.
+    const TAKEN = "این یوزرنیم قبلاً ثبت شده است.";
+    const adminUser = getAdminUsername().toLowerCase();
+    if (adminUser && username === adminUser) throw new Error(TAKEN);
 
     // Enforce plan enabled flag (admins can disable plans for new signups)
     const plansCfg = await loadPlansConfig(supabaseAdmin);
@@ -179,11 +317,12 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       password_set: true,
     };
 
-    // رمز انتخابی کاربر موقتاً نگه داشته می‌شود تا در پیامک خوش‌آمدگویی (لحظه‌ی
-    // تایید مدیر) فرستاده شود؛ بلافاصله بعد از تایید/رد پاک می‌شود.
-    const optional: Record<string, unknown> = { temp_password: data.password };
+    // رمز کاربر **هرگز** ذخیره نمی‌شود. ستون temp_password حذف شده است: رمز را
+    // خود کاربر انتخاب کرده و می‌داند؛ نگه‌داشتن متن ساده‌ی آن فقط یعنی هرکس به
+    // پنل ادمین نفوذ کند رمز همه‌ی کاربران در انتظار را یکجا برمی‌دارد.
+    const optional: Record<string, unknown> = {};
     if (phone) optional.phone = phone;
-    if (data.receipt_note?.trim()) optional.receipt_note = data.receipt_note.trim().slice(0, 500);
+    if (data.receipt_note) optional.receipt_note = data.receipt_note;
 
     let result = await supabaseAdmin
       .from("signup_requests")
@@ -191,7 +330,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       .select("id")
       .single();
 
-    if (/phone|temp_password|receipt_note/i.test(result.error?.message || "")) {
+    if (/phone|receipt_note/i.test(result.error?.message || "")) {
       // Column not yet migrated — retry with the base columns only
       result = await supabaseAdmin
         .from("signup_requests")
@@ -207,11 +346,17 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 // ─── Public: check request status (for set-password page) ────────────────────
 export const checkRequestStatus = createServerFn({ method: "POST" })
   .inputValidator((d: { username: string }) => {
-    if (!d.username?.trim()) throw new Error("یوزرنیم الزامی است.");
-    return d;
+    if (!d.username?.trim() || !USERNAME_RE.test(d.username.trim())) {
+      throw new Error("یوزرنیم الزامی است.");
+    }
+    return { username: d.username.trim().toLowerCase() };
   })
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = await admin();
+    // این تابع نام و نام خانوادگی صاحب یوزرنیم را برمی‌گرداند (برای پیام
+    // خوش‌آمد در صفحه‌ی تنظیم رمز). بدون سقف نرخ، می‌شد با پیمایش یوزرنیم‌ها
+    // فهرست کاملی از نام واقعی کاربران استخراج کرد.
+    await enforceRateLimit(supabaseAdmin, "check-status", clientIp(), 10, 3600);
     const { data: req } = await supabaseAdmin
       .from("signup_requests")
       .select("status, password_set, first_name, last_name, plan")
@@ -226,13 +371,15 @@ export const checkRequestStatus = createServerFn({ method: "POST" })
 // ─── Public: set password after admin approval ───────────────────────────────
 export const setPasswordAfterApproval = createServerFn({ method: "POST" })
   .inputValidator((d: { username: string; password: string }) => {
-    if (!d.username?.trim()) throw new Error("یوزرنیم الزامی است.");
-    if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
-    return d;
+    if (!d.username?.trim() || !USERNAME_RE.test(d.username.trim())) {
+      throw new Error("یوزرنیم الزامی است.");
+    }
+    return { username: d.username.trim().toLowerCase(), password: validatePassword(d.password) };
   })
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const username = data.username.trim().toLowerCase();
+    const supabaseAdmin = await admin();
+    const username = data.username;
+    await enforceRateLimit(supabaseAdmin, "set-password", clientIp(), 10, 3600);
 
     const { data: req } = await supabaseAdmin
       .from("signup_requests")
@@ -301,39 +448,96 @@ export const verifyAdminLogin = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const expectedUser = getAdminUsername();
     const expectedPass = getAdminPassword();
+    const supabaseAdmin = await admin();
+    const ip = clientIp();
+    const GENERIC = "یوزرنیم یا رمز عبور ادمین اشتباه است.";
+
+    // ─── قفل پس از تلاش‌های ناموفق ───────────────────────────────────────────
+    // این endpoint ناشناس است و مستقیماً رمز ادمین را می‌سنجد؛ بدون قفل، یک
+    // اسکریپت می‌تواند بی‌نهایت رمز امتحان کند. دو سطح قفل داریم:
+    //   • per-IP  : ۵ تلاش ناموفق در ۱۵ دقیقه
+    //   • سراسری  : ۲۰ تلاش ناموفق در ۱۵ دقیقه (جلوی حمله‌ی توزیع‌شده از چند IP)
+    const ipKey = ip;
+    const GLOBAL = "all";
+    if (
+      (await isLockedOut(supabaseAdmin, "admin-login-fail", ipKey, 5, 900)) ||
+      (await isLockedOut(supabaseAdmin, "admin-login-fail", GLOBAL, 20, 900))
+    ) {
+      await auditLog(supabaseAdmin, {
+        actor_id: null,
+        action: "admin_login_blocked",
+        detail: { reason: "locked_out" },
+      });
+      throw new Error("به دلیل تلاش‌های ناموفق، ورود موقتاً قفل شده است. بعداً دوباره تلاش کنید.");
+    }
+
     if (!expectedUser || !expectedPass) {
-      throw new Error("پیکربندی ادمین روی سرور انجام نشده است.");
+      // پیام عمومی — نبودِ پیکربندی نباید به مهاجم اطلاعاتی بدهد
+      console.error("[admin-login] ADMIN_USERNAME/ADMIN_PASSWORD not configured");
+      throw new Error(GENERIC);
     }
-    // Constant-time-ish comparison; reject with a generic message either way.
-    const userOk = ctEqual(data.username.toLowerCase(), expectedUser.toLowerCase());
-    const passOk = ctEqual(data.password, expectedPass);
+
+    // مقایسه‌ی زمان‌ثابت؛ هر دو طرف همیشه سنجیده می‌شوند تا زمان پاسخ
+    // نشان ندهد کدام‌یک غلط بوده است.
+    const [userOk, passOk] = await Promise.all([
+      ctEqual(data.username.toLowerCase(), expectedUser.toLowerCase()),
+      ctEqual(data.password, expectedPass),
+    ]);
     if (!userOk || !passOk) {
-      throw new Error("یوزرنیم یا رمز عبور ادمین اشتباه است.");
+      // شمارنده‌ی تلاش ناموفق فقط در همین شاخه بالا می‌رود
+      await enforceRateLimit(supabaseAdmin, "admin-login-fail", ipKey, 5, 900, GENERIC).catch(() => {});
+      await enforceRateLimit(supabaseAdmin, "admin-login-fail", GLOBAL, 20, 900, GENERIC).catch(() => {});
+      await auditLog(supabaseAdmin, {
+        actor_id: null,
+        action: "admin_login_failed",
+        detail: { username_matched: userOk },
+      });
+      throw new Error(GENERIC);
     }
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // ─── یافتن حساب ادمین ────────────────────────────────────────────────────
+    // نسخه‌ی قبلی فقط صفحه‌ی اول ۲۰۰ کاربر را می‌گشت؛ با رشد تعداد کاربران
+    // ممکن بود ادمین پیدا نشود و مسیر «ساخت ادمین» اجرا شود. اینجا از روی
+    // profiles (که id ادمین را نگه می‌دارد) مستقیم پیدا می‌شود.
+    const sessionPass = randomSecret();
+    let adminUser = await findAdminAuthUser(supabaseAdmin, expectedUser);
 
-    const { data: existingList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
-    let admin = existingList?.users.find((u) => u.email === ADMIN_EMAIL);
-
-    if (!admin) {
+    if (!adminUser) {
       const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
         email: ADMIN_EMAIL,
-        password: expectedPass,
+        password: sessionPass,
         email_confirm: true,
         user_metadata: { username: expectedUser },
       });
       if (error || !created.user) throw new Error(error?.message || "خطا در ساخت ادمین.");
-      admin = created.user;
+      adminUser = created.user;
     } else {
-      await supabaseAdmin.auth.admin.updateUserById(admin.id, { password: expectedPass });
+      // ⚠️ رمز حساب Supabase عمداً **برابر ADMIN_PASSWORD نیست**.
+      //
+      // احراز هویت واقعی را GoTrue انجام می‌دهد و endpoint آن برای همه باز
+      // است. اگر رمز حساب همان ADMIN_PASSWORD می‌بود، هرکس آن را می‌دانست
+      // می‌توانست مستقیماً signInWithPassword بزند و قفل/سقف نرخ این تابع را
+      // کامل دور بزند. به‌جای آن، در هر ورود موفق یک رمز تصادفی ۳۲ بایتی
+      // روی حساب گذاشته می‌شود که هیچ‌کس (حتی مرورگر ادمین) آن را نمی‌بیند.
+      const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(adminUser.id, {
+        password: sessionPass,
+      });
+      if (pwErr) throw new Error(pwErr.message);
     }
+    const admin_ = adminUser;
+
+    await clearRateLimit(supabaseAdmin, "admin-login-fail", ipKey);
+    await auditLog(supabaseAdmin, {
+      actor_id: admin_.id,
+      action: "admin_login_success",
+      detail: {},
+    });
 
     await supabaseAdmin
       .from("profiles")
       .upsert(
         {
-          id: admin.id,
+          id: admin_.id,
           username: expectedUser.toLowerCase(),
           first_name: "Amir",
           last_name: "Kamali",
@@ -344,9 +548,15 @@ export const verifyAdminLogin = createServerFn({ method: "POST" })
 
     await supabaseAdmin
       .from("user_roles")
-      .upsert({ user_id: admin.id, role: "admin" }, { onConflict: "user_id,role" });
+      .upsert({ user_id: admin_.id, role: "admin" }, { onConflict: "user_id,role" });
 
-    return { email: ADMIN_EMAIL };
+    // نشست آماده تحویل کلاینت — رمز هرگز از مرورگر به GoTrue نمی‌رود.
+    const session = await serverSignIn(ADMIN_EMAIL, sessionPass);
+    return {
+      email: ADMIN_EMAIL,
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    };
   });
 
 // ─── Admin: approve a signup request ─────────────────────────────────────────
@@ -386,12 +596,13 @@ async function purgeReceipt(supabaseAdmin: any, requestId: string) {
 
 // رمز موقت (که فقط برای پیامک خوش‌آمدگویی نگه داشته شده) پاک می‌شود.
 // اگر مهاجرت هنوز اعمال نشده باشد، بی‌صدا رد می‌شود.
-async function clearTempPassword(supabaseAdmin: any, requestId: string) {
-  try {
-    await supabaseAdmin.from("signup_requests").update({ temp_password: null }).eq("id", requestId);
-  } catch {
-    /* ستون هنوز وجود ندارد — مهم نیست */
-  }
+/**
+ * ستون temp_password در مهاجرت ۲۰۲۶-۰۸-۲۷ حذف شد — رمز کاربر دیگر هرگز ذخیره
+ * نمی‌شود. این تابع فقط برای سازگاری با فراخوانی‌های موجود باقی مانده و کاری
+ * انجام نمی‌دهد. (حذف کامل نیاز به تغییر UI ادمین دارد؛ عمداً به بعد موکول شده.)
+ */
+async function clearTempPassword(_supabaseAdmin: unknown, _requestId: string) {
+  // ponytail: no-op after temp_password removal; drop with the admin UI cleanup
 }
 
 export const approveSignupRequest = createServerFn({ method: "POST" })
@@ -480,6 +691,10 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
     // رسید پس از تایید دیگر لازم نیست — از استوریج حذف شود
     await purgeReceipt(supabaseAdmin, data.id);
 
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId, action: "signup_approved", target: data.id,
+      detail: { username: req.username, plan: req.plan },
+    });
     return { success: true };
   });
 
@@ -518,6 +733,10 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
     await clearTempPassword(supabaseAdmin, data.id);
     await purgeReceipt(supabaseAdmin, data.id);
 
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId, action: "signup_rejected", target: data.id,
+      detail: { username: req?.username ?? null },
+    });
     return { success: true };
   });
 
@@ -567,6 +786,10 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
       })
       .eq("id", data.user_id);
     if (error) throw new Error(error.message);
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId, action: "subscription_extended", target: data.user_id,
+      detail: { plan: data.plan },
+    });
     return { success: true };
   });
 
@@ -579,8 +802,30 @@ export const deleteUserAccount = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     if (data.user_id === context.userId) throw new Error("نمی‌توانید حساب خود را حذف کنید.");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.auth.admin.deleteUser(data.user_id);
+    const supabaseAdmin = await admin();
+
+    // هیچ ادمینی نمی‌تواند ادمین دیگری را حذف کند. در حادثه‌ی نفوذ، مهاجم با
+    // همین مسیر کاربران را پاک کرد؛ حساب‌های ادمین باید فقط از کنسول Supabase
+    // قابل حذف باشند.
+    const { data: targetRole } = await supabaseAdmin
+      .from("user_roles").select("role").eq("user_id", data.user_id).eq("role", "admin").maybeSingle();
+    if (targetRole) throw new Error("حذف حساب ادمین از این مسیر مجاز نیست.");
+
+    // آخرین وضعیت داده‌های کاربر پیش از حذف در user_data_backups نگه داشته
+    // می‌شود (این جدول FK ندارد، پس با حذف حساب cascade نمی‌شود).
+    const { data: live } = await supabaseAdmin
+      .from("user_data").select("*").eq("user_id", data.user_id).maybeSingle();
+    if (live) {
+      await supabaseAdmin.from("user_data_backups")
+        .insert({ user_id: data.user_id, snapshot: live }).then(() => {}, () => {});
+    }
+
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId, action: "user_deleted", target: data.user_id,
+      detail: { had_backup: !!live },
+    });
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(data.user_id);
+    if (error) throw new Error(error.message);
     return { success: true };
   });
 
@@ -614,17 +859,31 @@ export const updatePlanPrices = createServerFn({ method: "POST" })
 // ─── Public: create a 1-hour trial account (no admin approval) ───────────────
 export const createTrialAccount = createServerFn({ method: "POST" })
   .inputValidator((d: { first_name: string; last_name: string; username: string; password: string }) => {
-    if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
+    const first_name = requireName(d.first_name, "نام");
+    const last_name = requireName(d.last_name, "نام خانوادگی");
     if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
       throw new Error(USERNAME_HINT);
     }
-    if (!d.password || d.password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
-    if (d.username.toLowerCase() === getAdminUsername().toLowerCase()) throw new Error("این یوزرنیم رزرو شده است.");
-    return d;
+    return {
+      first_name,
+      last_name,
+      username: d.username.trim().toLowerCase(),
+      password: validatePassword(d.password),
+    };
   })
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const username = data.username.trim().toLowerCase();
+    const supabaseAdmin = await admin();
+    const username = data.username;
+
+    // ⚠️ این endpoint بدون تایید مدیر و بدون پرداخت، حساب واقعی می‌سازد.
+    // سخت‌ترین سقف نرخ کل سامانه اینجاست: ۲ حساب آزمایشی در ۲۴ ساعت برای هر IP،
+    // و حداکثر ۵۰ حساب آزمایشی در ساعت برای کل سرویس.
+    await enforceRateLimit(supabaseAdmin, "trial", clientIp(), 2, 86400);
+    await enforceRateLimit(supabaseAdmin, "trial-global", "all", 50, 3600);
+
+    const TAKEN = "این یوزرنیم قبلاً ثبت شده است.";
+    const adminUser = getAdminUsername().toLowerCase();
+    if (adminUser && username === adminUser) throw new Error(TAKEN);
 
     const plansCfg = await loadPlansConfig(supabaseAdmin);
     if (!plansCfg.trial?.enabled) throw new Error("نسخه تست در حال حاضر غیرفعال است.");
@@ -683,12 +942,37 @@ export const createTrialAccount = createServerFn({ method: "POST" })
 export const getReceiptSignedUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { path: string }) => {
-    if (!d.path) throw new Error("مسیر فایل لازم است.");
-    return d;
+    const path = String(d?.path ?? "");
+    // مسیر را خود سرور موقع آپلود ساخته: `<user>/<timestamp>-<rand>.<ext>`.
+    // این الگو جلوی path traversal و خواندن اشیای دلخواه باکت را می‌گیرد.
+    if (!/^[a-z0-9_.-]{1,60}\/[a-zA-Z0-9._-]{1,80}$/.test(path) || path.includes("..")) {
+      throw new Error("مسیر فایل نامعتبر است.");
+    }
+    return { path };
   })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = await admin();
+
+    // ─── تایید اینکه فایل واقعاً تصویر است ────────────────────────────────
+    // نوع محتوا (content-type) هنگام آپلود توسط خود کلاینت تعیین می‌شود، پس
+    // قابل اعتماد نیست: یک ثبت‌نام‌کننده‌ی ناشناس می‌توانست HTML آپلود کند و
+    // اگر مدیر لینک را در تب باز می‌کرد، آن صفحه روی دامنه‌ی استوریج اجرا
+    // می‌شد. اینجا بایت‌های ابتدایی فایل (magic number) بررسی می‌شود.
+    const { data: blob, error: dlErr } = await supabaseAdmin.storage
+      .from("receipts")
+      .download(data.path);
+    if (dlErr || !blob) throw new Error(dlErr?.message || "رسید یافت نشد.");
+    const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+    if (!isImageBytes(head)) {
+      await auditLog(supabaseAdmin, {
+        actor_id: context.userId,
+        action: "receipt_rejected_not_image",
+        target: data.path,
+      });
+      throw new Error("این فایل تصویر معتبری نیست و نمایش داده نمی‌شود.");
+    }
+
     const { data: signed, error } = await supabaseAdmin
       .storage
       .from("receipts")
@@ -696,6 +980,18 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { url: signed.signedUrl };
   });
+
+/** تشخیص تصویر از روی بایت‌های ابتدایی — JPEG/PNG/GIF/WEBP/HEIC */
+function isImageBytes(b: Uint8Array): boolean {
+  if (b.length < 12) return false;
+  const jpeg = b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+  const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+  const gif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38;
+  const ascii = (i: number) => String.fromCharCode(b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!);
+  const webp = ascii(0) === "RIFF" && ascii(8) === "WEBP";
+  const heic = ascii(4) === "ftyp"; // heic/heif/avif همگی brand ftyp دارند
+  return jpeg || png || gif || webp || heic;
+}
 
 // ─── Admin: fetch signup requests enriched with phone from user_metadata ──────
 // Works even before the phone column migration is applied — phone is always
@@ -731,17 +1027,19 @@ export const adminResetUserPassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { user_id: string; new_password: string }) => {
     if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
-    if (!d.new_password || d.new_password.length < 6) throw new Error("رمز عبور باید حداقل ۶ کاراکتر باشد.");
-    return d;
+    return { user_id: d.user_id, new_password: validatePassword(d.new_password) };
   })
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
     if (data.user_id === context.userId) throw new Error("نمی‌توانید رمز خود را از اینجا تغییر دهید.");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = await admin();
     const { error } = await supabaseAdmin.auth.admin.updateUserById(data.user_id, {
       password: data.new_password,
     });
     if (error) throw new Error(error.message);
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId, action: "user_password_reset", target: data.user_id,
+    });
     return { success: true };
   });
 
@@ -820,7 +1118,8 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
     },
   )
   .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = await admin();
+    await enforceRateLimit(supabaseAdmin, "renewal", context.userId, 5, 3600);
 
     const plansCfg = await loadPlansConfig(supabaseAdmin);
     if (!plansCfg[data.plan]?.enabled) throw new Error("این پلن در حال حاضر غیرفعال است.");
@@ -907,17 +1206,17 @@ function normalizeIranPhone(p: string): string {
 // عوض کردن رمز از همین‌جا انجام نمی‌شود — ادمین از تب کاربران رمز را دستی تغییر می‌دهد.
 export const submitPasswordResetRequest = createServerFn({ method: "POST" })
   .inputValidator((d: { first_name: string; last_name: string; phone: string }) => {
-    if (!d.first_name?.trim() || !d.last_name?.trim()) throw new Error("نام و نام خانوادگی الزامی است.");
+    const first_name = requireName(d.first_name, "نام");
+    const last_name = requireName(d.last_name, "نام خانوادگی");
     const phone = normalizeIranPhone(d.phone || "");
     if (!/^09\d{9}$/.test(phone)) throw new Error("شماره موبایل را به‌صورت ۰۹xxxxxxxxx وارد کنید.");
-    return {
-      first_name: d.first_name.trim(),
-      last_name: d.last_name.trim(),
-      phone,
-    };
+    return { first_name, last_name, phone };
   })
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = await admin();
+    // بدون سقف، این فرم عمومی می‌تواند جدول را پر کند و پنل ادمین را
+    // با درخواست‌های جعلی «بازیابی رمز» غرق کند.
+    await enforceRateLimit(supabaseAdmin, "pwd-reset", clientIp(), 3, 3600);
 
     const { data: recentRows } = await supabaseAdmin
       .from("password_reset_requests")

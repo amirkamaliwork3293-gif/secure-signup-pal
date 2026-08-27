@@ -19,6 +19,7 @@ import {
 } from "@/lib/store";
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import { printFitAssets, type PaperSize } from "@/lib/print";
+import { escapeHtml, safeCssColor } from "@/lib/html-escape";
 
 // ─── مدل داده ───────────────────────────────────────────────────────────────
 
@@ -278,12 +279,8 @@ export function normalizeTemplate(t?: Partial<InvoiceTemplate> | null): InvoiceT
 
 // ─── مقداردهی فیلدها ────────────────────────────────────────────────────────
 
-function esc(s: unknown): string {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// escaper مشترک — نسخه‌ی محلی قبلی نقل‌قول‌ها را رها می‌کرد و در جایگاه صفت ناامن بود.
+const esc = escapeHtml;
 
 export function resolveField(inv: Invoice, f: TplField): string {
   const c = inv.customer;
@@ -371,7 +368,8 @@ export function buildTemplatedInvoiceHTML(
   paper: PaperSize = "A4",
 ): string {
   const t = normalizeTemplate(tpl);
-  const accent = t.accent || "#1e3a8a";
+  // رنگ مستقیماً داخل <style> درج می‌شود؛ فقط هگز معتبر پذیرفته است.
+  const accent = safeCssColor(t.accent);
   const cols = t.columns.filter((c) => c.enabled);
   const shopName = inv.shopName || "فروشگاه";
   const docTitle = inv.documentTitle?.trim() || t.title || invoiceDocumentTitle(inv);
@@ -439,7 +437,7 @@ export function buildTemplatedInvoiceHTML(
 <html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>${esc(docTitle)} ${inv.id.toUpperCase()}</title>
+<title>${esc(docTitle)} ${esc(inv.id.toUpperCase())}</title>
 <style>
   ${fit.css}
   *{margin:0;padding:0;box-sizing:border-box}

@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  clientIp,
+  enforceRateLimit,
+  requireActiveSubscription,
+} from "@/lib/rate-limit.server";
 
 /**
  * تبدیل گفتار به متن برای نسخه‌ی نیتیو (APK) — مشکل پلاگین
@@ -44,7 +49,13 @@ const MIME_BY_EXT: Record<string, string> = {
 export const transcribeAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data) => InputSchema.parse(data))
-  .handler(async ({ data }): Promise<TranscribeResult> => {
+  .handler(async ({ data, context }): Promise<TranscribeResult> => {
+    // رونویسی صدا کلید پولی مصرف می‌کند: اشتراک فعال + سقف نرخ سخت‌گیرانه.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireActiveSubscription(context.supabase, context.userId);
+    await enforceRateLimit(supabaseAdmin, "stt", context.userId, 100, 3600);
+    await enforceRateLimit(supabaseAdmin, "stt-ip", clientIp(), 200, 3600);
+
     // روی هاست لاوابل، LOVABLE_API_KEY خودکار تزریق می‌شود. روی Vercel یا هر
     // هاست دیگری باید یکی از این دو متغیر محیطی تنظیم شود.
     const lovableKey = process.env.LOVABLE_API_KEY;

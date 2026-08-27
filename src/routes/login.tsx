@@ -50,8 +50,15 @@ export function LoginPage() {
 
     if (tab === "admin") {
       try {
-        const { email } = await adminLogin({ data: { username: u, password } });
-        const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+        // رمز ادمین هرگز به Supabase فرستاده نمی‌شود. سرور اعتبارسنجی می‌کند
+        // (با قفل پس از تلاش‌های ناموفق) و نشست آماده را برمی‌گرداند.
+        // رمز حساب Supabase یک مقدار تصادفی است که در هر ورود عوض می‌شود، پس
+        // کسی نمی‌تواند با دانستن ADMIN_PASSWORD مستقیماً signInWithPassword بزند.
+        const res = await adminLogin({ data: { username: u, password } });
+        const { error: err } = await supabase.auth.setSession({
+          access_token: res.access_token,
+          refresh_token: res.refresh_token,
+        });
         if (err) { setError(err.message); setLoading(false); return; }
         navigate({ to: "/admin" });
       } catch (e: any) {

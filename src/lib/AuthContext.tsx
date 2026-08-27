@@ -81,7 +81,12 @@ async function loadState(session: Session): Promise<AuthState> {
     const cached = readProfileCache(session.user.id);
     if (!cached) return { status: "unauthenticated" };
     profile = cached.profile;
-    isAdmin = cached.isAdmin;
+    // ⚠️ نقش ادمین هرگز از کش خوانده نمی‌شود. localStorage در دسترس هر
+    // اسکریپتی است که در همین origin اجرا شود؛ اگر مقدار کش‌شده معتبر
+    // شمرده شود، کافی است کسی isAdmin=true بنویسد و شبکه را قطع کند تا
+    // پنل ادمین برایش رندر شود. عملیات واقعی سمت سرور بررسی می‌شود، اما
+    // رابط کاربری هم نباید گمراه‌کننده باشد. آفلاین = غیرادمین.
+    isAdmin = false;
   }
 
   if (isAdmin) {
@@ -156,21 +161,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // «در حال احراز هویت...» ظاهر نشود. loadState در پس‌زمینه
         // اجرا می‌شود و در صورت تغییر، وضعیت را reconcile می‌کند.
         const cached = readProfileCache(session.user.id);
+        // نقش ادمین عمداً از شرط حذف شده: کش localStorage قابل دستکاری است
+        // و نباید به تنهایی مسیر ادمین را باز کند. پروفایل ادمین به‌هرحال
+        // active است و شرط زیر را پاس می‌کند.
         const usableCache =
           cached &&
-          (cached.isAdmin ||
-            (cached.profile.status !== "pending" &&
-              cached.profile.status !== "rejected" &&
-              cached.profile.status !== "expired" &&
-              (!cached.profile.end_date ||
-                new Date(cached.profile.end_date) >= new Date())));
+          cached.profile.status !== "pending" &&
+          cached.profile.status !== "rejected" &&
+          cached.profile.status !== "expired" &&
+          (!cached.profile.end_date ||
+            new Date(cached.profile.end_date) >= new Date());
         if (usableCache) {
           setStorageScope(session.user.id);
           setState({
             status: "authenticated",
             session,
             profile: cached!.profile,
-            isAdmin: cached!.isAdmin,
+            // هیدراسیون خوش‌بینانه هرگز ادمین نمی‌دهد؛ loadState بلافاصله
+            // بعد از این، نقش را از سرور می‌خواند و وضعیت را اصلاح می‌کند.
+            isAdmin: false,
           });
         } else {
           setState({ status: "loading" });

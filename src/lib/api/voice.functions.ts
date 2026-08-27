@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  clientIp,
+  enforceRateLimit,
+  requireActiveSubscription,
+} from "@/lib/rate-limit.server";
 
 // جایگزین کمکی (fallback) برای تحلیل گفتار صوتی با مدل زبانی Claude.
 //
@@ -36,12 +41,18 @@ export const parseVoiceInvoiceLLM = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
-      transcript: z.string().min(1),
+      transcript: z.string().min(1).max(2000),
       // نام محصولات موجود در انبار تا مدل از همین‌ها انتخاب کند
       productNames: z.array(z.string()).max(2000),
     }),
   )
-  .handler(async ({ data }): Promise<LlmParseResult> => {
+  .handler(async ({ data, context }): Promise<LlmParseResult> => {
+    // این تابع کلید پولی ANTHROPIC را مصرف می‌کند — فقط اشتراک فعال، با سقف نرخ.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireActiveSubscription(context.supabase, context.userId);
+    await enforceRateLimit(supabaseAdmin, "llm-invoice", context.userId, 60, 3600);
+    await enforceRateLimit(supabaseAdmin, "llm-invoice-ip", clientIp(), 120, 3600);
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return { available: false };
 
@@ -118,11 +129,16 @@ export const parseVoiceProductLLM = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
-      transcript: z.string().min(1),
+      transcript: z.string().min(1).max(2000),
       unitNames: z.array(z.string()).max(100),
     }),
   )
-  .handler(async ({ data }): Promise<LlmParseProductResult> => {
+  .handler(async ({ data, context }): Promise<LlmParseProductResult> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await requireActiveSubscription(context.supabase, context.userId);
+    await enforceRateLimit(supabaseAdmin, "llm-product", context.userId, 60, 3600);
+    await enforceRateLimit(supabaseAdmin, "llm-product-ip", clientIp(), 120, 3600);
+
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return { available: false };
 

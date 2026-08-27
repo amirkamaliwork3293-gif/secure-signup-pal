@@ -27,6 +27,7 @@ import {
 } from "@/lib/print";
 import { shareText } from "@/lib/openExternal";
 import { purchaseLineTotal } from "@/lib/invoice-math";
+import { escapeHtml as esc } from "@/lib/html-escape";
 
 // ─── HTML فاکتور خرید (A4) ──────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
     .map(
       (item, i) => `<tr>
         <td>${(i + 1).toLocaleString("fa-IR")}</td>
-        <td>${item.name}</td>
+        <td>${esc(item.name)}</td>
         <td>${item.quantity.toLocaleString("fa-IR")}${item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}</td>
         <td>${formatAmount(item.buyPrice)}</td>
         <td>${formatAmount(purchaseLineTotal(item))}</td>
@@ -51,7 +52,7 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>فاکتور خرید ${p.id.toUpperCase()}</title>
+<title>فاکتور خرید ${esc(p.id.toUpperCase())}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fontSize}px;color:#111;padding:24px 32px;direction:rtl}
@@ -72,18 +73,18 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
 </head>
 <body>
 <div class="header">
-  ${p.shopLogoUrl ? `<img class="logo" src="${p.shopLogoUrl}" alt="لوگو" />` : ""}
-  <h1>${shopName}</h1>
+  ${p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt="لوگو" />` : ""}
+  <h1>${esc(shopName)}</h1>
   <p>سیستم حسابداری کمالی | فاکتور خرید</p>
 </div>
 <div class="meta">
-  <div><span>شماره: </span><strong>${p.id.toUpperCase()}</strong></div>
-  <div><span>تاریخ: </span><strong>${date}</strong></div>
-  <div><span>تامین‌کننده: </span><strong>${p.supplierName || "—"}</strong></div>
-  <div><span>تلفن: </span><strong>${p.supplierPhone || "—"}</strong></div>
+  <div><span>شماره: </span><strong>${esc(p.id.toUpperCase())}</strong></div>
+  <div><span>تاریخ: </span><strong>${esc(date)}</strong></div>
+  <div><span>تامین‌کننده: </span><strong>${esc(p.supplierName || "—")}</strong></div>
+  <div><span>تلفن: </span><strong>${esc(p.supplierPhone || "—")}</strong></div>
   ${p.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[p.paymentMethod]}</strong></div>` : ""}
 </div>
-${p.note ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;background:#f7f7f7;border:1px solid #e2e2e2;font-size:${Math.round(fontSize * 0.9)}px;"><strong>یادداشت: </strong>${p.note}</div>` : ""}
+${p.note ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;background:#f7f7f7;border:1px solid #e2e2e2;font-size:${Math.round(fontSize * 0.9)}px;"><strong>یادداشت: </strong>${esc(p.note)}</div>` : ""}
 <table>
   <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت خرید</th><th>جمع</th></tr></thead>
   <tbody>${rows}</tbody>
@@ -96,7 +97,7 @@ ${p.note ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;ba
     ${p.paymentMethod === "credit" && p.paidAmount != null ? `<tr><td colspan="4">مانده بدهی به تامین‌کننده</td><td>${formatAmount(Math.max(0, p.total - (p.paidAmount || 0)))} ${currencyLabel()}</td></tr>` : ""}
   </tfoot>
 </table>
-<div class="footer">فاکتور خرید — ${shopName}</div>
+<div class="footer">فاکتور خرید — ${esc(shopName)}</div>
 </body>
 </html>`;
 }
@@ -111,7 +112,7 @@ export function buildThermalPurchaseHTML(p: Purchase): string {
     .map(
       (it) => `
       <div class="row">
-        <div class="name">${it.name}</div>
+        <div class="name">${esc(it.name)}</div>
         <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${fmt(it.buyPrice)}</span><span>${fmt(it.buyPrice * it.quantity)}</span></div>
       </div>`,
     )
@@ -119,7 +120,7 @@ export function buildThermalPurchaseHTML(p: Purchase): string {
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"/>
-<title>فاکتور خرید ${p.id.toUpperCase()}</title>
+<title>فاکتور خرید ${esc(p.id.toUpperCase())}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -138,18 +139,18 @@ export function buildThermalPurchaseHTML(p: Purchase): string {
   .logo{display:block;margin:0 auto 4px;max-width:56mm;max-height:28mm;object-fit:contain}
   @media print { body { width: 80mm; } }
 </style></head><body>
-${p.shopLogoUrl ? `<img class="logo" src="${p.shopLogoUrl}" alt="لوگو" />` : ""}
-<div class="center shop">${shopName}</div>
+${p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt="لوگو" />` : ""}
+<div class="center shop">${esc(shopName)}</div>
 <div class="center muted">فاکتور خرید</div>
 <div class="sep"></div>
 <div class="meta">
-  <div><span>شماره:</span><span>${p.id.toUpperCase()}</span></div>
-  <div><span>تاریخ:</span><span>${date}</span></div>
-  ${p.supplierName ? `<div><span>تامین‌کننده:</span><span>${p.supplierName}</span></div>` : ""}
-  ${p.supplierPhone ? `<div><span>تلفن:</span><span>${p.supplierPhone}</span></div>` : ""}
+  <div><span>شماره:</span><span>${esc(p.id.toUpperCase())}</span></div>
+  <div><span>تاریخ:</span><span>${esc(date)}</span></div>
+  ${p.supplierName ? `<div><span>تامین‌کننده:</span><span>${esc(p.supplierName)}</span></div>` : ""}
+  ${p.supplierPhone ? `<div><span>تلفن:</span><span>${esc(p.supplierPhone)}</span></div>` : ""}
   ${p.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[p.paymentMethod]}</span></div>` : ""}
 </div>
-${p.note ? `<div class="sep"></div><div class="muted">یادداشت: ${p.note}</div>` : ""}
+${p.note ? `<div class="sep"></div><div class="muted">یادداشت: ${esc(p.note)}</div>` : ""}
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>

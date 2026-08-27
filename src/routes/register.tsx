@@ -174,16 +174,24 @@ function RegisterPage() {
       if (receiptFile) {
         setUploading(true);
         // پسوند واقعی فایل (هر چیزی، نه فقط چند فرمت خاص) — اگر نامعتبر/خالی بود، jpg پیش‌فرض است
+        // سرور فقط پسوندهای تصویری را می‌پذیرد (جلوگیری از میزبانی HTML روی
+        // دامنه‌ی استوریج). هر پسوند ناشناخته به jpg نگاشت می‌شود تا آپلود
+        // کاربران با فایل‌های غیرمعمول شکست نخورد.
+        const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
         const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const ext = (rawExt && rawExt.length <= 8 ? rawExt : "jpg");
+        const ext = ALLOWED_EXT.includes(rawExt) ? rawExt : "jpg";
         const signed = await signReceiptUpload({
           data: { username: usernameField, ext, kind: "signup" },
         });
         const { error: upErr } = await supabase.storage
           .from("receipts")
           .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
-            // بعضی مرورگرها/فرمت‌ها نوع فایل را خالی گزارش می‌کنند — یک نوع پیش‌فرض امن جایگزین می‌شود
-            contentType: receiptFile.type || "application/octet-stream",
+            // نوع محتوا همیشه تصویری تثبیت می‌شود. اگر مرورگر نوع را خالی یا
+            // غیرتصویری گزارش کند، image/jpeg جایگزین می‌شود تا هیچ فایلی
+            // به‌عنوان HTML از دامنه‌ی استوریج سرو نشود.
+            contentType: receiptFile.type?.startsWith("image/")
+              ? receiptFile.type
+              : "image/jpeg",
             upsert: false,
           });
         setUploading(false);

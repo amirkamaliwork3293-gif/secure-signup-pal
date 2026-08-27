@@ -53,6 +53,75 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_audit_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          detail: Json
+          id: string
+          ip: string | null
+          target: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          detail?: Json
+          id?: string
+          ip?: string | null
+          target?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          detail?: Json
+          id?: string
+          ip?: string | null
+          target?: string | null
+        }
+        Relationships: []
+      }
+      password_reset_requests: {
+        Row: {
+          created_at: string
+          first_name: string
+          id: string
+          last_name: string
+          phone: string
+          resolved_by: string | null
+          reviewed_at: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          first_name: string
+          id?: string
+          last_name: string
+          phone: string
+          resolved_by?: string | null
+          reviewed_at?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          first_name?: string
+          id?: string
+          last_name?: string
+          phone?: string
+          resolved_by?: string | null
+          reviewed_at?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      rate_limits: {
+        Row: { bucket: string; count: number; window_start: string }
+        Insert: { bucket: string; count?: number; window_start?: string }
+        Update: { bucket?: string; count?: number; window_start?: string }
+        Relationships: []
+      }
       gold_rate_cache: {
         Row: {
           id: string
@@ -431,6 +500,15 @@ export type Database = {
         Returns: boolean
       }
       is_subscription_active: { Args: { _user_id: string }; Returns: boolean }
+      check_rate_limit: {
+        Args: { _bucket: string; _max: number; _window_seconds: number }
+        Returns: boolean
+      }
+      is_locked_out: {
+        Args: { _bucket: string; _max: number; _window_seconds: number }
+        Returns: boolean
+      }
+      clear_rate_limit: { Args: { _bucket: string }; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "user"

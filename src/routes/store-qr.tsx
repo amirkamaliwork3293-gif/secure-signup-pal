@@ -7,6 +7,7 @@ import { Layout } from "@/components/Layout";
 import { useAuth } from "@/lib/AuthContext";
 import { settings, storePublicUrl } from "@/lib/store";
 import { printHtml, savePdf, saveBase64File } from "@/lib/print";
+import { escapeHtml } from "@/lib/html-escape";
 import { QrCode, Printer, Download, ArrowLeft, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/store-qr")({
@@ -47,7 +48,7 @@ function StoreQrPage() {
   const buildHtml = () => {
     const sizeMm = sizeCm * 10;
     return `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8" />
-      <title>${shopName} — QR فروشگاه</title>
+      <title>${escapeHtml(shopName)} — QR فروشگاه</title>
       <style>
         @page { size: auto; margin: 10mm; }
         body { font-family: Tahoma, sans-serif; text-align: center; }
@@ -57,8 +58,8 @@ function StoreQrPage() {
         img { width: ${sizeMm}mm; height: ${sizeMm}mm; image-rendering: pixelated; }
       </style></head>
       <body><div class="card">
-        <div class="name">${shopName}</div>
-        <img src="${dataUrl}" alt="QR" />
+        <div class="name">${escapeHtml(shopName)}</div>
+        <img src="${escapeHtml(dataUrl)}" alt="QR" />
         <div class="hint">برای دیدن صفحه‌ی فروشگاه، این کد را اسکن کنید</div>
       </div></body></html>`;
   };

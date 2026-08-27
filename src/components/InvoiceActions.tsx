@@ -42,13 +42,10 @@ import {
 } from "@/lib/invoice-template";
 import { COUNT_UNIT } from "@/lib/store";
 import { shareText } from "@/lib/openExternal";
+import { escapeHtml } from "@/lib/html-escape";
 
-function escHtml(s: unknown): string {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// escaper مشترک — نسخه‌ی محلی قبلی نقل‌قول‌ها را escape نمی‌کرد.
+const escHtml = escapeHtml;
 
 // ─── HTML فاکتور ────────────────────────────────────────────────────────────
 
@@ -211,7 +208,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
     .map(
       (it) => `
       <div class="row">
-        <div class="name">${it.name}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
+        <div class="name">${escHtml(it.name)}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
         <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(lineTotal(it))}</span></div>
       </div>`,
     )
@@ -219,7 +216,7 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl"><head>
 <meta charset="utf-8"/>
-<title>فیش ${inv.id.toUpperCase()}</title>
+<title>فیش ${escHtml(inv.id.toUpperCase())}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -238,23 +235,23 @@ export function buildThermalInvoiceHTML(inv: Invoice): string {
   .logo{display:block;margin:0 auto 4px;max-width:56mm;max-height:28mm;object-fit:contain}
   @media print { body { width: 80mm; } }
 </style></head><body>
-${inv.shopLogoUrl ? `<img class="logo" src="${inv.shopLogoUrl}" alt="لوگو" />` : ""}
-<div class="center shop">${shopName}</div>
-<div class="center muted">${invoiceDocumentTitle(inv)}</div>
+${inv.shopLogoUrl ? `<img class="logo" src="${escHtml(inv.shopLogoUrl)}" alt="لوگو" />` : ""}
+<div class="center shop">${escHtml(shopName)}</div>
+<div class="center muted">${escHtml(invoiceDocumentTitle(inv))}</div>
 ${
   inv.shopAddress || inv.shopPhone
-    ? `<div class="center muted">${[inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join(" — ")}</div>`
+    ? `<div class="center muted">${escHtml([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join(" — "))}</div>`
     : ""
 }
 <div class="sep"></div>
 <div class="meta">
-  <div><span>شماره:</span><span>${inv.id.toUpperCase()}</span></div>
-  <div><span>تاریخ:</span><span>${date}</span></div>
-  ${customerName ? `<div><span>مشتری:</span><span>${customerName}</span></div>` : ""}
-  ${customer?.phone ? `<div><span>تلفن:</span><span>${customer.phone}</span></div>` : ""}
+  <div><span>شماره:</span><span>${escHtml(inv.id.toUpperCase())}</span></div>
+  <div><span>تاریخ:</span><span>${escHtml(date)}</span></div>
+  ${customerName ? `<div><span>مشتری:</span><span>${escHtml(customerName)}</span></div>` : ""}
+  ${customer?.phone ? `<div><span>تلفن:</span><span>${escHtml(customer.phone)}</span></div>` : ""}
   ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
 </div>
-${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${inv.notes}</div>` : ""}
+${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${escHtml(inv.notes)}</div>` : ""}
 <div class="sep"></div>
 ${rows}
 <div class="sep"></div>
@@ -269,7 +266,7 @@ ${invoiceCheques(inv)
       `<div class="line"><span>${escHtml(chequeLineLabel(c, i, formatChequeDue))}</span><span>${fmt(c.amount)}</span></div>`,
   )
   .join("")}
-${t.checkAmount && invoiceCheques(inv).length === 0 ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
+${t.checkAmount && invoiceCheques(inv).length === 0 ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${escHtml(inv.checkNumber)})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
 ${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${fmt(t.remaining)}</span></div>` : ""}
 <div class="foot">با تشکر از خرید شما</div>
 </body></html>`;

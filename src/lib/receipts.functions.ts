@@ -31,22 +31,29 @@ export const createReceiptUploadUrl = createServerFn({ method: "POST" })
     z
       .object({
         username: z.string().min(1).max(64),
-        // هر پسوند فایل واقع‌بینانه‌ای (حروف/عدد، حداکثر ۸ کاراکتر) پذیرفته می‌شود —
-        // قبلاً فقط چند فرمت خاص مجاز بود که باعث می‌شد رسید بعضی کاربران (خصوصاً
-        // عکس‌های HEIC آیفون یا فرمت‌های غیرمعمول) رد شود. اعتبارسنجی امنیتی
-        // (بدون کاراکتر خطرناک/path traversal) هنوز برقرار است.
+        // فقط پسوندهای تصویری. نسخه‌ی قبلی هر رشته‌ی حروف/عددی را می‌پذیرفت،
+        // یعنی یک بازدیدکننده‌ی ناشناس می‌توانست `receipt.html` آپلود کند و
+        // صفحه‌ای HTML روی دامنه‌ی استوریج پروژه میزبانی کند (زمینه‌ی فیشینگ).
+        // پسوندهای رایج آیفون (heic/heif) عمداً مجازند.
         ext: z
           .string()
           .min(1)
           .max(8)
-          .regex(/^[a-zA-Z0-9]+$/, "پسوند فایل نامعتبر است.")
-          .transform((s) => s.toLowerCase()),
+          .transform((s) => s.toLowerCase())
+          .refine(
+            (s) => ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"].includes(s),
+            "فقط تصویر (jpg، png، webp یا heic) قابل آپلود است.",
+          ),
         kind: z.enum(["signup", "renew"]).default("signup"),
       })
       .parse(d),
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { clientIp, enforceRateLimit } = await import("@/lib/rate-limit.server");
+    // آپلود رسید عمومی و ناشناس است — بدون سقف، یک اسکریپت می‌تواند فضای
+    // استوریج را پر کند (و هزینه بسازد).
+    await enforceRateLimit(supabaseAdmin, "receipt-upload", clientIp(), 10, 3600);
     const safeUser =
       (data.username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
     const rand = Math.random().toString(36).slice(2, 8);

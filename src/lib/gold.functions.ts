@@ -138,6 +138,13 @@ const STALE_MAX_MS = 12 * 60 * 60 * 1000;
 export const getGoldPrices = createServerFn({ method: "GET" })
   .inputValidator((data: { force?: boolean } | undefined) => ({ force: !!data?.force }))
   .handler(async ({ data }): Promise<GoldPricesResult> => {
+    if (data.force) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { clientIp, enforceRateLimit } = await import("@/lib/rate-limit.server");
+      // فقط مسیر «تازه‌سازی اجباری» محدود می‌شود؛ خواندن از کش آزاد است.
+      await enforceRateLimit(supabaseAdmin, "gold-force", clientIp(), 10, 3600);
+      await enforceRateLimit(supabaseAdmin, "gold-force-global", "all", 60, 3600);
+    }
     const force = data.force;
     const ttl = force ? FORCE_MIN_AGE_MS : CACHE_TTL_MS;
 

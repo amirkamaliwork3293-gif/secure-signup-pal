@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
-import { Receipt, Eye, EyeOff, Loader2, ShieldCheck, User } from "lucide-react";
+import { Receipt, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 
 const LOGIN_URL = "https://kamixapp.ir/login";
 
@@ -31,8 +31,7 @@ function toEmail(username: string) {
   return `${username.trim().toLowerCase()}@kamali.local`;
 }
 
-export function LoginPage() {
-  const [tab, setTab] = useState<"user" | "admin">("user");
+export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -48,7 +47,7 @@ export function LoginPage() {
 
     setLoading(true);
 
-    if (tab === "admin") {
+    if (adminMode) {
       try {
         // رمز ادمین هرگز به Supabase فرستاده نمی‌شود. سرور اعتبارسنجی می‌کند
         // (با قفل پس از تلاش‌های ناموفق) و نشست آماده را برمی‌گرداند.
@@ -98,26 +97,14 @@ export function LoginPage() {
       </div>
 
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-card">
-        {/* Tabs */}
-        <div className="mb-5 flex rounded-xl bg-muted p-1">
-          {([
-            { id: "user", label: "ورود کاربر", icon: User },
-            { id: "admin", label: "ورود ادمین", icon: ShieldCheck },
-          ] as const).map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => { setTab(id); setError(""); }}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
-                tab === id
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>
+        {adminMode ? (
+          <div className="mb-5 flex items-center justify-center gap-1.5 rounded-xl bg-muted py-2 text-sm font-medium">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            ورود مدیر سیستم
+          </div>
+        ) : (
+          <div className="mb-5 text-center text-sm font-medium text-foreground">ورود کاربر</div>
+        )}
 
         <div className="space-y-3">
           <div>
@@ -126,7 +113,7 @@ export function LoginPage() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              placeholder={tab === "admin" ? "Amirkamali" : "مثال: ali123"}
+              placeholder={adminMode ? "یوزرنیم مدیر" : "مثال: ali123"}
               dir="ltr"
               autoComplete="username"
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
@@ -170,7 +157,7 @@ export function LoginPage() {
           </button>
         </div>
 
-        {tab === "user" && (
+        {!adminMode && (
           <div className="mt-5 space-y-2 text-center text-xs text-muted-foreground">
             <div>
               رمز عبور را فراموش کرده‌اید؟{" "}

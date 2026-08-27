@@ -8,36 +8,93 @@
  * ⚠️ این فایل .server.ts است — هرگز در باندل کلاینت قرار نمی‌گیرد.
  */
 import { getRequest } from "@tanstack/react-start/server";
+import {
+  GENERIC_RATE_MESSAGE,
+  isRateLimitInfraMissing,
+} from "@/lib/rate-limit-utils";
 
 /**
  * IP واقعی درخواست‌کننده. روی Cloudflare همیشه CF-Connecting-IP معتبر است و
  * توسط خود Cloudflare نوشته می‌شود (قابل جعل توسط کلاینت نیست).
  * x-forwarded-for فقط fallback است و اولین مقدار آن گرفته می‌شود.
+ *
+ * اگر هیچ IPای در کار نباشد، به‌جای یک کلید مشترک «unknown» (که همه‌ی کاربران
+ * بدون IP را در یک سطل می‌گذارد و بعد از چند ثبت‌نام کل سایت را قفل می‌کند)
+ * از اثرانگشت ضعیف UA استفاده می‌شود. سقف سراسری (signup-global) همچنان
+ * جلوی سیل را می‌گیرد.
  */
 export function clientIp(): string {
   try {
     const h = getRequest()?.headers;
     if (!h) return "unknown";
     const cf = h.get("cf-connecting-ip");
-    if (cf) return cf.trim();
+    if (cf?.trim()) return cf.trim();
     const xff = h.get("x-forwarded-for");
-    if (xff) return xff.split(",")[0]!.trim();
-    return h.get("x-real-ip")?.trim() || "unknown";
+    if (xff) {
+      const first = xff.split(",")[0]!.trim();
+      if (first && first.toLowerCase() !== "unknown") return first;
+    }
+    const real = h.get("x-real-ip")?.trim();
+    if (real && real.toLowerCase() !== "unknown") return real;
+    return `ua:${uaFingerprint(h)}`;
   } catch {
     return "unknown";
   }
+}
+
+function uaFingerprint(h: Headers): string {
+  const s = `${h.get("user-agent") || ""}|${h.get("accept-language") || ""}`;
+  let n = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    n ^= s.charCodeAt(i);
+    n = Math.imul(n, 16777619);
+  }
+  return (n >>> 0).toString(36);
 }
 
 // کلاینت service-role. تایپ تولیدشده‌ی Database توابع RPC تازه (check_rate_limit
 // و…) را نمی‌شناسد، به همین دلیل — مثل بقیه‌ی helperهای همین پروژه — any است.
 type Admin = any;
 
+type MemBucket = { count: number; windowStart: number };
+const memBuckets = new Map<string, MemBucket>();
+const MEM_MAX = 4000;
+
+function memoryConsume(bucket: string, max: number, windowSeconds: number): boolean {
+  const now = Date.now();
+  const windowMs = Math.max(1, windowSeconds) * 1000;
+  if (memBuckets.size > MEM_MAX) {
+    for (const [k, v] of memBuckets) {
+      if (now - v.windowStart > 24 * 60 * 60 * 1000) memBuckets.delete(k);
+    }
+    if (memBuckets.size > MEM_MAX) memBuckets.clear();
+  }
+  const cur = memBuckets.get(bucket);
+  if (!cur || now - cur.windowStart >= windowMs) {
+    memBuckets.set(bucket, { count: 1, windowStart: now });
+    return true;
+  }
+  cur.count += 1;
+  return cur.count <= max;
+}
+
+function memoryPeekLocked(bucket: string, max: number, windowSeconds: number): boolean {
+  const cur = memBuckets.get(bucket);
+  if (!cur) return false;
+  if (Date.now() - cur.windowStart >= Math.max(1, windowSeconds) * 1000) return false;
+  return cur.count >= max;
+}
+
 /**
  * یک واحد از سهمیه مصرف می‌کند. اگر از حد بگذرد خطا پرتاب می‌کند.
  *
- * نکته‌ی امنیتی: اگر خود دیتابیس در دسترس نباشد، **درخواست رد می‌شود** (fail
- * closed). باز گذاشتن مسیر هنگام خطا یعنی مهاجم فقط کافی است دیتابیس را از
- * کار بیندازد تا محدودیت‌ها برداشته شوند.
+ * fail-closed برای خطای واقعی دیتابیس (اتصال قطع، timeout): درخواست رد می‌شود
+ * تا مهاجم با ازکار انداختن دیتابیس سقف‌ها را برندارد.
+ *
+ * اما اگر خود تابع/جدول هنوز مهاجرت نشده باشد (PGRST202 / 42883)، رد کردن
+ * همه‌ی ثبت‌نام‌ها با پیام «تعداد درخواست بیش از حد» اشتباه است — دقیقاً
+ * مشکلی که بعد از سخت‌سازی اول پیش آمد. در آن حالت به شمارنده‌ی حافظه‌ی
+ * همان isolate برمی‌گردیم (بهتر از قفل کامل سایت؛ ضعیف‌تر از Postgres مشترک).
  */
 export async function enforceRateLimit(
   admin: Admin,
@@ -45,7 +102,7 @@ export async function enforceRateLimit(
   identifier: string,
   max: number,
   windowSeconds: number,
-  message = "تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.",
+  message = GENERIC_RATE_MESSAGE,
 ): Promise<void> {
   const bucket = `${scope}:${identifier}`.slice(0, 200);
   const { data, error } = await admin.rpc("check_rate_limit", {
@@ -54,6 +111,11 @@ export async function enforceRateLimit(
     _window_seconds: windowSeconds,
   });
   if (error) {
+    if (isRateLimitInfraMissing(error)) {
+      console.error("[rate-limit] RPC missing — using in-memory fallback", error);
+      if (!memoryConsume(bucket, max, windowSeconds)) throw new Error(message);
+      return;
+    }
     console.error("[rate-limit] check failed, denying request", error);
     throw new Error(message);
   }
@@ -75,8 +137,12 @@ export async function isLockedOut(
     _window_seconds: windowSeconds,
   });
   if (error) {
-    console.error("[rate-limit] lockout check failed, denying request", error);
-    return true; // fail closed
+    if (isRateLimitInfraMissing(error)) {
+      console.error("[rate-limit] lockout RPC missing — using in-memory fallback", error);
+      return memoryPeekLocked(bucket, max, windowSeconds);
+    }
+    console.error("[rate-limit] lockout check failed, denying", error);
+    return true; // fail closed on real outage
   }
   return data === true;
 }
@@ -84,6 +150,7 @@ export async function isLockedOut(
 /** پس از موفقیت (مثلاً ورود درست) شمارنده‌ی تلاش‌های ناموفق پاک می‌شود. */
 export async function clearRateLimit(admin: Admin, scope: string, identifier: string): Promise<void> {
   const bucket = `${scope}:${identifier}`.slice(0, 200);
+  memBuckets.delete(bucket);
   try {
     await admin.rpc("clear_rate_limit", { _bucket: bucket });
   } catch {

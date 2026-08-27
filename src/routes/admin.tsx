@@ -108,18 +108,30 @@ function AdminPage() {
     catch (e: any) { alert(e?.message); }
     setActing(null);
   };
-  const handleDelete = async (user: UserProfile) => {
-    if (!confirm(`کاربر «${user.username}» حذف شود؟`)) return;
-    setActing(user.id);
-    try { await delUser({ data: { user_id: user.id } }); await fetchAll(); }
-    catch (e: any) { alert(e?.message); }
-    setActing(null);
-  };
-
-  const handleResetPassword = async (user: UserProfile, newPassword: string): Promise<boolean> => {
+  const handleDelete = async (user: UserProfile, confirmUsername: string, adminPassword: string): Promise<boolean> => {
     setActing(user.id);
     try {
-      await resetPwd({ data: { user_id: user.id, new_password: newPassword } });
+      await delUser({
+        data: {
+          user_id: user.id,
+          confirm_username: confirmUsername,
+          admin_password: adminPassword,
+        },
+      });
+      await fetchAll();
+      return true;
+    } catch (e: any) {
+      alert(e?.message);
+      return false;
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const handleResetPassword = async (user: UserProfile, newPassword: string, adminPassword: string): Promise<boolean> => {
+    setActing(user.id);
+    try {
+      await resetPwd({ data: { user_id: user.id, new_password: newPassword, admin_password: adminPassword } });
       return true;
     } catch (e: any) {
       alert(e?.message);
@@ -496,14 +508,19 @@ function UsersTab({
   phones: Record<string, string | null>;
   acting: string | null;
   onExtend: (u: UserProfile, plan: SubscriptionPlan) => void;
-  onDelete: (u: UserProfile) => void;
-  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
+  onDelete: (u: UserProfile, confirmUsername: string, adminPassword: string) => Promise<boolean>;
+  onResetPassword: (u: UserProfile, newPassword: string, adminPassword: string) => Promise<boolean>;
 }) {
   const [searchQ, setSearchQ] = useState("");
   const [resetTarget, setResetTarget] = useState<UserProfile | null>(null);
   const [newPwd, setNewPwd] = useState("");
+  const [adminPwd, setAdminPwd] = useState("");
   const [pwdSaving, setPwdSaving] = useState(false);
   const [messageTarget, setMessageTarget] = useState<UserProfile | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
+  const [deleteUsername, setDeleteUsername] = useState("");
+  const [deleteAdminPwd, setDeleteAdminPwd] = useState("");
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   const filtered = searchQ.trim()
     ? users.filter((u) =>
@@ -514,14 +531,34 @@ function UsersTab({
     : users;
 
   const handlePwdReset = async () => {
-    if (!resetTarget || newPwd.length < 6) return;
+    if (!resetTarget || newPwd.length < 8 || !adminPwd) return;
     setPwdSaving(true);
-    const ok = await onResetPassword(resetTarget, newPwd);
+    const ok = await onResetPassword(resetTarget, newPwd, adminPwd);
     setPwdSaving(false);
     if (!ok) return;
     setResetTarget(null);
     setNewPwd("");
+    setAdminPwd("");
     alert("رمز عبور با موفقیت تغییر کرد.");
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    if (deleteUsername.trim().toLowerCase() !== deleteTarget.username.toLowerCase()) {
+      alert("یوزرنیم واردشده مطابقت ندارد.");
+      return;
+    }
+    if (!deleteAdminPwd) {
+      alert("رمز ادمین را وارد کنید.");
+      return;
+    }
+    setDeleteSaving(true);
+    const ok = await onDelete(deleteTarget, deleteUsername, deleteAdminPwd);
+    setDeleteSaving(false);
+    if (!ok) return;
+    setDeleteTarget(null);
+    setDeleteUsername("");
+    setDeleteAdminPwd("");
   };
 
   return (
@@ -603,7 +640,11 @@ function UsersTab({
                       </button>
                     ))}
                     <button
-                      onClick={() => onDelete(u)}
+                      onClick={() => {
+                        setDeleteTarget(u);
+                        setDeleteUsername("");
+                        setDeleteAdminPwd("");
+                      }}
                       disabled={isActing}
                       className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
@@ -611,7 +652,7 @@ function UsersTab({
                     </button>
                   </div>
                   <button
-                    onClick={() => { setResetTarget(u); setNewPwd(""); }}
+                    onClick={() => { setResetTarget(u); setNewPwd(""); setAdminPwd(""); }}
                     className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
                   >
                     <KeyRound className="h-3 w-3" />
@@ -626,18 +667,18 @@ function UsersTab({
 
       {/* Password reset modal */}
       {resetTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setResetTarget(null); setNewPwd(""); } }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4" onClick={(e) => { if (e.target === e.currentTarget) { setResetTarget(null); setNewPwd(""); setAdminPwd(""); } }}>
           <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-elegant">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-bold flex items-center gap-2">
                 <KeyRound className="h-4 w-4 text-primary" />
                 تغییر رمز — {resetTarget.username}
               </h3>
-              <button onClick={() => { setResetTarget(null); setNewPwd(""); }} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-secondary">
+              <button onClick={() => { setResetTarget(null); setNewPwd(""); setAdminPwd(""); }} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-secondary">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور جدید (حداقل ۶ کاراکتر)</label>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">رمز عبور جدید (حداقل ۸ کاراکتر، حرف و عدد)</label>
             <input
               type="password"
               value={newPwd}
@@ -647,13 +688,81 @@ function UsersTab({
               placeholder="••••••••"
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
             />
+            <label className="mb-1.5 mt-3 block text-xs font-medium text-muted-foreground">رمز فعلی پنل ادمین (تایید هویت)</label>
+            <input
+              type="password"
+              value={adminPwd}
+              onChange={(e) => setAdminPwd(e.target.value)}
+              dir="ltr"
+              autoComplete="current-password"
+              placeholder="رمز ادمین"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+            />
             <button
               onClick={handlePwdReset}
-              disabled={pwdSaving || newPwd.length < 6}
+              disabled={pwdSaving || newPwd.length < 8 || !adminPwd}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
             >
               {pwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
               ذخیره رمز جدید
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation — بدون رمز ادمین و تطبیق یوزرنیم، حذف ممکن نیست */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4" onClick={(e) => { if (e.target === e.currentTarget && !deleteSaving) { setDeleteTarget(null); setDeleteUsername(""); setDeleteAdminPwd(""); } }}>
+          <div className="w-full max-w-sm rounded-2xl border border-destructive/30 bg-card p-5 shadow-elegant">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-destructive">
+                <Trash2 className="h-4 w-4" />
+                حذف کاربر
+              </h3>
+              <button
+                onClick={() => { if (!deleteSaving) { setDeleteTarget(null); setDeleteUsername(""); setDeleteAdminPwd(""); } }}
+                className="grid h-7 w-7 place-items-center rounded-lg hover:bg-secondary"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mb-3 text-xs leading-6 text-muted-foreground">
+              حساب «{deleteTarget.first_name} {deleteTarget.last_name}» با یوزرنیم
+              {" "}<strong dir="ltr">{deleteTarget.username}</strong> برای همیشه حذف می‌شود.
+              حداکثر ۳ حذف در ۳۰ دقیقه مجاز است.
+            </p>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              یوزرنیم را برای تایید تایپ کنید
+            </label>
+            <input
+              value={deleteUsername}
+              onChange={(e) => setDeleteUsername(e.target.value)}
+              dir="ltr"
+              autoFocus
+              placeholder={deleteTarget.username}
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-destructive"
+            />
+            <label className="mb-1.5 mt-3 block text-xs font-medium text-muted-foreground">رمز پنل ادمین</label>
+            <input
+              type="password"
+              value={deleteAdminPwd}
+              onChange={(e) => setDeleteAdminPwd(e.target.value)}
+              dir="ltr"
+              autoComplete="current-password"
+              placeholder="رمز ادمین"
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-destructive"
+            />
+            <button
+              onClick={() => void handleConfirmDelete()}
+              disabled={
+                deleteSaving ||
+                deleteUsername.trim().toLowerCase() !== deleteTarget.username.toLowerCase() ||
+                !deleteAdminPwd
+              }
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground disabled:opacity-60"
+            >
+              {deleteSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              حذف قطعی حساب
             </button>
           </div>
         </div>
@@ -1528,7 +1637,8 @@ function normalizeIranPhoneClient(p: string | null | undefined): string {
 }
 
 function generateSimplePassword() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  const n = String(Math.floor(1000 + Math.random() * 9000));
+  return `Kamix${n}`;
 }
 
 async function copyToClipboard(text: string) {
@@ -1563,7 +1673,7 @@ function PasswordResetsTab({
   users: UserProfile[];
   phones: Record<string, string | null>;
   signupRequests: SignupRequest[];
-  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
+  onResetPassword: (u: UserProfile, newPassword: string, adminPassword: string) => Promise<boolean>;
   onRefresh: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -1654,13 +1764,14 @@ function PasswordResetCard({
   users: UserProfile[];
   phones: Record<string, string | null>;
   signupRequests: SignupRequest[];
-  onResetPassword: (u: UserProfile, newPassword: string) => Promise<boolean>;
+  onResetPassword: (u: UserProfile, newPassword: string, adminPassword: string) => Promise<boolean>;
   onRefresh: () => void;
 }) {
   const ackFn = useServerFn(adminAckPasswordReset);
   const [picked, setPicked] = useState<UserProfile | null>(null);
   const [userQ, setUserQ] = useState("");
   const [newPwd, setNewPwd] = useState("");
+  const [adminPwd, setAdminPwd] = useState("");
   const [shownPwd, setShownPwd] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
@@ -1711,8 +1822,12 @@ function PasswordResetCard({
   };
 
   const applyPassword = async () => {
-    if (!picked || newPwd.length < 6) {
-      alert("کاربر را انتخاب کنید و رمز جدید حداقل ۶ کاراکتر باشد.");
+    if (!picked || newPwd.length < 8 || !/[a-zA-Z]/.test(newPwd) || !/\d/.test(newPwd)) {
+      alert("کاربر را انتخاب کنید و رمز جدید حداقل ۸ کاراکتر، با حرف و عدد باشد.");
+      return;
+    }
+    if (!adminPwd) {
+      alert("رمز پنل ادمین را وارد کنید.");
       return;
     }
     if (picked.username === "amirkamali") {
@@ -1720,10 +1835,11 @@ function PasswordResetCard({
       return;
     }
     setBusy(true);
-    const ok = await onResetPassword(picked, newPwd);
+    const ok = await onResetPassword(picked, newPwd, adminPwd);
     setBusy(false);
     if (!ok) return;
     setShownPwd(newPwd);
+    setAdminPwd("");
   };
 
   const markDone = async () => {
@@ -1859,7 +1975,7 @@ function PasswordResetCard({
                   value={newPwd}
                   onChange={(e) => setNewPwd(e.target.value)}
                   dir="ltr"
-                  placeholder="رمز جدید (حداقل ۶ کاراکتر)"
+                  placeholder="رمز جدید (حداقل ۸ کاراکتر، حرف و عدد)"
                   className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <button
@@ -1870,9 +1986,18 @@ function PasswordResetCard({
                   تولید
                 </button>
               </div>
+              <input
+                type="password"
+                value={adminPwd}
+                onChange={(e) => setAdminPwd(e.target.value)}
+                dir="ltr"
+                autoComplete="current-password"
+                placeholder="رمز فعلی پنل ادمین (تایید هویت)"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              />
               <button
                 type="button"
-                disabled={busy || newPwd.length < 6}
+                disabled={busy || newPwd.length < 8 || !adminPwd}
                 onClick={() => void applyPassword()}
                 className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
               >

@@ -14,7 +14,8 @@ import {
   updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
   adminClearSignupTempPassword,
   adminListPasswordResetRequests, adminAckPasswordReset,
-  type PasswordResetRequestRow,
+  adminListUserDataBackups, adminRestoreUserDataBackup,
+  type PasswordResetRequestRow, type UserDataBackupPreview,
 } from "@/lib/auth.functions";
 import {
   DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
@@ -24,7 +25,7 @@ import {
   ShieldCheck, Users, RefreshCw, LogOut, Loader2, Check, X,
   CreditCard, Save, Trash2, CalendarClock, Inbox, Image as ImageIcon, Eye,
   Package, Power, Percent, Timer, Search, KeyRound, BellRing, Phone, MessageSquare,
-  Copy,
+  Copy, History,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
@@ -521,6 +522,7 @@ function UsersTab({
   const [deleteUsername, setDeleteUsername] = useState("");
   const [deleteAdminPwd, setDeleteAdminPwd] = useState("");
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [backupTarget, setBackupTarget] = useState<UserProfile | null>(null);
 
   const filtered = searchQ.trim()
     ? users.filter((u) =>
@@ -658,6 +660,13 @@ function UsersTab({
                     <KeyRound className="h-3 w-3" />
                     تغییر رمز عبور
                   </button>
+                  <button
+                    onClick={() => setBackupTarget(u)}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-accent"
+                  >
+                    <History className="h-3 w-3" />
+                    بازیابی محصولات و فاکتورها
+                  </button>
                 </div>
               )}
             </li>
@@ -767,6 +776,9 @@ function UsersTab({
           </div>
         </div>
       )}
+      {backupTarget && (
+        <UserBackupModal user={backupTarget} onClose={() => setBackupTarget(null)} />
+      )}
       {/* Message modal — ارسال پیام به هر کاربر ثبت‌نامی (نه فقط تمدیدی‌ها) */}
       {messageTarget && (
         <MessageUserModal
@@ -775,6 +787,135 @@ function UsersTab({
           onClose={() => setMessageTarget(null)}
         />
       )}
+    </div>
+  );
+}
+
+function UserBackupModal({ user, onClose }: { user: UserProfile; onClose: () => void }) {
+  const listFn = useServerFn(adminListUserDataBackups);
+  const restoreFn = useServerFn(adminRestoreUserDataBackup);
+  const [loading, setLoading] = useState(true);
+  const [live, setLive] = useState<UserDataBackupPreview | null>(null);
+  const [backups, setBackups] = useState<UserDataBackupPreview[]>([]);
+  const [error, setError] = useState("");
+  const [adminPwd, setAdminPwd] = useState("");
+  const [picked, setPicked] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await listFn({ data: { user_id: user.id } });
+      setLive({ id: "live", created_at: "", ...res.live });
+      setBackups(res.backups);
+    } catch (e: unknown) {
+      setError((e as { message?: string })?.message || "خواندن نسخه‌ها ناموفق بود.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id]);
+
+  const restore = async () => {
+    if (!picked) return;
+    if (!adminPwd) {
+      alert("رمز ادمین را وارد کنید.");
+      return;
+    }
+    if (!confirm("داده‌های فعلی این کاربر با نسخه انتخاب‌شده جایگزین می‌شود. ادامه می‌دهید؟")) return;
+    setSaving(true);
+    try {
+      await restoreFn({ data: { user_id: user.id, backup_id: picked, admin_password: adminPwd } });
+      alert("بازیابی انجام شد. به کاربر بگویید اپ را ببندد، یک‌بار از حساب خارج شود و دوباره وارد شود تا دادهٔ خراب از گوشی دوباره بالا نرود.");
+      setAdminPwd("");
+      await load();
+    } catch (e: unknown) {
+      alert((e as { message?: string })?.message || "بازیابی ناموفق بود.");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4" onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-elegant">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-bold">
+            <History className="h-4 w-4 text-primary" />
+            بازیابی داده — {user.first_name} {user.last_name}
+          </h3>
+          <button onClick={onClose} className="grid h-7 w-7 place-items-center rounded-lg hover:bg-secondary">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
+          نسخه‌های خودکار حدود هر ۶ ساعت (حداکثر ۴۰ تا) ذخیره می‌شوند. نسخه‌ای را انتخاب کنید که نام محصولات واقعی باشد، نه متن خراب.
+        </p>
+        {loading && (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {error && <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>}
+        {!loading && !error && (
+          <div className="space-y-3">
+            {live && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+                <div className="mb-1 font-semibold text-amber-800 dark:text-amber-300">وضعیت فعلی (زنده)</div>
+                <div className="text-muted-foreground">{live.product_count} کالا · {live.invoice_count} فاکتور</div>
+                <div className="mt-1 leading-5">{live.sample_names.slice(0, 6).join("، ") || "—"}</div>
+              </div>
+            )}
+            {backups.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+                نسخهٔ پشتیبان ابری برای این کاربر پیدا نشد. اگر بک‌آپ روزانه سوپابیس دارید، از آنجا قابل برگشت است.
+              </div>
+            )}
+            <ul className="space-y-2">
+              {backups.map((b) => (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    onClick={() => setPicked(b.id)}
+                    className={`w-full rounded-xl border p-3 text-right text-xs ${
+                      picked === b.id ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent"
+                    }`}
+                  >
+                    <div className="font-medium">{formatJalaliDateTime(b.created_at)}</div>
+                    <div className="mt-0.5 text-muted-foreground">{b.product_count} کالا · {b.invoice_count} فاکتور</div>
+                    <div className="mt-1 leading-5 text-muted-foreground">{b.sample_names.slice(0, 6).join("، ") || "—"}</div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {backups.length > 0 && (
+              <>
+                <input
+                  type="password"
+                  value={adminPwd}
+                  onChange={(e) => setAdminPwd(e.target.value)}
+                  dir="ltr"
+                  autoComplete="current-password"
+                  placeholder="رمز پنل ادمین"
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+                />
+                <button
+                  type="button"
+                  disabled={!picked || !adminPwd || saving}
+                  onClick={() => void restore()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
+                  بازگرداندن نسخه انتخاب‌شده
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

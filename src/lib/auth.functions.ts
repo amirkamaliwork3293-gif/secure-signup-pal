@@ -306,13 +306,13 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     if (phone) {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { count } = await supabaseAdmin
+      const { count, error: phoneErr } = await supabaseAdmin
         .from("signup_requests")
         .select("id", { count: "exact", head: true })
         .eq("phone", phone)
         .eq("status", "pending")
         .gte("created_at", since);
-      if ((count ?? 0) >= 3) {
+      if (!phoneErr && (count ?? 0) >= 3) {
         throw new Error("با این شماره موبایل درخواست‌های زیادی در انتظار است. لطفاً کمی بعد تلاش کنید.");
       }
     }

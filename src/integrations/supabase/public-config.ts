@@ -1,9 +1,13 @@
 /**
- * آدرس پروژهٔ سوپابیس محرمانه نیست (همان project_id داخل supabase/config.toml).
- * اگر Vercel متغیر VITE_SUPABASE_URL را در بیلد نداشته باشد، بدون این پیش‌فرض
- * کل سایت با «This page didn't load» از کار می‌افتد.
+ * آدرس پروژهٔ سوپابیس محرمانه نیست.
+ *
+ * آدرس زندهٔ kamixapp.ir از هدر CSP سرور خوانده شده
+ * (connect-src → https://rhyxwmeiayebfnmibuiv.supabase.co).
+ * مقدار supabase/config.toml ممکن است پروژهٔ دیگری باشد؛ برای سایت از این
+ * پیش‌فرض استفاده می‌شود تا نبودن VITE_SUPABASE_URL در بیلد Vite سایت را
+ * نخواباند. اگر متغیر محیطی باشد، همان اولویت دارد.
  */
-export const DEFAULT_SUPABASE_URL = "https://wchghogprftrurbcarvp.supabase.co";
+export const DEFAULT_SUPABASE_URL = "https://rhyxwmeiayebfnmibuiv.supabase.co";
 
 function trimSlash(value: string): string {
   return value.replace(/\/+$/, "");

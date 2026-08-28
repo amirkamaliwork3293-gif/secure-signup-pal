@@ -22,7 +22,7 @@ delete process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 delete process.env.SUPABASE_ANON_KEY;
 
 assert.equal(resolveSupabaseUrl(), DEFAULT_SUPABASE_URL);
-assert.equal(DEFAULT_SUPABASE_URL, "https://wchghogprftrurbcarvp.supabase.co");
+assert.equal(DEFAULT_SUPABASE_URL, "https://rhyxwmeiayebfnmibuiv.supabase.co");
 assert.equal(resolveSupabasePublishableKey(), "");
 
 process.env.VITE_SUPABASE_URL = "https://example.supabase.co/";

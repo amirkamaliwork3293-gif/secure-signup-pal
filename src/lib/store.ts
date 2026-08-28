@@ -3,6 +3,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson } from "@/lib/search";
 import {
+  catalogLooksVandalized,
+  isProtectedCatalogField,
+  preferCloudValue,
+} from "@/lib/catalog-integrity";
+import {
   stockDeltasForSoldItems,
   expandRecipeForQty,
   ingredientsUsedOnSale,
@@ -709,6 +714,69 @@ function scheduleCloudPush(key: string, value: unknown) {
   pushTimer = setTimeout(flushCloudPush, 600);
 }
 
+function localValueForCloudField(field: string): unknown {
+  if (field in pendingPush) return pendingPush[field];
+  const localKey = FIELD_TO_LOCAL_KEY[field];
+  if (!localKey) return null;
+  try {
+    const raw = localStorage.getItem(scopedKey(localKey));
+    return raw != null ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function adoptCloudField(field: string, cloudValue: unknown) {
+  const localKey = FIELD_TO_LOCAL_KEY[field];
+  if (localKey && cloudValue != null) writeLocalOnly(localKey, cloudValue);
+  delete pendingPush[field];
+  clearDirty([field]);
+}
+
+/**
+ * قبل از upsert: اگر کاتالوگ محلی خراب است و نسخهٔ زندهٔ ابر سالم/غنی‌تر است،
+ * همان فیلد را از صف حذف می‌کنیم تا فحاشی دوباره روی سوپابیس نرود.
+ */
+async function dropVandalizedCatalogPushes(
+  userId: string,
+  fieldsToPush: Record<string, unknown>,
+): Promise<void> {
+  const protectedInPush = Object.keys(fieldsToPush).filter(isProtectedCatalogField);
+  if (protectedInPush.length === 0) return;
+
+  let live: Record<string, unknown> | null = null;
+  let liveOk = false;
+  try {
+    const { data, error } = await supabase
+      .from("user_data")
+      .select(protectedInPush.join(","))
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!error) {
+      live = (data ?? null) as Record<string, unknown> | null;
+      liveOk = true;
+    }
+  } catch {
+    liveOk = false;
+  }
+
+  for (const field of protectedInPush) {
+    const localVal = fieldsToPush[field];
+    if (liveOk) {
+      const cloudVal = live?.[field];
+      if (preferCloudValue(localVal, cloudVal, field)) {
+        adoptCloudField(field, cloudVal);
+        delete fieldsToPush[field];
+      }
+      continue;
+    }
+    // نتوانستیم ابر را بخوانیم: کاتالوگ فحاشی‌شده را هرگز بالا نفرست.
+    if (catalogLooksVandalized(localVal, field)) {
+      delete fieldsToPush[field];
+    }
+  }
+}
+
 async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
@@ -717,9 +785,17 @@ async function flushCloudPush() {
     return;
   }
   const fieldsToPush = { ...pendingPush };
-  const fieldNames = Object.keys(fieldsToPush);
-  if (fieldNames.length === 0) return;
   const userId = cloudUserId;
+  await dropVandalizedCatalogPushes(userId, fieldsToPush);
+  const fieldNames = Object.keys(fieldsToPush);
+  if (fieldNames.length === 0) {
+    publishSyncState({
+      pending: readDirtySet().size,
+      failed: false,
+      lastError: undefined,
+    });
+    return;
+  }
   const payload: Record<string, unknown> = {
     ...fieldsToPush,
     user_id: userId,
@@ -868,8 +944,8 @@ export async function hydrateFromCloud(userId: string) {
       markCloudHydrated();
       return; // بلوک finally صف را flush می‌کند
     }
-    // Overwrite local cache with cloud data — but NEVER for fields that have
-    // unsynced local changes (dirty), otherwise offline edits would be lost.
+    // بازنویسی کش محلی از ابر. فیلدهای dirty (ویرایش آفلاین) حفظ می‌شوند مگر
+    // اینکه کاتالوگ محلی خراب/فحاشی باشد یا خیلی فقیرتر از نسخهٔ ابری سالم.
     // نکته‌ی مهم: مجموعه‌ی dirty دوباره و همین‌الان خوانده می‌شود، چون ممکن است
     // کاربر در فاصله‌ی خواندن از سرور (چند صد میلی‌ثانیه) چیزی ثبت کرده باشد؛
     // با تکیه بر snapshot قدیمی، آن ثبت با داده‌ی سرور بازنویسی می‌شد و کاربر
@@ -877,7 +953,15 @@ export async function hydrateFromCloud(userId: string) {
     const dirtyNow = new Set<string>([...dirty, ...readDirtySet()]);
     const overwrite = (field: string, key: string, value: unknown) => {
       if (value == null) return;
-      if (dirtyNow.has(field)) return;
+      if (dirtyNow.has(field)) {
+        if (
+          isProtectedCatalogField(field) &&
+          preferCloudValue(localValueForCloudField(field), value, field)
+        ) {
+          adoptCloudField(field, value);
+        }
+        return;
+      }
       writeLocalOnly(key, value);
     };
     overwrite("products", PRODUCTS_KEY, data.products);

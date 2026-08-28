@@ -104,7 +104,7 @@ REVOKE ALL ON FUNCTION public.kamix_invoices_vandalized(jsonb) FROM PUBLIC, anon
 REVOKE ALL ON FUNCTION public.kamix_merge_invoices_keep_all(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
 
 -- پنجرهٔ امن: از ۲۶ اوت تا قبل از ۲۸ اوت (امروز = دادهٔ خراب؛ قدیمی‌تر = از دست رفتن کار ۲۷ اوت)
-WITH window AS (
+WITH safe_window AS (
   SELECT
     timestamptz '2026-08-26 00:00:00+00' AS from_at,
     timestamptz '2026-08-28 00:00:00+00' AS to_at
@@ -116,7 +116,7 @@ picked AS (
          b.snapshot
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN window w
+    CROSS JOIN safe_window w
    WHERE b.created_at >= w.from_at
      AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')
@@ -138,7 +138,7 @@ SELECT d.user_id, to_jsonb(d)
   JOIN planned x ON x.user_id = d.user_id
  WHERE COALESCE(x.live_invoices, '[]'::jsonb) IS DISTINCT FROM COALESCE(x.merged, '[]'::jsonb);
 
-WITH window AS (
+WITH safe_window AS (
   SELECT
     timestamptz '2026-08-26 00:00:00+00' AS from_at,
     timestamptz '2026-08-28 00:00:00+00' AS to_at
@@ -149,7 +149,7 @@ picked AS (
          b.snapshot
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN window w
+    CROSS JOIN safe_window w
    WHERE b.created_at >= w.from_at
      AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')
@@ -166,7 +166,7 @@ UPDATE public.user_data d
        IS DISTINCT FROM public.kamix_merge_invoices_keep_all(d.invoices, p.snapshot->'invoices');
 
 -- گزارش: برای هر حساب، تعداد فاکتور کم نمی‌شود
-WITH window AS (
+WITH safe_window AS (
   SELECT
     timestamptz '2026-08-26 00:00:00+00' AS from_at,
     timestamptz '2026-08-28 00:00:00+00' AS to_at
@@ -177,7 +177,7 @@ picked AS (
          b.created_at AS backup_at
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN window w
+    CROSS JOIN safe_window w
    WHERE b.created_at >= w.from_at
      AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')

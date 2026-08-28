@@ -5,6 +5,7 @@ import { namesReferToSamePerson } from "@/lib/search";
 import {
   catalogLooksVandalized,
   isProtectedCatalogField,
+  mergeInvoicesKeepAll,
   preferCloudValue,
 } from "@/lib/catalog-integrity";
 import {
@@ -764,6 +765,13 @@ async function dropVandalizedCatalogPushes(
     const localVal = fieldsToPush[field];
     if (liveOk) {
       const cloudVal = live?.[field];
+      if (field === "invoices") {
+        const merged = mergeInvoicesKeepAll(localVal, cloudVal);
+        fieldsToPush[field] = merged;
+        writeLocalOnly(HISTORY_KEY, merged);
+        pendingPush.invoices = merged;
+        continue;
+      }
       if (preferCloudValue(localVal, cloudVal, field)) {
         adoptCloudField(field, cloudVal);
         delete fieldsToPush[field];
@@ -977,6 +985,16 @@ export async function hydrateFromCloud(userId: string) {
     const dirtyNow = new Set<string>([...dirty, ...readDirtySet()]);
     const overwrite = (field: string, key: string, value: unknown) => {
       if (value == null) return;
+      if (field === "invoices") {
+        const merged = mergeInvoicesKeepAll(localValueForCloudField("invoices"), value);
+        writeLocalOnly(key, merged);
+        if (dirtyNow.has("invoices")) pendingPush.invoices = merged;
+        else {
+          delete pendingPush.invoices;
+          clearDirty(["invoices"]);
+        }
+        return;
+      }
       if (dirtyNow.has(field)) {
         if (
           isProtectedCatalogField(field) &&

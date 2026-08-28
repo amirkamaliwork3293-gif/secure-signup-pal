@@ -216,6 +216,38 @@ export function invoicePricesDiverge(local: unknown, cloud: unknown): boolean {
   return false;
 }
 
+/**
+ * ادغام فاکتور بدون حذف: همهٔ فاکتورهای محلی می‌مانند.
+ * اگر همان شناسه در ابر قیمت متفاوت داشته باشد، قیمت ابر روی همان فاکتور می‌نشیند.
+ * فاکتورهایی که فقط در ابر هستند اضافه می‌شوند. هیچ شناسه‌ای از محلی پاک نمی‌شود.
+ */
+export function mergeInvoicesKeepAll(local: unknown, cloud: unknown): unknown[] {
+  const localArr = Array.isArray(local) ? local : [];
+  const cloudArr = Array.isArray(cloud) ? cloud : [];
+  const cloudById = new Map<string, unknown>();
+  for (const inv of cloudArr) {
+    const id = (inv as { id?: unknown })?.id;
+    if (typeof id === "string" && id) cloudById.set(id, inv);
+  }
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const inv of localArr) {
+    const id = (inv as { id?: unknown })?.id;
+    if (typeof id === "string" && id) seen.add(id);
+    const cloudInv = typeof id === "string" && id ? cloudById.get(id) : undefined;
+    if (cloudInv && invoiceLineFingerprint(inv) !== invoiceLineFingerprint(cloudInv)) {
+      out.push(cloudInv);
+    } else {
+      out.push(inv);
+    }
+  }
+  for (const inv of cloudArr) {
+    const id = (inv as { id?: unknown })?.id;
+    if (typeof id === "string" && id && !seen.has(id)) out.push(inv);
+  }
+  return out;
+}
+
 export function catalogLooksVandalized(value: unknown, field: ProtectedCatalogField): boolean {
   return inspectCatalog(value, field).vandalized;
 }
@@ -241,14 +273,6 @@ export function preferCloudValue(
 
   const localReport = inspectCatalog(local, field);
   const cloudReport = inspectCatalog(cloud, field);
-
-  if (
-    field === "invoices" &&
-    !cloudReport.vandalized &&
-    invoicePricesDiverge(local, cloud)
-  ) {
-    return true;
-  }
 
   if (localReport.vandalized && !cloudReport.vandalized) return true;
   if (!localReport.vandalized && cloudReport.vandalized) return false;

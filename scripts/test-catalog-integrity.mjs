@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import {
   catalogLooksVandalized,
+  mergeInvoicesKeepAll,
   preferCloudValue,
   textLooksVandalized,
 } from "../src/lib/catalog-integrity.ts";
@@ -84,18 +85,23 @@ assert.equal(preferCloudValue(slightlyFewer, manyCloud, "products"), false);
 // ابر خالی: چیزی برای گرفتن نیست
 assert.equal(preferCloudValue(persianProducts, null, "products"), false);
 
-// قیمت فاکتور عوض شده بدون اسم چینی — ابرِ بازیابی‌شده باید برنده شود
 const priced = (id, price) => ({
   id,
   items: [{ productId: "p1", name: "نان", price, quantity: 2 }],
   total: price * 2,
 });
-const originalInvoices = [priced("a", 10000), priced("b", 20000), priced("c", 30000), priced("d", 40000)];
-const randomInvoices = [priced("a", 17), priced("b", 9182), priced("c", 4), priced("d", 555)];
-assert.equal(preferCloudValue(randomInvoices, originalInvoices, "invoices"), true);
-assert.equal(preferCloudValue(originalInvoices, originalInvoices, "invoices"), false);
-// یک فاکتور ویرایش‌شده توسط خود کاربر نباید کل تاریخچه را از ابر بگیرد
-const oneEdited = [priced("a", 12000), priced("b", 20000), priced("c", 30000), priced("d", 40000)];
-assert.equal(preferCloudValue(oneEdited, originalInvoices, "invoices"), false);
+const originalInvoices = [priced("a", 10000), priced("b", 20000), priced("c", 30000)];
+const randomPlusNew = [priced("a", 17), priced("b", 9182), priced("c", 4), priced("new", 50000)];
+const merged = mergeInvoicesKeepAll(randomPlusNew, originalInvoices);
+assert.equal(merged.length, 4, "فاکتور جدید محلی نباید حذف شود");
+assert.deepEqual(merged.find((i) => i.id === "a").items[0].price, 10000);
+assert.deepEqual(merged.find((i) => i.id === "new").items[0].price, 50000);
+const recovered = mergeInvoicesKeepAll([priced("a", 17)], originalInvoices);
+assert.equal(recovered.length, 3, "فاکتور پشتیبان که از زنده حذف شده بود برمی‌گردد");
+assert.equal(
+  preferCloudValue(randomPlusNew, originalInvoices, "invoices"),
+  false,
+  "کل تاریخچه نباید با ابر جایگزین شود",
+);
 
 console.log("✓ catalog-integrity: همه‌ی بررسی‌ها موفق");

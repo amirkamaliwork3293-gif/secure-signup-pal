@@ -1,20 +1,21 @@
 -- ════════════════════════════════════════════════════════════════════════════
--- برگرداندن قیمت و شمارهٔ فاکتور از آخرین نسخهٔ پشتیبانِ قبل از خرابکاری.
+-- بازیابی امن قیمت فاکتور — هیچ فاکتوری حذف نمی‌شود.
 --
 -- این فایل را کامل کپی کنید → سوپابیس → SQL Editor → Run.
 --
--- کد مخربی داخل برنامه نیست. هکر با کلید دیتابیس قیمت اقلام فاکتور را عوض کرد.
--- اسکریپت قبلی فقط اسم‌های چینی/فحاشی را می‌دید؛ قیمت تصادفی را برنمی‌گرداند.
--- بعد از رفع خطای ۴۰۳، گوشیِ بعضی کاربرها همان فاکتور خراب را دوباره ذخیره کرد.
+-- SQL قبلی کل فهرست فاکتور را عوض می‌کرد. این نسخه آن کار را نمی‌کند.
+-- اگر آن یکی را هنوز Run نکرده‌اید، همان را نادیده بگیرید و فقط این را بزنید.
 --
--- چه می‌کند:
---   ۱) وضعیت فعلی را در پشتیبان نگه می‌دارد (قابل برگشت).
---   ۲) برای هر کاربر، آخرین پشتیبانِ سالمِ فاکتور قبل از
---      ۲۰۲۶-۰۸-۲۸ ساعت ۰۶:۰۰ UTC را پیدا می‌کند.
---   ۳) همان فاکتورها را برمی‌گرداند (قیمت و شمارهٔ اصلی).
---
--- بعد از Run: به کاربر بگویید اپ را کامل ببندد (از برنامه‌های اخیر حذف کند)
--- و دوباره باز کند تا گوشی نسخهٔ ابری را بگیرد.
+-- چه می‌کند (و چه نمی‌کند):
+--   • هیچ فاکتوری پاک نمی‌شود.
+--   • کالا، مشتری، تنظیمات، فاکتورِ بازِ فعلی دست نمی‌خورند.
+--   • فقط اگر همان شماره فاکتور در پشتیبانِ ۲۷ اوت باشد، قیمت اقلام
+--     همان فاکتور از پشتیبان کپی می‌شود.
+--   • فاکتورهایی که فقط در پشتیبان هستند (حذف‌شده توسط هکر) اضافه می‌شوند.
+--   • فاکتورهایی که فقط امروز ثبت شده‌اند سر جایشان می‌مانند.
+--   • پشتیبان فقط از ۲۶ و ۲۷ اوت انتخاب می‌شود — نه امروز (داده‌ی خراب)
+--     و نه هفته‌های قبل.
+--   • قبل از تغییر، یک نسخه از وضعیت فعلی در backups ذخیره می‌شود.
 -- ════════════════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION public.kamix_invoices_is_array(j jsonb)
@@ -46,46 +47,101 @@ AS $$
   );
 $$;
 
+-- ادغام: همه فاکتورهای زنده می‌مانند؛ قیمتِ شناسه‌های مشترک از پشتیبان می‌آید.
+CREATE OR REPLACE FUNCTION public.kamix_merge_invoices_keep_all(live jsonb, backup jsonb)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT COALESCE(
+    (
+      SELECT jsonb_agg(q.inv ORDER BY q.ord)
+      FROM (
+        SELECT
+          CASE
+            WHEN b.inv IS NULL THEN l.inv
+            WHEN COALESCE(l.inv->'items', 'null'::jsonb) IS DISTINCT FROM COALESCE(b.inv->'items', 'null'::jsonb)
+              OR COALESCE(l.inv->>'total', '') IS DISTINCT FROM COALESCE(b.inv->>'total', '')
+            THEN l.inv || jsonb_build_object(
+              'items', b.inv->'items',
+              'total', b.inv->'total',
+              'subtotal', b.inv->'subtotal',
+              'discountAmount', b.inv->'discountAmount',
+              'discountPercent', b.inv->'discountPercent',
+              'taxPercent', b.inv->'taxPercent'
+            )
+            ELSE l.inv
+          END AS inv,
+          l.ord
+        FROM jsonb_array_elements(COALESCE(live, '[]'::jsonb)) WITH ORDINALITY AS l(inv, ord)
+        LEFT JOIN LATERAL (
+          SELECT x.inv
+            FROM jsonb_array_elements(COALESCE(backup, '[]'::jsonb)) x(inv)
+           WHERE x.inv->>'id' = l.inv->>'id'
+             AND COALESCE(x.inv->>'id', '') <> ''
+           LIMIT 1
+        ) b ON true
+
+        UNION ALL
+
+        SELECT b.inv, 1000000 + b.ord
+        FROM jsonb_array_elements(COALESCE(backup, '[]'::jsonb)) WITH ORDINALITY AS b(inv, ord)
+        WHERE COALESCE(b.inv->>'id', '') <> ''
+          AND NOT EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(COALESCE(live, '[]'::jsonb)) l(inv)
+             WHERE l.inv->>'id' = b.inv->>'id'
+          )
+      ) q
+    ),
+    '[]'::jsonb
+  );
+$$;
+
 REVOKE ALL ON FUNCTION public.kamix_invoices_is_array(jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.kamix_invoices_vandalized(jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.kamix_merge_invoices_keep_all(jsonb, jsonb) FROM PUBLIC, anon, authenticated;
 
--- آخرین پشتیبانِ فاکتور قبل از اینکه ذخیرهٔ خراب دوباره روی ابر برود
-WITH cutoff AS (
-  SELECT timestamptz '2026-08-28 06:00:00+00' AS at
+-- پنجرهٔ امن: از ۲۶ اوت تا قبل از ۲۸ اوت (امروز = دادهٔ خراب؛ قدیمی‌تر = از دست رفتن کار ۲۷ اوت)
+WITH window AS (
+  SELECT
+    timestamptz '2026-08-26 00:00:00+00' AS from_at,
+    timestamptz '2026-08-28 00:00:00+00' AS to_at
 ),
 picked AS (
   SELECT DISTINCT ON (d.user_id)
          d.user_id,
-         b.id AS backup_id,
          b.created_at AS backup_at,
          b.snapshot
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN cutoff c
-   WHERE b.created_at < c.at
+    CROSS JOIN window w
+   WHERE b.created_at >= w.from_at
+     AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')
      AND jsonb_array_length(COALESCE(b.snapshot->'invoices', '[]'::jsonb)) >= 1
      AND NOT public.kamix_invoices_vandalized(b.snapshot->'invoices')
    ORDER BY d.user_id, b.created_at DESC
 ),
-changed AS (
+planned AS (
   SELECT p.user_id,
-         p.backup_id,
          p.backup_at,
-         p.snapshot,
-         jsonb_array_length(COALESCE(d.invoices, '[]'::jsonb)) AS live_n,
-         jsonb_array_length(COALESCE(p.snapshot->'invoices', '[]'::jsonb)) AS backup_n
+         d.invoices AS live_invoices,
+         public.kamix_merge_invoices_keep_all(d.invoices, p.snapshot->'invoices') AS merged
     FROM picked p
     JOIN public.user_data d ON d.user_id = p.user_id
-   WHERE COALESCE(d.invoices, '[]'::jsonb) IS DISTINCT FROM COALESCE(p.snapshot->'invoices', '[]'::jsonb)
 )
 INSERT INTO public.user_data_backups (user_id, snapshot)
 SELECT d.user_id, to_jsonb(d)
   FROM public.user_data d
-  JOIN changed c ON c.user_id = d.user_id;
+  JOIN planned x ON x.user_id = d.user_id
+ WHERE COALESCE(x.live_invoices, '[]'::jsonb) IS DISTINCT FROM COALESCE(x.merged, '[]'::jsonb);
 
-WITH cutoff AS (
-  SELECT timestamptz '2026-08-28 06:00:00+00' AS at
+WITH window AS (
+  SELECT
+    timestamptz '2026-08-26 00:00:00+00' AS from_at,
+    timestamptz '2026-08-28 00:00:00+00' AS to_at
 ),
 picked AS (
   SELECT DISTINCT ON (d.user_id)
@@ -93,70 +149,48 @@ picked AS (
          b.snapshot
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN cutoff c
-   WHERE b.created_at < c.at
+    CROSS JOIN window w
+   WHERE b.created_at >= w.from_at
+     AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')
      AND jsonb_array_length(COALESCE(b.snapshot->'invoices', '[]'::jsonb)) >= 1
      AND NOT public.kamix_invoices_vandalized(b.snapshot->'invoices')
    ORDER BY d.user_id, b.created_at DESC
 )
 UPDATE public.user_data d
-   SET invoices = COALESCE(p.snapshot->'invoices', d.invoices),
-       current_invoice = COALESCE(p.snapshot->'current_invoice', d.current_invoice),
+   SET invoices = public.kamix_merge_invoices_keep_all(d.invoices, p.snapshot->'invoices'),
        updated_at = now()
   FROM picked p
  WHERE d.user_id = p.user_id
-   AND COALESCE(d.invoices, '[]'::jsonb) IS DISTINCT FROM COALESCE(p.snapshot->'invoices', '[]'::jsonb);
+   AND COALESCE(d.invoices, '[]'::jsonb)
+       IS DISTINCT FROM public.kamix_merge_invoices_keep_all(d.invoices, p.snapshot->'invoices');
 
--- گزارش: چند حساب برگردانده شد
-WITH cutoff AS (
-  SELECT timestamptz '2026-08-28 06:00:00+00' AS at
+-- گزارش: برای هر حساب، تعداد فاکتور کم نمی‌شود
+WITH window AS (
+  SELECT
+    timestamptz '2026-08-26 00:00:00+00' AS from_at,
+    timestamptz '2026-08-28 00:00:00+00' AS to_at
 ),
 picked AS (
   SELECT DISTINCT ON (d.user_id)
          d.user_id,
-         b.created_at AS backup_at,
-         jsonb_array_length(COALESCE(b.snapshot->'invoices', '[]'::jsonb)) AS backup_n
+         b.created_at AS backup_at
     FROM public.user_data d
     JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN cutoff c
-   WHERE b.created_at < c.at
+    CROSS JOIN window w
+   WHERE b.created_at >= w.from_at
+     AND b.created_at < w.to_at
      AND public.kamix_invoices_is_array(b.snapshot->'invoices')
      AND jsonb_array_length(COALESCE(b.snapshot->'invoices', '[]'::jsonb)) >= 1
      AND NOT public.kamix_invoices_vandalized(b.snapshot->'invoices')
    ORDER BY d.user_id, b.created_at DESC
 )
-SELECT p.username,
-       p.first_name,
-       p.last_name,
+SELECT pr.username,
+       pr.first_name,
+       pr.last_name,
        k.backup_at,
-       k.backup_n AS invoice_count,
-       (SELECT e->>'id' FROM jsonb_array_elements(COALESCE(d.invoices, '[]'::jsonb)) e LIMIT 1) AS sample_invoice_id
+       jsonb_array_length(COALESCE(d.invoices, '[]'::jsonb)) AS invoice_count_now
   FROM picked k
-  JOIN public.profiles p ON p.id = k.user_id
+  JOIN public.profiles pr ON pr.id = k.user_id
   JOIN public.user_data d ON d.user_id = k.user_id
- ORDER BY p.last_name, p.first_name;
-
--- حساب‌هایی که فاکتور دارند ولی پشتیبانِ قبل از cutoff پیدا نشد
-WITH cutoff AS (
-  SELECT timestamptz '2026-08-28 06:00:00+00' AS at
-),
-picked AS (
-  SELECT DISTINCT ON (d.user_id) d.user_id
-    FROM public.user_data d
-    JOIN public.user_data_backups b ON b.user_id = d.user_id
-    CROSS JOIN cutoff c
-   WHERE b.created_at < c.at
-     AND public.kamix_invoices_is_array(b.snapshot->'invoices')
-     AND jsonb_array_length(COALESCE(b.snapshot->'invoices', '[]'::jsonb)) >= 1
-     AND NOT public.kamix_invoices_vandalized(b.snapshot->'invoices')
-   ORDER BY d.user_id, b.created_at DESC
-)
-SELECT p.username, p.first_name, p.last_name,
-       jsonb_array_length(COALESCE(d.invoices, '[]'::jsonb)) AS live_invoices
-  FROM public.user_data d
-  JOIN public.profiles p ON p.id = d.user_id
- WHERE jsonb_array_length(COALESCE(d.invoices, '[]'::jsonb)) >= 1
-   AND d.user_id NOT IN (SELECT user_id FROM picked)
- ORDER BY live_invoices DESC, p.username
- LIMIT 50;
+ ORDER BY pr.last_name, pr.first_name;

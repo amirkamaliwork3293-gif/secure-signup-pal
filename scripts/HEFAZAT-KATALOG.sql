@@ -34,6 +34,7 @@ REVOKE ALL ON FUNCTION public.kamix_json_looks_vandalized(jsonb) FROM PUBLIC, an
 CREATE OR REPLACE FUNCTION public.protect_user_data_catalog()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
@@ -74,6 +75,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.protect_user_data_catalog() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS user_data_protect_catalog ON public.user_data;
 CREATE TRIGGER user_data_protect_catalog

@@ -777,6 +777,21 @@ async function dropVandalizedCatalogPushes(
   }
 }
 
+function isCloudPermissionError(
+  error: { code?: string; message?: string; status?: number } | null | undefined,
+): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const msg = String(error.message || "").toLowerCase();
+  return (
+    error.status === 403 ||
+    code === "42501" ||
+    code === "PGRST301" ||
+    msg.includes("permission denied") ||
+    msg.includes("row-level security")
+  );
+}
+
 async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
@@ -805,6 +820,15 @@ async function flushCloudPush() {
     let { error } = await supabase
       .from("user_data")
       .upsert(payload as never, { onConflict: "user_id" });
+    if (isCloudPermissionError(error)) {
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (!refreshError) {
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+    }
     // If the customers column doesn't exist yet in this deployment, retry without
     // it so syncing of products/invoices/settings is never blocked.
     if (error && /customers/.test(error.message) && "customers" in payload) {

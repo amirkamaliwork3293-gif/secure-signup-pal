@@ -1,25 +1,14 @@
--- جلوگیری از بازنویسی کاتالوگ سالم با فحاشی / نام‌های چینی.
--- اگر اپ قدیمی هنوز روی گوشی کاربر باشد، این تریگر نسخهٔ ابری را نگه می‌دارد.
+-- ════════════════════════════════════════════════════════════════════════════
+-- ذخیره ابری کاربران با خطای 403 قطع شده بود.
+-- این فایل را کامل کپی کنید → سوپابیس → SQL Editor → Run.
+--
+-- علت: تریگر محافظ کاتالوگ با دسترسی خودِ کاربر اجرا می‌شد و تابع کمکی‌اش
+-- برای کاربر قفل بود؛ برای همین UPDATE روی user_data رد می‌شد.
+-- بعد از Run، یک‌بار در سایت کالا یا فاکتور را ذخیره کنید؛ خطای کنسول باید برود.
+-- ════════════════════════════════════════════════════════════════════════════
 
-CREATE OR REPLACE FUNCTION public.kamix_json_looks_vandalized(j jsonb)
-RETURNS boolean
-LANGUAGE sql
-IMMUTABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT j IS NOT NULL AND (
-    j::text ~ 'جنده'
-    OR j::text ~ 'کسکش'
-    OR j::text ~ 'کیر'
-    OR j::text ~ 'کص'
-    OR j::text ~ 'گایید'
-    OR j::text ~ 'حرومزاده'
-    OR j::text ~ 'لاشی'
-    OR j::text ~ '[一-鿿ぁ-ゟァ-ヿ]'
-  );
-$$;
-
-REVOKE ALL ON FUNCTION public.kamix_json_looks_vandalized(jsonb) FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_data TO authenticated;
+GRANT ALL ON public.user_data TO service_role;
 
 CREATE OR REPLACE FUNCTION public.protect_user_data_catalog()
 RETURNS trigger
@@ -73,3 +62,11 @@ CREATE TRIGGER user_data_protect_catalog
   BEFORE UPDATE ON public.user_data
   FOR EACH ROW
   EXECUTE FUNCTION public.protect_user_data_catalog();
+
+SELECT
+  p.prosecdef AS trigger_is_security_definer,
+  has_table_privilege('authenticated', 'public.user_data', 'UPDATE') AS authenticated_can_update
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+  AND p.proname = 'protect_user_data_catalog';

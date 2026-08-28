@@ -1,25 +1,8 @@
--- جلوگیری از بازنویسی کاتالوگ سالم با فحاشی / نام‌های چینی.
--- اگر اپ قدیمی هنوز روی گوشی کاربر باشد، این تریگر نسخهٔ ابری را نگه می‌دارد.
+-- تریگر محافظ کاتالوگ باید SECURITY DEFINER باشد؛ وگرنه UPDATE کاربر با 403 رد می‌شود
+-- چون EXECUTE تابع kamix_json_looks_vandalized از authenticated گرفته شده است.
 
-CREATE OR REPLACE FUNCTION public.kamix_json_looks_vandalized(j jsonb)
-RETURNS boolean
-LANGUAGE sql
-IMMUTABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT j IS NOT NULL AND (
-    j::text ~ 'جنده'
-    OR j::text ~ 'کسکش'
-    OR j::text ~ 'کیر'
-    OR j::text ~ 'کص'
-    OR j::text ~ 'گایید'
-    OR j::text ~ 'حرومزاده'
-    OR j::text ~ 'لاشی'
-    OR j::text ~ '[一-鿿ぁ-ゟァ-ヿ]'
-  );
-$$;
-
-REVOKE ALL ON FUNCTION public.kamix_json_looks_vandalized(jsonb) FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_data TO authenticated;
+GRANT ALL ON public.user_data TO service_role;
 
 CREATE OR REPLACE FUNCTION public.protect_user_data_catalog()
 RETURNS trigger

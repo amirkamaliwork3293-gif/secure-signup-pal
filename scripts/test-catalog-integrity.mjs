@@ -5,7 +5,9 @@
 import assert from "node:assert/strict";
 import {
   catalogLooksVandalized,
+  mergeInvoicePricesFromCloud,
   mergeInvoicesKeepAll,
+  mergeProductPricesFromCloud,
   preferCloudValue,
   textLooksVandalized,
 } from "../src/lib/catalog-integrity.ts";
@@ -103,5 +105,36 @@ assert.equal(
   false,
   "کل تاریخچه نباید با ابر جایگزین شود",
 );
+
+const vandalProducts = [
+  { id: "p1", name: "کبریت", price: 9999 },
+  { id: "p2", name: "صابون", price: 9999 },
+  { id: "p3", name: "کالای جدید", price: 12000 },
+];
+const backupProducts = [
+  { id: "p1", name: "کبریت", price: 25000 },
+  { id: "p2", name: "صابون", price: 18000 },
+];
+const fixedProducts = mergeProductPricesFromCloud(vandalProducts, backupProducts);
+assert.equal(fixedProducts.length, 3);
+assert.equal(fixedProducts.find((p) => p.id === "p1").price, 25000);
+assert.equal(fixedProducts.find((p) => p.id === "p3").price, 12000, "کالای جدید حذف نشود");
+
+const vandalInv = [
+  {
+    id: "a",
+    items: [{ productId: "p1", name: "کبریت", price: 9999, quantity: 1 }],
+    total: 9999,
+  },
+];
+const backupInv = [
+  {
+    id: "a",
+    items: [{ productId: "p1", name: "کبریت", price: 25000, quantity: 1 }],
+    total: 25000,
+  },
+];
+const fixedInv = mergeInvoicePricesFromCloud(vandalInv, backupInv, backupProducts);
+assert.equal(fixedInv[0].items[0].price, 25000);
 
 console.log("✓ catalog-integrity: همه‌ی بررسی‌ها موفق");

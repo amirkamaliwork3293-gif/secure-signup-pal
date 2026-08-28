@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { submitPasswordResetRequest } from "@/lib/auth.functions";
+import { getPublicSettings, submitPasswordResetRequest } from "@/lib/auth.functions";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
+import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
 import { ArrowRight, KeyRound, Loader2, Receipt, CheckCircle2 } from "lucide-react";
 
 export const Route = createFileRoute("/forgot-password")({
@@ -27,6 +29,19 @@ function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileReset, setTurnstileReset] = useState(0);
+
+  useEffect(() => {
+    getPublicSettings()
+      .then((data) => {
+        if (data.turnstile_site_key) setTurnstileSiteKey(data.turnstile_site_key);
+      })
+      .catch(() => {
+        /* widget stays hidden until keys are configured */
+      });
+  }, []);
 
   const handleSubmit = async () => {
     setError("");
@@ -38,13 +53,24 @@ function ForgotPasswordPage() {
       setError("شماره موبایل را به‌صورت ۰۹xxxxxxxxx وارد کنید.");
       return;
     }
+    if (turnstileSiteKey && !turnstileToken) {
+      setError(TURNSTILE_REQUIRED_ERROR);
+      return;
+    }
     setLoading(true);
     try {
       await submit({
-        data: { first_name: firstName.trim(), last_name: lastName.trim(), phone: phone.trim() },
+        data: {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          phone: phone.trim(),
+          turnstile_token: turnstileToken || undefined,
+        },
       });
       setDone(true);
     } catch (e: unknown) {
+      setTurnstileToken("");
+      setTurnstileReset((n) => n + 1);
       setError((e as { message?: string })?.message || "ارسال درخواست ناموفق بود.");
     }
     setLoading(false);
@@ -100,6 +126,11 @@ function ForgotPasswordPage() {
             {error && (
               <div className="rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">{error}</div>
             )}
+            <TurnstileWidget
+              siteKey={turnstileSiteKey}
+              onToken={setTurnstileToken}
+              resetSignal={turnstileReset}
+            />
             <button
               type="button"
               onClick={() => void handleSubmit()}

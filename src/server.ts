@@ -57,13 +57,13 @@ function cspReportOnly(): string {
   return [
     "default-src 'self'",
     // 'unsafe-inline' لازم است تا اسکریپت تشخیص اپ و استایل‌های inline کار کنند.
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
-    `connect-src 'self' ${SUPABASE_ORIGIN} https://api.anthropic.com`.trim(),
-    "frame-src https://www.aparat.com https://www.youtube.com https://player.vimeo.com",
+    `connect-src 'self' ${SUPABASE_ORIGIN} https://api.anthropic.com https://challenges.cloudflare.com`.trim(),
+    "frame-src https://www.aparat.com https://www.youtube.com https://player.vimeo.com https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

@@ -22,5 +22,6 @@ export function getServerConfig() {
     // Add server-only values here, e.g.:
     //   databaseUrl: process.env.DATABASE_URL,
     //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    //   turnstileSecretKey: process.env.TURNSTILE_SECRET_KEY,
   };
 }

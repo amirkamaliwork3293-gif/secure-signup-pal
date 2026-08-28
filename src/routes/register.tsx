@@ -7,8 +7,10 @@ import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { markPendingOnboarding } from "@/lib/onboarding";
+import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
@@ -84,6 +86,9 @@ function RegisterPage() {
   const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
   const [honeypot, setHoneypot] = useState("");
   const formStartedAt = useRef(Date.now());
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const [card, setCard] = useState({
     card_number: "",
@@ -108,6 +113,7 @@ function RegisterPage() {
           bank_name: data.bank_name || "",
         });
         setPlansCfg(data.plans);
+        if (data.turnstile_site_key) setTurnstileSiteKey(data.turnstile_site_key);
       })
       .catch(() => {
         /* leave defaults */
@@ -173,6 +179,7 @@ function RegisterPage() {
       return;
     }
     if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
+    if (turnstileSiteKey && !turnstileToken) { setError(TURNSTILE_REQUIRED_ERROR); return; }
     setLoading(true);
     try {
       let path: string | null = null;
@@ -217,11 +224,14 @@ function RegisterPage() {
           phone: phone.trim() || undefined,
           website: honeypot,
           form_started_at: formStartedAt.current,
+          turnstile_token: turnstileToken || undefined,
         },
       });
       markPendingOnboarding(usernameField);
       setSuccess(true);
     } catch (e: any) {
+      setTurnstileToken("");
+      setTurnstileReset((n) => n + 1);
       setError(e?.message || "خطا در ارسال درخواست.");
     }
     setLoading(false);
@@ -536,6 +546,12 @@ function RegisterPage() {
         {error && (
           <div className="rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">{error}</div>
         )}
+
+        <TurnstileWidget
+          siteKey={turnstileSiteKey}
+          onToken={setTurnstileToken}
+          resetSignal={turnstileReset}
+        />
 
         <button
           type="button"

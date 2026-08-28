@@ -3,10 +3,7 @@
  * اجرا: node --experimental-strip-types scripts/test-turnstile.mjs
  */
 import assert from "node:assert/strict";
-import {
-  isTurnstileHostnameAllowed,
-  normalizeTurnstileToken,
-} from "../src/lib/turnstile.ts";
+import { isTurnstileHostnameAllowed, normalizeTurnstileToken } from "../src/lib/turnstile.ts";
 
 assert.equal(isTurnstileHostnameAllowed("kamixapp.ir"), true);
 assert.equal(isTurnstileHostnameAllowed("www.kamixapp.ir"), true);

@@ -82,7 +82,7 @@ function withSecurityHeaders(response: Response): Response {
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   // دوربین (اسکن بارکد) و میکروفون (ثبت صوتی) فقط برای خود اپ؛ بقیه بسته.
-  headers.set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()");
+  headers.set("Permissions-Policy", "camera=*, microphone=*, geolocation=(), payment=(), usb=()");
   // این سه دستور CSP هیچ‌کدام روی اپ فعلی اثر منفی ندارند و اجباری‌اند.
   headers.set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
 

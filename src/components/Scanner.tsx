@@ -112,8 +112,11 @@ function zxingDecode(imageData: ImageData, reader: MultiFormatReader): string | 
 
 const DEVICE_TIER: "low" | "mid" | "high" = (() => {
   if (typeof navigator === "undefined") return "high"; // SSR
+  const mem = Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0);
   const cores = navigator.hardwareConcurrency ?? 2;
-  if (cores >= 8) return "high";
+  if (mem > 0 && mem <= 2) return "low";
+  if (mem > 0 && mem <= 4) return "mid";
+  if (cores >= 8 && (mem === 0 || mem >= 6)) return "high";
   if (cores >= 4) return "mid";
   return "low";
 })();
@@ -283,16 +286,28 @@ export function Scanner({ onDetected, paused }: Props) {
       const c = cropRef.current;
       const sx = vw * c.x, sy = vh * c.y;
       const sw = vw * c.w, sh = vh * c.h;
-      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, DW, DH);
-      fpsCountRef.current++; // counts drawn frames
+      const now = performance.now();
+      const minInterval = nativeRef.current
+        ? (DEVICE_TIER === "low" ? 600 : 350)
+        : workerRef.current
+          ? (DEVICE_TIER === "low" ? 180 : 90)
+          : (DEVICE_TIER === "low" ? 350 : 200);
+      const zxingDue = now - lastZxingAt.current >= minInterval;
 
-      // ── Path A: Native BarcodeDetector ─────────────────────────────────
+      // پیش‌نمایش از تگ video است؛ کانواس فقط برای ZXing لازم است.
+      // با Native، هر فریم کانواس نکش تا گوشی روان بماند.
+      if (!nativeRef.current || zxingDue) {
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, DW, DH);
+      }
+      fpsCountRef.current++;
+
+      // ── Path A: Native BarcodeDetector روی خود ویدیو (سریع‌تر از کانواس) ─
       if (nativeRef.current) {
         if (!nativeInflight.current) {
           const gen = ++nativeGenRef.current;
           nativeInflight.current = true;
           nativeRef.current
-            .detect(offscreen.current as CanvasImageSource)
+            .detect(video)
             .then((codes) => {
               nativeInflight.current = false;
               if (gen < nativeRunRef.current) return;
@@ -304,13 +319,7 @@ export function Scanner({ onDetected, paused }: Props) {
       }
 
       // ── Path B: ZXing (Worker preferred, sync fallback) ────────────────
-      const now = performance.now();
-      const minInterval = nativeRef.current
-        ? (DEVICE_TIER === "low" ? 600 : 350)
-        : workerRef.current
-          ? (DEVICE_TIER === "low" ? 180 : 90)
-          : (DEVICE_TIER === "low" ? 350 : 200);
-      if (now - lastZxingAt.current >= minInterval) {
+      if (zxingDue) {
         if (workerRef.current) {
           if (!workerBusy.current) {
             lastZxingAt.current = now;
@@ -421,15 +430,6 @@ export function Scanner({ onDetected, paused }: Props) {
           // Continuous AF — most critical for fast focus on barcodes
           if (Array.isArray(caps.focusMode) && (caps.focusMode as string[]).includes("continuous"))
             adv.push({ focusMode: "continuous" });
-          // Macro / minimum focus distance — lets the camera lock on tiny
-          // barcodes held very close without going blurry.
-          const fd = caps.focusDistance as { min?: number } | undefined;
-          if (fd && typeof fd.min === "number")
-            adv.push({ focusDistance: fd.min });
-          // Modern Chrome on Android exposes a dedicated macro focusRange.
-          if (Array.isArray((caps as Record<string, unknown>).focusRange) &&
-              ((caps as Record<string, unknown>).focusRange as string[]).includes("macro"))
-            adv.push({ focusRange: "macro" });
           // Continuous AE — prevents dark frames during scan
           if (Array.isArray(caps.exposureMode) && (caps.exposureMode as string[]).includes("continuous"))
             adv.push({ exposureMode: "continuous" });

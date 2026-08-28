@@ -278,17 +278,71 @@ function restorePriceKeys(
   return changed ? next : live;
 }
 
+export type CatalogMergeOpts = {
+  /**
+   * اگر true باشد، ردیف‌هایی که فقط در ابر هستند اضافه می‌شوند.
+   * برای همگام‌سازی روزمره باید false بماند وگرنه حذف فاکتور/کالا از گوشی
+   * با نسخهٔ قدیمی ابر برمی‌گردد.
+   */
+  adoptCloudOnly?: boolean;
+};
+
+function appendCloudOnly(
+  out: unknown[],
+  seen: Set<string>,
+  cloudArr: unknown[],
+  adopt: boolean,
+) {
+  if (!adopt) return;
+  for (const row of cloudArr) {
+    const rec = asRecord(row);
+    const id = rec && typeof rec.id === "string" ? rec.id : "";
+    if (id && !seen.has(id)) out.push(row);
+  }
+}
+
+export function catalogHasVandalPrice(value: unknown, field: "products" | "invoices"): boolean {
+  if (!Array.isArray(value)) return false;
+  if (field === "products") {
+    for (const row of value) {
+      const rec = asRecord(row);
+      if (!rec) continue;
+      for (const key of PRODUCT_PRICE_KEYS) {
+        if (isVandalPrice(rec[key])) return true;
+      }
+    }
+    return false;
+  }
+  for (const inv of value) {
+    const rec = asRecord(inv);
+    const items = rec && Array.isArray(rec.items) ? rec.items : [];
+    for (const it of items) {
+      const item = asRecord(it);
+      if (!item) continue;
+      for (const key of LINE_PRICE_KEYS) {
+        if (isVandalPrice(item[key])) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
- * قیمت ۹۹۹۹ جعلی هکر را از روی ابر درست می‌کند؛ هیچ کالایی حذف نمی‌شود.
+ * قیمت ۹۹۹۹ جعلی هکر را از روی ابر درست می‌کند؛ هیچ کالایی از محلی حذف نمی‌شود.
+ * ردیف حذف‌شدهٔ محلی به‌صورت پیش‌فرض از ابر برنمی‌گردد.
  */
-export function mergeProductPricesFromCloud(local: unknown, cloud: unknown): unknown[] {
+export function mergeProductPricesFromCloud(
+  local: unknown,
+  cloud: unknown,
+  opts?: CatalogMergeOpts,
+): unknown[] {
   const localArr = Array.isArray(local) ? local : [];
   const cloudArr = Array.isArray(cloud) ? cloud : [];
   const cloudById = new Map<string, Record<string, unknown>>();
   for (const row of cloudArr) {
     const rec = asRecord(row);
     const id = rec && typeof rec.id === "string" ? rec.id : "";
-    if (id) cloudById.set(id, rec);
+    if (rec && id) cloudById.set(id, rec);
   }
   const seen = new Set<string>();
   const out: unknown[] = [];
@@ -302,11 +356,7 @@ export function mergeProductPricesFromCloud(local: unknown, cloud: unknown): unk
     if (id) seen.add(id);
     out.push(restorePriceKeys(rec, id ? cloudById.get(id) ?? null : null, PRODUCT_PRICE_KEYS));
   }
-  for (const row of cloudArr) {
-    const rec = asRecord(row);
-    const id = rec && typeof rec.id === "string" ? rec.id : "";
-    if (id && !seen.has(id)) out.push(row);
-  }
+  appendCloudOnly(out, seen, cloudArr, !!opts?.adoptCloudOnly);
   return out;
 }
 
@@ -317,7 +367,7 @@ function restoreInvoiceItems(inv: Record<string, unknown>, backupInv: Record<str
   for (const it of backupItems) {
     const rec = asRecord(it);
     const pid = rec && typeof rec.productId === "string" ? rec.productId : "";
-    if (pid && !backupByProduct.has(pid)) backupByProduct.set(pid, rec);
+    if (rec && pid && !backupByProduct.has(pid)) backupByProduct.set(pid, rec);
   }
   const nextItems = items.map((it) => {
     const rec = asRecord(it);
@@ -335,7 +385,12 @@ function restoreInvoiceItems(inv: Record<string, unknown>, backupInv: Record<str
 }
 
 /** فاکتورهای محلی می‌مانند؛ فقط ردیف‌هایی که قیمت ۹۹۹۹ دارند از ابر/کالا درست می‌شوند. */
-export function mergeInvoicePricesFromCloud(local: unknown, cloud: unknown, cloudProducts?: unknown): unknown[] {
+export function mergeInvoicePricesFromCloud(
+  local: unknown,
+  cloud: unknown,
+  cloudProducts?: unknown,
+  opts?: CatalogMergeOpts,
+): unknown[] {
   const localArr = Array.isArray(local) ? local : [];
   const cloudArr = Array.isArray(cloud) ? cloud : [];
   const productsById = new Map<string, Record<string, unknown>>();
@@ -343,14 +398,14 @@ export function mergeInvoicePricesFromCloud(local: unknown, cloud: unknown, clou
     for (const row of cloudProducts) {
       const rec = asRecord(row);
       const id = rec && typeof rec.id === "string" ? rec.id : "";
-      if (id) productsById.set(id, rec);
+      if (rec && id) productsById.set(id, rec);
     }
   }
   const cloudById = new Map<string, Record<string, unknown>>();
   for (const row of cloudArr) {
     const rec = asRecord(row);
     const id = rec && typeof rec.id === "string" ? rec.id : "";
-    if (id) cloudById.set(id, rec);
+    if (rec && id) cloudById.set(id, rec);
   }
   const seen = new Set<string>();
   const out: unknown[] = [];
@@ -364,11 +419,7 @@ export function mergeInvoicePricesFromCloud(local: unknown, cloud: unknown, clou
     if (id) seen.add(id);
     out.push(restoreInvoiceItems(rec, id ? cloudById.get(id) ?? null : null, productsById));
   }
-  for (const row of cloudArr) {
-    const rec = asRecord(row);
-    const id = rec && typeof rec.id === "string" ? rec.id : "";
-    if (id && !seen.has(id)) out.push(row);
-  }
+  appendCloudOnly(out, seen, cloudArr, !!opts?.adoptCloudOnly);
   return out;
 }
 
@@ -376,17 +427,13 @@ export function catalogLooksVandalized(value: unknown, field: ProtectedCatalogFi
   return inspectCatalog(value, field).vandalized;
 }
 
-function arrayLen(value: unknown): number | null {
-  return Array.isArray(value) ? value.length : null;
-}
-
 /**
  * آیا نسخهٔ ابری باید جایگزین نسخهٔ محلیِ همگام‌نشده شود؟
  *
  * - محلی فحاشی/چینی، ابر سالم → ابر
  * - ابر فحاشی، محلی سالم → محلی (تا ذخیره شود و ابر را درست کند)
- * - هر دو سالم، ولی محلی خیلی کوچک‌تر از ابر → ابر (کش ناقص بعد از بازیابی)
- * - هر دو سالم و اندازه نزدیک → محلی (ویرایش آفلاین واقعی)
+ * - فاکتور باز با کالا → هرگز با ابر خالی نشود
+ * - هر دو سالم → محلی (حذف و ویرایش واقعی کاربر)
  */
 export function preferCloudValue(
   local: unknown,
@@ -394,6 +441,11 @@ export function preferCloudValue(
   field: ProtectedCatalogField,
 ): boolean {
   if (cloud == null) return false;
+
+  if (field === "current_invoice") {
+    const items = (local as { items?: unknown[] } | null)?.items;
+    if (Array.isArray(items) && items.length > 0) return false;
+  }
 
   const localReport = inspectCatalog(local, field);
   const cloudReport = inspectCatalog(cloud, field);
@@ -403,19 +455,7 @@ export function preferCloudValue(
 
   if (localReport.vandalized && cloudReport.vandalized) {
     if (cloudReport.ratio + 0.08 < localReport.ratio) return true;
-    const localN = arrayLen(local);
-    const cloudN = arrayLen(cloud);
-    if (localN != null && cloudN != null) {
-      return cloudN > localN * 1.2 && cloudN >= localN + 8;
-    }
     return false;
-  }
-
-  const localN = arrayLen(local);
-  const cloudN = arrayLen(cloud);
-  if (localN != null && cloudN != null) {
-    if (cloudN >= 10 && localN === 0) return true;
-    if (cloudN >= 20 && localN * 2 < cloudN) return true;
   }
 
   return false;

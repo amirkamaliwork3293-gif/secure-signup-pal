@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  catalogHasVandalPrice,
   catalogLooksVandalized,
   mergeInvoicePricesFromCloud,
   mergeInvoicesKeepAll,
@@ -72,13 +73,18 @@ assert.equal(preferCloudValue(persianProducts, chineseGarbage, "products"), fals
 const localPlusOne = [...persianProducts, { id: "4", name: "ماست سه‌زال" }];
 assert.equal(preferCloudValue(localPlusOne, persianProducts, "products"), false);
 
-// بعد از بازیابی ابر: گوشی تقریباً خالی، ابر پر
+// بعد از بازیابی ابر: گوشی خالیِ همگام‌نشده دیگر ابر را برنمی‌گرداند
+// (حذف واقعی همهٔ کالاها). نسخهٔ ابری فقط اگر محلی فحاشی باشد برنده است.
 const manyCloud = Array.from({ length: 40 }, (_, i) => ({
   id: String(i),
   name: `کالای ${i}`,
 }));
-assert.equal(preferCloudValue([], manyCloud, "products"), true);
-assert.equal(preferCloudValue(manyCloud.slice(0, 10), manyCloud, "products"), true);
+assert.equal(preferCloudValue([], manyCloud, "products"), false);
+assert.equal(
+  preferCloudValue(manyCloud.slice(0, 10), manyCloud, "products"),
+  false,
+  "حذف بخشی از کالاها نباید همه را از ابر برگرداند",
+);
 
 // حذف معمولی چند کالا نباید ابر را برنده کند
 const slightlyFewer = manyCloud.slice(5);
@@ -99,12 +105,35 @@ assert.equal(merged.length, 4, "فاکتور جدید محلی نباید حذف
 assert.deepEqual(merged.find((i) => i.id === "a").items[0].price, 10000);
 assert.deepEqual(merged.find((i) => i.id === "new").items[0].price, 50000);
 const recovered = mergeInvoicesKeepAll([priced("a", 17)], originalInvoices);
-assert.equal(recovered.length, 3, "فاکتور پشتیبان که از زنده حذف شده بود برمی‌گردد");
+assert.equal(recovered.length, 3, "ابزار بازیابی یک‌باره می‌تواند فاکتور ابری را برگرداند");
 assert.equal(
   preferCloudValue(randomPlusNew, originalInvoices, "invoices"),
   false,
   "کل تاریخچه نباید با ابر جایگزین شود",
 );
+
+const afterUserDelete = mergeInvoicePricesFromCloud(
+  [priced("a", 10000), priced("b", 20000)],
+  originalInvoices,
+);
+assert.equal(afterUserDelete.length, 2, "فاکتور حذف‌شده از تاریخچه نباید از ابر برگردد");
+assert.equal(
+  afterUserDelete.some((i) => i.id === "c"),
+  false,
+);
+
+assert.equal(
+  preferCloudValue(
+    { id: "cur", items: [{ name: "شیر" }] },
+    { id: "cur", items: [] },
+    "current_invoice",
+  ),
+  false,
+  "فاکتور باز روی صفحه نباید با نسخهٔ خالی ابر پاک شود",
+);
+
+assert.equal(catalogHasVandalPrice([{ id: "p1", price: 9999 }], "products"), true);
+assert.equal(catalogHasVandalPrice([{ id: "p1", price: 25000 }], "products"), false);
 
 const vandalProducts = [
   { id: "p1", name: "کبریت", price: 9999 },

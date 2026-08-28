@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson } from "@/lib/search";
 import {
+  catalogHasVandalPrice,
   catalogLooksVandalized,
   isProtectedCatalogField,
   mergeInvoicePricesFromCloud,
@@ -773,6 +774,7 @@ async function dropVandalizedCatalogPushes(
     if (liveOk) {
       const cloudVal = live?.[field];
       if (field === "products") {
+        if (!catalogHasVandalPrice(localVal, "products")) continue;
         const merged = mergeProductPricesFromCloud(localVal, cloudVal);
         fieldsToPush[field] = merged;
         writeLocalOnly(PRODUCTS_KEY, merged);
@@ -780,6 +782,7 @@ async function dropVandalizedCatalogPushes(
         continue;
       }
       if (field === "invoices") {
+        if (!catalogHasVandalPrice(localVal, "invoices")) continue;
         const cloudProducts = mergeProductPricesFromCloud(
           localValueForCloudField("products"),
           live?.products,
@@ -994,8 +997,8 @@ export async function hydrateFromCloud(userId: string) {
       markCloudHydrated();
       return; // بلوک finally صف را flush می‌کند
     }
-    // بازنویسی کش محلی از ابر. فیلدهای dirty (ویرایش آفلاین) حفظ می‌شوند مگر
-    // اینکه کاتالوگ محلی خراب/فحاشی باشد یا خیلی فقیرتر از نسخهٔ ابری سالم.
+    // بازنویسی کش محلی از ابر. فیلدهای dirty (ویرایش آفلاین، از جمله حذف فاکتور)
+    // حفظ می‌شوند. فقط اگر محلی فحاشی باشد نسخهٔ سالم ابر جایگزین می‌شود.
     // نکته‌ی مهم: مجموعه‌ی dirty دوباره و همین‌الان خوانده می‌شود، چون ممکن است
     // کاربر در فاصله‌ی خواندن از سرور (چند صد میلی‌ثانیه) چیزی ثبت کرده باشد؛
     // با تکیه بر snapshot قدیمی، آن ثبت با داده‌ی سرور بازنویسی می‌شد و کاربر
@@ -1004,28 +1007,32 @@ export async function hydrateFromCloud(userId: string) {
     const overwrite = (field: string, key: string, value: unknown) => {
       if (value == null) return;
       if (field === "products") {
-        const merged = mergeProductPricesFromCloud(localValueForCloudField("products"), value);
-        writeLocalOnly(key, merged);
-        if (dirtyNow.has("products")) pendingPush.products = merged;
-        else {
+        if (dirtyNow.has("products")) {
+          const merged = mergeProductPricesFromCloud(localValueForCloudField("products"), value);
+          writeLocalOnly(key, merged);
+          pendingPush.products = merged;
+        } else {
+          writeLocalOnly(key, value);
           delete pendingPush.products;
           clearDirty(["products"]);
         }
         return;
       }
       if (field === "invoices") {
-        const mergedProducts = mergeProductPricesFromCloud(
-          localValueForCloudField("products"),
-          data.products,
-        );
-        const merged = mergeInvoicePricesFromCloud(
-          localValueForCloudField("invoices"),
-          value,
-          mergedProducts,
-        );
-        writeLocalOnly(key, merged);
-        if (dirtyNow.has("invoices")) pendingPush.invoices = merged;
-        else {
+        if (dirtyNow.has("invoices")) {
+          const mergedProducts = mergeProductPricesFromCloud(
+            localValueForCloudField("products"),
+            data.products,
+          );
+          const merged = mergeInvoicePricesFromCloud(
+            localValueForCloudField("invoices"),
+            value,
+            mergedProducts,
+          );
+          writeLocalOnly(key, merged);
+          pendingPush.invoices = merged;
+        } else {
+          writeLocalOnly(key, value);
           delete pendingPush.invoices;
           clearDirty(["invoices"]);
         }
@@ -1180,7 +1187,16 @@ export const products = {
   useAll: () => useStore<Product[]>(PRODUCTS_KEY, []),
   getAll: () => read<Product[]>(PRODUCTS_KEY, []),
   save: (list: Product[]) => write(PRODUCTS_KEY, list),
-  findByCode: (code: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.code === code),
+  findByCode: (code: string) => {
+    const list = read<Product[]>(PRODUCTS_KEY, []);
+    const t = code.trim();
+    if (!t) return undefined;
+    const exact = list.find((p) => p.code === t);
+    if (exact) return exact;
+    const digits = t.replace(/\D/g, "");
+    if (!digits) return undefined;
+    return list.find((p) => String(p.code || "").replace(/\D/g, "") === digits);
+  },
   findById: (id: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.id === id),
   update: (updated: Product) => {
     const list = read<Product[]>(PRODUCTS_KEY, []);

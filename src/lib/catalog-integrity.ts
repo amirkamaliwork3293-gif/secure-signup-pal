@@ -155,6 +155,67 @@ export function inspectCatalog(value: unknown, field: ProtectedCatalogField): Va
   return { blobs: blobs.length, insults, cjk, ratio, vandalized };
 }
 
+function invoiceLineFingerprint(inv: unknown): string {
+  const row = inv as {
+    id?: unknown;
+    items?: { productId?: unknown; price?: unknown; quantity?: unknown }[];
+    total?: unknown;
+  } | null;
+  if (!row || typeof row !== "object") return "";
+  const items = (row.items ?? [])
+    .map(
+      (it) =>
+        `${String(it.productId ?? "")}:${Number(it.price) || 0}:${Number(it.quantity) || 0}`,
+    )
+    .join(",");
+  return `${String(row.id ?? "")}|${Number(row.total) || 0}|${items}`;
+}
+
+/**
+ * آیا قیمت/اقلام فاکتورهای محلی با نسخهٔ ابریِ همان شناسه‌ها فرق دارد؟
+ * حمله قیمت‌ها را عوض کرد بدون اینکه لزوماً اسم چینی بگذارد؛ در آن حالت
+ * تشخیص فحاشی کافی نیست و باید ابرِ بازیابی‌شده برنده شود.
+ */
+export function invoicePricesDiverge(local: unknown, cloud: unknown): boolean {
+  if (!Array.isArray(local) || !Array.isArray(cloud)) {
+    if (local && cloud && typeof local === "object" && typeof cloud === "object" && !Array.isArray(local)) {
+      const localId = (local as { id?: unknown }).id;
+      const cloudId = (cloud as { id?: unknown }).id;
+      if (localId && localId === cloudId) {
+        return invoiceLineFingerprint(local) !== invoiceLineFingerprint(cloud);
+      }
+    }
+    return false;
+  }
+  if (cloud.length < 1 || local.length < 1) return false;
+
+  const cloudById = new Map<string, unknown>();
+  for (const inv of cloud) {
+    const id = (inv as { id?: unknown })?.id;
+    if (typeof id === "string" && id) cloudById.set(id, inv);
+  }
+
+  let compared = 0;
+  let diverged = 0;
+  for (const inv of local) {
+    const id = (inv as { id?: unknown })?.id;
+    if (typeof id !== "string" || !id) continue;
+    const other = cloudById.get(id);
+    if (!other) continue;
+    compared += 1;
+    if (invoiceLineFingerprint(inv) !== invoiceLineFingerprint(other)) diverged += 1;
+  }
+
+  if (compared >= 3 && diverged / compared >= 0.3) return true;
+
+  // مجموعهٔ فاکتور کلاً عوض شده (شناسه‌های مشترک خیلی کم) — نسخهٔ ابریِ بازیابی
+  const overlap = compared;
+  const minN = Math.min(local.length, cloud.length);
+  if (minN >= 8 && overlap <= minN * 0.2) return true;
+
+  return false;
+}
+
 export function catalogLooksVandalized(value: unknown, field: ProtectedCatalogField): boolean {
   return inspectCatalog(value, field).vandalized;
 }
@@ -180,6 +241,14 @@ export function preferCloudValue(
 
   const localReport = inspectCatalog(local, field);
   const cloudReport = inspectCatalog(cloud, field);
+
+  if (
+    field === "invoices" &&
+    !cloudReport.vandalized &&
+    invoicePricesDiverge(local, cloud)
+  ) {
+    return true;
+  }
 
   if (localReport.vandalized && !cloudReport.vandalized) return true;
   if (!localReport.vandalized && cloudReport.vandalized) return false;

@@ -942,13 +942,14 @@ export const updatePlanPrices = createServerFn({ method: "POST" })
 
 // ─── Public: create a 1-hour trial account (no admin approval) ───────────────
 export const createTrialAccount = createServerFn({ method: "POST" })
-  .inputValidator((d: {
-    first_name: string;
-    last_name: string;
-    username: string;
-    password: string;
-    turnstile_token?: string | null;
-  }) => {
+  .inputValidator(
+    (d: {
+      first_name: string;
+      last_name: string;
+      username: string;
+      password: string;
+      turnstile_token?: string | null;
+    }) => {
     const first_name = requireName(d.first_name, "نام");
     const last_name = requireName(d.last_name, "نام خانوادگی");
     if (!d.username?.trim() || !USERNAME_RE.test(d.username)) {
@@ -1303,12 +1304,13 @@ function normalizeIranPhone(p: string): string {
 // فقط نام، نام خانوادگی و شماره ثبت می‌شود تا ادمین در پنل ببیند.
 // عوض کردن رمز از همین‌جا انجام نمی‌شود — ادمین از تب کاربران رمز را دستی تغییر می‌دهد.
 export const submitPasswordResetRequest = createServerFn({ method: "POST" })
-  .inputValidator((d: {
-    first_name: string;
-    last_name: string;
-    phone: string;
-    turnstile_token?: string | null;
-  }) => {
+  .inputValidator(
+    (d: {
+      first_name: string;
+      last_name: string;
+      phone: string;
+      turnstile_token?: string | null;
+    }) => {
     const first_name = requireName(d.first_name, "نام");
     const last_name = requireName(d.last_name, "نام خانوادگی");
     const phone = normalizeIranPhone(d.phone || "");

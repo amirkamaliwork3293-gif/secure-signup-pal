@@ -15,7 +15,9 @@ export const TURNSTILE_UNAVAILABLE_ERROR =
 const MAX_TOKEN = 2048;
 
 export function normalizeTurnstileToken(raw: unknown): string {
-  return String(raw ?? "").trim().slice(0, MAX_TOKEN);
+  return String(raw ?? "")
+    .trim()
+    .slice(0, MAX_TOKEN);
 }
 
 /** دامنه‌هایی که ویجت Turnstile روی آن‌ها مجاز است. */

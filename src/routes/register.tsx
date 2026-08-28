@@ -178,8 +178,14 @@ function RegisterPage() {
       setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری، تاریخ و ساعت دقیق واریز را بنویسید.");
       return;
     }
-    if (!paid) { setError("لطفاً تایید کنید که پرداخت انجام شده است."); return; }
-    if (turnstileSiteKey && !turnstileToken) { setError(TURNSTILE_REQUIRED_ERROR); return; }
+    if (!paid) {
+      setError("لطفاً تایید کنید که پرداخت انجام شده است.");
+      return;
+    }
+    if (turnstileSiteKey && !turnstileToken) {
+      setError(TURNSTILE_REQUIRED_ERROR);
+      return;
+    }
     setLoading(true);
     try {
       let path: string | null = null;

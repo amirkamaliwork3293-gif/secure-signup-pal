@@ -2,6 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { resolveSupabaseUrl } from "./integrations/supabase/public-config";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -50,7 +51,7 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
  * frame-ancestors در حالت اجباری است: جلوی clickjacking روی پنل ادمین را
  * می‌گیرد و چون اپ خودش هیچ‌جا در iframe جاسازی نمی‌شود، چیزی نمی‌شکند.
  */
-const SUPABASE_ORIGIN = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+const SUPABASE_ORIGIN = resolveSupabaseUrl();
 
 function cspReportOnly(): string {
   return [
@@ -58,7 +59,7 @@ function cspReportOnly(): string {
     // 'unsafe-inline' لازم است تا اسکریپت تشخیص اپ و استایل‌های inline کار کنند.
     "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' data: https://fonts.gstatic.com",
+    "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
     `connect-src 'self' ${SUPABASE_ORIGIN} https://api.anthropic.com`.trim(),

@@ -127,8 +127,11 @@ function randomSecret(): string {
  */
 async function serverSignIn(email: string, password: string) {
   const { createClient } = await import("@supabase/supabase-js");
-  const url = process.env.SUPABASE_URL;
-  const anon = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const { resolveSupabasePublishableKey, resolveSupabaseUrl } = await import(
+    "@/integrations/supabase/public-config"
+  );
+  const url = resolveSupabaseUrl();
+  const anon = resolveSupabasePublishableKey();
   if (!url || !anon) throw new Error("پیکربندی Supabase ناقص است.");
   const client = createClient(url, anon, {
     auth: { persistSession: false, autoRefreshToken: false, storage: undefined },

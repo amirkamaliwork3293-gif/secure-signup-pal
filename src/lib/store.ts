@@ -5,7 +5,8 @@ import { namesReferToSamePerson } from "@/lib/search";
 import {
   catalogLooksVandalized,
   isProtectedCatalogField,
-  mergeInvoicesKeepAll,
+  mergeInvoicePricesFromCloud,
+  mergeProductPricesFromCloud,
   preferCloudValue,
 } from "@/lib/catalog-integrity";
 import {
@@ -745,12 +746,18 @@ async function dropVandalizedCatalogPushes(
   const protectedInPush = Object.keys(fieldsToPush).filter(isProtectedCatalogField);
   if (protectedInPush.length === 0) return;
 
+  const selectFields = new Set(protectedInPush);
+  if (selectFields.has("invoices") || selectFields.has("products")) {
+    selectFields.add("products");
+    selectFields.add("invoices");
+  }
+
   let live: Record<string, unknown> | null = null;
   let liveOk = false;
   try {
     const { data, error } = await supabase
       .from("user_data")
-      .select(protectedInPush.join(","))
+      .select([...selectFields].join(","))
       .eq("user_id", userId)
       .maybeSingle();
     if (!error) {
@@ -765,8 +772,19 @@ async function dropVandalizedCatalogPushes(
     const localVal = fieldsToPush[field];
     if (liveOk) {
       const cloudVal = live?.[field];
+      if (field === "products") {
+        const merged = mergeProductPricesFromCloud(localVal, cloudVal);
+        fieldsToPush[field] = merged;
+        writeLocalOnly(PRODUCTS_KEY, merged);
+        pendingPush.products = merged;
+        continue;
+      }
       if (field === "invoices") {
-        const merged = mergeInvoicesKeepAll(localVal, cloudVal);
+        const cloudProducts = mergeProductPricesFromCloud(
+          localValueForCloudField("products"),
+          live?.products,
+        );
+        const merged = mergeInvoicePricesFromCloud(localVal, cloudVal, cloudProducts);
         fieldsToPush[field] = merged;
         writeLocalOnly(HISTORY_KEY, merged);
         pendingPush.invoices = merged;
@@ -985,8 +1003,26 @@ export async function hydrateFromCloud(userId: string) {
     const dirtyNow = new Set<string>([...dirty, ...readDirtySet()]);
     const overwrite = (field: string, key: string, value: unknown) => {
       if (value == null) return;
+      if (field === "products") {
+        const merged = mergeProductPricesFromCloud(localValueForCloudField("products"), value);
+        writeLocalOnly(key, merged);
+        if (dirtyNow.has("products")) pendingPush.products = merged;
+        else {
+          delete pendingPush.products;
+          clearDirty(["products"]);
+        }
+        return;
+      }
       if (field === "invoices") {
-        const merged = mergeInvoicesKeepAll(localValueForCloudField("invoices"), value);
+        const mergedProducts = mergeProductPricesFromCloud(
+          localValueForCloudField("products"),
+          data.products,
+        );
+        const merged = mergeInvoicePricesFromCloud(
+          localValueForCloudField("invoices"),
+          value,
+          mergedProducts,
+        );
         writeLocalOnly(key, merged);
         if (dirtyNow.has("invoices")) pendingPush.invoices = merged;
         else {

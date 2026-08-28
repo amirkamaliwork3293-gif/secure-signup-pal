@@ -248,6 +248,130 @@ export function mergeInvoicesKeepAll(local: unknown, cloud: unknown): unknown[] 
   return out;
 }
 
+const VANDAL_PRICE = 9999;
+const PRODUCT_PRICE_KEYS = ["price", "buyPrice", "consumerPrice", "sellerPrice", "wholesalePrice"] as const;
+const LINE_PRICE_KEYS = ["price", "buyPrice", "originalPrice"] as const;
+
+function isVandalPrice(value: unknown): boolean {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && Math.round(n) === VANDAL_PRICE;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function restorePriceKeys(
+  live: Record<string, unknown>,
+  backup: Record<string, unknown> | null,
+  keys: readonly string[],
+): Record<string, unknown> {
+  if (!backup) return live;
+  const next = { ...live };
+  let changed = false;
+  for (const key of keys) {
+    if (isVandalPrice(live[key]) && backup[key] != null && !isVandalPrice(backup[key])) {
+      next[key] = backup[key];
+      changed = true;
+    }
+  }
+  return changed ? next : live;
+}
+
+/**
+ * قیمت ۹۹۹۹ جعلی هکر را از روی ابر درست می‌کند؛ هیچ کالایی حذف نمی‌شود.
+ */
+export function mergeProductPricesFromCloud(local: unknown, cloud: unknown): unknown[] {
+  const localArr = Array.isArray(local) ? local : [];
+  const cloudArr = Array.isArray(cloud) ? cloud : [];
+  const cloudById = new Map<string, Record<string, unknown>>();
+  for (const row of cloudArr) {
+    const rec = asRecord(row);
+    const id = rec && typeof rec.id === "string" ? rec.id : "";
+    if (id) cloudById.set(id, rec);
+  }
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const row of localArr) {
+    const rec = asRecord(row);
+    if (!rec) {
+      out.push(row);
+      continue;
+    }
+    const id = typeof rec.id === "string" ? rec.id : "";
+    if (id) seen.add(id);
+    out.push(restorePriceKeys(rec, id ? cloudById.get(id) ?? null : null, PRODUCT_PRICE_KEYS));
+  }
+  for (const row of cloudArr) {
+    const rec = asRecord(row);
+    const id = rec && typeof rec.id === "string" ? rec.id : "";
+    if (id && !seen.has(id)) out.push(row);
+  }
+  return out;
+}
+
+function restoreInvoiceItems(inv: Record<string, unknown>, backupInv: Record<string, unknown> | null, productsById: Map<string, Record<string, unknown>>): Record<string, unknown> {
+  const items = Array.isArray(inv.items) ? inv.items : [];
+  const backupItems = backupInv && Array.isArray(backupInv.items) ? backupInv.items : [];
+  const backupByProduct = new Map<string, Record<string, unknown>>();
+  for (const it of backupItems) {
+    const rec = asRecord(it);
+    const pid = rec && typeof rec.productId === "string" ? rec.productId : "";
+    if (pid && !backupByProduct.has(pid)) backupByProduct.set(pid, rec);
+  }
+  const nextItems = items.map((it) => {
+    const rec = asRecord(it);
+    if (!rec) return it;
+    const pid = typeof rec.productId === "string" ? rec.productId : "";
+    const fromBackupItem = pid ? backupByProduct.get(pid) ?? null : null;
+    const fromProduct = pid ? productsById.get(pid) ?? null : null;
+    let fixed = restorePriceKeys(rec, fromBackupItem, LINE_PRICE_KEYS);
+    if (isVandalPrice(fixed.price)) {
+      fixed = restorePriceKeys(fixed, fromProduct, ["price", "buyPrice"]);
+    }
+    return fixed;
+  });
+  return { ...inv, items: nextItems };
+}
+
+/** فاکتورهای محلی می‌مانند؛ فقط ردیف‌هایی که قیمت ۹۹۹۹ دارند از ابر/کالا درست می‌شوند. */
+export function mergeInvoicePricesFromCloud(local: unknown, cloud: unknown, cloudProducts?: unknown): unknown[] {
+  const localArr = Array.isArray(local) ? local : [];
+  const cloudArr = Array.isArray(cloud) ? cloud : [];
+  const productsById = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(cloudProducts)) {
+    for (const row of cloudProducts) {
+      const rec = asRecord(row);
+      const id = rec && typeof rec.id === "string" ? rec.id : "";
+      if (id) productsById.set(id, rec);
+    }
+  }
+  const cloudById = new Map<string, Record<string, unknown>>();
+  for (const row of cloudArr) {
+    const rec = asRecord(row);
+    const id = rec && typeof rec.id === "string" ? rec.id : "";
+    if (id) cloudById.set(id, rec);
+  }
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const row of localArr) {
+    const rec = asRecord(row);
+    if (!rec) {
+      out.push(row);
+      continue;
+    }
+    const id = typeof rec.id === "string" ? rec.id : "";
+    if (id) seen.add(id);
+    out.push(restoreInvoiceItems(rec, id ? cloudById.get(id) ?? null : null, productsById));
+  }
+  for (const row of cloudArr) {
+    const rec = asRecord(row);
+    const id = rec && typeof rec.id === "string" ? rec.id : "";
+    if (id && !seen.has(id)) out.push(row);
+  }
+  return out;
+}
+
 export function catalogLooksVandalized(value: unknown, field: ProtectedCatalogField): boolean {
   return inspectCatalog(value, field).vandalized;
 }

@@ -54,6 +54,7 @@ export const createReceiptUploadUrl = createServerFn({ method: "POST" })
     // آپلود رسید عمومی و ناشناس است — بدون سقف، یک اسکریپت می‌تواند فضای
     // استوریج را پر کند (و هزینه بسازد).
     await enforceRateLimit(supabaseAdmin, "receipt-upload", clientIp(), 20, 3600);
+    await enforceRateLimit(supabaseAdmin, "receipt-upload-global", "all", 80, 3600);
     const safeUser =
       (data.username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
     const rand = Math.random().toString(36).slice(2, 8);

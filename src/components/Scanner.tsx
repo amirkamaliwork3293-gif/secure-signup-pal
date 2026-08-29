@@ -132,15 +132,13 @@ function luminanceVariance(lum: Uint8ClampedArray): number {
 }
 
 function spawnZxingWorker(): Worker | null {
-  const url = new URL("../lib/zxing.worker.ts", import.meta.url);
+  // Vite only emits a worker chunk when `new Worker(new URL(..., import.meta.url), …)`
+  // is written as a single expression. Splitting the URL into a variable inlines
+  // the file as a data: URL and the worker never loads.
   try {
-    return new Worker(url, { type: "module" });
+    return new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
   } catch {
-    try {
-      return new Worker(url);
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 

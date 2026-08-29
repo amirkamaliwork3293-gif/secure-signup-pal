@@ -26,15 +26,19 @@ function onboardingStillActive(): boolean {
 /**
  * یادآوری پشتیبان‌گیری: سایت = دانلود اکسل کامل؛ اپ = فقط یادآوری.
  */
-export function BackupReminderDialog() {
+export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolean }) {
   const { state } = useAuth();
   const userId = authUserId(state);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(forceOpen);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inApp = useMemo(() => isWebView(), []);
 
   useEffect(() => {
+    if (forceOpen) {
+      setOpen(true);
+      return;
+    }
     if (!isAppSession(state) || !userId) {
       setOpen(false);
       return;
@@ -60,7 +64,7 @@ export function BackupReminderDialog() {
       window.clearTimeout(timer);
       if (retry) window.clearTimeout(retry);
     };
-  }, [state, userId]);
+  }, [state, userId, forceOpen]);
 
   const snooze = (freq: BackupReminderFreq) => {
     if (!userId) return;
@@ -153,7 +157,11 @@ export function BackupReminderDialog() {
             onClick={() => void onConfirm()}
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {busy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : inApp ? null : (
+              <Download className="h-4 w-4" />
+            )}
             {inApp ? "متوجه شدم" : "تأیید و دریافت اکسل"}
           </button>
           <button

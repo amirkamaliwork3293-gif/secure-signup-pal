@@ -86,6 +86,27 @@ const NATIVE_FORMATS = [
   "qr_code","code_39","itf","data_matrix","pdf417","aztec","codabar",
 ];
 
+const CORE_NATIVE_FORMATS = [
+  "ean_13", "ean_8", "upc_a", "upc_e", "code_128", "qr_code", "code_39",
+];
+
+function createNativeDetector(): NativeDetector | null {
+  if (!window.BarcodeDetector) return null;
+  const attempts: Array<{ formats?: string[] } | undefined> = [
+    { formats: NATIVE_FORMATS },
+    { formats: CORE_NATIVE_FORMATS },
+    undefined,
+  ];
+  for (const opts of attempts) {
+    try {
+      return opts ? new window.BarcodeDetector!(opts) : new window.BarcodeDetector!();
+    } catch {
+      /* some engines throw if any listed format is unsupported */
+    }
+  }
+  return null;
+}
+
 // ─── BT.601 luminance (SIMD-friendly) ────────────────────────────────────────
 
 function extractLuminance(data: Uint8ClampedArray, size: number): Uint8ClampedArray {
@@ -306,15 +327,9 @@ export function Scanner({ onDetected, paused }: Props) {
 
     if (!workerRef.current) attachWorker(spawnZxingWorker());
 
-    // Native BarcodeDetector
-    const hasNative = !!window.BarcodeDetector;
-    if (hasNative) {
-      try {
-        nativeRef.current = new window.BarcodeDetector!({ formats: NATIVE_FORMATS });
-        setEngine("🚀 Native GPU");
-      } catch {
-        setEngine(workerRef.current ? "⚡ ZXing Worker" : "⚙️ ZXing");
-      }
+    nativeRef.current = createNativeDetector();
+    if (nativeRef.current) {
+      setEngine("🚀 Native GPU");
     } else {
       setEngine(workerRef.current ? "⚡ ZXing Worker" : "⚙️ ZXing");
     }

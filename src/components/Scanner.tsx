@@ -26,6 +26,7 @@ import {
   MultiFormatReader,
 } from "@zxing/library";
 import { Flashlight, FlashlightOff, RefreshCw } from "lucide-react";
+import { decodeCanvasSize, detectDeviceTier } from "@/lib/device-tier";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,25 +109,10 @@ function zxingDecode(imageData: ImageData, reader: MultiFormatReader): string | 
 }
 
 // ─── Device tier (module-level, SSR-safe) ────────────────────────────────────
-// Uses only CPU core count — no benchmark loop, no blocking, safe during SSR.
+// Chrome deviceMemory is a power-of-two floor (3GB→2, 6GB→4). See device-tier.ts.
 
-const DEVICE_TIER: "low" | "mid" | "high" = (() => {
-  if (typeof navigator === "undefined") return "high"; // SSR
-  const mem = Number((navigator as Navigator & { deviceMemory?: number }).deviceMemory || 0);
-  const cores = navigator.hardwareConcurrency ?? 2;
-  if (mem > 0 && mem <= 2) return "low";
-  if (mem > 0 && mem <= 4) return "mid";
-  if (cores >= 8 && (mem === 0 || mem >= 6)) return "high";
-  if (cores >= 4) return "mid";
-  return "low";
-})();
-
-// Decode canvas size — adapts to device tier.
-// Higher resolution = small/dense barcodes are decoded reliably (user-priority).
-// Bumped mid/high tiers so tiny/dense barcodes (EAN-13 روی برچسب‌های کوچک،
-// QRهای متراکم) با جزئیات کافی به دیکودر برسند.
-const DW = DEVICE_TIER === "low" ? 416 : DEVICE_TIER === "mid" ? 640 : 800;
-const DH = DEVICE_TIER === "low" ? 312 : DEVICE_TIER === "mid" ? 480 : 600;
+const DEVICE_TIER = detectDeviceTier();
+const { dw: DW, dh: DH } = decodeCanvasSize(DEVICE_TIER);
 
 // ─── Component ───────────────────────────────────────────────────────────────
 

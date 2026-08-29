@@ -291,10 +291,9 @@ export function Scanner({ onDetected, paused }: Props) {
         workerRef.current?.terminate();
         workerRef.current = null;
         workerBusy.current = false;
-        // Sync MultiFormatReader can hang the UI the same way; after a few
-        // stalls just keep Native. Recreate the worker a few times first.
-        if (workerFails.current <= 3) attachWorker(spawnZxingWorker());
-        else setEngine(nativeRef.current ? "🚀 Native GPU" : "⚙️ ZXing");
+        // Always respawn. Giving up would leave WebView/Firefox (no Native)
+        // with no decoder after a few noisy frames.
+        attachWorker(spawnZxingWorker());
       }, budgetMs);
     };
 
@@ -316,7 +315,7 @@ export function Scanner({ onDetected, paused }: Props) {
         w.terminate();
         workerRef.current = null;
         workerFails.current += 1;
-        if (workerFails.current <= 3) attachWorker(spawnZxingWorker());
+        attachWorker(spawnZxingWorker());
       };
       workerRef.current = w;
     };

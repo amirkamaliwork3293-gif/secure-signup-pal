@@ -76,6 +76,7 @@ supabase.auth.signInWithPassword({ email: "amirkamali@kamali.local", password: "
 ```
 supabase/migrations/20260827120000_security_hardening.sql
 supabase/migrations/20260827223000_security_hardening_v2.sql
+supabase/migrations/20260829120000_security_hardening_v3.sql
 ```
 
 بررسی سلامت:
@@ -238,3 +239,25 @@ SELECT user_id, created_at,
 ساده** در `signup_requests.temp_password` ذخیره و در پنل ادمین نمایش داده
 می‌شد. هرکس به پنل دسترسی داشته، آن‌ها را دیده است. کاربرانی که همان رمز را
 جای دیگری هم استفاده می‌کنند باید مطلع شوند.
+
+---
+
+## ۵. ممیزی تکمیلی (۲۰۲۶-۰۸-۲۹)
+
+کارهای باقی‌ماندهٔ سند اولیه که در کد بسته شد:
+
+* `xlsx` رسمی 0.20.3
+* سقف نرخ سخت‌تر وقتی Turnstile پیکربندی نشده
+* Turnstile روی `/set-password`
+* MIME تصویر روی باکت‌های receipts / store-assets / menu-images
+* سقف سراسری آپلود رسید
+* رد SVG و محدود کردن magic-byte رسید به برند HEIC واقعی
+
+کارهایی که **فقط شما** می‌توانید بزنید هنوز همان ۸ مرحلهٔ `docs/RAHNAMA-AMNIAT.md`
+است، به‌علاوه اجرای مهاجرت `20260829120000_security_hardening_v3.sql` در
+SQL Editor اگر مهاجرت‌های خودکار اعمال نمی‌شوند.
+
+CSP کامل هنوز Report-Only است (گام ۷). باندل مرورگر برای
+`ADMIN_PASSWORD` / `CRON_SECRET` / `SUPABASE_SERVICE_ROLE_KEY` /
+`TURNSTILE_SECRET_KEY` خالی است.
+

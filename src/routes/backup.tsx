@@ -8,9 +8,16 @@ export const Route = createFileRoute("/backup")({
   head: () => ({
     meta: [
       { title: "پشتیبان‌گیری اطلاعات | KAMIX" },
-      { name: "description", content: "از محصولات، مشتریان، فاکتورها و سایر داده‌های کسب‌وکار خود خروجی اکسل یا فایل کامل بگیرید." },
+      {
+        name: "description",
+        content:
+          "از محصولات، مشتریان، فاکتورها و سایر داده‌های کسب‌وکار خود خروجی اکسل یا فایل کامل بگیرید.",
+      },
       { property: "og:title", content: "پشتیبان‌گیری اطلاعات | KAMIX" },
-      { property: "og:description", content: "خروجی اکسل و فایل پشتیبان کامل از تمام داده‌های کسب‌وکار شما در KAMIX." },
+      {
+        property: "og:description",
+        content: "خروجی اکسل و فایل پشتیبان کامل از تمام داده‌های کسب‌وکار شما در KAMIX.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -29,13 +36,15 @@ function BackupPage() {
             </div>
             <div>
               <h1 className="text-base font-bold">پشتیبان‌گیری از اطلاعات</h1>
-              <p className="text-[11px] text-muted-foreground">یک نسخه امن از داده‌های کسب‌وکارتان روی دستگاه خودتان</p>
+              <p className="text-[11px] text-muted-foreground">
+                یک نسخه امن از داده‌های کسب‌وکارتان روی دستگاه خودتان
+              </p>
             </div>
           </div>
           <p className="mt-3 text-xs leading-6 text-muted-foreground">
             در این بخش می‌توانید از بخش‌هایی که انتخاب می‌کنید (محصولات، مشتریان، فاکتورها، خریدها،
-            هزینه‌ها، یادآوری‌ها، هنرجویان و حساب‌ها) یک نسخه پشتیبان تهیه کنید. این کار فقط اطلاعات را
-            می‌خوانَد و هیچ داده‌ای را تغییر نمی‌دهد یا پاک نمی‌کند.
+            هزینه‌ها، یادآوری‌ها، هنرجویان و حساب‌ها) یک فایل اکسل یا نسخهٔ کامل بگیرید. این کار فقط
+            یک کپی می‌سازد و برنامه مثل همیشه کار می‌کند.
           </p>
           <ul className="mt-3 space-y-1.5 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5">

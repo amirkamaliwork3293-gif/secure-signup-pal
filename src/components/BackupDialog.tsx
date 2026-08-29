@@ -85,8 +85,8 @@ export function BackupSection() {
           <h2 className="text-sm font-bold">پشتیبان‌گیری از اطلاعات</h2>
         </div>
         <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) یک نسخه‌ی پشتیبان اکسل یا فایل کامل
-          JSON بگیرید. این کار فقط یک کپی می‌سازد و هیچ داده‌ای را تغییر نمی‌دهد.
+          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) یک فایل اکسل یا نسخهٔ کامل JSON
+          بگیرید. برنامه مثل همیشه کار می‌کند.
         </p>
         <button
           onClick={() => setOpen(true)}
@@ -567,14 +567,25 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         {inApp ? (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs leading-6">
-            <div className="mb-1 flex items-center gap-2 font-bold text-amber-700 dark:text-amber-400">
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs leading-7">
+            <div className="mb-2 flex items-center gap-2 font-semibold text-primary">
               <Smartphone className="h-4 w-4" />
-              در نسخه‌ی اپلیکیشن در دسترس نیست
+              دانلود فایل داخل اپ باز نمی‌شود
             </div>
-            ذخیره‌ی فایل پشتیبان داخل اپلیکیشن اندروید به‌درستی کار نمی‌کند. لطفاً با همین حساب
-            کاربری از طریق مرورگر وارد سایت شوید و از بخش «تنظیمات ← پشتیبان‌گیری» فایل را دریافت
-            کنید. تمام اطلاعات شما همگام‌سازی شده و در سایت هم در دسترس است.
+            <p className="mb-2 text-foreground">
+              برای گرفتن فایل اکسل، با همان نام کاربری و همان رمز عبور از سایت وارد شوید:
+            </p>
+            <ol className="list-decimal space-y-1 pr-4 text-foreground">
+              <li>مرورگر گوشی یا رایانه را باز کنید.</li>
+              <li>
+                بروید به{" "}
+                <span className="font-semibold" dir="ltr">
+                  kamixapp.ir
+                </span>
+              </li>
+              <li>با همان یوزرنیم و رمزی که در اپ استفاده می‌کنید وارد شوید.</li>
+              <li>از منوی پایین «بیشتر» ← «پشتیبان‌گیری» فایل اکسل را بگیرید.</li>
+            </ol>
           </div>
         ) : (
           <>

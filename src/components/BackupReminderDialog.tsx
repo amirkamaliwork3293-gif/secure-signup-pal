@@ -109,9 +109,9 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
               </div>
               <div>
                 <h2 id="backup-reminder-title" className="text-base font-bold">
-                  یک نسخه پیش خودتان نگه دارید
+                  پشتیبان‌گیری پیشنهادی
                 </h2>
-                <p className="mt-0.5 text-[11px] text-white/85">یادآوری روزانه پشتیبان‌گیری</p>
+                <p className="mt-0.5 text-[11px] text-white/85">یک فایل اکسل برای خودتان</p>
               </div>
             </div>
             <button
@@ -128,20 +128,36 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
         <div className="space-y-3 p-5 text-sm leading-7">
           {inApp ? (
             <>
-              <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[12px] leading-6 text-amber-800 dark:text-amber-300">
-                <Smartphone className="mt-0.5 h-4 w-4 shrink-0" />
-                دانلود فایل داخل اپلیکیشن ممکن نیست. لطفاً با همین حساب از مرورگر وارد kamixapp.ir
-                شوید و از بخش «پشتیبان‌گیری» فایل اکسل را بگیرید.
-              </div>
-              <p className="text-[13px] text-foreground">
-                اطلاعات فروشگاه روی سرور همگام است؛ یک نسخهٔ اکسل روی رایانه یا گوشی، اگر روزی مشکلی
-                پیش آمد خیالتان را راحت می‌کند.
+              <p className="text-[13px] leading-7 text-foreground">
+                اطلاعات فروشگاهتان مثل همیشه در حساب شما هست. اگر دوست دارید یک فایل اکسل هم روی
+                گوشی یا رایانهٔ خودتان داشته باشید، از سایت بگیرید — داخل اپ دانلود فایل باز
+                نمی‌شود.
               </p>
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-[12px] leading-7 text-foreground">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-primary">
+                  <Smartphone className="h-3.5 w-3.5" />
+                  راهنمای کوتاه
+                </div>
+                <ol className="list-decimal space-y-1 pr-4">
+                  <li>مرورگر گوشی یا رایانه را باز کنید (مثلاً کروم).</li>
+                  <li>
+                    بروید به{" "}
+                    <span className="font-semibold" dir="ltr">
+                      kamixapp.ir
+                    </span>
+                  </li>
+                  <li>با همان نام کاربری و همان رمز عبوری که در این اپ وارد می‌شوید، وارد شوید.</li>
+                  <li>
+                    از منوی پایین «بیشتر» را بزنید، «پشتیبان‌گیری» را باز کنید و فایل اکسل را دریافت
+                    کنید.
+                  </li>
+                </ol>
+              </div>
             </>
           ) : (
-            <p className="text-[13px] text-foreground">
-              پیشنهاد می‌کنیم همین حالا از همهٔ بخش‌ها (فاکتور، مشتری، محصول و…) یک فایل اکسل بگیرید
-              و در جای امن ذخیره کنید. با «تأیید» فایل دانلود می‌شود و فردا دوباره یادآوری می‌کنیم.
+            <p className="text-[13px] leading-7 text-foreground">
+              اگر دوست دارید یک فایل اکسل از فاکتورها، مشتریان و محصولاتتان روی همین دستگاه هم باشد،
+              با تأیید دانلود می‌شود. کار فروشگاه مثل همیشه ادامه دارد.
             </p>
           )}
 
@@ -174,8 +190,8 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
           </button>
           <p className="text-center text-[11px] leading-5 text-muted-foreground">
             {inApp
-              ? "اگر هر روز این پیام را نمی‌خواهید، یادآوری هفتگی را انتخاب کنید."
-              : "تأیید یعنی فردا دوباره یادآوری می‌شود. یادآوری هفتگی تا هفت روز بعد نشان داده نمی‌شود."}
+              ? "اگر هر روز این یادآوری را نمی‌خواهید، گزینهٔ هفتگی را بزنید."
+              : "تأیید فقط فایل را ذخیره می‌کند. اگر هر روز این پنجره را نمی‌خواهید، یادآوری هفتگی را انتخاب کنید."}
           </p>
         </div>
       </div>

@@ -43,10 +43,10 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
  *
  * دو دسته‌اند:
  *  ۱. مواردی که هیچ ریسکی برای خراب‌شدن اپ ندارند → همین حالا اجباری‌اند.
- *  ۲. سیاست کامل CSP برای script/style → فعلاً فقط Report-Only، چون اپ از
- *     اسکریپت inline (تشخیص اپ اندروید در __root.tsx)، استایل inline و
- *     iframe آپارات/یوتیوب/ویمئو استفاده می‌کند. پس از بررسی گزارش‌ها،
- *     همین رشته را به هدر بدون پسوند «-Report-Only» منتقل کنید.
+ *  ۲. سیاست کامل CSP برای script/style → فعلاً فقط Report-Only. هنوز
+ *     promot نمی‌شود چون script/style به 'unsafe-inline' نیاز دارند
+ *     (تشخیص اپ در __root.tsx) و باید گزارش مرورگر چند روز بدون نقض
+ *     واقعی باشد. connect-src حالا wss:// همان مبدأ Supabase را هم دارد.
  *
  * frame-ancestors در حالت اجباری است: جلوی clickjacking روی پنل ادمین را
  * می‌گیرد و چون اپ خودش هیچ‌جا در iframe جاسازی نمی‌شود، چیزی نمی‌شکند.
@@ -62,7 +62,15 @@ function cspReportOnly(): string {
     "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
-    `connect-src 'self' ${SUPABASE_ORIGIN} https://api.anthropic.com https://challenges.cloudflare.com`.trim(),
+    [
+      "connect-src 'self'",
+      SUPABASE_ORIGIN,
+      SUPABASE_ORIGIN.replace(/^https:/, "wss:"),
+      "https://api.anthropic.com",
+      "https://challenges.cloudflare.com",
+    ]
+      .filter(Boolean)
+      .join(" "),
     "frame-src https://www.aparat.com https://www.youtube.com https://player.vimeo.com https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
@@ -82,7 +90,10 @@ function withSecurityHeaders(response: Response): Response {
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   // دوربین (اسکن بارکد) و میکروفون (ثبت صوتی) فقط برای خود اپ؛ بقیه بسته.
-  headers.set("Permissions-Policy", "camera=*, microphone=*, geolocation=(), payment=(), usb=()");
+  headers.set(
+    "Permissions-Policy",
+    "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
+  );
   // این سه دستور CSP هیچ‌کدام روی اپ فعلی اثر منفی ندارند و اجباری‌اند.
   headers.set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
 

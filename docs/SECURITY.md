@@ -107,8 +107,19 @@ git commit -m "chore: stop tracking .env"
 ### گام ۷ — بعد از پایدار شدن: سفت‌کردن CSP
 
 در `src/server.ts` سیاست کامل فعلاً روی `Content-Security-Policy-Report-Only`
-است تا چیزی نشکند. چند روز گزارش‌ها را ببینید، سپس همان رشته را به هدر اصلی
-منتقل کنید.
+است. **هنوز به هدر اجباری منتقل نشده** چون:
+
+* اسکریپت تشخیص اپ اندروید و استایل‌های inline به `'unsafe-inline'` نیاز دارند
+  (با nonce شکسته می‌شوند مگر همان اسکریپت‌ها بازنویسی شوند).
+* `connect-src` باید `wss://<project>.supabase.co` را هم داشته باشد (اضافه شد).
+* فونت: `fonts.googleapis.com` / `fonts.gstatic.com` / `cdn.jsdelivr.net`
+* اسکریپت/فریم کپچا: `challenges.cloudflare.com`
+* iframe ویدیو: `www.aparat.com`، `www.youtube.com`، `player.vimeo.com`
+* تصویر: `img-src` فعلاً `https:` است (لوگوی فروشگاه و رسید امضاشده).
+
+تا وقتی در گزارش مرورگر نقض واقعی نبینید، promot نکنید. هدرهای اجباری فعلی
+(HSTS، `X-Frame-Options`، `frame-ancestors`، `nosniff`، `Permissions-Policy`)
+کافی‌اند و دوربین/میکروفون به `(self)` محدود شده‌اند.
 
 ---
 

@@ -440,16 +440,22 @@ export const checkRequestStatus = createServerFn({ method: "POST" })
 
 // ─── Public: set password after admin approval ───────────────────────────────
 export const setPasswordAfterApproval = createServerFn({ method: "POST" })
-  .inputValidator((d: { username: string; password: string }) => {
+  .inputValidator((d: { username: string; password: string; turnstile_token?: string | null }) => {
     if (!d.username?.trim() || !USERNAME_RE.test(d.username.trim())) {
       throw new Error("یوزرنیم الزامی است.");
     }
-    return { username: d.username.trim().toLowerCase(), password: validatePassword(d.password) };
+    return {
+      username: d.username.trim().toLowerCase(),
+      password: validatePassword(d.password),
+      turnstile_token: d.turnstile_token ?? null,
+    };
   })
   .handler(async ({ data }) => {
+    await assertTurnstileToken(data.turnstile_token);
     const supabaseAdmin = await admin();
     const username = data.username;
-    await enforceRateLimit(supabaseAdmin, "set-password", clientIp(), 10, 3600);
+    const setPassMax = isTurnstileConfigured() ? 10 : 4;
+    await enforceRateLimit(supabaseAdmin, "set-password", clientIp(), setPassMax, 3600);
 
     const { data: req } = await supabaseAdmin
       .from("signup_requests")

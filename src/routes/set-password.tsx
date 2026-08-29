@@ -1,7 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { checkRequestStatus, setPasswordAfterApproval } from "@/lib/auth.functions";
+import {
+  checkRequestStatus,
+  getPublicSettings,
+  setPasswordAfterApproval,
+} from "@/lib/auth.functions";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
+import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
 import { KeyRound, Loader2, Eye, EyeOff, Search, Clock, X, Check } from "lucide-react";
 import { PLAN_LABEL } from "@/lib/supabase";
 
@@ -28,9 +34,22 @@ function SetPasswordPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const check = useServerFn(checkRequestStatus);
   const setPass = useServerFn(setPasswordAfterApproval);
+
+  useEffect(() => {
+    getPublicSettings()
+      .then((data) => {
+        if (data.turnstile_site_key) setTurnstileSiteKey(data.turnstile_site_key);
+      })
+      .catch(() => {
+        /* widget stays hidden until keys are configured */
+      });
+  }, []);
 
   const handleCheck = async () => {
     setError(""); setChecked(null);
@@ -45,13 +64,24 @@ function SetPasswordPage() {
 
   const handleSetPassword = async () => {
     setError("");
-    if (password.length < 6) { setError("رمز عبور باید حداقل ۶ کاراکتر باشد."); return; }
+    if (password.length < 8 || !/[a-zA-Z؀-ۿ]/.test(password) || !/\d/.test(password)) {
+      setError("رمز عبور باید حداقل ۸ کاراکتر باشد و هم حرف و هم عدد داشته باشد.");
+      return;
+    }
     if (password !== confirm) { setError("تکرار رمز عبور صحیح نیست."); return; }
+    if (turnstileSiteKey && !turnstileToken) {
+      setError(TURNSTILE_REQUIRED_ERROR);
+      return;
+    }
     setLoading(true);
     try {
-      await setPass({ data: { username, password } });
+      await setPass({ data: { username, password, turnstile_token: turnstileToken || undefined } });
       navigate({ to: "/login" });
-    } catch (e: any) { setError(e?.message || "خطا"); }
+    } catch (e: any) {
+      setTurnstileToken("");
+      setTurnstileReset((n) => n + 1);
+      setError(e?.message || "خطا");
+    }
     setLoading(false);
   };
 
@@ -130,6 +160,12 @@ function SetPasswordPage() {
             {error && (
               <div className="rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">{error}</div>
             )}
+
+            <TurnstileWidget
+              siteKey={turnstileSiteKey}
+              onToken={setTurnstileToken}
+              resetSignal={turnstileReset}
+            />
 
             <button
               onClick={handleSetPassword}

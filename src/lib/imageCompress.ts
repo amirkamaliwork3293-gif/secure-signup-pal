@@ -80,6 +80,11 @@ const RAW_INPUT_MAX_MB = 20;
  * پردازش کند مثل HEIC خیلی سنگین) خطای فارسی پرتاب می‌شود تا کالر پیام مناسب بدهد.
  */
 export async function prepareImageUpload(file: File, kind: ImageKind): Promise<File> {
+  const type = (file.type || "").toLowerCase();
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (type === "image/svg+xml" || ext === "svg" || ext === "svgz") {
+    throw new Error("فایل SVG مجاز نیست. لطفاً یک عکس (jpg، png یا webp) انتخاب کنید.");
+  }
   const { maxDim, quality, maxMB } = IMAGE_LIMITS[kind];
   assertMaxFileSize(file, RAW_INPUT_MAX_MB);
   const cap = maxMB * 1024 * 1024;

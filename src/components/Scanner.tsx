@@ -7,7 +7,7 @@
  *   2. Dynamic resolution: starts at 480p, bumps to 720p after first success
  *   3. Scan-zone crop tightened to 70%×50% (less pixels, faster decode)
  *   4. ZXing runs in a dedicated Web Worker → zero main-thread blocking
- *      (falls back to synchronous if Worker unavailable)
+ *      (watchdog recycles a hung decode; blank frames are skipped)
  *   5. Native promise stacking fixed with a generation counter (not a flag)
  *   6. Adaptive cooldown: 800ms same-code, 0ms different-code
  *   7. Camera: tries 60fps first, then 30fps — higher fps = more decode chances
@@ -60,7 +60,6 @@ const FAST_HINTS = new Map<DecodeHintType, unknown>([
       BarcodeFormat.CODE_128,
       BarcodeFormat.CODE_39,
       BarcodeFormat.ITF,
-      BarcodeFormat.DATA_MATRIX,
     ],
   ],
 ]);
@@ -95,6 +94,33 @@ function extractLuminance(data: Uint8ClampedArray, size: number): Uint8ClampedAr
     lum[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
   }
   return lum;
+}
+
+/** Sampled variance — blank/unfocused frames have near-zero contrast. */
+function luminanceVariance(lum: Uint8ClampedArray): number {
+  let n = 0, sum = 0, sum2 = 0;
+  for (let i = 0; i < lum.length; i += 17) {
+    const v = lum[i];
+    sum += v;
+    sum2 += v * v;
+    n++;
+  }
+  if (n < 8) return 0;
+  const mean = sum / n;
+  return sum2 / n - mean * mean;
+}
+
+function spawnZxingWorker(): Worker | null {
+  const url = new URL("../lib/zxing.worker.ts", import.meta.url);
+  try {
+    return new Worker(url, { type: "module" });
+  } catch {
+    try {
+      return new Worker(url);
+    } catch {
+      return null;
+    }
+  }
 }
 
 function zxingDecode(imageData: ImageData, reader: MultiFormatReader): string | null {
@@ -138,6 +164,8 @@ export function Scanner({ onDetected, paused }: Props) {
   // ZXing Web Worker — decode off the main thread (kills UI lag)
   const workerRef      = useRef<Worker | null>(null);
   const workerBusy     = useRef(false);
+  const workerWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workerFails    = useRef(0);
   const lastZxingAt    = useRef(0);
 
   const [error,          setError]          = useState<string | null>(null);
@@ -229,24 +257,54 @@ export function Scanner({ onDetected, paused }: Props) {
     const tr = new MultiFormatReader(); tr.setHints(THOROUGH_HINTS);
     thoroughReader.current = tr;
 
-    // ZXing in a dedicated Web Worker — decoding never blocks the UI thread.
-    // Falls back to synchronous decode below if Worker construction fails.
-    if (!workerRef.current) {
-      try {
-        const w = new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
-        w.onmessage = (e: MessageEvent<{ id: number; text: string | null }>) => {
-          workerBusy.current = false;
-          if (e.data.text) emit(e.data.text, "ZXing-W");
-        };
-        w.onerror = () => {
-          workerBusy.current = false;
-          workerRef.current = null; // fall back to sync path
-        };
-        workerRef.current = w;
-      } catch {
-        workerRef.current = null;
+    const budgetMs = DEVICE_TIER === "low" ? 350 : 250;
+    const clearWatchdog = () => {
+      if (workerWatchdog.current) {
+        clearTimeout(workerWatchdog.current);
+        workerWatchdog.current = null;
       }
-    }
+    };
+
+    const armWatchdog = () => {
+      clearWatchdog();
+      workerWatchdog.current = setTimeout(() => {
+        workerWatchdog.current = null;
+        workerFails.current += 1;
+        console.warn("[scanner] ZXing worker decode exceeded", budgetMs, "ms — recycling");
+        workerRef.current?.terminate();
+        workerRef.current = null;
+        workerBusy.current = false;
+        // Sync MultiFormatReader can hang the UI the same way; after a few
+        // stalls just keep Native. Recreate the worker a few times first.
+        if (workerFails.current <= 3) attachWorker(spawnZxingWorker());
+        else setEngine(nativeRef.current ? "🚀 Native GPU" : "⚙️ ZXing");
+      }, budgetMs);
+    };
+
+    const attachWorker = (w: Worker | null) => {
+      if (!w) {
+        workerRef.current = null;
+        return;
+      }
+      w.onmessage = (e: MessageEvent<{ id: number; text: string | null }>) => {
+        clearWatchdog();
+        workerBusy.current = false;
+        workerFails.current = 0;
+        if (e.data.text) emit(e.data.text, "ZXing-W");
+      };
+      w.onerror = (ev) => {
+        console.warn("[scanner] ZXing worker error", ev.message);
+        clearWatchdog();
+        workerBusy.current = false;
+        w.terminate();
+        workerRef.current = null;
+        workerFails.current += 1;
+        if (workerFails.current <= 3) attachWorker(spawnZxingWorker());
+      };
+      workerRef.current = w;
+    };
+
+    if (!workerRef.current) attachWorker(spawnZxingWorker());
 
     // Native BarcodeDetector
     const hasNative = !!window.BarcodeDetector;
@@ -274,7 +332,7 @@ export function Scanner({ onDetected, paused }: Props) {
       const sw = vw * c.w, sh = vh * c.h;
       const now = performance.now();
       const minInterval = nativeRef.current
-        ? (DEVICE_TIER === "low" ? 600 : 350)
+        ? (DEVICE_TIER === "low" ? 400 : 240)
         : workerRef.current
           ? (DEVICE_TIER === "low" ? 180 : 90)
           : (DEVICE_TIER === "low" ? 350 : 200);
@@ -311,20 +369,29 @@ export function Scanner({ onDetected, paused }: Props) {
             lastZxingAt.current = now;
             const imageData = ctx.getImageData(0, 0, DW, DH);
             const lum = extractLuminance(imageData.data, DW * DH);
+            // Blank / unfocused frames hang MultiFormatReader (no postMessage).
+            if (luminanceVariance(lum) < 70) return;
             thoroughToggle.current = DEVICE_TIER === "low" ? false : !thoroughToggle.current;
+            // Thorough (Data Matrix / PDF417 / TRY_HARDER) only every other ZXing tick.
+            const thorough = DEVICE_TIER !== "low" && thoroughToggle.current;
             workerBusy.current = true;
+            armWatchdog();
             workerRef.current.postMessage(
-              { id: nativeGenRef.current, width: DW, height: DH, lum, thorough: thoroughToggle.current },
+              { id: nativeGenRef.current, width: DW, height: DH, lum, thorough },
               [lum.buffer as ArrayBuffer],
             );
           }
+        } else if (nativeRef.current) {
+          lastZxingAt.current = now;
+          // Native is live and worker is gone — do not run sync ZXing (can freeze UI).
         } else {
           lastZxingAt.current = now;
           const imageData = ctx.getImageData(0, 0, DW, DH);
-          thoroughToggle.current = DEVICE_TIER === "low" ? false : !thoroughToggle.current;
-          const reader = thoroughToggle.current ? tr : fr;
-          const result = zxingDecode(imageData, reader);
-          if (result) emit(result, thoroughToggle.current ? "ZXing-T" : "ZXing-F");
+          const lum = extractLuminance(imageData.data, DW * DH);
+          if (luminanceVariance(lum) < 70) return;
+          thoroughToggle.current = false; // never TRY_HARDER on the main thread
+          const result = zxingDecode(imageData, fr);
+          if (result) emit(result, "ZXing-F");
         }
       }
     };
@@ -441,6 +508,8 @@ export function Scanner({ onDetected, paused }: Props) {
       streamRef.current?.getTracks().forEach(t => t.stop());
       fastReader.current?.reset();
       thoroughReader.current?.reset();
+      if (workerWatchdog.current) clearTimeout(workerWatchdog.current);
+      workerWatchdog.current = null;
       workerRef.current?.terminate();
       workerRef.current = null;
       workerBusy.current = false;

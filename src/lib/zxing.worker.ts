@@ -31,7 +31,9 @@ const FAST_HINTS = new Map<DecodeHintType, unknown>([
       BarcodeFormat.CODE_128,
       BarcodeFormat.CODE_39,
       BarcodeFormat.ITF,
-      BarcodeFormat.DATA_MATRIX,
+      // DATA_MATRIX / PDF417 / AZTEC stay on the thorough pass.
+      // Including them on every failed camera frame can stall MultiFormatReader
+      // indefinitely (worker never postMessages; main thread stays busy).
     ],
   ],
 ]);

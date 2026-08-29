@@ -71,7 +71,10 @@ export const transcribeAudio = createServerFn({ method: "POST" })
     }
 
     const ext = (data.format || "webm").toLowerCase();
-    const mime = MIME_BY_EXT[ext] ?? "audio/webm";
+    if (!(ext in MIME_BY_EXT)) {
+      return { ok: false, error: "فرمت فایل صوتی پشتیبانی نمی‌شود." };
+    }
+    const mime = MIME_BY_EXT[ext];
     const bytes = base64ToBytes(data.audioBase64);
     if (bytes.byteLength < 1024) return { ok: false, error: "صدایی ضبط نشد." };
 

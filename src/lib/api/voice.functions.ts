@@ -43,7 +43,7 @@ export const parseVoiceInvoiceLLM = createServerFn({ method: "POST" })
     z.object({
       transcript: z.string().min(1).max(2000),
       // نام محصولات موجود در انبار تا مدل از همین‌ها انتخاب کند
-      productNames: z.array(z.string()).max(2000),
+      productNames: z.array(z.string().max(120)).max(2000),
     }),
   )
   .handler(async ({ data, context }): Promise<LlmParseResult> => {
@@ -130,7 +130,7 @@ export const parseVoiceProductLLM = createServerFn({ method: "POST" })
   .inputValidator(
     z.object({
       transcript: z.string().min(1).max(2000),
-      unitNames: z.array(z.string()).max(100),
+      unitNames: z.array(z.string().max(40)).max(100),
     }),
   )
   .handler(async ({ data, context }): Promise<LlmParseProductResult> => {

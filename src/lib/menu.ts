@@ -95,7 +95,8 @@ export async function createItem(userId: string, item: Partial<MenuItem> & { nam
 }
 
 export async function updateItem(id: string, patch: Partial<MenuItem>) {
-  const { error } = await supabase.from("menu_items").update(patch).eq("id", id);
+  const { id: _id, user_id: _userId, ...safe } = patch;
+  const { error } = await supabase.from("menu_items").update(safe).eq("id", id);
   if (error) throw error;
 }
 

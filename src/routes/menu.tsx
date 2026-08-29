@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { Layout } from "@/components/Layout";
 import { useAuth } from "@/lib/AuthContext";
+import { authUserId } from "@/lib/subscription-access";
 import {
   listCategories, listItems, createCategory, deleteCategory,
   createItem, updateItem, deleteItem, uploadMenuImage,
@@ -16,7 +18,9 @@ export const Route = createFileRoute("/menu")({
   head: () => ({ meta: [{ title: "منوی دیجیتال | KAMIX" }] }),
   component: () => (
     <AuthGuard>
-      <MenuPage />
+      <RequireActiveSubscription feature="ویرایش منو">
+        <MenuPage />
+      </RequireActiveSubscription>
     </AuthGuard>
   ),
 });
@@ -27,7 +31,7 @@ function formatToman(n: number) {
 
 function MenuPage() {
   const { state } = useAuth();
-  const userId = state.status === "authenticated" ? state.session.user.id : "";
+  const userId = authUserId(state) ?? "";
   const [cats, setCats] = useState<MenuCategory[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);

@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
 import { GlobalSearch } from "@/components/GlobalSearch";
@@ -9,6 +9,9 @@ import { DueAlertsDialog } from "@/components/DueAlertsDialog";
 import { SmartAssistant } from "@/components/SmartAssistant";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
+import { BackupReminderDialog } from "@/components/BackupReminderDialog";
+import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
+import { isAppSession, isSubscriptionReadOnly } from "@/lib/subscription-access";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -33,6 +36,7 @@ const nav = [
 
 /** فقط پرکاربردترین بخش‌ها همیشه در نوار پایین دیده می‌شوند؛ بقیه داخل «بیشتر». */
 const PRIMARY_PATHS = ["/", "/products", "/invoices", "/customers"] as const;
+const WRITE_NAV_PATHS = new Set(["/scan", "/voice", "/voice-products", "/quick-add", "/production"]);
 
 export function Layout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -47,6 +51,7 @@ export function Layout({ children }: { children: ReactNode }) {
     return !!appSettings[item.settingKey];
   });
   const { state, signOut } = useAuth();
+  const { requireActive } = useSubscriptionAccess();
   const [studentsList] = studentsStore.useAll();
   const [remindersList] = remindersStore.useAll();
   const studentsDueCount = studentsList.filter((s) => {
@@ -59,7 +64,9 @@ export function Layout({ children }: { children: ReactNode }) {
   );
   // وضعیت همگام‌سازی ابری — فقط وقتی واقعاً شکست خورده هشدار نشان داده می‌شود
   const sync = useSyncState();
-  const syncFailed = sync.failed && sync.pending > 0 && state.status === "authenticated";
+  const loggedIn = isAppSession(state);
+  const readOnly = isSubscriptionReadOnly(state);
+  const syncFailed = sync.failed && sync.pending > 0 && loggedIn;
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
@@ -90,7 +97,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           </div>
           <div className="flex items-center gap-1.5">
-            {state.status === "authenticated" && (
+            {loggedIn && !readOnly && (
               <button
                 type="button"
                 onClick={() => setTourReplay((n) => n + 1)}
@@ -111,7 +118,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 پنل ادمین
               </Link>
             )}
-            {state.status === "authenticated" && (
+            {loggedIn && (
               <button
                 onClick={signOut}
                 className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
@@ -147,20 +154,32 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
+      {readOnly && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-red-600 px-4 py-2 text-xs font-semibold text-white"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <CalendarX className="h-3.5 w-3.5 shrink-0" />
+          اشتراک تمام شده — سوابق، چاپ و اکسل آزاد است؛ ثبت کار جدید پس از تمدید
+        </div>
+      )}
+
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
 
       {/* پاپ‌آپ سررسید یادآوری و موعد تسویه مشتریان بدهکار */}
-      {state.status === "authenticated" && (
+      {loggedIn && (
         <DueAlertsDialog includeReminders={appSettings.showRemindersFeature !== false} />
       )}
 
       {/* دستیار هوشمند صوتی — دکمه‌ی شناور + شیت پایین (کاملاً محلی، بدون AI/API) */}
-      {state.status === "authenticated" && <SmartAssistant />}
+      {loggedIn && !readOnly && <SmartAssistant />}
 
       {/* دانلود اپ برای تازه‌ثبت‌نام در سایت — قبل از تور آموزش */}
-      {state.status === "authenticated" && <ApkWelcomeDialog />}
+      {loggedIn && !readOnly && <ApkWelcomeDialog />}
       {/* تور شروع کار — لایه‌ی spotlight روی UI موجود، بدون تغییر منطق صفحات */}
-      {state.status === "authenticated" && <OnboardingTour replayNonce={tourReplay} />}
+      {loggedIn && !readOnly && <OnboardingTour replayNonce={tourReplay} />}
+
+      {loggedIn && <BackupReminderDialog />}
 
       {(() => {
         const badgeFor = (to: string) =>
@@ -200,7 +219,13 @@ export function Layout({ children }: { children: ReactNode }) {
                         <Link
                           key={to}
                           to={to}
-                          onClick={() => setMoreOpen(false)}
+                          onClick={(e) => {
+                            if (WRITE_NAV_PATHS.has(to) && !requireActive()) {
+                              e.preventDefault();
+                              return;
+                            }
+                            setMoreOpen(false);
+                          }}
                           className={`relative flex flex-col items-center gap-1.5 rounded-2xl border p-3 text-[11px] transition ${
                             active
                               ? "border-primary bg-primary/10 font-semibold text-primary"

@@ -32,6 +32,8 @@ import {
   type PaymentMethod,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
+import { authUserId } from "@/lib/subscription-access";
+import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { openExternal, shareText, toIntlPhone, telHref } from "@/lib/openExternal";
@@ -1565,7 +1567,7 @@ function SmsCampaignModal({
 }) {
   const shopName = settings.get().shopName || "فروشگاه ما";
   const { state: authState } = useAuth();
-  const userId = authState.status === "authenticated" ? authState.session.user.id : null;
+  const userId = authUserId(authState);
   const [audience, setAudience] = useState<Audience>("all");
   const [text, setText] = useState(TEMPLATES[0].body(shopName));
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -2213,6 +2215,7 @@ function DeleteAllCustomersDialog({
 // ─── فاکتور فروش سریع برای یک مشتری مشخص (از داخل صفحه مشتریان) ───────────────
 
 function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const { requireActive } = useSubscriptionAccess();
   const [appSettings] = settings.useAll();
   const [allProducts] = products.useAll();
   const [cartInv, setCartInv] = useState(() => emptyInvoice());
@@ -2286,6 +2289,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   const debt = paymentMethod === "credit" ? cartTotals.remaining : 0;
 
   const submit = () => {
+    if (!requireActive()) return;
     if (cartInv.items.length === 0) {
       alert("حداقل یک کالا به فاکتور اضافه کنید.");
       return;

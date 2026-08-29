@@ -11,6 +11,8 @@ import {
 import appCss from "../styles.css?url";
 import { AuthProvider } from "@/lib/AuthContext";
 import { disableServiceWorker } from "@/registerSW";
+import { BackupReminderDialog } from "@/components/BackupReminderDialog";
+import { RenewRequiredDialog } from "@/components/RenewRequiredDialog";
 
 function NotFoundComponent() {
   return (
@@ -178,7 +180,16 @@ function RootComponent() {
       <AuthProvider>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        {import.meta.env.DEV ? <DevPreviewOverlays /> : null}
       </AuthProvider>
     </QueryClientProvider>
   );
+}
+
+function DevPreviewOverlays() {
+  if (typeof window === "undefined") return null;
+  const preview = new URLSearchParams(window.location.search).get("preview");
+  if (preview === "backup") return <BackupReminderDialog forceOpen />;
+  if (preview === "renew") return <RenewRequiredDialog onClose={() => {}} />;
+  return null;
 }

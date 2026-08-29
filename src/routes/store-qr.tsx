@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Layout } from "@/components/Layout";
 import { useAuth } from "@/lib/AuthContext";
+import { authUserId } from "@/lib/subscription-access";
 import { settings, storePublicUrl } from "@/lib/store";
 import { printHtml, savePdf, saveBase64File } from "@/lib/print";
 import { escapeHtml } from "@/lib/html-escape";
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/store-qr")({
 
 function StoreQrPage() {
   const { state } = useAuth();
-  const userId = state.status === "authenticated" ? state.session.user.id : "";
+  const userId = authUserId(state) ?? "";
   const [appSettings] = settings.useAll();
   const shopName = appSettings.shopName || "فروشگاه من";
   const [sizeCm, setSizeCm] = useState(6);

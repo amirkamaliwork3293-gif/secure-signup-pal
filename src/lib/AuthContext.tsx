@@ -9,7 +9,7 @@ import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
 type AuthState =
   | { status: "loading" }
   | { status: "unauthenticated" }
-  | { status: "expired"; username: string; profile: UserProfile }
+  | { status: "expired"; username: string; profile: UserProfile; session: Session }
   | { status: "pending"; username: string }
   | { status: "rejected"; username: string }
   | { status: "authenticated"; session: Session; profile: UserProfile; isAdmin: boolean };
@@ -99,10 +99,10 @@ async function loadState(session: Session): Promise<AuthState> {
   if (profile.end_date && new Date(profile.end_date) < new Date()) {
     // Best-effort DB update — ignore failure when offline
     try { await supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id); } catch {}
-    return { status: "expired", username: profile.username, profile };
+    return { status: "expired", username: profile.username, profile, session };
   }
   if (profile.status === "expired") {
-    return { status: "expired", username: profile.username, profile };
+    return { status: "expired", username: profile.username, profile, session };
   }
 
   return { status: "authenticated", session, profile, isAdmin: false };
@@ -154,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cur = stateRef.current;
       const sameUser =
         (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
-        (cur.status === "expired" && cur.profile.id === session.user.id);
+        (cur.status === "expired" && cur.session.user.id === session.user.id);
       if (!disposed && currentRevision === revision && !sameUser) {
         // Optimistic hydration: اگر پروفایل این کاربر در کش داریم،
         // مستقیم وضعیت authenticated را نشان بده تا اسپینر

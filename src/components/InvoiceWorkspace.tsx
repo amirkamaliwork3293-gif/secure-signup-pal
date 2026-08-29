@@ -56,6 +56,7 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 import { InvoiceSavedDialog } from "@/components/InvoiceSavedDialog";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
+import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 function scheduleChequeReminders(
@@ -86,11 +87,17 @@ function scheduleChequeReminders(
 }
 
 export function InvoiceWorkspace() {
+  const { requireActive } = useSubscriptionAccess();
   const [inv, setInv] = invoice.useCurrent();
   const [board, tabs] = invoice.useTabs();
   const [appSettings] = settings.useAll();
   const [showCustomer, setShowCustomer] = useState(
-    () => !!(inv.customer?.firstName?.trim() || inv.customer?.lastName?.trim() || inv.customer?.phone?.trim()),
+    () =>
+      !!(
+        inv.customer?.firstName?.trim() ||
+        inv.customer?.lastName?.trim() ||
+        inv.customer?.phone?.trim()
+      ),
   );
   const [showFields, setShowFields] = useState(false);
   const [customFields, setCustomFields] = useState<Record<string, string>>({});
@@ -193,7 +200,11 @@ export function InvoiceWorkspace() {
     }
     setNotes(inv.notes ?? "");
     setShowCustomer(
-      !!(inv.customer?.firstName?.trim() || inv.customer?.lastName?.trim() || inv.customer?.phone?.trim()),
+      !!(
+        inv.customer?.firstName?.trim() ||
+        inv.customer?.lastName?.trim() ||
+        inv.customer?.phone?.trim()
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inv.id]);
@@ -249,6 +260,7 @@ export function InvoiceWorkspace() {
   };
 
   const checkout = () => {
+    if (!requireActive()) return;
     if (inv.items.length === 0) return;
     const hasCustomer = !!(
       customer.firstName?.trim() ||
@@ -332,6 +344,7 @@ export function InvoiceWorkspace() {
   };
 
   const addFromSearch = (productId: string) => {
+    if (!requireActive()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     setInv((prev) => addProductToInvoice(prev, p));
@@ -354,6 +367,7 @@ export function InvoiceWorkspace() {
 
   // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست
   const addManualItem = () => {
+    if (!requireActive()) return;
     const price = parseNumberInput(manualPrice);
     const qty = parseNumberInput(manualQty) || 1;
     if (!manualName.trim() || price <= 0 || qty <= 0) {
@@ -466,6 +480,9 @@ export function InvoiceWorkspace() {
           <Link
             to="/scan"
             data-tour="invoice-scan"
+            onClick={(e) => {
+              if (!requireActive()) e.preventDefault();
+            }}
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <ScanLine className="h-4 w-4" />
@@ -474,6 +491,9 @@ export function InvoiceWorkspace() {
           <Link
             to="/voice"
             data-tour="invoice-voice"
+            onClick={(e) => {
+              if (!requireActive()) e.preventDefault();
+            }}
             className="flex items-center justify-center gap-2 rounded-xl bg-background/15 px-3 py-2.5 text-sm font-medium backdrop-blur transition hover:bg-background/25"
           >
             <Mic className="h-4 w-4" />
@@ -1084,6 +1104,9 @@ export function InvoiceWorkspace() {
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
               to="/scan"
+              onClick={(e) => {
+                if (!requireActive()) e.preventDefault();
+              }}
               className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
             >
               <ScanLine className="h-4 w-4" />

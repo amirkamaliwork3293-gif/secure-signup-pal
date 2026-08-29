@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
@@ -37,7 +38,9 @@ export const Route = createFileRoute("/production")({
   }),
   component: () => (
     <AuthGuard>
-      <ProductionPage />
+      <RequireActiveSubscription feature="تولید">
+        <ProductionPage />
+      </RequireActiveSubscription>
     </AuthGuard>
   ),
 });

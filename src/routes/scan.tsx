@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useRef } from "react";
 import { Layout } from "@/components/Layout";
@@ -212,7 +213,9 @@ function ScanPageInner() {
 function ScanPage() {
   return (
     <AuthGuard>
-      <ScanPageInner />
+      <RequireActiveSubscription feature="اسکن بارکد">
+        <ScanPageInner />
+      </RequireActiveSubscription>
     </AuthGuard>
   );
 }

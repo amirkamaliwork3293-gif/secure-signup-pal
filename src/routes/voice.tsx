@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Layout } from "@/components/Layout";
@@ -995,7 +996,9 @@ function VoiceDraftPreview({
 function VoicePage() {
   return (
     <AuthGuard>
-      <VoicePageInner />
+      <RequireActiveSubscription feature="ثبت صوتی">
+        <VoicePageInner />
+      </RequireActiveSubscription>
     </AuthGuard>
   );
 }

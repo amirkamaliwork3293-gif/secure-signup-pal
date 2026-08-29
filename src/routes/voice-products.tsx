@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Layout } from "@/components/Layout";
@@ -494,7 +495,9 @@ function FailedRow({ item, onDiscard }: { item: ResolvedProduct; onDiscard: () =
 function VoiceProductsPage() {
   return (
     <AuthGuard>
-      <VoiceProductsPageInner />
+      <RequireActiveSubscription feature="ثبت صوتی محصول">
+        <VoiceProductsPageInner />
+      </RequireActiveSubscription>
     </AuthGuard>
   );
 }

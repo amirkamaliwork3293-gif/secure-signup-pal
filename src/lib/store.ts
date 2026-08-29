@@ -17,6 +17,7 @@ import {
   type RecipeIngredient,
   type ProductionEvent,
 } from "@/lib/production";
+import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -585,9 +586,35 @@ function writeLocalOnly<T>(key: string, value: T) {
   );
 }
 
-function write<T>(key: string, value: T) {
+/**
+ * پس از انقضای اشتراک، نوشتن دادهٔ کسب‌وکار قطع می‌شود.
+ * خواندن، چاپ و خروجی اکسل آزاد می‌ماند. همگام‌سازی ابریِ تغییراتِ قبلی
+ * (dirty از قبل از انقضا) همچنان ارسال می‌شود.
+ */
+let businessWritesBlocked = false;
+
+export function setBusinessWritesBlocked(blocked: boolean) {
+  businessWritesBlocked = blocked;
+}
+
+export function areBusinessWritesBlocked(): boolean {
+  return businessWritesBlocked;
+}
+
+/** اگر نوشتن مجاز نباشد رویداد UI را می‌فرستد و false برمی‌گرداند. */
+export function assertBusinessWriteAllowed(): boolean {
+  if (!businessWritesBlocked) return true;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(WRITE_BLOCKED_EVENT));
+  }
+  return false;
+}
+
+function write<T>(key: string, value: T): boolean {
+  if (!assertBusinessWriteAllowed()) return false;
   writeLocalOnly(key, value);
   scheduleCloudPush(key, value);
+  return true;
 }
 
 // ─── Cloud sync ──────────────────────────────────────────────────────────────
@@ -1174,7 +1201,7 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
   const set = (v: T | ((p: T) => T)) => {
     setState((prev) => {
       const next = typeof v === "function" ? (v as (p: T) => T)(prev) : v;
-      write(key, next);
+      if (!write(key, next)) return prev;
       return next;
     });
   };
@@ -1398,6 +1425,7 @@ export const invoice = {
   useHistory: () => useStore<Invoice[]>(HISTORY_KEY, []),
   getHistory: () => read<Invoice[]>(HISTORY_KEY, []),
   archive: (inv: Invoice): Invoice => {
+    if (!assertBusinessWriteAllowed()) return inv;
     const hist = read<Invoice[]>(HISTORY_KEY, []);
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
     // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
@@ -1475,6 +1503,7 @@ export const purchases = {
    * در غیر این صورت (پیش‌فرض قبلی) تاریخ لحظه‌ی ثبت است.
    */
   archive: (p: Purchase, opts?: { keepCreatedAt?: boolean }) => {
+    if (!assertBusinessWriteAllowed()) return p;
     const stamped: Purchase = { ...p, createdAt: opts?.keepCreatedAt ? p.createdAt : Date.now() };
 
     const list = read<Product[]>(PRODUCTS_KEY, []);
@@ -2602,7 +2631,10 @@ export function addCustomInvoiceLine(
   const price = Math.max(0, Math.round(line.price || 0));
   const existing = inv.items.find(
     (i) =>
-      isManualInvoiceItem(i) && i.name === name && i.price === price && (i.unit || COUNT_UNIT) === unit,
+      isManualInvoiceItem(i) &&
+      i.name === name &&
+      i.price === price &&
+      (i.unit || COUNT_UNIT) === unit,
   );
   const items = existing
     ? inv.items.map((i) => (i === existing ? { ...i, quantity: i.quantity + qty } : i))

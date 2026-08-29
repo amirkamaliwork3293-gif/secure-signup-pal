@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
@@ -24,7 +25,9 @@ export const Route = createFileRoute("/quick-add")({
   head: () => ({ meta: [{ title: "ثبت سریع محصولات | KAMIX" }] }),
   component: () => (
     <AuthGuard>
-      <QuickAdd />
+      <RequireActiveSubscription feature="ثبت سریع محصول">
+        <QuickAdd />
+      </RequireActiveSubscription>
     </AuthGuard>
   ),
 });

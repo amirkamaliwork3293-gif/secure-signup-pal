@@ -6,6 +6,7 @@ import { settings, storePublicUrl } from "@/lib/store";
 import { PAPER_SIZES, type PaperSize } from "@/lib/print";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/AuthContext";
+import { authUserId } from "@/lib/subscription-access";
 import {
   publishStoreProfile,
   uploadStoreLogo,
@@ -50,7 +51,7 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPageInner() {
   const { state: authState } = useAuth();
-  const meId = authState.status === "authenticated" ? authState.session.user.id : null;
+  const meId = authUserId(authState);
   const [appSettings, setSettings] = settings.useAll();
   const [shopName, setShopName] = useState(appSettings.shopName);
   const [invoiceFontSize, setInvoiceFontSize] = useState(appSettings.invoiceFontSize ?? 13);
@@ -570,7 +571,7 @@ function ChangePasswordSection() {
 
 function StoreProfileSection({ shopName }: { shopName: string }) {
   const { state } = useAuth();
-  const userId = state.status === "authenticated" ? state.session.user.id : null;
+  const userId = authUserId(state);
   const [appSettings, setSettings] = settings.useAll();
 
   const [open, setOpen] = useState(false);

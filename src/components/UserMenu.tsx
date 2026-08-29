@@ -4,14 +4,13 @@ import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
 import { PLAN_LABEL } from "@/lib/supabase";
 import { User, X, CalendarClock, BadgeCheck, RefreshCw, AlertTriangle } from "lucide-react";
+import {
+  daysLeftFrom,
+  isSubscriptionExpiringSoon,
+  isSubscriptionReadOnly,
+} from "@/lib/subscription-access";
 
-/** روزهای باقی‌مانده تا پایان اشتراک (بالا-گرد) */
-export function daysLeftFrom(endDate?: string | null): number | null {
-  if (!endDate) return null;
-  const ms = new Date(endDate).getTime();
-  if (!isFinite(ms)) return null;
-  return Math.ceil((ms - Date.now()) / 86_400_000);
-}
+export { daysLeftFrom };
 
 export function UserMenu() {
   const { state } = useAuth();
@@ -30,12 +29,14 @@ export function UserMenu() {
     }
   }, [open]);
 
-  if (state.status !== "authenticated") return null;
+  if (state.status !== "authenticated" && state.status !== "expired") return null;
 
   const profile = state.profile as any;
   const left = daysLeftFrom(profile?.end_date);
-  const warn = left !== null && left <= 2;
-  const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "کاربر KAMIX";
+  const expired = isSubscriptionReadOnly(state) || (left !== null && left <= 0);
+  const warn = expired || isSubscriptionExpiringSoon(profile?.end_date);
+  const fullName =
+    [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "کاربر KAMIX";
 
   const dialog = (
     <div
@@ -79,7 +80,9 @@ export function UserMenu() {
                 <BadgeCheck className="h-3.5 w-3.5" />
                 پلن فعلی
               </span>
-              <span className="font-semibold">{PLAN_LABEL[profile.plan as keyof typeof PLAN_LABEL]}</span>
+              <span className="font-semibold">
+                {PLAN_LABEL[profile.plan as keyof typeof PLAN_LABEL]}
+              </span>
             </div>
           )}
           <div
@@ -103,7 +106,11 @@ export function UserMenu() {
             <div className="flex items-start gap-1.5 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 leading-6 text-red-600">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                اشتراک شما به‌زودی به پایان می‌رسد. برای جلوگیری از قطع دسترسی، همین حالا تمدید کنید.
+                {expired
+                  ? "اشتراک شما تمام شده است. سوابق را می‌بینید و می‌توانید چاپ یا اکسل بگیرید؛ برای کار جدید تمدید کنید."
+                  : left !== null
+                    ? `فقط ${left.toLocaleString("fa-IR")} روز تا پایان اشتراک مانده. برای قطع نشدن ثبت فاکتور و اسکن، همین حالا تمدید کنید.`
+                    : "اشتراک شما به‌زودی تمام می‌شود. برای جلوگیری از قطع دسترسی تمدید کنید."}
               </span>
             </div>
           )}

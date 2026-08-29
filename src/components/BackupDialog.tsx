@@ -10,6 +10,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { isWebView } from "@/lib/isWebView";
+import { writeBackupExcel } from "@/lib/backup-export";
 import {
   products as productsStore,
   categories as categoriesStore,
@@ -46,8 +47,6 @@ type Row = Record<string, string | number>;
  * ستون‌هایی که مقدارشان «مبلغ/عدد» است و در اکسل باید با جداکننده‌ی هزارگان
  * نمایش داده شوند (به‌صورت عدد واقعی ذخیره می‌شوند تا در اکسل قابل جمع‌زدن باشند).
  */
-const MONEY_HEADER = /مبلغ|قیمت|جمع|مانده|تخفیف|شهریه|پرداخت|ارزش|بدهی|موجودی|واریز|برداشت/;
-const COUNT_HEADER = /تعداد|دوره|حد |طول/;
 type SectionKey =
   | "products"
   | "customers"
@@ -515,45 +514,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      const XLSX = await import("xlsx");
-      const wb = XLSX.utils.book_new();
-      // کل کارپوشه راست‌به‌چپ باز شود (متن و ستون‌ها فارسی‌اند)
-      wb.Workbook = { ...(wb.Workbook ?? {}), Views: [{ RTL: true }] };
-
-      for (const s of sheets) {
-        const headers = Object.keys(s.rows[0] ?? {});
-        const ws = XLSX.utils.json_to_sheet(s.rows, { header: headers });
-        const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
-
-        // عرض ستون‌ها بر اساس بلندترین محتوای همان ستون (با سقف معقول)
-        ws["!cols"] = headers.map((h) => {
-          const longest = s.rows.reduce((m, r) => {
-            const v = r[h];
-            const len =
-              typeof v === "number" ? String(Math.round(v)).length + 3 : String(v ?? "").length;
-            return Math.max(m, len);
-          }, h.length);
-          return { wch: Math.min(42, Math.max(10, longest + 2)) };
-        });
-
-        // قالب عددی ستون‌های مبلغ/تعداد
-        headers.forEach((h, c) => {
-          const fmt = MONEY_HEADER.test(h) ? "#,##0" : COUNT_HEADER.test(h) ? "#,##0.###" : null;
-          if (!fmt) return;
-          for (let r = range.s.r + 1; r <= range.e.r; r++) {
-            const cell = ws[XLSX.utils.encode_cell({ r, c })];
-            if (cell && cell.t === "n") cell.z = fmt;
-          }
-        });
-
-        // فیلتر/مرتب‌سازی روی سطر عنوان
-        if (headers.length > 0 && s.rows.length > 1)
-          ws["!autofilter"] = { ref: ws["!ref"] as string };
-
-        // نام برگه در اکسل حداکثر ۳۱ کاراکتر و بدون کاراکترهای غیرمجاز
-        XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 30));
-      }
-      XLSX.writeFile(wb, `kamix-backup-${stamp()}.xlsx`, { compression: true });
+      await writeBackupExcel(sheets, `kamix-backup-${stamp()}.xlsx`);
     } catch (e) {
       console.error("[backup] excel export failed", e);
       setError("ساخت فایل اکسل ناموفق بود. لطفاً دوباره تلاش کنید.");

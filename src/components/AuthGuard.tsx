@@ -3,8 +3,8 @@ import { useAuth } from "@/lib/AuthContext";
 import { LandingPage } from "@/components/LandingPage";
 import { isWebView } from "@/lib/isWebView";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
-import { ShieldOff, Lock, Clock, CalendarX } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { SubscriptionAccessProvider } from "@/components/SubscriptionAccess";
+import { ShieldOff, Lock, Clock } from "lucide-react";
 
 const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 
@@ -98,35 +98,7 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
     );
   }
 
-  if (state.status === "expired") {
-    return (
-      <CenterMessage
-        icon={<CalendarX className="h-8 w-8 text-destructive" />}
-        iconBg="bg-destructive/10"
-        title="اشتراک شما منقضی شده است"
-        desc={
-          <>
-            مدت اشتراک <strong>{state.username}</strong> به پایان رسیده.
-            <br />
-            برای تمدید، درخواست جدیدی ثبت کنید.
-          </>
-        }
-        action={
-          <div className="flex gap-2">
-            <Link
-              to="/renew"
-              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
-            >
-              تمدید اشتراک
-            </Link>
-            <SignOutBtn onClick={signOut} />
-          </div>
-        }
-      />
-    );
-  }
-
-  if (adminOnly && !state.isAdmin) {
+  if (adminOnly && (state.status !== "authenticated" || !state.isAdmin)) {
     return (
       <CenterMessage
         icon={<Lock className="h-8 w-8 text-amber-500" />}
@@ -145,7 +117,7 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
     );
   }
 
-  return <>{children}</>;
+  return <SubscriptionAccessProvider>{children}</SubscriptionAccessProvider>;
 }
 
 function CenterMessage({

@@ -1125,7 +1125,11 @@ function isImageBytes(b: Uint8Array): boolean {
   const gif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38;
   const ascii = (i: number) => String.fromCharCode(b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!);
   const webp = ascii(0) === "RIFF" && ascii(8) === "WEBP";
-  const heic = ascii(4) === "ftyp"; // heic/heif/avif همگی brand ftyp دارند
+  // ftyp به‌تنهایی MP4/MOV را هم شامل می‌شود؛ فقط برندهای تصویر را بپذیر.
+  const brand = ascii(8).toLowerCase();
+  const heic =
+    ascii(4) === "ftyp" &&
+    ["heic", "heix", "heif", "hevc", "mif1", "msf1", "avif"].includes(brand);
   return jpeg || png || gif || webp || heic;
 }
 

@@ -12,8 +12,17 @@ import {
   enforceRateLimit,
   isLockedOut,
 } from "@/lib/rate-limit.server";
-import { SIGNUP_RATE_MESSAGE } from "@/lib/rate-limit-utils";
-import { getTurnstileSiteKey, assertTurnstileToken } from "@/lib/turnstile.server";
+import {
+  SIGNUP_RATE_MESSAGE,
+  passwordResetRateCaps,
+  signupRateCaps,
+  trialRateCaps,
+} from "@/lib/rate-limit-utils";
+import {
+  getTurnstileSiteKey,
+  assertTurnstileToken,
+  isTurnstileConfigured,
+} from "@/lib/turnstile.server";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -268,13 +277,28 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const supabaseAdmin = await admin();
     const username = data.username;
     const ip = clientIp();
+    const caps = signupRateCaps(isTurnstileConfigured());
 
     // دو لایه سقف: هر IP (شبکه‌های ایران اغلب CGNAT هستند پس سقف را کمی باز
     // می‌گذاریم) + سقف سراسری که جلوی سیل ۳۰۰تایی از IPهای مختلف را می‌گیرد.
-    // نسخه‌ی قبلی فقط ۵/ساعت·IP بود و اگر IP تشخیص داده نمی‌شد همه‌ی کاربران
-    // یک سطل «unknown» را پر می‌کردند و ثبت‌نام کل سایت می‌خوابید.
-    await enforceRateLimit(supabaseAdmin, "signup-ip", ip, 12, 3600, SIGNUP_RATE_MESSAGE);
-    await enforceRateLimit(supabaseAdmin, "signup-global", "all", 80, 3600, SIGNUP_RATE_MESSAGE);
+    // اگر TURNSTILE_SECRET_KEY نباشد بررسی کپچا fail-open است؛ در آن حالت
+    // سقف‌ها سخت‌تر می‌شوند تا همان سیل ثبت‌نام قبلی بدون کپچا تکرار نشود.
+    await enforceRateLimit(
+      supabaseAdmin,
+      "signup-ip",
+      ip,
+      caps.ipMax,
+      caps.ipWindow,
+      SIGNUP_RATE_MESSAGE,
+    );
+    await enforceRateLimit(
+      supabaseAdmin,
+      "signup-global",
+      "all",
+      caps.globalMax,
+      caps.globalWindow,
+      SIGNUP_RATE_MESSAGE,
+    );
 
     // یوزرنیم ادمین رزرو است — اما پیام خطا باید **دقیقاً** همان پیام «تکراری»
     // باشد. پیام اختصاصی قبلی («این یوزرنیم رزرو شده است») به هر مهاجم ناشناسی
@@ -967,12 +991,25 @@ export const createTrialAccount = createServerFn({ method: "POST" })
     await assertTurnstileToken(data.turnstile_token);
     const supabaseAdmin = await admin();
     const username = data.username;
+    const trialCaps = trialRateCaps(isTurnstileConfigured());
 
     // ⚠️ این endpoint بدون تایید مدیر و بدون پرداخت، حساب واقعی می‌سازد.
-    // سخت‌ترین سقف نرخ کل سامانه اینجاست: ۲ حساب آزمایشی در ۲۴ ساعت برای هر IP،
-    // و حداکثر ۵۰ حساب آزمایشی در ساعت برای کل سرویس.
-    await enforceRateLimit(supabaseAdmin, "trial", clientIp(), 2, 86400);
-    await enforceRateLimit(supabaseAdmin, "trial-global", "all", 20, 3600);
+    // سخت‌ترین سقف نرخ کل سامانه اینجاست. اگر کپچا پیکربندی نشده باشد سقف
+    // سخت‌تر می‌شود (۱/روز·IP و ۶/ساعت سراسری).
+    await enforceRateLimit(
+      supabaseAdmin,
+      "trial",
+      clientIp(),
+      trialCaps.ipMax,
+      trialCaps.ipWindow,
+    );
+    await enforceRateLimit(
+      supabaseAdmin,
+      "trial-global",
+      "all",
+      trialCaps.globalMax,
+      trialCaps.globalWindow,
+    );
 
     const TAKEN = "این یوزرنیم قبلاً ثبت شده است.";
     const adminUser = getAdminUsername().toLowerCase();
@@ -1320,9 +1357,16 @@ export const submitPasswordResetRequest = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await assertTurnstileToken(data.turnstile_token);
     const supabaseAdmin = await admin();
+    const resetCaps = passwordResetRateCaps(isTurnstileConfigured());
     // بدون سقف، این فرم عمومی می‌تواند جدول را پر کند و پنل ادمین را
     // با درخواست‌های جعلی «بازیابی رمز» غرق کند.
-    await enforceRateLimit(supabaseAdmin, "pwd-reset", clientIp(), 3, 3600);
+    await enforceRateLimit(
+      supabaseAdmin,
+      "pwd-reset",
+      clientIp(),
+      resetCaps.ipMax,
+      resetCaps.ipWindow,
+    );
 
     const { data: recentRows } = await supabaseAdmin
       .from("password_reset_requests")

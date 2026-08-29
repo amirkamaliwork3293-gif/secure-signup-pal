@@ -29,3 +29,34 @@ export const SIGNUP_RATE_MESSAGE =
 
 export const GENERIC_RATE_MESSAGE =
   "تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.";
+
+/**
+ * سقف ثبت‌نام/آزمایشی وقتی Turnstile واقعاً اعمال می‌شود، در مقابل وقتی
+ * کلید محرمانه هنوز در هاست نیست (fail-open عمدی تا سایت نخوابد).
+ * بدون کپچا باید سقف سخت‌تر جایگزین شود وگرنه همان سیل ثبت‌نام قبلی برمی‌گردد.
+ */
+export type PublicRateCaps = {
+  ipMax: number;
+  ipWindow: number;
+  globalMax: number;
+  globalWindow: number;
+};
+
+export function signupRateCaps(turnstileEnforced: boolean): PublicRateCaps {
+  return turnstileEnforced
+    ? { ipMax: 12, ipWindow: 3600, globalMax: 80, globalWindow: 3600 }
+    : { ipMax: 3, ipWindow: 3600, globalMax: 15, globalWindow: 3600 };
+}
+
+export function trialRateCaps(turnstileEnforced: boolean): PublicRateCaps {
+  return turnstileEnforced
+    ? { ipMax: 2, ipWindow: 86400, globalMax: 20, globalWindow: 3600 }
+    : { ipMax: 1, ipWindow: 86400, globalMax: 6, globalWindow: 3600 };
+}
+
+export function passwordResetRateCaps(turnstileEnforced: boolean): {
+  ipMax: number;
+  ipWindow: number;
+} {
+  return turnstileEnforced ? { ipMax: 3, ipWindow: 3600 } : { ipMax: 2, ipWindow: 3600 };
+}

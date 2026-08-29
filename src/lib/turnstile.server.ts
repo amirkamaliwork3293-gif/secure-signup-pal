@@ -21,10 +21,18 @@ function getTurnstileSecretKey(): string {
   return (process.env.TURNSTILE_SECRET_KEY || "").trim();
 }
 
+/** آیا تایید سمت سرور واقعاً فعال است؟ (کلید محرمانه در env هاست) */
+export function isTurnstileConfigured(): boolean {
+  return getTurnstileSecretKey().length > 0;
+}
+
 /**
  * اگر کلید محرمانه تنظیم نشده، بررسی را رد می‌کند تا قبل از چسباندن کلیدها
  * ثبت‌نام سایت نخوابد. به‌محض گذاشتن TURNSTILE_SECRET_KEY در Vercel،
  * هر درخواست بدون توکن معتبر رد می‌شود.
+ *
+ * این fail-open است؛ فراخوان‌کننده باید وقتی `isTurnstileConfigured()` غلط
+ * است سقف نرخ سخت‌تری بگذارد تا سیل ثبت‌نام بدون کپچا برنگردد.
  */
 export async function assertTurnstileToken(token: unknown): Promise<void> {
   const secret = getTurnstileSecretKey();

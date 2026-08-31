@@ -2,7 +2,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { createFileRoute } from "@tanstack/react-router";
 import { Layout } from "@/components/Layout";
 import { BackupSection } from "@/components/BackupDialog";
-import { DatabaseBackup, ShieldCheck, FileSpreadsheet, FileJson } from "lucide-react";
+import { DatabaseBackup, ShieldCheck, FileSpreadsheet, FileJson, FileText } from "lucide-react";
 
 export const Route = createFileRoute("/backup")({
   head: () => ({
@@ -11,12 +11,12 @@ export const Route = createFileRoute("/backup")({
       {
         name: "description",
         content:
-          "از محصولات، مشتریان، فاکتورها و سایر داده‌های کسب‌وکار خود خروجی اکسل یا فایل کامل بگیرید.",
+          "از محصولات، مشتریان، فاکتورها و سایر داده‌های کسب‌وکار خود خروجی اکسل، PDF یا فایل کامل بگیرید.",
       },
       { property: "og:title", content: "پشتیبان‌گیری اطلاعات | KAMIX" },
       {
         property: "og:description",
-        content: "خروجی اکسل و فایل پشتیبان کامل از تمام داده‌های کسب‌وکار شما در KAMIX.",
+        content: "خروجی اکسل، PDF چاپی و فایل پشتیبان کامل از تمام داده‌های کسب‌وکار شما در KAMIX.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -43,13 +43,17 @@ function BackupPage() {
           </div>
           <p className="mt-3 text-xs leading-6 text-muted-foreground">
             در این بخش می‌توانید از بخش‌هایی که انتخاب می‌کنید (محصولات، مشتریان، فاکتورها، خریدها،
-            هزینه‌ها، یادآوری‌ها، هنرجویان و حساب‌ها) یک فایل اکسل یا نسخهٔ کامل بگیرید. این کار فقط
-            یک کپی می‌سازد و برنامه مثل همیشه کار می‌کند.
+            هزینه‌ها، یادآوری‌ها، هنرجویان و حساب‌ها) یک فایل اکسل، پروندهٔ PDF یا نسخهٔ کامل
+            بگیرید. این کار فقط یک کپی می‌سازد و برنامه مثل همیشه کار می‌کند.
           </p>
           <ul className="mt-3 space-y-1.5 text-[11px] text-muted-foreground">
             <li className="flex items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+              PDF: مناسب چاپ و ذخیره از پنجرهٔ چاپ — حتی داخل اپ
+            </li>
+            <li className="flex items-center gap-1.5">
               <FileSpreadsheet className="h-3.5 w-3.5 text-primary" />
-              خروجی اکسل: مناسب مرور، چاپ و کار با داده‌ها در رایانه
+              خروجی اکسل: مناسب مرور و کار با داده‌ها در رایانه
             </li>
             <li className="flex items-center gap-1.5">
               <FileJson className="h-3.5 w-3.5 text-primary" />

@@ -79,6 +79,24 @@ export const ALL_BACKUP_SECTIONS: Record<BackupSectionKey, boolean> = {
 
 const MONEY_HEADER = /مبلغ|قیمت|جمع|مانده|تخفیف|شهریه|پرداخت|ارزش|بدهی|موجودی|واریز|برداشت/;
 const COUNT_HEADER = /تعداد|دوره|حد |طول/;
+const PERCENT_HEADER = /درصد/;
+const CODE_HEADER = /شماره|کد|تلفن|شبا|کارت/;
+
+export function backupHeaderIsPercent(header: string): boolean {
+  return PERCENT_HEADER.test(header);
+}
+
+export function backupHeaderIsMoney(header: string): boolean {
+  return !backupHeaderIsPercent(header) && MONEY_HEADER.test(header);
+}
+
+export function backupHeaderIsCount(header: string): boolean {
+  return COUNT_HEADER.test(header);
+}
+
+export function backupHeaderIsCode(header: string): boolean {
+  return CODE_HEADER.test(header);
+}
 
 export type BackupSnapshot = {
   products: Product[];

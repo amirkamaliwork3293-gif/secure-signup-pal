@@ -5,12 +5,21 @@ import {
   Download,
   FileSpreadsheet,
   FileJson,
+  FileText,
   Loader2,
   X,
   Smartphone,
+  Printer,
 } from "lucide-react";
 import { isWebView } from "@/lib/isWebView";
-import { writeBackupExcel } from "@/lib/backup-export";
+import {
+  writeBackupExcel,
+  buildBackupSheets,
+  collectBackupSnapshot,
+  BACKUP_SECTION_LABEL,
+  type BackupSectionKey,
+} from "@/lib/backup-export";
+import { exportBackupPdf } from "@/lib/backup-pdf";
 import {
   products as productsStore,
   categories as categoriesStore,
@@ -24,52 +33,9 @@ import {
   accountTxs as accountTxsStore,
   production as productionStore,
   manualLedger as ledgerStore,
-  customerBalance,
-  customerFullName,
-  formatJalaliDateTime,
-  formatJalaliDate,
-  PAYMENT_LABEL,
-  MANUAL_LEDGER_LABEL,
-  accountBalance,
-  formatChequeDue,
 } from "@/lib/store";
-import {
-  invoiceTotals,
-  lineTotal,
-  purchaseLineTotal,
-  invoiceCheques,
-  chequeLineLabel,
-} from "@/lib/invoice-math";
 
-type Row = Record<string, string | number>;
-
-/**
- * ستون‌هایی که مقدارشان «مبلغ/عدد» است و در اکسل باید با جداکننده‌ی هزارگان
- * نمایش داده شوند (به‌صورت عدد واقعی ذخیره می‌شوند تا در اکسل قابل جمع‌زدن باشند).
- */
-type SectionKey =
-  | "products"
-  | "customers"
-  | "invoices"
-  | "purchases"
-  | "expenses"
-  | "reminders"
-  | "students"
-  | "accounts";
-
-const SECTION_LABEL: Record<SectionKey, string> = {
-  products: "محصولات و انبار",
-  customers: "مشتریان و بدهکاران",
-  invoices: "فاکتورهای فروش",
-  purchases: "فاکتورهای خرید",
-  expenses: "هزینه‌ها",
-  reminders: "یادآوری‌ها",
-  students: "هنرجویان",
-  accounts: "حساب‌ها و تراکنش‌ها",
-};
-
-const d = (ts?: number | null) => (ts ? formatJalaliDateTime(ts) : "");
-const dd = (ts?: number | null) => (ts ? formatJalaliDate(ts) : "");
+type SectionKey = BackupSectionKey;
 
 /**
  * بک‌آپ کامل داده‌های کاربر — فقط خواندن از استور محلی/همگام‌شده است
@@ -85,8 +51,8 @@ export function BackupSection() {
           <h2 className="text-sm font-bold">پشتیبان‌گیری از اطلاعات</h2>
         </div>
         <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) یک فایل اکسل یا نسخهٔ کامل JSON
-          بگیرید. برنامه مثل همیشه کار می‌کند.
+          از هر بخشی که بخواهید (محصولات، مشتریان، فاکتورها و…) فایل اکسل، نسخهٔ کامل JSON یا
+          پروندهٔ PDF چاپی بگیرید. برنامه مثل همیشه کار می‌کند.
         </p>
         <button
           onClick={() => setOpen(true)}
@@ -136,341 +102,13 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     students: true,
     accounts: true,
   });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"excel" | "pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const anySelected = Object.values(selected).some(Boolean);
   const inApp = useMemo(() => isWebView(), []);
 
   const toggle = (k: SectionKey) => setSelected((s) => ({ ...s, [k]: !s[k] }));
-
-  function buildSheets(): { name: string; rows: Row[] }[] {
-    const out: { name: string; rows: Row[] }[] = [];
-
-    // ── برگه‌ی «خلاصه» — نمای کلی کسب‌وکار در یک نگاه، ابتدای فایل ──────────
-    const summary: Row[] = [];
-    const addSummary = (title: string, count: number, amountLabel: string, amount: number) =>
-      summary.push({ بخش: title, "تعداد رکورد": count, "شرح مبلغ": amountLabel, مبلغ: amount });
-
-    if (selected.products) {
-      addSummary(
-        "محصولات و انبار",
-        prods.length,
-        "ارزش موجودی انبار (به قیمت فروش)",
-        prods.reduce((s, p) => s + (p.price || 0) * (p.stock || 0), 0),
-      );
-    }
-    if (selected.customers) {
-      const receivable = custs.reduce((s, c) => s + Math.max(0, customerBalance(c)), 0);
-      const payable = custs.reduce((s, c) => s + Math.max(0, -customerBalance(c)), 0);
-      addSummary("مشتریان — طلب شما", custs.length, "مجموع بدهی مشتریان به شما", receivable);
-      addSummary("مشتریان — بدهی شما", custs.length, "مجموع طلب مشتریان از شما", payable);
-    }
-    if (selected.invoices) {
-      const totals = invs.map((i) => invoiceTotals(i));
-      addSummary(
-        "فاکتورهای فروش",
-        invs.length,
-        "مجموع فروش",
-        totals.reduce((s, t) => s + t.total, 0),
-      );
-      const unpaid = totals.reduce((s, t) => s + t.remaining, 0);
-      if (unpaid > 0)
-        addSummary("فاکتورهای نسیه/چک", invs.length, "مجموع مانده‌ی وصول‌نشده", unpaid);
-      if (ledger.length > 0) {
-        addSummary(
-          "فروش دستی",
-          ledger.filter((e) => e.kind === "sales").length,
-          "مجموع فروش بدون فاکتور",
-          ledger.filter((e) => e.kind === "sales").reduce((s, e) => s + (e.amount || 0), 0),
-        );
-        addSummary(
-          "سود دستی",
-          ledger.filter((e) => e.kind === "profit").length,
-          "مجموع سود ثبت‌شده دستی",
-          ledger.filter((e) => e.kind === "profit").reduce((s, e) => s + (e.amount || 0), 0),
-        );
-      }
-    }
-    if (selected.purchases) {
-      addSummary(
-        "فاکتورهای خرید",
-        purch.length,
-        "مجموع خرید",
-        purch.reduce((s, p) => s + (p.total || 0), 0),
-      );
-    }
-    if (selected.expenses) {
-      addSummary(
-        "هزینه‌ها",
-        exps.length,
-        "مجموع هزینه‌ها",
-        exps.reduce((s, e) => s + (e.amount || 0), 0),
-      );
-    }
-    if (selected.accounts) {
-      addSummary(
-        "حساب‌ها و کارت‌ها",
-        accs.length,
-        "مجموع موجودی حساب‌ها",
-        accs.reduce((s, a) => s + accountBalance(a, txs), 0),
-      );
-    }
-    if (summary.length > 0) {
-      out.push({
-        name: "خلاصه",
-        rows: [
-          {
-            بخش: "تاریخ تهیه نسخه پشتیبان",
-            "تعداد رکورد": "",
-            "شرح مبلغ": formatJalaliDateTime(Date.now()),
-            مبلغ: "",
-          },
-          ...summary,
-        ],
-      });
-    }
-
-    if (selected.products) {
-      out.push({
-        name: "محصولات",
-        rows: prods.map((p) => ({
-          نام: p.name,
-          کد: p.code ?? "",
-          دسته‌بندی: p.category ?? "",
-          واحد: p.unit ?? "",
-          موجودی: p.stock ?? 0,
-          "قیمت فروش": p.price ?? 0,
-          "قیمت خرید": p.buyPrice ?? "",
-          "قیمت مصرف‌کننده": p.consumerPrice ?? "",
-          "قیمت همکار": p.sellerPrice ?? "",
-          "قیمت عمده": p.wholesalePrice ?? "",
-          "حداقل تعداد عمده": p.wholesaleMinQty ?? "",
-          "درصد تخفیف": p.discountPercent ?? "",
-          "حد هشدار موجودی": p.lowStockThreshold ?? "",
-          "تاریخ انقضا": dd(p.expiryAt),
-          توضیحات: p.description ?? "",
-        })),
-      });
-      out.push({
-        name: "دسته‌بندی‌ها",
-        rows: cats.map((c) => ({ نام: c.name, رنگ: c.color ?? "" })),
-      });
-    }
-
-    if (selected.customers) {
-      out.push({
-        name: "مشتریان",
-        rows: custs.map((c) => ({
-          نام: customerFullName(c),
-          تلفن: c.phone ?? "",
-          "مانده حساب": customerBalance(c),
-          "تاریخ تسویه": c.settlementDate ?? "",
-          "تعداد تراکنش": c.txs?.length ?? 0,
-          "تاریخ ثبت": d(c.createdAt),
-          یادداشت: c.note ?? "",
-        })),
-      });
-      out.push({
-        name: "تراکنش مشتریان",
-        rows: custs.flatMap((c) =>
-          (c.txs ?? []).map((t) => ({
-            مشتری: customerFullName(c),
-            نوع: t.type === "debt" ? "بدهی" : "پرداخت",
-            مبلغ: t.amount,
-            تاریخ: d(t.at),
-            "شماره فاکتور": t.invoiceId ?? "",
-            یادداشت: t.note ?? "",
-          })),
-        ),
-      });
-    }
-
-    if (selected.invoices) {
-      out.push({
-        name: "فاکتورهای فروش",
-        // مبالغ از همان منبعی می‌آیند که فاکتور چاپی استفاده می‌کند (invoice-math)
-        rows: invs.map((inv) => {
-          const t = invoiceTotals(inv);
-          return {
-            "شماره فاکتور": inv.id.toUpperCase(),
-            تاریخ: d(inv.createdAt),
-            مشتری: [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
-            "تلفن مشتری": inv.customer?.phone ?? "",
-            "تعداد اقلام": inv.items?.length ?? 0,
-            "جمع اقلام": t.subtotal,
-            "درصد تخفیف": t.discountPercent || "",
-            "مبلغ تخفیف": t.discount || "",
-            "درصد مالیات": t.taxPercent || "",
-            "مبلغ مالیات": t.tax || "",
-            "جمع کل": t.total,
-            "روش پرداخت": inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "",
-            "پرداخت نقدی": t.paid || "",
-            "مبلغ چک": t.checkAmount || "",
-            "جزئیات چک": invoiceCheques(inv)
-              .map(
-                (c, i) =>
-                  chequeLineLabel(c, i, formatChequeDue) + (c.amount ? ` = ${c.amount}` : ""),
-              )
-              .join(" | "),
-            مانده: t.remaining || "",
-            توضیحات: inv.notes ?? "",
-          };
-        }),
-      });
-      out.push({
-        name: "اقلام فاکتور فروش",
-        rows: invs.flatMap((inv) =>
-          (inv.items ?? []).map((it) => ({
-            "شماره فاکتور": inv.id.toUpperCase(),
-            تاریخ: d(inv.createdAt),
-            مشتری: [inv.customer?.firstName, inv.customer?.lastName].filter(Boolean).join(" "),
-            کالا: it.name,
-            تعداد: it.quantity,
-            واحد: it.unit ?? "",
-            "قیمت واحد": it.price,
-            "قیمت خرید": it.buyPrice ?? "",
-            جمع: lineTotal(it),
-          })),
-        ),
-      });
-    }
-
-    if (selected.invoices && ledger.length > 0) {
-      out.push({
-        name: "فروش و سود دستی",
-        rows: ledger.map((e) => ({
-          نوع: MANUAL_LEDGER_LABEL[e.kind],
-          عنوان: e.title,
-          مبلغ: e.amount || 0,
-          تاریخ: d(e.at),
-          یادداشت: e.note ?? "",
-          منبع: e.source === "assistant" ? "دستیار هوشمند" : "ثبت دستی",
-        })),
-      });
-    }
-
-    if (selected.purchases) {
-      out.push({
-        name: "فاکتورهای خرید",
-        rows: purch.map((p) => ({
-          "شماره فاکتور": p.id.toUpperCase(),
-          تاریخ: d(p.createdAt),
-          تامین‌کننده: p.supplierName ?? "",
-          تلفن: p.supplierPhone ?? "",
-          "تعداد اقلام": p.items?.length ?? 0,
-          "جمع کل": p.total ?? 0,
-          "روش پرداخت": p.paymentMethod ? PAYMENT_LABEL[p.paymentMethod] : "",
-          پرداخت‌شده: p.paidAmount ?? "",
-          یادداشت: p.note ?? "",
-        })),
-      });
-      out.push({
-        name: "اقلام فاکتور خرید",
-        rows: purch.flatMap((p) =>
-          (p.items ?? []).map((it) => ({
-            "شماره فاکتور": p.id.toUpperCase(),
-            تاریخ: d(p.createdAt),
-            تامین‌کننده: p.supplierName ?? "",
-            کالا: it.name,
-            تعداد: it.quantity,
-            واحد: it.unit ?? "",
-            "قیمت خرید": it.buyPrice,
-            جمع: purchaseLineTotal(it),
-          })),
-        ),
-      });
-    }
-
-    if (selected.expenses) {
-      out.push({
-        name: "هزینه‌ها",
-        rows: exps.map((e) => ({
-          عنوان: e.title,
-          مبلغ: e.amount,
-          دسته‌بندی: e.category,
-          تاریخ: d(e.at),
-          "روش پرداخت": e.paymentMethod ? PAYMENT_LABEL[e.paymentMethod] : "",
-          "دوره تکرار (روز)": e.recurringDays ?? "",
-          یادداشت: e.note ?? "",
-        })),
-      });
-    }
-
-    if (selected.reminders) {
-      out.push({
-        name: "یادآوری‌ها",
-        rows: rems.map((r) => ({
-          عنوان: r.title,
-          سررسید: d(r.dueAt),
-          مشتری: r.customerName ?? "",
-          "انجام شده": r.done ? "بله" : "خیر",
-          "تاریخ انجام": d(r.doneAt),
-          "دوره تکرار (روز)": r.recurringDays ?? "",
-          یادداشت: r.note ?? "",
-        })),
-      });
-    }
-
-    if (selected.students) {
-      out.push({
-        name: "هنرجویان",
-        rows: studs.map((s) => ({
-          نام: [s.firstName, s.lastName].filter(Boolean).join(" "),
-          تلفن: s.phone ?? "",
-          رشته: s.discipline ?? "",
-          شهریه: s.fee,
-          "طول دوره (روز)": s.periodDays,
-          "تاریخ شروع": dd(s.startDate),
-          "سررسید بعدی": dd(s.nextDueAt),
-          فعال: s.active ? "بله" : "خیر",
-          اقساطی: s.installmentMode ? "بله" : "خیر",
-          "تعداد پرداخت": s.payments?.length ?? 0,
-          یادداشت: s.note ?? "",
-        })),
-      });
-      out.push({
-        name: "پرداخت هنرجویان",
-        rows: studs.flatMap((s) =>
-          ((s.payments ?? []) as any[]).map((p) => ({
-            هنرجو: [s.firstName, s.lastName].filter(Boolean).join(" "),
-            مبلغ: p.amount ?? 0,
-            تاریخ: d(p.at ?? p.createdAt),
-            یادداشت: p.note ?? "",
-          })),
-        ),
-      });
-    }
-
-    if (selected.accounts) {
-      out.push({
-        name: "حساب‌ها",
-        rows: accs.map((a) => ({
-          نام: a.name,
-          "صاحب حساب": a.holderName ?? "",
-          بانک: a.bankName ?? "",
-          "رنگ کارت": a.cardColor ?? "",
-          "شماره کارت": a.cardNumber ?? "",
-          شبا: a.iban ?? "",
-          "موجودی اولیه": a.openingBalance,
-          "موجودی فعلی": accountBalance(a, txs),
-          "تاریخ ایجاد": d(a.createdAt),
-        })),
-      });
-      out.push({
-        name: "تراکنش حساب‌ها",
-        rows: txs.map((t) => ({
-          حساب: accs.find((a) => a.id === t.accountId)?.name ?? "",
-          نوع: t.type === "deposit" ? "واریز" : "برداشت",
-          مبلغ: t.amount,
-          تاریخ: d(t.at),
-          یادداشت: t.note ?? "",
-        })),
-      });
-    }
-
-    return out.filter((s) => s.rows.length > 0);
-  }
 
   function buildJson() {
     const data: Record<string, unknown> = {
@@ -500,26 +138,32 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
 
   const stamp = () => new Date().toISOString().slice(0, 10);
 
-  /**
-   * ساخت فایل اکسل خوانا: هر بخش یک برگه، ستون‌ها با عرض متناسب محتوا،
-   * مبالغ به‌صورت عدد واقعی با جداکننده‌ی هزارگان (قابل جمع‌زدن در اکسل)،
-   * فیلتر روی سطر عنوان و جهت راست‌به‌چپ.
-   */
   async function exportExcel() {
     setError(null);
-    const sheets = buildSheets();
+    const sheets = buildBackupSheets(collectBackupSnapshot(), selected);
     if (!sheets.length) {
       setError("در بخش‌های انتخاب‌شده داده‌ای برای پشتیبان‌گیری وجود ندارد.");
       return;
     }
-    setBusy(true);
+    setBusy("excel");
     try {
       await writeBackupExcel(sheets, `kamix-backup-${stamp()}.xlsx`);
     } catch (e) {
       console.error("[backup] excel export failed", e);
       setError("ساخت فایل اکسل ناموفق بود. لطفاً دوباره تلاش کنید.");
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }
+
+  async function exportPdf() {
+    setError(null);
+    setBusy("pdf");
+    try {
+      const result = await exportBackupPdf(selected);
+      if (!result.ok) setError(result.error);
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -539,6 +183,62 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
       setError("ساخت فایل پشتیبان ناموفق بود.");
     }
   }
+
+  const sectionPicker = (
+    <>
+      <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
+        بخش‌هایی را که می‌خواهید در پرونده پشتیبان باشند تیک بزنید.
+      </p>
+      <div className="space-y-1.5">
+        {(Object.keys(BACKUP_SECTION_LABEL) as SectionKey[]).map((k) => (
+          <label
+            key={k}
+            className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+          >
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected[k]}
+                onChange={() => toggle(k)}
+                className="h-4 w-4 accent-[hsl(var(--primary))]"
+              />
+              {BACKUP_SECTION_LABEL[k]}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {counts[k].toLocaleString("fa-IR")} مورد
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <button
+          onClick={() =>
+            setSelected(
+              Object.fromEntries(
+                (Object.keys(BACKUP_SECTION_LABEL) as SectionKey[]).map((k) => [k, true]),
+              ) as Record<SectionKey, boolean>,
+            )
+          }
+          className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
+        >
+          انتخاب همه
+        </button>
+        <button
+          onClick={() =>
+            setSelected(
+              Object.fromEntries(
+                (Object.keys(BACKUP_SECTION_LABEL) as SectionKey[]).map((k) => [k, false]),
+              ) as Record<SectionKey, boolean>,
+            )
+          }
+          className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
+        >
+          حذف انتخاب‌ها
+        </button>
+      </div>
+    </>
+  );
 
   const body = (
     <div
@@ -566,94 +266,47 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {inApp ? (
-          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs leading-7">
-            <div className="mb-2 flex items-center gap-2 font-semibold text-primary">
-              <Smartphone className="h-4 w-4" />
-              دانلود فایل داخل اپ باز نمی‌شود
+        {inApp && (
+          <div className="mb-3 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-[11px] leading-6 text-foreground">
+            <div className="mb-1 flex items-center gap-2 font-semibold text-primary">
+              <Printer className="h-4 w-4" />
+              ذخیره PDF از چاپ
             </div>
-            <p className="mb-2 text-foreground">
-              برای گرفتن فایل اکسل، با همان نام کاربری و همان رمز عبور از سایت وارد شوید:
-            </p>
-            <ol className="list-decimal space-y-1 pr-4 text-foreground">
-              <li>مرورگر گوشی یا رایانه را باز کنید.</li>
-              <li>
-                بروید به{" "}
-                <span className="font-semibold" dir="ltr">
-                  kamixapp.ir
-                </span>
-              </li>
-              <li>با همان یوزرنیم و رمزی که در اپ استفاده می‌کنید وارد شوید.</li>
-              <li>از منوی پایین «بیشتر» ← «پشتیبان‌گیری» فایل اکسل را بگیرید.</li>
-            </ol>
+            داخل اپ دانلود فایل باز نمی‌شود. دکمهٔ PDF پنجرهٔ چاپ را باز می‌کند؛ مقصد را «ذخیره
+            به‌صورت PDF» بگذارید تا پرونده روی گوشی بماند.
           </div>
-        ) : (
-          <>
-            <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-              بخش‌هایی را که می‌خواهید در فایل پشتیبان باشند تیک بزنید.
-            </p>
-            <div className="space-y-1.5">
-              {(Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => (
-                <label
-                  key={k}
-                  className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
-                >
-                  <span className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selected[k]}
-                      onChange={() => toggle(k)}
-                      className="h-4 w-4 accent-[hsl(var(--primary))]"
-                    />
-                    {SECTION_LABEL[k]}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {counts[k].toLocaleString("fa-IR")} مورد
-                  </span>
-                </label>
-              ))}
-            </div>
+        )}
 
-            <div className="mt-3 flex gap-2">
-              <button
-                onClick={() =>
-                  setSelected(
-                    Object.fromEntries(
-                      (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, true]),
-                    ) as Record<SectionKey, boolean>,
-                  )
-                }
-                className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
-              >
-                انتخاب همه
-              </button>
-              <button
-                onClick={() =>
-                  setSelected(
-                    Object.fromEntries(
-                      (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, false]),
-                    ) as Record<SectionKey, boolean>,
-                  )
-                }
-                className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
-              >
-                حذف انتخاب‌ها
-              </button>
-            </div>
+        {sectionPicker}
 
-            {error && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-[11px] text-red-600">
-                {error}
-              </div>
+        {error && (
+          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-[11px] text-red-600">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-4 space-y-2">
+          <button
+            disabled={!anySelected || busy !== null}
+            onClick={() => void exportPdf()}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+          >
+            {busy === "pdf" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
             )}
+            چاپ و ذخیره PDF
+          </button>
 
-            <div className="mt-4 space-y-2">
+          {!inApp && (
+            <>
               <button
-                disabled={!anySelected || busy}
-                onClick={exportExcel}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                disabled={!anySelected || busy !== null}
+                onClick={() => void exportExcel()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold disabled:opacity-50"
               >
-                {busy ? (
+                {busy === "excel" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <FileSpreadsheet className="h-4 w-4" />
@@ -661,19 +314,34 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
                 دریافت فایل اکسل
               </button>
               <button
-                disabled={!anySelected}
+                disabled={!anySelected || busy !== null}
                 onClick={exportJson}
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold disabled:opacity-50"
               >
                 <FileJson className="h-4 w-4" />
                 دریافت فایل کامل (JSON)
               </button>
+            </>
+          )}
+        </div>
+
+        {inApp ? (
+          <div className="mt-3 rounded-2xl border border-border bg-card p-3 text-[11px] leading-6 text-muted-foreground">
+            <div className="mb-1 flex items-center gap-1.5 font-semibold text-foreground">
+              <Smartphone className="h-3.5 w-3.5 text-primary" />
+              اکسل از سایت
             </div>
-            <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
-              فایل JSON نسخه‌ی کامل و بدون کم‌وکاست داده‌هاست؛ فایل اکسل برای مشاهده و چاپ مناسب‌تر
-              است.
-            </p>
-          </>
+            اگر فایل اکسل هم می‌خواهید، با همان نام کاربری در{" "}
+            <span className="font-semibold" dir="ltr">
+              kamixapp.ir
+            </span>{" "}
+            وارد شوید و از «پشتیبان‌گیری» اکسل را بگیرید.
+          </div>
+        ) : (
+          <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
+            PDF برای چاپ و بایگانی خواناست. فایل JSON نسخه‌ی کامل داده‌هاست؛ اکسل برای کار در رایانه
+            مناسب‌تر است.
+          </p>
         )}
       </div>
     </div>

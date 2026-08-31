@@ -111,7 +111,7 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
                 <h2 id="backup-reminder-title" className="text-base font-bold">
                   پشتیبان‌گیری پیشنهادی
                 </h2>
-                <p className="mt-0.5 text-[11px] text-white/85">یک فایل اکسل برای خودتان</p>
+                <p className="mt-0.5 text-[11px] text-white/85">یک نسخه روی دستگاه خودتان</p>
               </div>
             </div>
             <button
@@ -129,9 +129,8 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
           {inApp ? (
             <>
               <p className="text-[13px] leading-7 text-foreground">
-                اطلاعات فروشگاهتان مثل همیشه در حساب شما هست. اگر دوست دارید یک فایل اکسل هم روی
-                گوشی یا رایانهٔ خودتان داشته باشید، از سایت بگیرید — داخل اپ دانلود فایل باز
-                نمی‌شود.
+                اطلاعات فروشگاهتان مثل همیشه در حساب شما هست. داخل اپ می‌توانید از بخش پشتیبان‌گیری
+                پروندهٔ PDF را چاپ و ذخیره کنید — دانلود اکسل داخل اپ باز نمی‌شود.
               </p>
               <div className="rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-[12px] leading-7 text-foreground">
                 <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-primary">
@@ -139,17 +138,15 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
                   راهنمای کوتاه
                 </div>
                 <ol className="list-decimal space-y-1 pr-4">
-                  <li>مرورگر گوشی یا رایانه را باز کنید (مثلاً کروم).</li>
+                  <li>از منوی پایین «پشتیبان‌گیری» را باز کنید.</li>
+                  <li>بخش‌های موردنظر را تیک بزنید و «چاپ و ذخیره PDF» را بزنید.</li>
+                  <li>در پنجرهٔ چاپ، مقصد را «ذخیره به‌صورت PDF» انتخاب کنید.</li>
                   <li>
-                    بروید به{" "}
+                    اگر اکسل می‌خواهید، با همان حساب در{" "}
                     <span className="font-semibold" dir="ltr">
                       kamixapp.ir
-                    </span>
-                  </li>
-                  <li>با همان نام کاربری و همان رمز عبوری که در این اپ وارد می‌شوید، وارد شوید.</li>
-                  <li>
-                    از منوی پایین «بیشتر» را بزنید، «پشتیبان‌گیری» را باز کنید و فایل اکسل را دریافت
-                    کنید.
+                    </span>{" "}
+                    وارد شوید.
                   </li>
                 </ol>
               </div>

@@ -13,7 +13,6 @@ import { AuthProvider } from "@/lib/AuthContext";
 import { disableServiceWorker } from "@/registerSW";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { RenewRequiredDialog } from "@/components/RenewRequiredDialog";
-import { BackupSection } from "@/components/BackupDialog";
 
 function NotFoundComponent() {
   return (
@@ -213,13 +212,6 @@ function DevPreviewOverlays() {
   if (typeof window === "undefined") return null;
   const preview = new URLSearchParams(window.location.search).get("preview");
   if (preview === "backup") return <BackupReminderDialog forceOpen />;
-  if (preview === "backup-export") {
-    return (
-      <div className="min-h-screen bg-background p-4" dir="rtl">
-        <BackupSection initialOpen />
-      </div>
-    );
-  }
   if (preview === "renew") return <RenewRequiredDialog onClose={() => {}} />;
   return null;
 }

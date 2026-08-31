@@ -96,6 +96,7 @@ assert.ok(!html.includes('onerror="alert'), "نباید بتوان از سلول
 assert.ok(html.includes(escapeHtml('فروشگاه "نمونه"')));
 assert.ok(html.includes(escapeHtml("<b>آدرس</b>")));
 assert.ok(!html.includes("<b>آدرس</b>"));
+assert.ok(html.includes('تلفن: <span dir="ltr">021-1</span>'), "شماره تلفن باید چپ‌به‌راست بماند");
 assert.ok(html.includes("محصولات"));
 assert.ok(html.includes("نسخه پشتیبان"));
 assert.ok(html.includes("کامیکس"));

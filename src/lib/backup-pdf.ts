@@ -327,9 +327,12 @@ export function buildBackupPrintHtml(
   meta: BackupPdfMeta,
 ): string {
   const logo = safeBackupLogoUrl(meta.logoUrl);
-  const shopLine = [meta.shopAddress, meta.shopPhone ? `تلفن: ${meta.shopPhone}` : ""]
-    .filter(Boolean)
-    .join("  ·  ");
+  const shopBits: string[] = [];
+  if (meta.shopAddress) shopBits.push(escapeHtml(meta.shopAddress));
+  if (meta.shopPhone) {
+    shopBits.push(`تلفن: <span dir="ltr">${escapeHtml(meta.shopPhone)}</span>`);
+  }
+  const shopLineHtml = shopBits.join("  ·  ") || escapeHtml("گزارش کامل اطلاعات کسب‌وکار");
   const chapters = sheets.map((s) => renderTable(s.name, s.rows)).join("\n");
   const title = `نسخه پشتیبان اطلاعات — ${meta.shopName}`;
 
@@ -353,7 +356,7 @@ export function buildBackupPrintHtml(
       <div class="who">
         <div class="brand">${escapeHtml(BRAND)} · ${escapeHtml(BRAND_FA)}</div>
         <h1>${escapeHtml(meta.shopName)}</h1>
-        <div class="sub">${escapeHtml(shopLine || "گزارش کامل اطلاعات کسب‌وکار")}</div>
+        <div class="sub">${shopLineHtml}</div>
       </div>
       <div class="badge">
         <div class="k">نسخه پشتیبان</div>

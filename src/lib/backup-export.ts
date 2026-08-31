@@ -514,10 +514,7 @@ export async function writeBackupExcel(
 
     XLSX.utils.book_append_sheet(wb, ws, s.name.replace(/[\\/?*[\]:]/g, "-").slice(0, 30));
   }
-
-  const { saveOrShareFile, XLSX_MIME } = await import("@/lib/nativeDownload");
-  const base64 = XLSX.write(wb, { bookType: "xlsx", type: "base64", compression: true });
-  await saveOrShareFile({ filename, mimeType: XLSX_MIME, base64Data: base64 });
+  XLSX.writeFile(wb, filename, { compression: true });
 }
 
 /** خروجی کامل اکسل از همهٔ بخش‌ها — همان منطق صفحهٔ پشتیبان‌گیری. */

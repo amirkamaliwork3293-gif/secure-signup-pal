@@ -31,6 +31,7 @@ import {
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { filterAndRankSearch } from "@/lib/search";
+import { isWebView } from "@/lib/isWebView";
 // مودال‌های سنگین فقط هنگام باز شدن بارگذاری می‌شوند (bwip-js/jsPDF/xlsx) تا
 // خودِ صفحه‌ی محصولات سریع باز شود.
 const BulkImportModal = lazy(() =>
@@ -255,8 +256,18 @@ function ProductsPageInner() {
       return;
     }
 
+    // داخل اپلیکیشن اندروید: دانلود فایل اکسل به‌طور قابل‌اعتماد در WebView کار
+    // نمی‌کند (چه با دانلود مستقیم مرورگر، چه با پلاگین‌های نیتیو که در تست
+    // واقعی باعث کرش می‌شدند). به‌جای ریسک کردن، کاربر را به نسخه‌ی وب/سایت
+    // ارجاع می‌دهیم؛ آنجا این قابلیت با مرورگر واقعی بدون مشکل کار می‌کند.
+    if (isWebView()) {
+      alert(
+        "خروجی گرفتن اکسل در نسخه‌ی اپلیکیشن در دسترس نیست. لطفاً از طریق مرورگر (سایت) وارد حساب‌تان شوید و از همان‌جا خروجی اکسل را دریافت کنید.",
+      );
+      return;
+    }
+
     const XLSX = await import("xlsx");
-    const { saveOrShareFile, XLSX_MIME } = await import("@/lib/nativeDownload");
     const rows = list.map((p) => ({
       "نام محصول": p.name,
       "قیمت فروش (تومان)": p.price,
@@ -295,17 +306,7 @@ function ProductsPageInner() {
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "محصولات");
-    try {
-      const base64 = XLSX.write(wb, { bookType: "xlsx", type: "base64" });
-      await saveOrShareFile({
-        filename: `products-${new Date().toISOString().slice(0, 10)}.xlsx`,
-        mimeType: XLSX_MIME,
-        base64Data: base64,
-      });
-    } catch (e) {
-      console.error("[products] excel export failed", e);
-      alert("ساخت فایل اکسل ناموفق بود. لطفاً دوباره تلاش کنید.");
-    }
+    XLSX.writeFile(wb, `products-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const stockBadge = (p: Product) => {

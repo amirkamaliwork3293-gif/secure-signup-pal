@@ -84,12 +84,7 @@ export function BulkImportModal({ onClose }: { onClose: () => void }) {
                 />
               </label>
             </div>
-            <button
-              onClick={() =>
-                void downloadSample().catch(() => alert("دانلود فایل نمونه ناموفق بود."))
-              }
-              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2 text-xs"
-            >
+            <button onClick={downloadSample} className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-4 py-2 text-xs">
               <Download className="h-3.5 w-3.5" />
               دانلود فایل نمونه
             </button>

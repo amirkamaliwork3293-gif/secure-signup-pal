@@ -6,8 +6,7 @@
 
 const APP_FLAG_KEY = "kamix_is_app";
 
-/** true یعنی پل Capacitor نیتیو در این WebView تزریق شده است. */
-export function isCapacitor(): boolean {
+function isCapacitor(): boolean {
   if (typeof window === "undefined") return false;
   const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return !!cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : true);

@@ -9,9 +9,8 @@ import {
   X,
   Smartphone,
 } from "lucide-react";
-import { isCapacitor } from "@/lib/isWebView";
+import { isWebView } from "@/lib/isWebView";
 import { writeBackupExcel } from "@/lib/backup-export";
-import { saveOrShareFile, utf8ToBase64 } from "@/lib/nativeDownload";
 import {
   products as productsStore,
   categories as categoriesStore,
@@ -141,7 +140,7 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const anySelected = Object.values(selected).some(Boolean);
-  const inApp = useMemo(() => isCapacitor(), []);
+  const inApp = useMemo(() => isWebView(), []);
 
   const toggle = (k: SectionKey) => setSelected((s) => ({ ...s, [k]: !s[k] }));
 
@@ -524,20 +523,20 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function exportJson() {
+  function exportJson() {
     setError(null);
-    setBusy(true);
     try {
-      const json = JSON.stringify(buildJson(), null, 2);
-      await saveOrShareFile({
-        filename: `kamix-backup-${stamp()}.json`,
-        mimeType: "application/json",
-        base64Data: utf8ToBase64(json),
+      const blob = new Blob([JSON.stringify(buildJson(), null, 2)], {
+        type: "application/json",
       });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kamix-backup-${stamp()}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch {
       setError("ساخت فایل پشتیبان ناموفق بود.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -567,100 +566,115 @@ function BackupDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {inApp && (
-          <div className="mb-3 rounded-2xl border border-primary/20 bg-primary/5 p-3 text-[11px] leading-6 text-foreground">
-            <div className="mb-1 flex items-center gap-2 font-semibold text-primary">
+        {inApp ? (
+          <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs leading-7">
+            <div className="mb-2 flex items-center gap-2 font-semibold text-primary">
               <Smartphone className="h-4 w-4" />
-              ذخیره روی گوشی
+              دانلود فایل داخل اپ باز نمی‌شود
             </div>
-            پس از ساخت فایل، منوی اشتراک‌گذاری اندروید باز می‌شود تا بتوانید آن را در Downloads
-            ذخیره یا ارسال کنید.
+            <p className="mb-2 text-foreground">
+              برای گرفتن فایل اکسل، با همان نام کاربری و همان رمز عبور از سایت وارد شوید:
+            </p>
+            <ol className="list-decimal space-y-1 pr-4 text-foreground">
+              <li>مرورگر گوشی یا رایانه را باز کنید.</li>
+              <li>
+                بروید به{" "}
+                <span className="font-semibold" dir="ltr">
+                  kamixapp.ir
+                </span>
+              </li>
+              <li>با همان یوزرنیم و رمزی که در اپ استفاده می‌کنید وارد شوید.</li>
+              <li>از منوی پایین «بیشتر» ← «پشتیبان‌گیری» فایل اکسل را بگیرید.</li>
+            </ol>
           </div>
-        )}
+        ) : (
+          <>
+            <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
+              بخش‌هایی را که می‌خواهید در فایل پشتیبان باشند تیک بزنید.
+            </p>
+            <div className="space-y-1.5">
+              {(Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => (
+                <label
+                  key={k}
+                  className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+                >
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selected[k]}
+                      onChange={() => toggle(k)}
+                      className="h-4 w-4 accent-[hsl(var(--primary))]"
+                    />
+                    {SECTION_LABEL[k]}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {counts[k].toLocaleString("fa-IR")} مورد
+                  </span>
+                </label>
+              ))}
+            </div>
 
-        <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-          بخش‌هایی را که می‌خواهید در فایل پشتیبان باشند تیک بزنید.
-        </p>
-        <div className="space-y-1.5">
-          {(Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => (
-            <label
-              key={k}
-              className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
-            >
-              <span className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={selected[k]}
-                  onChange={() => toggle(k)}
-                  className="h-4 w-4 accent-[hsl(var(--primary))]"
-                />
-                {SECTION_LABEL[k]}
-              </span>
-              <span className="text-[11px] text-muted-foreground">
-                {counts[k].toLocaleString("fa-IR")} مورد
-              </span>
-            </label>
-          ))}
-        </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() =>
+                  setSelected(
+                    Object.fromEntries(
+                      (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, true]),
+                    ) as Record<SectionKey, boolean>,
+                  )
+                }
+                className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
+              >
+                انتخاب همه
+              </button>
+              <button
+                onClick={() =>
+                  setSelected(
+                    Object.fromEntries(
+                      (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, false]),
+                    ) as Record<SectionKey, boolean>,
+                  )
+                }
+                className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
+              >
+                حذف انتخاب‌ها
+              </button>
+            </div>
 
-        <div className="mt-3 flex gap-2">
-          <button
-            onClick={() =>
-              setSelected(
-                Object.fromEntries(
-                  (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, true]),
-                ) as Record<SectionKey, boolean>,
-              )
-            }
-            className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
-          >
-            انتخاب همه
-          </button>
-          <button
-            onClick={() =>
-              setSelected(
-                Object.fromEntries(
-                  (Object.keys(SECTION_LABEL) as SectionKey[]).map((k) => [k, false]),
-                ) as Record<SectionKey, boolean>,
-              )
-            }
-            className="flex-1 rounded-lg border border-border py-1.5 text-[11px] hover:bg-accent"
-          >
-            حذف انتخاب‌ها
-          </button>
-        </div>
-
-        {error && (
-          <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-[11px] text-red-600">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-4 space-y-2">
-          <button
-            disabled={!anySelected || busy}
-            onClick={() => void exportExcel()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FileSpreadsheet className="h-4 w-4" />
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/5 px-3 py-2 text-[11px] text-red-600">
+                {error}
+              </div>
             )}
-            دریافت فایل اکسل
-          </button>
-          <button
-            disabled={!anySelected || busy}
-            onClick={() => void exportJson()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold disabled:opacity-50"
-          >
-            <FileJson className="h-4 w-4" />
-            دریافت فایل کامل (JSON)
-          </button>
-        </div>
-        <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
-          فایل JSON نسخه‌ی کامل و بدون کم‌وکاست داده‌هاست؛ فایل اکسل برای مشاهده و چاپ مناسب‌تر است.
-        </p>
+
+            <div className="mt-4 space-y-2">
+              <button
+                disabled={!anySelected || busy}
+                onClick={exportExcel}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="h-4 w-4" />
+                )}
+                دریافت فایل اکسل
+              </button>
+              <button
+                disabled={!anySelected}
+                onClick={exportJson}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-semibold disabled:opacity-50"
+              >
+                <FileJson className="h-4 w-4" />
+                دریافت فایل کامل (JSON)
+              </button>
+            </div>
+            <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
+              فایل JSON نسخه‌ی کامل و بدون کم‌وکاست داده‌هاست؛ فایل اکسل برای مشاهده و چاپ مناسب‌تر
+              است.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

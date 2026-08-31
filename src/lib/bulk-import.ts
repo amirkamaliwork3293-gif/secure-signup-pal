@@ -145,14 +145,6 @@ export async function parseFile(file: File): Promise<ImportRow[]> {
 }
 
 export function sampleWorkbook(): Blob {
-  const wb = buildSampleWorkbook();
-  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-  return new Blob([out], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-}
-
-function buildSampleWorkbook() {
   const data = [
     ["نام", "بارکد", "قیمت خرید", "قیمت فروش", "موجودی", "دسته", "واحد", "توضیحات"],
     ["شیر پرچرب کاله", "1234567890123", 18000, 25000, 100, "لبنیات", "عدد", "بطری ۱ لیتری"],
@@ -161,17 +153,15 @@ function buildSampleWorkbook() {
   const ws = XLSX.utils.aoa_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Products");
-  return wb;
+  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  return new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
-export async function downloadSample() {
-  const { saveOrShareFile, XLSX_MIME } = await import("@/lib/nativeDownload");
-  const base64 = XLSX.write(buildSampleWorkbook(), { type: "base64", bookType: "xlsx" });
-  await saveOrShareFile({
-    filename: "نمونه-محصولات.xlsx",
-    mimeType: XLSX_MIME,
-    base64Data: base64,
-  });
+export function downloadSample() {
+  const url = URL.createObjectURL(sampleWorkbook());
+  const a = document.createElement("a");
+  a.href = url; a.download = "نمونه-محصولات.xlsx"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type MergeResult = { added: number; updated: number };

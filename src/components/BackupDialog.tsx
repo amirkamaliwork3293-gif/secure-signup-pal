@@ -41,8 +41,8 @@ type SectionKey = BackupSectionKey;
  * بک‌آپ کامل داده‌های کاربر — فقط خواندن از استور محلی/همگام‌شده است
  * و هیچ نوشتن یا حذفی روی داده‌ها انجام نمی‌دهد.
  */
-export function BackupSection() {
-  const [open, setOpen] = useState(false);
+export function BackupSection({ initialOpen = false }: { initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
   return (
     <>
       <div className="mt-4 rounded-2xl border border-border bg-card p-4 shadow-sm">

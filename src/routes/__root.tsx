@@ -13,6 +13,7 @@ import { AuthProvider } from "@/lib/AuthContext";
 import { disableServiceWorker } from "@/registerSW";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { RenewRequiredDialog } from "@/components/RenewRequiredDialog";
+import { BackupSection } from "@/components/BackupDialog";
 
 function NotFoundComponent() {
   return (
@@ -115,13 +116,28 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
       { name: "apple-mobile-web-app-title", content: "KAMIX" },
       { title: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
-      { name: "description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل. ثبت‌نام، دانلود APK و شروع رایگان." },
-      { name: "keywords", content: "کامیکس, حسابداری کامیکس, حسابداری فروشگاهی, فاکتور موبایل, صدور فاکتور, انبار موبایل, اسکن بارکد, QR, حسابداری اندروید" },
+      {
+        name: "description",
+        content:
+          "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل. ثبت‌نام، دانلود APK و شروع رایگان.",
+      },
+      {
+        name: "keywords",
+        content:
+          "کامیکس, حسابداری کامیکس, حسابداری فروشگاهی, فاکتور موبایل, صدور فاکتور, انبار موبایل, اسکن بارکد, QR, حسابداری اندروید",
+      },
       { name: "author", content: "Kamali" },
       { name: "robots", content: "index, follow, max-image-preview:large" },
       { property: "og:site_name", content: "KAMIX (کامیکس)" },
-      { property: "og:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
-      { property: "og:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
+      {
+        property: "og:title",
+        content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل",
+      },
+      {
+        property: "og:description",
+        content:
+          "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل.",
+      },
       { property: "og:type", content: "website" },
       { property: "og:url", content: BASE_URL },
       { property: "og:image", content: OG_IMAGE },
@@ -130,8 +146,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:image:type", content: "image/png" },
       { property: "og:image:alt", content: "KAMIX — اپلیکیشن حسابداری موبایل" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل" },
-      { name: "twitter:description", content: "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل." },
+      {
+        name: "twitter:title",
+        content: "KAMIX (کامیکس) — حسابداری فروشگاهی، فاکتور و انبار موبایل",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "KAMIX (کامیکس) — سیستم حسابداری ساده فارسی برای فروشگاه، انبار و صدور فاکتور با اسکن بارکد و QR توسط دوربین موبایل.",
+      },
       { name: "twitter:image", content: OG_IMAGE },
     ],
     links: [
@@ -190,6 +213,13 @@ function DevPreviewOverlays() {
   if (typeof window === "undefined") return null;
   const preview = new URLSearchParams(window.location.search).get("preview");
   if (preview === "backup") return <BackupReminderDialog forceOpen />;
+  if (preview === "backup-export") {
+    return (
+      <div className="min-h-screen bg-background p-4" dir="rtl">
+        <BackupSection initialOpen />
+      </div>
+    );
+  }
   if (preview === "renew") return <RenewRequiredDialog onClose={() => {}} />;
   return null;
 }

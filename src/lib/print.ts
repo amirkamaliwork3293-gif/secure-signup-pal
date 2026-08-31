@@ -14,6 +14,7 @@
  */
 
 import { isWebView } from "@/lib/isWebView";
+import { saveOrShareFile, saveOrShareFiles } from "@/lib/nativeDownload";
 
 type PrinterPlugin = {
   print?: (opts: { content: string; name?: string; orientation?: string }) => Promise<void>;
@@ -301,48 +302,18 @@ export function downloadBlob(blob: Blob, filename: string): boolean {
 /**
  * ذخیره فایل از روی data-URL یا رشته base64.
  * وب: دانلود مستقیم — اپ اندروید: نوشتن فایل + پنجره اشتراک/ذخیره.
+ * مسیر واقعی در `saveOrShareFile` است تا بک‌آپ و PDF رفتار یکسان داشته باشند.
  */
 export async function saveBase64File(
   base64: string,
   filename: string,
   mime: string,
 ): Promise<boolean> {
-  const data = base64.includes(",") ? base64.split(",")[1] : base64;
-  const plugins = nativePlugins();
-  const fs = plugins?.Filesystem;
-  const share = plugins?.Share;
-
-  // اول پل نیتیو — هم Capacitor و هم WebViewای که پلاگین دارد
-  if (fs?.writeFile) {
-    try {
-      const res = await fs.writeFile({ path: filename, data, directory: "CACHE" });
-      if (share?.share) {
-        await share
-          .share({
-            title: filename,
-            files: [res.uri],
-            dialogTitle: "ذخیره در گالری یا ارسال",
-          })
-          .catch(() => {
-            /* کاربر پنجره را بست — فایل نوشته شده است */
-          });
-      }
-      return true;
-    } catch (e) {
-      console.warn("[print] native save failed", e);
-    }
-  }
-
-  // داخل اپ بدون پلاگین: لینک دانلود WebView را می‌بندد — انجام نده
-  if (isAppShell()) return false;
-
-  // وب: تبدیل base64 به Blob و دانلود معمولی
   try {
-    const bin = atob(data);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return downloadBlob(new Blob([bytes], { type: mime }), filename);
-  } catch {
+    await saveOrShareFile({ filename, mimeType: mime, base64Data: base64 });
+    return true;
+  } catch (e) {
+    console.warn("[print] save failed", e);
     return false;
   }
 }
@@ -352,35 +323,19 @@ export async function saveBase64Files(
   files: { base64: string; filename: string; mime: string }[],
 ): Promise<boolean> {
   if (!files.length) return false;
-  if (files.length === 1) {
-    return saveBase64File(files[0].base64, files[0].filename, files[0].mime);
+  try {
+    await saveOrShareFiles(
+      files.map((f) => ({
+        filename: f.filename,
+        mimeType: f.mime,
+        base64Data: f.base64,
+      })),
+    );
+    return true;
+  } catch (e) {
+    console.warn("[print] multi-save failed", e);
+    return false;
   }
-  const plugins = nativePlugins();
-  const fs = plugins?.Filesystem;
-  const share = plugins?.Share;
-  if (fs?.writeFile && share?.share) {
-    try {
-      const uris: string[] = [];
-      for (const f of files) {
-        const data = f.base64.includes(",") ? f.base64.split(",")[1] : f.base64;
-        const res = await fs.writeFile({ path: f.filename, data, directory: "CACHE" });
-        if (res?.uri) uris.push(res.uri);
-      }
-      if (uris.length) {
-        await share
-          .share({
-            title: files[0].filename,
-            files: uris,
-            dialogTitle: "ذخیره در گالری یا ارسال",
-          })
-          .catch(() => {});
-        return true;
-      }
-    } catch (e) {
-      console.warn("[print] native multi-save failed", e);
-    }
-  }
-  return saveBase64File(files[0].base64, files[0].filename, files[0].mime);
 }
 
 /** ذخیره PDF ساخته‌شده با jsPDF — وب: دانلود، اپ: ذخیره + اشتراک */

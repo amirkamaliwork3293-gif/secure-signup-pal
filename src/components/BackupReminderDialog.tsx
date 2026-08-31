@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { DatabaseBackup, Download, Loader2, Smartphone, X } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
-import { isWebView } from "@/lib/isWebView";
+import { isCapacitor } from "@/lib/isWebView";
 import { authUserId, isAppSession } from "@/lib/subscription-access";
 import {
   backupReminderDue,
@@ -24,7 +24,7 @@ function onboardingStillActive(): boolean {
 }
 
 /**
- * یادآوری پشتیبان‌گیری: سایت = دانلود اکسل کامل؛ اپ = فقط یادآوری.
+ * یادآوری پشتیبان‌گیری: دانلود اکسل کامل (وب: دانلود مستقیم؛ اپ: Share Sheet).
  */
 export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolean }) {
   const { state } = useAuth();
@@ -32,7 +32,7 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
   const [open, setOpen] = useState(forceOpen);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inApp = useMemo(() => isWebView(), []);
+  const inApp = useMemo(() => isCapacitor(), []);
 
   useEffect(() => {
     if (forceOpen) {
@@ -75,10 +75,6 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
   };
 
   const onConfirm = async () => {
-    if (inApp) {
-      snooze("daily");
-      return;
-    }
     setBusy(true);
     setError(null);
     const result = await exportFullBackupExcel();
@@ -126,39 +122,19 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
         </div>
 
         <div className="space-y-3 p-5 text-sm leading-7">
-          {inApp ? (
-            <>
-              <p className="text-[13px] leading-7 text-foreground">
-                اطلاعات فروشگاهتان مثل همیشه در حساب شما هست. اگر دوست دارید یک فایل اکسل هم روی
-                گوشی یا رایانهٔ خودتان داشته باشید، از سایت بگیرید — داخل اپ دانلود فایل باز
-                نمی‌شود.
-              </p>
-              <div className="rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-[12px] leading-7 text-foreground">
-                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-primary">
-                  <Smartphone className="h-3.5 w-3.5" />
-                  راهنمای کوتاه
-                </div>
-                <ol className="list-decimal space-y-1 pr-4">
-                  <li>مرورگر گوشی یا رایانه را باز کنید (مثلاً کروم).</li>
-                  <li>
-                    بروید به{" "}
-                    <span className="font-semibold" dir="ltr">
-                      kamixapp.ir
-                    </span>
-                  </li>
-                  <li>با همان نام کاربری و همان رمز عبوری که در این اپ وارد می‌شوید، وارد شوید.</li>
-                  <li>
-                    از منوی پایین «بیشتر» را بزنید، «پشتیبان‌گیری» را باز کنید و فایل اکسل را دریافت
-                    کنید.
-                  </li>
-                </ol>
+          <p className="text-[13px] leading-7 text-foreground">
+            اگر دوست دارید یک فایل اکسل از فاکتورها، مشتریان و محصولاتتان روی همین دستگاه هم باشد،
+            با تأیید دانلود می‌شود. کار فروشگاه مثل همیشه ادامه دارد.
+          </p>
+          {inApp && (
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-[12px] leading-6 text-foreground">
+              <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-primary">
+                <Smartphone className="h-3.5 w-3.5" />
+                ذخیره روی گوشی
               </div>
-            </>
-          ) : (
-            <p className="text-[13px] leading-7 text-foreground">
-              اگر دوست دارید یک فایل اکسل از فاکتورها، مشتریان و محصولاتتان روی همین دستگاه هم باشد،
-              با تأیید دانلود می‌شود. کار فروشگاه مثل همیشه ادامه دارد.
-            </p>
+              پس از ساخت فایل، منوی اشتراک‌گذاری اندروید باز می‌شود تا بتوانید آن را در Downloads
+              ذخیره یا ارسال کنید.
+            </div>
           )}
 
           {error && (
@@ -173,12 +149,8 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
             onClick={() => void onConfirm()}
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
           >
-            {busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : inApp ? null : (
-              <Download className="h-4 w-4" />
-            )}
-            {inApp ? "متوجه شدم" : "تأیید و دریافت اکسل"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            تأیید و دریافت اکسل
           </button>
           <button
             type="button"
@@ -189,9 +161,8 @@ export function BackupReminderDialog({ forceOpen = false }: { forceOpen?: boolea
             هفته‌ای یک‌بار یادآوری کن
           </button>
           <p className="text-center text-[11px] leading-5 text-muted-foreground">
-            {inApp
-              ? "اگر هر روز این یادآوری را نمی‌خواهید، گزینهٔ هفتگی را بزنید."
-              : "تأیید فقط فایل را ذخیره می‌کند. اگر هر روز این پنجره را نمی‌خواهید، یادآوری هفتگی را انتخاب کنید."}
+            تأیید فایل را ذخیره می‌کند. اگر هر روز این پنجره را نمی‌خواهید، یادآوری هفتگی را انتخاب
+            کنید.
           </p>
         </div>
       </div>

@@ -365,7 +365,7 @@ export function buildBackupPrintHtml(
     </div>
     <div class="meta">
       <div class="cell"><span class="k">واحد مبالغ</span><span class="v">${escapeHtml(meta.currency)}</span></div>
-      <div class="cell"><span class="k">تعداد برگه‌ها</span><span class="v">${escapeHtml(formatNumber(sheets.length))}</span></div>
+      <div class="cell"><span class="k">تعداد بخش‌ها</span><span class="v">${escapeHtml(formatNumber(sheets.length))}</span></div>
       <div class="cell"><span class="k">تهیه‌شده با</span><span class="v">${escapeHtml(BRAND_FA)}</span></div>
     </div>
     <div class="body">

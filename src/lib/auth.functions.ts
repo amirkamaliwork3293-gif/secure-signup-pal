@@ -33,6 +33,7 @@ import {
   mergeSettingsKeepBoth,
   unionMergeById,
 } from "@/lib/catalog-integrity";
+import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -1493,6 +1494,9 @@ function mergeUserDataRows(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   for (const field of USER_DATA_FIELDS) {
+    const liveHas = !!live && Object.prototype.hasOwnProperty.call(live, field);
+    const inHas = !!incoming && Object.prototype.hasOwnProperty.call(incoming, field);
+    if (!liveHas && !inHas) continue;
     const a = live?.[field];
     const b = incoming?.[field];
     if (field === "settings") {
@@ -1504,6 +1508,23 @@ function mergeUserDataRows(
     }
   }
   return payload;
+}
+
+async function upsertUserDataFlexible(
+  supabaseAdmin: { from: (t: string) => any },
+  payload: Record<string, unknown>,
+): Promise<void> {
+  let current = { ...payload };
+  for (let i = 0; i < 12; i++) {
+    const { error } = await supabaseAdmin
+      .from("user_data")
+      .upsert(current as never, { onConflict: "user_id" });
+    if (!error) return;
+    const col = missingUserDataColumnFromError(error.message);
+    if (!col || !(col in current)) throw new Error(error.message);
+    current = stripMissingUserDataColumn(current, col);
+  }
+  throw new Error("ذخیره داده به‌خاطر ستون ناموجود ممکن نشد.");
 }
 
 function previewFromRow(row: Record<string, unknown> | null | undefined) {
@@ -1605,10 +1626,7 @@ export const adminRestoreUserDataBackup = createServerFn({ method: "POST" })
       ...mergeUserDataRows((live || {}) as Record<string, unknown>, snap),
     };
 
-    const { error: upErr } = await supabaseAdmin
-      .from("user_data")
-      .upsert(payload as never, { onConflict: "user_id" });
-    if (upErr) throw new Error(upErr.message);
+    await upsertUserDataFlexible(supabaseAdmin, payload);
 
     await auditLog(supabaseAdmin, {
       actor_id: context.userId,
@@ -1661,10 +1679,7 @@ export const adminMergeAllUserDataBackups = createServerFn({ method: "POST" })
       updated_at: new Date().toISOString(),
       ...merged,
     };
-    const { error: upErr } = await supabaseAdmin
-      .from("user_data")
-      .upsert(payload as never, { onConflict: "user_id" });
-    if (upErr) throw new Error(upErr.message);
+    await upsertUserDataFlexible(supabaseAdmin, payload);
 
     await auditLog(supabaseAdmin, {
       actor_id: context.userId,

@@ -34,6 +34,7 @@ import {
   unionMergeById,
 } from "@/lib/catalog-integrity";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
+import { settleQuery } from "@/lib/settle-query";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -381,11 +382,14 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     });
     if (profileErr) {
       // cleanup so the username isn't burned by a half-created account
-      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      await settleQuery(supabaseAdmin.auth.admin.deleteUser(created.user.id));
       throw new Error(publicSignupProfileError(profileErr.message));
     }
 
-    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }).catch(() => {});
+    // کوئری PostgREST Promise نیست — `.catch` روی insert وجود ندارد و ثبت‌نام را می‌خواباند.
+    await settleQuery(
+      supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }),
+    );
 
     // Try inserting with the optional columns; if one doesn't exist yet (migration
     // pending), fall back to inserting without them so registration never fails.
@@ -422,9 +426,9 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         .single();
     }
     if (result.error) {
-      await supabaseAdmin.from("profiles").delete().eq("id", created.user.id).catch(() => {});
-      await supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id).catch(() => {});
-      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      await settleQuery(supabaseAdmin.from("profiles").delete().eq("id", created.user.id));
+      await settleQuery(supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id));
+      await settleQuery(supabaseAdmin.auth.admin.deleteUser(created.user.id));
       throw new Error(SIGNUP_RETRY_LATER);
     }
 
@@ -516,7 +520,9 @@ export const setPasswordAfterApproval = createServerFn({ method: "POST" })
     });
     if (profileErr) throw new Error(profileErr.message);
 
-    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
+    await settleQuery(
+      supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }),
+    );
 
     await supabaseAdmin
       .from("signup_requests")
@@ -1074,11 +1080,13 @@ export const createTrialAccount = createServerFn({ method: "POST" })
       end_date: endDate.toISOString(),
     });
     if (profileErr) {
-      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      await settleQuery(supabaseAdmin.auth.admin.deleteUser(created.user.id));
       throw new Error(publicSignupProfileError(profileErr.message));
     }
 
-    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
+    await settleQuery(
+      supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }),
+    );
 
     // Track trial request for audit; mark password_set so it can't be re-approved later
     await supabaseAdmin.from("signup_requests").insert({

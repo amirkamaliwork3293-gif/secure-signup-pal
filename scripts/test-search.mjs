@@ -3,7 +3,7 @@
  * اجرا: node scripts/test-search.mjs
  */
 import assert from "node:assert/strict";
-import { filterAndRankSearch, scoreSearchFields } from "../src/lib/search.ts";
+import { filterAndRankSearch, identitySearchFields, phonesLikelySame, normalizePhoneDigits, scoreSearchFields } from "../src/lib/search.ts";
 
 const products = [
   { id: "1", name: "گلس سامسونگ" },
@@ -61,6 +61,26 @@ function names(list) {
   ]);
   assert.equal(ranked[0].lastName, "کمالی");
   assert.equal(ranked[0].firstName, "علی");
+}
+
+{
+  const users = [
+    { username: "ali", first_name: "علی", last_name: "کمالی", phone: "+98 912 333 4444" },
+    { username: "reza", first_name: "رضا", last_name: "محمدی", phone: "09125556666" },
+  ];
+  const byPhone = filterAndRankSearch(users, "۰۹۱۲۳۳۳۴۴۴۴", (u) => identitySearchFields(u));
+  assert.equal(byPhone.length, 1);
+  assert.equal(byPhone[0].username, "ali");
+
+  const spaced = filterAndRankSearch(users, "0912 333 4444", (u) => identitySearchFields(u));
+  assert.equal(spaced[0].username, "ali");
+
+  const shortPrefix = filterAndRankSearch(users, "0912555", (u) => identitySearchFields(u));
+  assert.equal(shortPrefix[0].username, "reza");
+
+  assert.equal(normalizePhoneDigits("+989123334444"), "09123334444");
+  assert.equal(phonesLikelySame("09123334444", "+98 912 333 4444"), true);
+  assert.equal(phonesLikelySame("09123334444", "09125556666"), false);
 }
 
 console.log("search ranking ok", names(filterAndRankSearch(products, "گلس آیفون", (p) => [p.name])));

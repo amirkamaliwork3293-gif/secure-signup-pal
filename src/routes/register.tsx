@@ -238,7 +238,12 @@ function RegisterPage() {
     } catch (e: any) {
       setTurnstileToken("");
       setTurnstileReset((n) => n + 1);
-      setError(e?.message || "خطا در ارسال درخواست.");
+      const raw = String(e?.message || "");
+      setError(
+        /failed to fetch|network|load failed|timeout/i.test(raw)
+          ? "ارتباط با سرور برقرار نشد. لطفاً اتصال را چک کنید و دوباره تلاش کنید."
+          : raw || "خطا در ارسال درخواست.",
+      );
     }
     setLoading(false);
   };

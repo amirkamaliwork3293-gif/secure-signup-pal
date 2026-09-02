@@ -23,6 +23,12 @@ import {
   assertTurnstileToken,
   isTurnstileConfigured,
 } from "@/lib/turnstile.server";
+import {
+  SIGNUP_RETRY_LATER,
+  publicSignupCreateUserError,
+  publicSignupProfileError,
+  shouldRetrySignupWithoutOptionalColumns,
+} from "@/lib/signup-errors";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -356,7 +362,9 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       // Store phone in user_metadata so it's always accessible without a schema change
       user_metadata: { username, first_name: data.first_name.trim(), last_name: data.last_name.trim(), phone },
     });
-    if (createErr || !created.user) throw new Error(createErr?.message || "خطا در ایجاد حساب.");
+    // حساب موجود را هرگز با رمز فرم جدید بازنویسی نکن — بعد از نفوذ، رمز کاربران
+    // نباید خودکار عوض شود. اگر یوزرنیم تکراری است فقط همان پیام را بده.
+    if (createErr || !created.user) throw new Error(publicSignupCreateUserError(createErr?.message));
 
     const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
       id: created.user.id,
@@ -369,10 +377,10 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     if (profileErr) {
       // cleanup so the username isn't burned by a half-created account
       await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
-      throw new Error(profileErr.message);
+      throw new Error(publicSignupProfileError(profileErr.message));
     }
 
-    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
+    await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }).catch(() => {});
 
     // Try inserting with the optional columns; if one doesn't exist yet (migration
     // pending), fall back to inserting without them so registration never fails.
@@ -400,7 +408,7 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       .select("id")
       .single();
 
-    if (/phone|receipt_note|client_ip/i.test(result.error?.message || "")) {
+    if (shouldRetrySignupWithoutOptionalColumns(result.error?.message)) {
       // Column not yet migrated — retry with the base columns only
       result = await supabaseAdmin
         .from("signup_requests")
@@ -408,7 +416,12 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         .select("id")
         .single();
     }
-    if (result.error) throw new Error(result.error.message);
+    if (result.error) {
+      await supabaseAdmin.from("profiles").delete().eq("id", created.user.id).catch(() => {});
+      await supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id).catch(() => {});
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      throw new Error(SIGNUP_RETRY_LATER);
+    }
 
     return { id: result.data.id };
   });
@@ -483,7 +496,7 @@ export const setPasswordAfterApproval = createServerFn({ method: "POST" })
       email_confirm: true,
       user_metadata: { username, first_name: req.first_name, last_name: req.last_name },
     });
-    if (createErr || !created.user) throw new Error(createErr?.message || "خطا در ایجاد حساب.");
+    if (createErr || !created.user) throw new Error(publicSignupCreateUserError(createErr?.message));
 
     // Create profile
     const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
@@ -1043,7 +1056,7 @@ export const createTrialAccount = createServerFn({ method: "POST" })
       email_confirm: true,
       user_metadata: { username, first_name: data.first_name, last_name: data.last_name, trial: true },
     });
-    if (createErr || !created.user) throw new Error(createErr?.message || "خطا در ایجاد حساب.");
+    if (createErr || !created.user) throw new Error(publicSignupCreateUserError(createErr?.message));
 
     const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
       id: created.user.id,
@@ -1055,7 +1068,10 @@ export const createTrialAccount = createServerFn({ method: "POST" })
       start_date: startDate.toISOString(),
       end_date: endDate.toISOString(),
     });
-    if (profileErr) throw new Error(profileErr.message);
+    if (profileErr) {
+      await supabaseAdmin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      throw new Error(publicSignupProfileError(profileErr.message));
+    }
 
     await supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" });
 

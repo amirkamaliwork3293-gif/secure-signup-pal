@@ -5,6 +5,12 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
+import {
+  classifyUserAccess,
+  pickProfileForSession,
+  shouldKeepExistingSession,
+  shouldSyncOnAuthEvent,
+} from "@/lib/auth-session";
 
 type AuthState =
   | { status: "loading" }
@@ -45,67 +51,78 @@ function readProfileCache(uid: string): { profile: UserProfile; isAdmin: boolean
   try {
     const raw = localStorage.getItem(profileCacheKey(uid));
     return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
+}
+
+function toAuthState(session: Session, profile: UserProfile, isAdmin: boolean): AuthState {
+  const kind = classifyUserAccess(profile, isAdmin);
+  if (kind === "rejected") return { status: "rejected", username: profile.username };
+  if (kind === "pending") return { status: "pending", username: profile.username };
+  if (kind === "expired") {
+    if (isAdmin) {
+      return { status: "authenticated", session, profile, isAdmin: true };
+    }
+    try {
+      void supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id);
+    } catch {}
+    return { status: "expired", username: profile.username, profile, session };
+  }
+  return { status: "authenticated", session, profile, isAdmin };
 }
 
 async function loadState(session: Session): Promise<AuthState> {
   setStorageScope(session.user.id);
 
   // hydrateFromCloud fails when offline — that's fine, local data is source of truth
-  try { await hydrateFromCloud(session.user.id); } catch {}
+  try {
+    await hydrateFromCloud(session.user.id);
+  } catch {}
 
-  let profile: UserProfile | null = null;
-  let isAdmin = false;
+  let live: UserProfile | null = null;
+  let liveIsAdmin = false;
 
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", session.user.id)
       .maybeSingle();
 
-    if (!data) return { status: "unauthenticated" };
-
-    const { data: roleRow } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", session.user.id)
-      .eq("role", "admin")
-      .maybeSingle();
-
-    isAdmin = !!roleRow;
-    profile = data as UserProfile;
-    saveProfileCache(session.user.id, profile, isAdmin);
+    if (!error && data) {
+      live = data as UserProfile;
+      try {
+        const { data: roleRow, error: roleErr } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", session.user.id)
+          .eq("role", "admin")
+          .maybeSingle();
+        liveIsAdmin = !roleErr && !!roleRow;
+      } catch {
+        liveIsAdmin = false;
+      }
+      saveProfileCache(session.user.id, live, liveIsAdmin);
+    }
   } catch {
-    // Offline path: fall back to cached profile
-    const cached = readProfileCache(session.user.id);
-    if (!cached) return { status: "unauthenticated" };
-    profile = cached.profile;
-    // ⚠️ نقش ادمین هرگز از کش خوانده نمی‌شود. localStorage در دسترس هر
-    // اسکریپتی است که در همین origin اجرا شود؛ اگر مقدار کش‌شده معتبر
-    // شمرده شود، کافی است کسی isAdmin=true بنویسد و شبکه را قطع کند تا
-    // پنل ادمین برایش رندر شود. عملیات واقعی سمت سرور بررسی می‌شود، اما
-    // رابط کاربری هم نباید گمراه‌کننده باشد. آفلاین = غیرادمین.
-    isAdmin = false;
+    // شبکه/RLS — پایین‌تر از کش استفاده می‌شود. JWT معتبر را دور نمی‌اندازیم.
   }
 
-  if (isAdmin) {
-    return { status: "authenticated", session, profile, isAdmin: true };
-  }
+  const picked = pickProfileForSession({
+    session: session.user,
+    live,
+    liveIsAdmin,
+    cached: readProfileCache(session.user.id),
+  });
+  return toAuthState(session, picked.profile, picked.isAdmin);
+}
 
-  if (profile.status === "rejected") return { status: "rejected", username: profile.username };
-  if (profile.status === "pending") return { status: "pending", username: profile.username };
-
-  if (profile.end_date && new Date(profile.end_date) < new Date()) {
-    // Best-effort DB update — ignore failure when offline
-    try { await supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id); } catch {}
-    return { status: "expired", username: profile.username, profile, session };
-  }
-  if (profile.status === "expired") {
-    return { status: "expired", username: profile.username, profile, session };
-  }
-
-  return { status: "authenticated", session, profile, isAdmin: false };
+function optimisticStateFromCache(session: Session): AuthState | null {
+  const cached = readProfileCache(session.user.id);
+  if (!cached || cached.profile.id !== session.user.id) return null;
+  // نقش ادمین عمداً از کش نمی‌آید؛ localStorage قابل دستکاری است.
+  return toAuthState(session, cached.profile, false);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -122,13 +139,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
 
   const refreshProfile = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     if (!session) {
       setStorageScope(null);
       setState({ status: "unauthenticated" });
       return;
     }
-    setState(await loadState(session));
+    const next = await loadState(session);
+    if (shouldKeepExistingSession(next.status, stateRef.current.status, true)) {
+      return;
+    }
+    setState(next);
   };
 
   useEffect(() => {
@@ -154,33 +177,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cur = stateRef.current;
       const sameUser =
         (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
-        (cur.status === "expired" && cur.session.user.id === session.user.id);
+        (cur.status === "expired" && cur.session.user.id === session.user.id) ||
+        ((cur.status === "pending" || cur.status === "rejected") &&
+          readProfileCache(session.user.id)?.profile.id === session.user.id);
       if (!disposed && currentRevision === revision && !sameUser) {
-        // Optimistic hydration: اگر پروفایل این کاربر در کش داریم،
-        // مستقیم وضعیت authenticated را نشان بده تا اسپینر
-        // «در حال احراز هویت...» ظاهر نشود. loadState در پس‌زمینه
-        // اجرا می‌شود و در صورت تغییر، وضعیت را reconcile می‌کند.
-        const cached = readProfileCache(session.user.id);
-        // نقش ادمین عمداً از شرط حذف شده: کش localStorage قابل دستکاری است
-        // و نباید به تنهایی مسیر ادمین را باز کند. پروفایل ادمین به‌هرحال
-        // active است و شرط زیر را پاس می‌کند.
-        const usableCache =
-          cached &&
-          cached.profile.status !== "pending" &&
-          cached.profile.status !== "rejected" &&
-          cached.profile.status !== "expired" &&
-          (!cached.profile.end_date ||
-            new Date(cached.profile.end_date) >= new Date());
-        if (usableCache) {
+        const optimistic = optimisticStateFromCache(session);
+        if (optimistic) {
           setStorageScope(session.user.id);
-          setState({
-            status: "authenticated",
-            session,
-            profile: cached!.profile,
-            // هیدراسیون خوش‌بینانه هرگز ادمین نمی‌دهد؛ loadState بلافاصله
-            // بعد از این، نقش را از سرور می‌خواند و وضعیت را اصلاح می‌کند.
-            isAdmin: false,
-          });
+          setState(optimistic);
         } else {
           setState({ status: "loading" });
         }
@@ -188,6 +192,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const nextState = await loadState(session);
       if (!disposed && currentRevision === revision) {
+        if (shouldKeepExistingSession(nextState.status, stateRef.current.status, true)) {
+          return;
+        }
         setState(nextState);
       }
     };
@@ -196,18 +203,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void syncSession(session);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-      // SIGNED_IN for the already-authenticated (or pending/expired) user is a
-      // no-op on tab focus / mobile resume — Supabase re-emits it after every
-      // TOKEN_REFRESHED and window focus. Re-running loadState there causes
-      // the "در حال احراز هویت..." flicker the user is complaining about.
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
       const cur = stateRef.current;
-      if (event === "SIGNED_IN" && session) {
-        // Any resolved state means we've already loaded this user's profile.
-        // A truly new user only arrives after an explicit SIGNED_OUT.
-        if (cur.status !== "loading" && cur.status !== "unauthenticated") return;
-      }
+      if (!shouldSyncOnAuthEvent(event, cur.status)) return;
       void syncSession(session);
     });
 

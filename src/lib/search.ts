@@ -41,6 +41,57 @@ function norm(s: string | undefined | null): string {
 }
 
 /**
+ * رقم‌های یک شماره را یکدست می‌کند: ارقام فارسی، فاصله، +98 / 0098 / 98 → 0.
+ * برای جستجو است، نه اعتبارسنجی سخت‌گیرانه.
+ */
+export function normalizePhoneDigits(input: string | null | undefined): string {
+  const n = normalizeSearchText(input);
+  if (!n) return "";
+  let d = n.replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
+  if (d.startsWith("98") && d.length >= 12) d = `0${d.slice(2)}`;
+  if (d.length === 10 && d.startsWith("9")) d = `0${d}`;
+  return d;
+}
+
+/** آیا عبارت تقریباً فقط شماره است (با فاصله و پیش‌شماره)؟ */
+export function isPhoneLikeQuery(query: string): boolean {
+  const n = normalizeSearchText(query);
+  if (!n) return false;
+  const digits = n.replace(/[^\d]/g, "");
+  if (digits.length < 4) return false;
+  const rest = n.replace(/[\d\s+\-()]/g, "");
+  return rest.length === 0;
+}
+
+/**
+ * شکل‌های قابل‌جستجوی یک شماره: 0912…، 912…، 98912…
+ * تا ادمین با هر فرمت رایجی همان کاربر را پیدا کند.
+ */
+export function phoneSearchKeys(input: string | null | undefined): string[] {
+  const digits = normalizePhoneDigits(input);
+  if (digits.length < 4) return [];
+  const keys = new Set<string>([digits]);
+  if (digits.startsWith("0")) keys.add(digits.slice(1));
+  if (digits.length >= 10) keys.add(digits.slice(-10));
+  if (digits.length === 11 && digits.startsWith("09")) {
+    keys.add(`98${digits.slice(1)}`);
+    keys.add(`+98${digits.slice(1)}`);
+  }
+  return [...keys];
+}
+
+export function phonesLikelySame(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const A = normalizePhoneDigits(a);
+  const B = normalizePhoneDigits(b);
+  if (!A || !B || A.length < 10 || B.length < 10) return false;
+  if (A === B) return true;
+  return A.slice(-10) === B.slice(-10);
+}
+
+/**
  * فیلدهای قابل‌جستجوی نام شخص: نام، نام خانوادگی، نام کامل، و هر کلمه جدا.
  * تا جستجوی «علی» و «کمالی» و «علی کمالی» هر سه کار کنند.
  */
@@ -53,6 +104,25 @@ export function personNameSearchFields(
   const full = [first, last].filter(Boolean).join(" ");
   const words = [...first.split(/\s+/), ...last.split(/\s+/)].map((w) => w.trim()).filter(Boolean);
   return [first, last, full, ...words];
+}
+
+/** نام + یوزرنیم + شکل‌های شماره تلفن — برای پنل ادمین و انتخاب کاربر */
+export function identitySearchFields(
+  person?: {
+    username?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    phone?: string | null;
+  } | null,
+  phone?: string | null,
+): string[] {
+  if (!person) return phoneSearchKeys(phone);
+  const first = person.first_name ?? person.firstName ?? "";
+  const last = person.last_name ?? person.lastName ?? "";
+  const tel = phone ?? person.phone ?? null;
+  return [person.username ?? "", ...personNameSearchFields({ firstName: first, lastName: last }), tel ?? "", ...phoneSearchKeys(tel)];
 }
 
 function tokensInOrder(field: string, tokens: string[]): boolean {
@@ -71,11 +141,7 @@ function tokensInOrder(field: string, tokens: string[]): boolean {
  * کل عبارت همیشه بر تک‌کلمه‌ی اول اولویت دارد؛ مثلاً جستجوی «گلس آیفون»
  * محصول «گلس آیفون ۱۳» را بالاتر از «گلس سامسونگ» می‌آورد.
  */
-export function scoreSearchFields(fields: string[], query: string): number | null {
-  const q = norm(query);
-  if (!q) return 0;
-  const normalized = fields.map(norm).filter(Boolean);
-  if (normalized.length === 0) return null;
+function scoreNormalizedFields(normalized: string[], q: string): number | null {
   const tokens = q.split(" ").filter((t) => t.length >= 1);
 
   let best = -1;
@@ -130,6 +196,25 @@ export function scoreSearchFields(fields: string[], query: string): number | nul
       ? 500
       : 0;
   return 1200 + hits.length * 220 + laterHits * 180 - firstOnlyPenalty;
+}
+
+export function scoreSearchFields(fields: string[], query: string): number | null {
+  const q = norm(query);
+  if (!q) return 0;
+  const normalized = [
+    ...new Set([...fields.map(norm).filter(Boolean), ...fields.flatMap((f) => phoneSearchKeys(f))]),
+  ];
+  if (normalized.length === 0) return null;
+
+  let best = scoreNormalizedFields(normalized, q);
+  if (isPhoneLikeQuery(query)) {
+    for (const qk of phoneSearchKeys(query)) {
+      if (qk === q) continue;
+      const s = scoreNormalizedFields(normalized, qk);
+      if (s !== null) best = best === null ? s : Math.max(best, s);
+    }
+  }
+  return best;
 }
 
 /**

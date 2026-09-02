@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
-import { filterAndRankSearch, namesReferToSamePerson, personNameSearchFields } from "@/lib/search";
+import {
+  filterAndRankSearch,
+  identitySearchFields,
+  namesReferToSamePerson,
+  phonesLikelySame,
+} from "@/lib/search";
 import { openExternal, toIntlPhone } from "@/lib/openExternal";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
@@ -38,6 +43,41 @@ export const Route = createFileRoute("/admin")({
 });
 
 type Tab = "requests" | "users" | "renewals" | "customers" | "plans" | "settings" | "landing" | "resets";
+
+function mergeAdminPhones(
+  fromAuth: Record<string, string | null>,
+  requests: SignupRequest[],
+): Record<string, string | null> {
+  const out: Record<string, string | null> = { ...fromAuth };
+  for (const r of requests) {
+    const u = r.username?.toLowerCase();
+    if (!u || !r.phone) continue;
+    if (!out[u]) out[u] = r.phone;
+  }
+  return out;
+}
+
+function AdminSearchBox({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="relative">
+      <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
+      />
+    </div>
+  );
+}
 
 function AdminPage() {
   const { state, signOut } = useAuth();
@@ -76,9 +116,10 @@ function AdminPage() {
 
     if (u.error) throw new Error(u.error.message);
 
-    setRequests((requestsData as unknown as SignupRequest[]) || []);
+    const reqs = (requestsData as unknown as SignupRequest[]) || [];
+    setRequests(reqs);
     setUsers((u.data as UserProfile[]) || []);
-    setPhones((phoneMap as Record<string, string | null>) || {});
+    setPhones(mergeAdminPhones((phoneMap as Record<string, string | null>) || {}, reqs));
     setResetRequests((resets as PasswordResetRequestRow[]) || []);
     setLoading(false);
   };
@@ -282,6 +323,7 @@ function RequestsTab({
   phones: Record<string, string | null>;
 }) {
   const [messageTarget, setMessageTarget] = useState<SignupRequest | null>(null);
+  const [searchQ, setSearchQ] = useState("");
   const clearTempPwd = useServerFn(adminClearSignupTempPassword);
   const [plansCfg, setPlansCfg] = useState<PlansConfig>(DEFAULT_PLANS);
 
@@ -294,6 +336,17 @@ function RequestsTab({
       .then(({ data }) => setPlansCfg(normalizePlans((data as any)?.plans)));
   }, []);
 
+  const filtered = filterAndRankSearch(requests, searchQ, (r) =>
+    identitySearchFields(
+      {
+        username: r.username,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        phone: r.phone || phones[r.username?.toLowerCase()] || null,
+      },
+    ),
+  );
+
   if (requests.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
@@ -303,9 +356,19 @@ function RequestsTab({
     );
   }
   return (
-    <>
+    <div className="space-y-3">
+    <AdminSearchBox
+      value={searchQ}
+      onChange={setSearchQ}
+      placeholder="جستجوی نام، یوزرنیم یا شماره تلفن..."
+    />
+    {filtered.length === 0 && (
+      <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        درخواستی با این مشخصات پیدا نشد
+      </div>
+    )}
     <ul className="space-y-2">
-      {requests.map((r) => {
+      {filtered.map((r) => {
         const isActing = acting === r.id;
         const cfg = plansCfg[r.plan];
         const price = cfg ? effectivePrice(cfg, Date.now()) : 0;
@@ -444,7 +507,7 @@ function RequestsTab({
         onClose={() => setMessageTarget(null)}
       />
     )}
-    </>
+    </div>
   );
 }
 
@@ -524,13 +587,12 @@ function UsersTab({
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [backupTarget, setBackupTarget] = useState<UserProfile | null>(null);
 
-  const filtered = searchQ.trim()
-    ? users.filter((u) =>
-        u.username?.includes(searchQ) ||
-        u.first_name?.includes(searchQ) ||
-        u.last_name?.includes(searchQ),
-      )
-    : users;
+  const filtered = filterAndRankSearch(users, searchQ, (u) =>
+    identitySearchFields(
+      { username: u.username, first_name: u.first_name, last_name: u.last_name },
+      phones[u.username?.toLowerCase()] || null,
+    ),
+  );
 
   const handlePwdReset = async () => {
     if (!resetTarget || newPwd.length < 8 || !adminPwd) return;
@@ -565,16 +627,11 @@ function UsersTab({
 
   return (
     <div className="space-y-3">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <input
-          value={searchQ}
-          onChange={(e) => setSearchQ(e.target.value)}
-          placeholder="جستجوی نام یا یوزرنیم..."
-          className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
-        />
-      </div>
+      <AdminSearchBox
+        value={searchQ}
+        onChange={setSearchQ}
+        placeholder="جستجوی نام، یوزرنیم یا شماره تلفن..."
+      />
 
       {filtered.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
@@ -597,6 +654,11 @@ function UsersTab({
                     {u.first_name || "—"} {u.last_name || ""}
                     <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{u.username}</span>
                   </div>
+                  {phones[u.username?.toLowerCase()] ? (
+                    <div dir="ltr" className="mt-0.5 text-xs text-muted-foreground">
+                      {phones[u.username.toLowerCase()]}
+                    </div>
+                  ) : null}
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {u.plan && (
                       <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">{PLAN_LABEL[u.plan]}</span>
@@ -1406,6 +1468,7 @@ function RenewalsTab({
 }) {
   const [subTab, setSubTab] = useState<"expiring" | "history">("expiring");
   const [detailTarget, setDetailTarget] = useState<SignupRequest | null>(null);
+  const [searchQ, setSearchQ] = useState("");
   const now = Date.now();
   const DAY = 24 * 60 * 60 * 1000;
 
@@ -1425,6 +1488,29 @@ function RenewalsTab({
     .filter((r) => (r as any).request_type === "renewal")
     .slice()
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const visibleRows = filterAndRankSearch(rows, searchQ, (r) =>
+    identitySearchFields(
+      { username: r.u.username, first_name: r.u.first_name, last_name: r.u.last_name },
+      r.phone,
+    ),
+  );
+  const visibleRenewals = filterAndRankSearch(renewalRequests, searchQ, (r) =>
+    identitySearchFields({
+      username: r.username,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      phone: r.phone || phones[r.username?.toLowerCase()] || null,
+    }),
+  );
+
+  const searchBox = (
+    <AdminSearchBox
+      value={searchQ}
+      onChange={setSearchQ}
+      placeholder="جستجوی نام، یوزرنیم یا شماره تلفن..."
+    />
+  );
 
   const subTabSwitcher = (
     <div className="mb-3 flex gap-1 rounded-xl bg-muted p-1">
@@ -1449,14 +1535,15 @@ function RenewalsTab({
     return (
       <div className="space-y-3">
         {subTabSwitcher}
-        {renewalRequests.length === 0 ? (
+        {searchBox}
+        {visibleRenewals.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
             <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
-            هنوز هیچ تمدیدی ثبت نشده است.
+            {renewalRequests.length === 0 ? "هنوز هیچ تمدیدی ثبت نشده است." : "موردی با این جستجو پیدا نشد."}
           </div>
         ) : (
           <ul className="space-y-2">
-            {renewalRequests.map((r) => (
+            {visibleRenewals.map((r) => (
               <li
                 key={r.id}
                 onClick={() => setDetailTarget(r)}
@@ -1495,6 +1582,7 @@ function RenewalsTab({
     return (
       <div className="space-y-3">
         {subTabSwitcher}
+        {searchBox}
         <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
           <BellRing className="mx-auto mb-2 h-8 w-8 opacity-30" />
           فعلا کاربری در آستانه تمدید یا منقضی وجود ندارد.
@@ -1516,11 +1604,17 @@ function RenewalsTab({
   return (
     <div className="space-y-3">
       {subTabSwitcher}
+      {searchBox}
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
         نمایش کاربرانی که اشتراکشان تا ۷ روز آینده تمام می‌شود یا منقضی شده — جهت یادآوری تمدید.
       </div>
+      {visibleRows.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+          کاربری با این جستجو پیدا نشد.
+        </div>
+      ) : (
       <ul className="space-y-2">
-        {rows.map(({ u, daysLeft, phone }) => {
+        {visibleRows.map(({ u, daysLeft, phone }) => {
           const expired = daysLeft <= 0;
           const msg = buildMsg(u, daysLeft);
           const encoded = encodeURIComponent(msg);
@@ -1585,6 +1679,7 @@ function RenewalsTab({
           );
         })}
       </ul>
+      )}
     </div>
   );
 }
@@ -1602,17 +1697,27 @@ function CustomersTab({
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);
   const [detailTarget, setDetailTarget] = useState<SignupRequest | null>(null);
+  const [searchQ, setSearchQ] = useState("");
 
   const fromMs = from ? new Date(from).getTime() : -Infinity;
   const toMs = to ? new Date(to).getTime() : Infinity;
 
-  const rows = requests
+  const dated = requests
     .filter((r) => {
       const t = new Date(r.created_at).getTime();
       return t >= fromMs && t <= toMs;
     })
     .slice()
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const rows = filterAndRankSearch(dated, searchQ, (r) =>
+    identitySearchFields({
+      username: r.username,
+      first_name: r.first_name,
+      last_name: r.last_name,
+      phone: r.phone || phones[r.username?.toLowerCase()] || null,
+    }),
+  );
 
   const profileByUsername = new Map(users.map((u) => [u.username?.toLowerCase(), u]));
 
@@ -1645,10 +1750,16 @@ function CustomersTab({
         </div>
       </div>
 
+      <AdminSearchBox
+        value={searchQ}
+        onChange={setSearchQ}
+        placeholder="جستجوی نام، یوزرنیم یا شماره تلفن..."
+      />
+
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
           <Search className="mx-auto mb-2 h-8 w-8 opacity-30" />
-          موردی در این بازه یافت نشد.
+          {dated.length === 0 ? "موردی در این بازه یافت نشد." : "موردی با این جستجو پیدا نشد."}
         </div>
       ) : (
         <ul className="space-y-2">
@@ -1773,10 +1884,6 @@ function CustomerDetailDialog({
   );
 }
 
-function normalizeIranPhoneClient(p: string | null | undefined): string {
-  return (p || "").replace(/\s+/g, "").replace(/^\+98/, "0").replace(/^98/, "0");
-}
-
 function generateSimplePassword() {
   const n = String(Math.floor(1000 + Math.random() * 9000));
   return `Kamix${n}`;
@@ -1792,14 +1899,10 @@ async function copyToClipboard(text: string) {
 }
 
 function userSearchFields(u: UserProfile, phone: string | null | undefined) {
-  return [
-    u.username,
-    u.first_name,
-    u.last_name,
-    `${u.first_name || ""} ${u.last_name || ""}`.trim(),
-    phone || "",
-    ...personNameSearchFields({ firstName: u.first_name || "", lastName: u.last_name || "" }),
-  ];
+  return identitySearchFields(
+    { username: u.username, first_name: u.first_name, last_name: u.last_name },
+    phone,
+  );
 }
 
 function PasswordResetsTab({
@@ -1819,12 +1922,13 @@ function PasswordResetsTab({
 }) {
   const [query, setQuery] = useState("");
 
-  const filtered = filterAndRankSearch(requests, query, (r) => [
-    r.first_name,
-    r.last_name,
-    `${r.first_name} ${r.last_name}`,
-    r.phone,
-  ]);
+  const filtered = filterAndRankSearch(requests, query, (r) =>
+    identitySearchFields({
+      first_name: r.first_name,
+      last_name: r.last_name,
+      phone: r.phone,
+    }),
+  );
   const pending = filtered.filter((r) => r.status === "pending");
   const done = filtered.filter((r) => r.status !== "pending");
 
@@ -1842,15 +1946,11 @@ function PasswordResetsTab({
       <p className="rounded-xl border border-border bg-card px-3 py-2 text-[11px] leading-6 text-muted-foreground">
         کاربر را با نام یا شماره پیدا کنید، یوزرنیم را ببینید، رمز جدید بگذارید و با پیامک نیمه‌دستی برایش بفرستید. رمز قبلی به‌خاطر امنیت قابل نمایش نیست.
       </p>
-      <div className="relative">
-        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="جستجوی درخواست: نام، نام خانوادگی یا شماره..."
-          className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
-        />
-      </div>
+      <AdminSearchBox
+        value={query}
+        onChange={setQuery}
+        placeholder="جستجوی نام یا شماره تلفن..."
+      />
       {filtered.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
           درخواستی با این مشخصات پیدا نشد
@@ -1920,9 +2020,7 @@ function PasswordResetCard({
 
   const phoneOf = (u: UserProfile) => phones[u.username?.toLowerCase()] || null;
 
-  const phoneMatches = users.filter(
-    (u) => normalizeIranPhoneClient(phoneOf(u)) === normalizeIranPhoneClient(r.phone) && normalizeIranPhoneClient(r.phone),
-  );
+  const phoneMatches = users.filter((u) => phonesLikelySame(phoneOf(u), r.phone));
   const nameMatches = users.filter((u) =>
     namesReferToSamePerson(
       { firstName: r.first_name, lastName: r.last_name },

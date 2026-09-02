@@ -29,6 +29,10 @@ import {
   publicSignupProfileError,
   shouldRetrySignupWithoutOptionalColumns,
 } from "@/lib/signup-errors";
+import {
+  mergeSettingsKeepBoth,
+  unionMergeById,
+} from "@/lib/catalog-integrity";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -1483,6 +1487,25 @@ const USER_DATA_FIELDS = [
   "manual_ledger",
 ] as const;
 
+function mergeUserDataRows(
+  live: Record<string, unknown> | null | undefined,
+  incoming: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const field of USER_DATA_FIELDS) {
+    const a = live?.[field];
+    const b = incoming?.[field];
+    if (field === "settings") {
+      payload[field] = mergeSettingsKeepBoth(a, b);
+    } else if (field === "current_invoice") {
+      payload[field] = b ?? a ?? null;
+    } else {
+      payload[field] = unionMergeById(a, b);
+    }
+  }
+  return payload;
+}
+
 function previewFromRow(row: Record<string, unknown> | null | undefined) {
   const products = Array.isArray(row?.products) ? (row!.products as { name?: unknown }[]) : [];
   const invoices = Array.isArray(row?.invoices) ? (row!.invoices as unknown[]) : [];
@@ -1579,10 +1602,8 @@ export const adminRestoreUserDataBackup = createServerFn({ method: "POST" })
     const payload: Record<string, unknown> = {
       user_id: data.user_id,
       updated_at: new Date().toISOString(),
+      ...mergeUserDataRows((live || {}) as Record<string, unknown>, snap),
     };
-    for (const field of USER_DATA_FIELDS) {
-      if (field in snap) payload[field] = snap[field];
-    }
 
     const { error: upErr } = await supabaseAdmin
       .from("user_data")
@@ -1596,5 +1617,64 @@ export const adminRestoreUserDataBackup = createServerFn({ method: "POST" })
       detail: { backup_id: data.backup_id, backup_at: backup.created_at },
     });
     return { success: true, restored_at: backup.created_at as string };
+  });
+
+export const adminMergeAllUserDataBackups = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { user_id: string; admin_password: string }) => {
+    if (!d.user_id) throw new Error("شناسه کاربر لازم است.");
+    if (!d.admin_password) throw new Error("رمز ادمین لازم است.");
+    return d;
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    await requireAdminPassword(data.admin_password);
+    const supabaseAdmin = await admin();
+    const { data: live } = await supabaseAdmin
+      .from("user_data")
+      .select("*")
+      .eq("user_id", data.user_id)
+      .maybeSingle();
+    const { data: rows, error } = await supabaseAdmin
+      .from("user_data_backups")
+      .select("snapshot, created_at")
+      .eq("user_id", data.user_id)
+      .order("created_at", { ascending: true })
+      .limit(80);
+    if (error) throw new Error(error.message);
+
+    if (live) {
+      await supabaseAdmin
+        .from("user_data_backups")
+        .insert({ user_id: data.user_id, snapshot: live })
+        .then(() => {}, () => {});
+    }
+
+    let merged: Record<string, unknown> = { ...(live || {}) };
+    for (const row of rows ?? []) {
+      merged = mergeUserDataRows(merged, (row.snapshot || {}) as Record<string, unknown>);
+    }
+    merged = mergeUserDataRows(merged, (live || {}) as Record<string, unknown>);
+
+    const payload = {
+      user_id: data.user_id,
+      updated_at: new Date().toISOString(),
+      ...merged,
+    };
+    const { error: upErr } = await supabaseAdmin
+      .from("user_data")
+      .upsert(payload as never, { onConflict: "user_id" });
+    if (upErr) throw new Error(upErr.message);
+
+    await auditLog(supabaseAdmin, {
+      actor_id: context.userId,
+      action: "user_data_union_restored",
+      target: data.user_id,
+      detail: { backups: (rows ?? []).length },
+    });
+    return {
+      success: true,
+      ...previewFromRow(merged),
+    };
   });
 

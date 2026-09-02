@@ -9,8 +9,10 @@ import {
   mergeInvoicePricesFromCloud,
   mergeInvoicesKeepAll,
   mergeProductPricesFromCloud,
+  mergeSettingsKeepBoth,
   preferCloudValue,
   textLooksVandalized,
+  unionMergeById,
 } from "../src/lib/catalog-integrity.ts";
 
 const persianProducts = [
@@ -165,5 +167,33 @@ const backupInv = [
 ];
 const fixedInv = mergeInvoicePricesFromCloud(vandalInv, backupInv, backupProducts);
 assert.equal(fixedInv[0].items[0].price, 25000);
+
+{
+  const oldCloud = [
+    { id: "a", name: "نان", createdAt: 1 },
+    { id: "b", name: "شیر", createdAt: 1 },
+  ];
+  const localNewer = [
+    { id: "a", name: "نان سنگک", createdAt: 9 },
+    { id: "c", name: "ماست", createdAt: 9 },
+  ];
+  const merged = unionMergeById(localNewer, oldCloud);
+  assert.equal(merged.length, 3, "ادغام نباید کالای جدید یا قدیمی را حذف کند");
+  assert.equal(merged.find((p) => p.id === "a").name, "نان سنگک");
+  assert.ok(merged.some((p) => p.id === "b"));
+  assert.ok(merged.some((p) => p.id === "c"));
+  const hidden = unionMergeById(localNewer, oldCloud, new Set(["b"]));
+  assert.equal(hidden.some((p) => p.id === "b"), false);
+}
+
+{
+  const settings = mergeSettingsKeepBoth(
+    { shopName: "فروشگاه علی", invoiceFontSize: 14 },
+    { shopName: "فروشگاه من", invoiceFontSize: 13, trackInventory: true },
+  );
+  assert.equal(settings.shopName, "فروشگاه علی");
+  assert.equal(settings.trackInventory, true);
+  assert.equal(settings.invoiceFontSize, 14);
+}
 
 console.log("✓ catalog-integrity: همه‌ی بررسی‌ها موفق");

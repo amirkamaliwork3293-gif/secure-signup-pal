@@ -19,7 +19,7 @@ import {
   updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
   adminClearSignupTempPassword,
   adminListPasswordResetRequests, adminAckPasswordReset,
-  adminListUserDataBackups, adminRestoreUserDataBackup,
+  adminListUserDataBackups, adminRestoreUserDataBackup, adminMergeAllUserDataBackups,
   type PasswordResetRequestRow, type UserDataBackupPreview,
 } from "@/lib/auth.functions";
 import {
@@ -856,6 +856,7 @@ function UsersTab({
 function UserBackupModal({ user, onClose }: { user: UserProfile; onClose: () => void }) {
   const listFn = useServerFn(adminListUserDataBackups);
   const restoreFn = useServerFn(adminRestoreUserDataBackup);
+  const mergeAllFn = useServerFn(adminMergeAllUserDataBackups);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState<UserDataBackupPreview | null>(null);
   const [backups, setBackups] = useState<UserDataBackupPreview[]>([]);
@@ -888,11 +889,11 @@ function UserBackupModal({ user, onClose }: { user: UserProfile; onClose: () => 
       alert("رمز ادمین را وارد کنید.");
       return;
     }
-    if (!confirm("داده‌های فعلی این کاربر با نسخه انتخاب‌شده جایگزین می‌شود. ادامه می‌دهید؟")) return;
+    if (!confirm("نسخه انتخاب‌شده با دادهٔ فعلی ادغام می‌شود. هیچ فاکتور یا کالایی پاک نمی‌شود. ادامه می‌دهید؟")) return;
     setSaving(true);
     try {
       await restoreFn({ data: { user_id: user.id, backup_id: picked, admin_password: adminPwd } });
-      alert("بازیابی انجام شد. به کاربر بگویید اپ را ببندد، یک‌بار از حساب خارج شود و دوباره وارد شود تا دادهٔ خراب از گوشی دوباره بالا نرود.");
+      alert("بازیابی ادغامی انجام شد. کاربر اگر اپ را باز کند دادهٔ کامل‌تر را می‌بیند؛ از حساب خارج شدن لازم نیست.");
       setAdminPwd("");
       await load();
     } catch (e: unknown) {
@@ -914,7 +915,7 @@ function UserBackupModal({ user, onClose }: { user: UserProfile; onClose: () => 
           </button>
         </div>
         <p className="mb-3 text-[11px] leading-6 text-muted-foreground">
-          نسخه‌های خودکار حدود هر ۶ ساعت (حداکثر ۴۰ تا) ذخیره می‌شوند. نسخه‌ای را انتخاب کنید که نام محصولات واقعی باشد، نه متن خراب.
+          نسخه‌های خودکار حدود هر ۶ ساعت ذخیره می‌شوند. بازیابی همیشه ادغامی است: کالای جدید کاربر پاک نمی‌شود. اگر بعد از حمله داده برگشته، «ادغام همه نسخه‌ها» را بزنید.
         </p>
         {loading && (
           <div className="flex justify-center py-8">
@@ -971,7 +972,29 @@ function UserBackupModal({ user, onClose }: { user: UserProfile; onClose: () => 
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
-                  بازگرداندن نسخه انتخاب‌شده
+                  بازگرداندن نسخه انتخاب‌شده (ادغام)
+                </button>
+                <button
+                  type="button"
+                  disabled={!adminPwd || saving}
+                  onClick={() => {
+                    if (!adminPwd) return;
+                    if (!confirm("همهٔ نسخه‌های پشتیبان با وضعیت فعلی ادغام می‌شوند. چیزی پاک نمی‌شود. ادامه؟")) return;
+                    setSaving(true);
+                    void mergeAllFn({ data: { user_id: user.id, admin_password: adminPwd } })
+                      .then((res) => {
+                        alert(`ادغام انجام شد: ${res.product_count} کالا، ${res.invoice_count} فاکتور.`);
+                        setAdminPwd("");
+                        return load();
+                      })
+                      .catch((e: unknown) => {
+                        alert((e as { message?: string })?.message || "ادغام ناموفق بود.");
+                      })
+                      .finally(() => setSaving(false));
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 py-2.5 text-sm font-semibold text-primary disabled:opacity-60"
+                >
+                  ادغام امن همه نسخه‌ها
                 </button>
               </>
             )}

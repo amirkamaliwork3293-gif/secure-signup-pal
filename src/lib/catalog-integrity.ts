@@ -460,3 +460,138 @@ export function preferCloudValue(
 
   return false;
 }
+
+/** شناسهٔ پایدار ردیف کاتالوگ/فاکتور/مشتری */
+export function catalogRowId(row: unknown): string {
+  const rec = asRecord(row);
+  return rec && typeof rec.id === "string" ? rec.id : "";
+}
+
+function catalogRowTimestamp(row: unknown): number {
+  const rec = asRecord(row);
+  if (!rec) return 0;
+  for (const key of ["updatedAt", "createdAt", "at", "date", "paidAt"]) {
+    const n = Number(rec[key]);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function catalogRowVandalized(row: unknown): boolean {
+  const rec = asRecord(row);
+  if (!rec) return false;
+  const parts = [
+    rec.name,
+    rec.notes,
+    rec.description,
+    rec.firstName,
+    rec.lastName,
+    rec.supplierName,
+    rec.title,
+  ];
+  for (const p of parts) {
+    if (typeof p === "string" && textLooksVandalized(p)) return true;
+  }
+  const items = Array.isArray(rec.items) ? rec.items : [];
+  for (const it of items) {
+    const name = asRecord(it)?.name;
+    if (typeof name === "string" && textLooksVandalized(name)) return true;
+  }
+  return false;
+}
+
+function catalogRowSize(row: unknown): number {
+  try {
+    return JSON.stringify(row).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * بین دو نسخه از همان شناسه، نسخهٔ سالم‌تر و جدیدتر را نگه می‌دارد.
+ * هرگز نسخهٔ فحاشی را برنمی‌گرداند اگر نسخهٔ تمیز وجود داشته باشد.
+ */
+export function pickRicherCatalogRow(local: unknown, cloud: unknown): unknown {
+  if (local == null) return cloud;
+  if (cloud == null) return local;
+  const localBad = catalogRowVandalized(local);
+  const cloudBad = catalogRowVandalized(cloud);
+  if (localBad && !cloudBad) {
+    const loc = asRecord(local);
+    const cl = asRecord(cloud);
+    if (loc && cl && catalogHasVandalPrice([local], "products")) {
+      return restorePriceKeys(loc, cl, PRODUCT_PRICE_KEYS);
+    }
+    return cloud;
+  }
+  if (!localBad && cloudBad) return local;
+  const loc = asRecord(local);
+  const cl = asRecord(cloud);
+  if (loc && cl && (catalogHasVandalPrice([local], "products") || catalogHasVandalPrice([local], "invoices"))) {
+    const priced = restorePriceKeys(loc, cl, PRODUCT_PRICE_KEYS);
+    if (Array.isArray(priced.items)) {
+      return restoreInvoiceItems(priced, cl, new Map());
+    }
+    return priced;
+  }
+  const lt = catalogRowTimestamp(local);
+  const ct = catalogRowTimestamp(cloud);
+  if (ct > lt + 1000) return cloud;
+  if (lt > ct + 1000) return local;
+  return catalogRowSize(local) >= catalogRowSize(cloud) ? local : cloud;
+}
+
+/**
+ * ادغام بدون حذف: هر شناسه‌ای که در محلی یا ابر باشد می‌ماند.
+ * شناسه‌های tombstone (حذف عمدی همین دستگاه) از نتیجه بیرون می‌مانند.
+ */
+export function unionMergeById(
+  local: unknown,
+  cloud: unknown,
+  tombstoned: ReadonlySet<string> = new Set(),
+): unknown[] {
+  const localArr = Array.isArray(local) ? local : [];
+  const cloudArr = Array.isArray(cloud) ? cloud : [];
+  const map = new Map<string, unknown>();
+  const noId: unknown[] = [];
+
+  const take = (row: unknown, preferLocal: boolean) => {
+    const id = catalogRowId(row);
+    if (id && tombstoned.has(id)) return;
+    if (!id) {
+      noId.push(row);
+      return;
+    }
+    const prev = map.get(id);
+    if (!prev) {
+      map.set(id, row);
+      return;
+    }
+    map.set(id, preferLocal ? pickRicherCatalogRow(row, prev) : pickRicherCatalogRow(prev, row));
+  };
+
+  for (const row of cloudArr) take(row, false);
+  for (const row of localArr) take(row, true);
+  return [...map.values(), ...noId];
+}
+
+/** تنظیمات: مقدارهای محلی خالی‌نشده روی ابر می‌نشینند. */
+export function mergeSettingsKeepBoth(local: unknown, cloud: unknown): Record<string, unknown> {
+  const c = asRecord(cloud) ?? {};
+  const l = asRecord(local) ?? {};
+  const out: Record<string, unknown> = { ...c, ...l };
+  const localName = typeof l.shopName === "string" ? l.shopName.trim() : "";
+  const cloudName = typeof c.shopName === "string" ? c.shopName.trim() : "";
+  if (localName) out.shopName = localName;
+  else if (cloudName) out.shopName = cloudName;
+  return out;
+}
+
+export function catalogArraysDiffer(a: unknown, b: unknown): boolean {
+  try {
+    return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+  } catch {
+    return true;
+  }
+}

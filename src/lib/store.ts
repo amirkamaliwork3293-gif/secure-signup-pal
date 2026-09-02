@@ -3,12 +3,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson } from "@/lib/search";
 import {
+  catalogArraysDiffer,
   catalogHasVandalPrice,
   catalogLooksVandalized,
+  catalogRowId,
   isProtectedCatalogField,
   mergeInvoicePricesFromCloud,
   mergeProductPricesFromCloud,
+  mergeSettingsKeepBoth,
   preferCloudValue,
+  unionMergeById,
 } from "@/lib/catalog-integrity";
 import {
   stockDeltasForSoldItems,
@@ -389,6 +393,10 @@ const ACCOUNTS_KEY = "acc.accounts.v1";
 const ACCOUNT_TXS_KEY = "acc.account_txs.v1";
 const PRODUCTION_KEY = "acc.production.v1";
 export const STORAGE_SCOPE_KEY = "kamali.auth.scope.v1";
+/** آخرین کاربر واردشده — خروج نباید داده را به کلید خالی anon ببرد. */
+const LAST_USER_SCOPE_KEY = "kamali.auth.lastScope.v1";
+/** شناسه‌هایی که همین دستگاه عمداً حذف کرده تا از ابر برنگردند. */
+const TOMBSTONE_KEY = "acc.tombstones.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
 const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
@@ -544,7 +552,20 @@ function scopedKey(key: string, scope = getStorageScope()) {
 
 export function setStorageScope(scope: string | null) {
   if (typeof window === "undefined") return;
-  const nextScope = scope || "anon";
+  let nextScope = scope || "anon";
+  if (scope) {
+    if (scope !== "anon") {
+      try {
+        localStorage.setItem(LAST_USER_SCOPE_KEY, scope);
+      } catch {}
+    }
+  } else {
+    // خروج از حساب دادهٔ همان کاربر را پاک نمی‌کند و به کلید خالی anon نمی‌رود.
+    try {
+      const last = localStorage.getItem(LAST_USER_SCOPE_KEY);
+      if (last) nextScope = last;
+    } catch {}
+  }
   localStorage.setItem(STORAGE_SCOPE_KEY, nextScope);
   window.dispatchEvent(
     new CustomEvent("store-change", { detail: { scopeChanged: true, scope: nextScope } }),
@@ -612,6 +633,11 @@ export function assertBusinessWriteAllowed(): boolean {
 
 function write<T>(key: string, value: T): boolean {
   if (!assertBusinessWriteAllowed()) return false;
+  const field = CLOUD_FIELDS[key];
+  if (field) {
+    const prev = read<unknown>(key, Array.isArray(value) ? [] : null);
+    rememberRemovedIds(field, prev, value);
+  }
   writeLocalOnly(key, value);
   scheduleCloudPush(key, value);
   return true;
@@ -659,6 +685,47 @@ function writeDirtySet(set: Set<string>) {
     if (set.size === 0) localStorage.removeItem(scopedKey(CLOUD_DIRTY_KEY));
     else localStorage.setItem(scopedKey(CLOUD_DIRTY_KEY), JSON.stringify([...set]));
   } catch {}
+}
+
+type TombstoneMap = Record<string, string[]>;
+
+function readTombstones(): TombstoneMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(scopedKey(TOMBSTONE_KEY));
+    const parsed = raw ? (JSON.parse(raw) as TombstoneMap) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeTombstones(map: TombstoneMap) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(scopedKey(TOMBSTONE_KEY), JSON.stringify(map));
+  } catch {}
+}
+
+function tombstoneSet(field: string): Set<string> {
+  return new Set(readTombstones()[field] || []);
+}
+
+function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return;
+  const nextIds = new Set(next.map(catalogRowId).filter(Boolean));
+  const removed: string[] = [];
+  for (const row of prev) {
+    const id = catalogRowId(row);
+    if (id && !nextIds.has(id)) removed.push(id);
+  }
+  if (removed.length === 0 && nextIds.size === 0) return;
+  const map = readTombstones();
+  const cur = new Set(map[field] || []);
+  for (const id of removed) cur.add(id);
+  for (const id of nextIds) cur.delete(id);
+  map[field] = [...cur];
+  writeTombstones(map);
 }
 
 function markDirty(fields: string[]) {
@@ -821,8 +888,9 @@ async function dropVandalizedCatalogPushes(
         continue;
       }
       if (preferCloudValue(localVal, cloudVal, field)) {
-        adoptCloudField(field, cloudVal);
-        delete fieldsToPush[field];
+        const merged = unionMergeById(localVal, cloudVal, tombstoneSet(field));
+        fieldsToPush[field] = merged;
+        adoptCloudField(field, merged);
       }
       continue;
     }
@@ -1030,66 +1098,59 @@ export async function hydrateFromCloud(userId: string) {
     // کاربر در فاصله‌ی خواندن از سرور (چند صد میلی‌ثانیه) چیزی ثبت کرده باشد؛
     // با تکیه بر snapshot قدیمی، آن ثبت با داده‌ی سرور بازنویسی می‌شد و کاربر
     // «ناپدید شدن» آن را می‌دید.
-    const dirtyNow = new Set<string>([...dirty, ...readDirtySet()]);
-    const overwrite = (field: string, key: string, value: unknown) => {
-      if (value == null) return;
-      if (field === "products") {
-        if (dirtyNow.has("products")) {
-          const merged = mergeProductPricesFromCloud(localValueForCloudField("products"), value);
-          writeLocalOnly(key, merged);
-          pendingPush.products = merged;
-        } else {
-          writeLocalOnly(key, value);
-          delete pendingPush.products;
-          clearDirty(["products"]);
+    // هرگز آرایهٔ محلی را کامل با ابر عوض نکن — ادغام شناسه‌به‌شناسه.
+    // اگر ابر قدیمی‌تر باشد (مثل بعد از حمله یا خطای ذخیره)، کالای جدید محلی می‌ماند
+    // و دوباره به ابر فرستاده می‌شود. حذف عمدی همین دستگاه با tombstone حفظ می‌شود.
+    const applyMerged = (field: string, key: string, cloudValue: unknown) => {
+      if (field === "settings") {
+        const merged = mergeSettingsKeepBoth(localValueForCloudField("settings"), cloudValue);
+        writeLocalOnly(key, merged);
+        if (catalogArraysDiffer(merged, cloudValue)) {
+          pendingPush.settings = merged;
+          markDirty(["settings"]);
         }
         return;
       }
-      if (field === "invoices") {
-        if (dirtyNow.has("invoices")) {
-          const mergedProducts = mergeProductPricesFromCloud(
-            localValueForCloudField("products"),
-            data.products,
-          );
-          const merged = mergeInvoicePricesFromCloud(
-            localValueForCloudField("invoices"),
-            value,
-            mergedProducts,
-          );
-          writeLocalOnly(key, merged);
-          pendingPush.invoices = merged;
-        } else {
-          writeLocalOnly(key, value);
-          delete pendingPush.invoices;
-          clearDirty(["invoices"]);
-        }
+      if (field === "current_invoice") {
+        const localBoard = localValueForCloudField("current_invoice");
+        const hasLocalItems = (() => {
+          if (!localBoard || typeof localBoard !== "object") return false;
+          const board = localBoard as { items?: unknown[]; open?: { items?: unknown[] }[] };
+          if (Array.isArray(board.open)) {
+            return board.open.some((i) => Array.isArray(i.items) && i.items.length > 0);
+          }
+          return Array.isArray(board.items) && board.items.length > 0;
+        })();
+        if (hasLocalItems) return;
+        if (cloudValue != null) writeLocalOnly(key, cloudValue);
         return;
       }
-      if (dirtyNow.has(field)) {
-        if (
-          isProtectedCatalogField(field) &&
-          preferCloudValue(localValueForCloudField(field), value, field)
-        ) {
-          adoptCloudField(field, value);
-        }
-        return;
+      const localVal = localValueForCloudField(field);
+      const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
+      const merged = unionMergeById(localVal, cloudArr, tombstoneSet(field));
+      writeLocalOnly(key, merged);
+      if (catalogArraysDiffer(merged, cloudArr)) {
+        pendingPush[field] = merged;
+        markDirty([field]);
+      } else {
+        delete pendingPush[field];
+        clearDirty([field]);
       }
-      writeLocalOnly(key, value);
     };
-    overwrite("products", PRODUCTS_KEY, data.products);
-    overwrite("categories", CATEGORIES_KEY, data.categories);
-    overwrite("invoices", HISTORY_KEY, data.invoices);
-    overwrite("current_invoice", INVOICE_KEY, data.current_invoice);
-    overwrite("settings", SETTINGS_KEY, data.settings);
-    overwrite("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
-    overwrite("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
-    overwrite("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
-    overwrite("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
-    overwrite("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
-    overwrite("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
-    overwrite("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
-    overwrite("production", PRODUCTION_KEY, (data as Record<string, unknown>).production);
-    overwrite("manual_ledger", MANUAL_LEDGER_KEY, (data as Record<string, unknown>).manual_ledger);
+    applyMerged("products", PRODUCTS_KEY, data.products);
+    applyMerged("categories", CATEGORIES_KEY, data.categories);
+    applyMerged("invoices", HISTORY_KEY, data.invoices);
+    applyMerged("current_invoice", INVOICE_KEY, data.current_invoice);
+    applyMerged("settings", SETTINGS_KEY, data.settings);
+    applyMerged("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
+    applyMerged("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
+    applyMerged("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
+    applyMerged("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
+    applyMerged("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
+    applyMerged("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
+    applyMerged("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
+    applyMerged("production", PRODUCTION_KEY, (data as Record<string, unknown>).production);
+    applyMerged("manual_ledger", MANUAL_LEDGER_KEY, (data as Record<string, unknown>).manual_ledger);
     markCloudHydrated();
   } catch (e) {
     console.error("[store] hydrate failed", e);

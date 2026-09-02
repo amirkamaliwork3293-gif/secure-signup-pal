@@ -13,6 +13,7 @@ const files = [
   "scripts/HEFAZAT-KATALOG.sql",
   "supabase/migrations/20260828060000_protect_catalog_from_vandalism.sql",
   "supabase/migrations/20260828080000_protect_catalog_security_definer.sql",
+  "supabase/migrations/20260902120000_never_replace_catalog_with_empty.sql",
 ];
 
 for (const rel of files) {

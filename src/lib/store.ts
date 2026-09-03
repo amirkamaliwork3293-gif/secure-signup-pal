@@ -25,6 +25,13 @@ import {
   type ProductionEvent,
 } from "@/lib/production";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
+import { isCapacitor } from "@/lib/isWebView";
+import {
+  isCapacitorOfflineReadOnly,
+  notifyOfflineWriteBlocked,
+  ONLINE_CONFIRMED_EVENT,
+} from "@/lib/online-status";
+import { rememberCloudRead } from "@/lib/offline-cache";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -641,6 +648,10 @@ export function areBusinessWritesBlocked(): boolean {
 
 /** اگر نوشتن مجاز نباشد رویداد UI را می‌فرستد و false برمی‌گرداند. */
 export function assertBusinessWriteAllowed(): boolean {
+  if (isCapacitorOfflineReadOnly()) {
+    notifyOfflineWriteBlocked();
+    return false;
+  }
   if (!businessWritesBlocked) return true;
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(WRITE_BLOCKED_EVENT));
@@ -996,6 +1007,8 @@ function isCloudPermissionError(
 async function flushCloudPush() {
   pushTimer = null;
   if (!cloudUserId) return;
+  // اپ آفلاین: هیچ درخواستی به سرور فرستاده نشود (نه صف جدید، نه امید به شکست).
+  if (isCapacitorOfflineReadOnly()) return;
   if (!cloudHydrated) {
     // Keep everything queued; hydrateFromCloud() triggers the flush when done.
     return;
@@ -1237,6 +1250,7 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
       }
       lastCloudUpdatedAt = null;
       markCloudHydrated();
+      if (isCapacitor()) rememberCloudRead(userId);
       return; // بلوک finally صف را flush می‌کند
     }
     // بازنویسی کش محلی از ابر. فیلدهای dirty (ویرایش آفلاین، از جمله حذف فاکتور)
@@ -1251,6 +1265,7 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
     applyCloudRow(data as Record<string, unknown>);
     lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
     markCloudHydrated();
+    if (isCapacitor()) rememberCloudRead(userId);
   } catch (e) {
     console.error("[store] hydrate failed", e);
     publishSyncState({
@@ -1262,6 +1277,7 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
     // Pending edits keep their dirty markers and retry after a successful read.
     if (!opts?.refresh) {
       setTimeout(() => {
+        if (isCapacitorOfflineReadOnly()) return;
         if (cloudUserId === userId && !cloudHydrated) void hydrateFromCloud(userId);
       }, 15000);
     }
@@ -1331,20 +1347,24 @@ export function stopCloudSync() {
   // reload so a subsequent sign-in can still resync offline edits.
 }
 
+function onReconnect() {
+  if (!cloudUserId) return;
+  if (isCapacitorOfflineReadOnly()) return;
+  retryDelay = 5000;
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  if (Object.keys(pendingPush).length > 0) {
+    flushCloudPush();
+  }
+  void refreshFromCloud();
+}
+
 // Re-flush pending changes when the browser regains connectivity
 if (typeof window !== "undefined") {
-  window.addEventListener("online", () => {
-    if (!cloudUserId) return;
-    retryDelay = 5000;
-    if (retryTimer) {
-      clearTimeout(retryTimer);
-      retryTimer = null;
-    }
-    if (Object.keys(pendingPush).length > 0) {
-      flushCloudPush();
-    }
-    void refreshFromCloud();
-  });
+  window.addEventListener("online", onReconnect);
+  window.addEventListener(ONLINE_CONFIRMED_EVENT, onReconnect);
 
   // بستن تب / رفتن اپ به پس‌زمینه: منتظر تایمر ۶۰۰ میلی‌ثانیه‌ای نمی‌مانیم و
   // همان لحظه تلاش می‌کنیم ذخیره کنیم. (اگر نرسد، نشانه‌ی dirty باقی می‌ماند و
@@ -1366,6 +1386,7 @@ if (typeof window !== "undefined") {
   // تا همان اکانت روی گوشی/مرورگر دیگر آخرین تغییرات را ببیند.
   window.setInterval(() => {
     if (!cloudUserId || !cloudHydrated) return;
+    if (isCapacitorOfflineReadOnly()) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
     void refreshFromCloud();
   }, 40_000);

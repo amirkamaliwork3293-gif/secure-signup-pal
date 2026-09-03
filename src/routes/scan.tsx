@@ -13,6 +13,7 @@ import {
   inventoryTrackingEnabled,
   productTracksStock,
 } from "@/lib/store";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
 export const Route = createFileRoute("/scan")({
@@ -46,6 +47,7 @@ function ScanPageInner() {
         setPaused(true);
         return;
       }
+      if (!requireOnlineWrite()) return;
       const current = invoice.getCurrent();
       const next = addProductToInvoice(current, product);
       invoice.save(next);
@@ -65,6 +67,7 @@ function ScanPageInner() {
   };
 
   const addFromSearch = (productId: string) => {
+    if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     const status = stockStatus(p);

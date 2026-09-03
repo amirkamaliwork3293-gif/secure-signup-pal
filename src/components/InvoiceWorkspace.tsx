@@ -57,6 +57,7 @@ import { InvoiceSavedDialog } from "@/components/InvoiceSavedDialog";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
+import { requireOnlineWrite } from "@/lib/online-status";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 function scheduleChequeReminders(
@@ -261,6 +262,7 @@ export function InvoiceWorkspace() {
 
   const checkout = () => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     if (inv.items.length === 0) return;
     const hasCustomer = !!(
       customer.firstName?.trim() ||
@@ -345,6 +347,7 @@ export function InvoiceWorkspace() {
 
   const addFromSearch = (productId: string) => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     setInv((prev) => addProductToInvoice(prev, p));
@@ -368,6 +371,7 @@ export function InvoiceWorkspace() {
   // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست
   const addManualItem = () => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     const price = parseNumberInput(manualPrice);
     const qty = parseNumberInput(manualQty) || 1;
     if (!manualName.trim() || price <= 0 || qty <= 0) {

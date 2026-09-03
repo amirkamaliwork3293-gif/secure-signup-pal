@@ -34,6 +34,7 @@ import {
 import { useAuth } from "@/lib/AuthContext";
 import { authUserId } from "@/lib/subscription-access";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { invoiceTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { openExternal, shareText, toIntlPhone, telHref } from "@/lib/openExternal";
@@ -2290,6 +2291,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
 
   const submit = () => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     if (cartInv.items.length === 0) {
       alert("حداقل یک کالا به فاکتور اضافه کنید.");
       return;

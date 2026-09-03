@@ -5,6 +5,8 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
+import { isCapacitor } from "@/lib/isWebView";
+import { clearUserOfflineCache } from "@/lib/offline-cache";
 import {
   classifyUserAccess,
   pickProfileForSession,
@@ -162,7 +164,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentRevision = ++revision;
 
       if (!session) {
+        const prev = stateRef.current;
+        const prevId =
+          prev.status === "authenticated" || prev.status === "expired"
+            ? prev.session.user.id
+            : null;
         stopCloudSync();
+        if (isCapacitor() && prevId) clearUserOfflineCache(prevId);
         setStorageScope(null);
         if (!disposed && currentRevision === revision) {
           setState({ status: "unauthenticated" });
@@ -218,8 +226,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    const prev = stateRef.current;
+    const prevId =
+      prev.status === "authenticated" || prev.status === "expired" ? prev.session.user.id : null;
     stopCloudSync();
     await supabase.auth.signOut();
+    if (isCapacitor() && prevId) clearUserOfflineCache(prevId);
     setStorageScope(null);
     setState({ status: "unauthenticated" });
   };

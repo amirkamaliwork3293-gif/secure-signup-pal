@@ -2,7 +2,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
 import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX } from "lucide-react";
 import type { ReactNode } from "react";
-import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState } from "@/lib/store";
+import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState, formatJalaliDateTime } from "@/lib/store";
+import { useOnlineStatus } from "@/lib/online-status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { DueAlertsDialog } from "@/components/DueAlertsDialog";
@@ -59,9 +60,7 @@ export function Layout({ children }: { children: ReactNode }) {
     return st === "overdue" || st === "due-today";
   }).length;
   const remindersDueCount = dueReminderCount(remindersList);
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator !== "undefined" ? navigator.onLine : true,
-  );
+  const { isOnline, lastSyncedAt, isCapacitorApp } = useOnlineStatus();
   // وضعیت همگام‌سازی ابری — فقط وقتی واقعاً شکست خورده هشدار نشان داده می‌شود
   const sync = useSyncState();
   const loggedIn = isAppSession(state);
@@ -70,13 +69,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
-  useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
-  }, []);
 
   return (
     <div
@@ -137,8 +129,17 @@ export function Layout({ children }: { children: ReactNode }) {
           className="sticky z-20 flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-xs font-semibold text-white"
           style={{ top: "calc(57px + var(--safe-top))" }}
         >
-          <WifiOff className="h-3.5 w-3.5" />
-          آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد
+          <WifiOff className="h-3.5 w-3.5 shrink-0" />
+          {isCapacitorApp ? (
+            <span>
+              آفلاین هستید — اطلاعات ممکن است قدیمی باشند
+              {lastSyncedAt
+                ? ` (آخرین به‌روزرسانی: ${formatJalaliDateTime(lastSyncedAt)})`
+                : ""}
+            </span>
+          ) : (
+            <span>آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد</span>
+          )}
         </div>
       )}
 

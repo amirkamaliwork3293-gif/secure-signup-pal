@@ -6,7 +6,11 @@
 
 const APP_FLAG_KEY = "kamix_is_app";
 
-function isCapacitor(): boolean {
+/**
+ * تشخیص محیط Capacitor / اپ نیتیو اندروید.
+ * تنها منبع مشترک این تشخیص است — تابع تکراری نسازید (نگاه کنید به openExternal).
+ */
+export function isCapacitor(): boolean {
   if (typeof window === "undefined") return false;
   const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return !!cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : true);

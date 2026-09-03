@@ -1,3 +1,5 @@
+import { isCapacitor } from "@/lib/isWebView";
+
 /**
  * باز کردن لینک‌های بیرونی به‌شکلی که هم در مرورگر و هم داخل WebView اپ (Capacitor)
  * درست کار کند. لینک‌هایی مثل `sms:`، `https://wa.me/...` و صفحه عمومی فروشگاه
@@ -7,11 +9,6 @@
  * باز می‌کند (به‌جای تلاش برای بارگذاری داخل WebView که برای schemeهایی مثل
  * `sms:` شکست می‌خورد). در مرورگر معمولی از یک anchor موقت استفاده می‌کنیم.
  */
-function isCapacitor(): boolean {
-  if (typeof window === "undefined") return false;
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return !!cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : true);
-}
 
 type NativeSharePlugin = {
   share?: (opts: {

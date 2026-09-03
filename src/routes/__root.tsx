@@ -10,7 +10,8 @@ import {
 
 import appCss from "../styles.css?url";
 import { AuthProvider } from "@/lib/AuthContext";
-import { disableServiceWorker } from "@/registerSW";
+import { initServiceWorker } from "@/registerSW";
+import { initOnlineMonitoring } from "@/lib/online-status";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { RenewRequiredDialog } from "@/components/RenewRequiredDialog";
 
@@ -193,8 +194,9 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   if (typeof window !== "undefined") {
-    // PWA حذف شده: سرویس‌ورکرهای قبلی پاک می‌شوند تا کش قدیمی مزاحم نشود
-    disableServiceWorker();
+    // وب: SW قدیمی پاک می‌شود. اپ Capacitor: پوستهٔ Network-First ثبت می‌شود.
+    initServiceWorker();
+    initOnlineMonitoring();
   }
 
   return (

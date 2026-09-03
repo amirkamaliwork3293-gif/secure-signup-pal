@@ -40,7 +40,7 @@ export type ProductionEvent = {
 const UNIT_BASE: Record<string, { family: string; factor: number }> = {
   گرم: { family: "mass", factor: 1 },
   کیلوگرم: { family: "mass", factor: 1000 },
-  "میلی‌لیتر": { family: "volume", factor: 1 },
+  میلی‌لیتر: { family: "volume", factor: 1 },
   میلیلیتر: { family: "volume", factor: 1 },
   لیتر: { family: "volume", factor: 1000 },
 };
@@ -109,6 +109,8 @@ export function stockDeltasForSoldItems(
   const map = new Map<string, number>();
   const add = (id: string, qty: number) => {
     if (!id || !qty) return;
+    const prod = byId.get(id);
+    if (prod && prod.trackStock === false) return;
     map.set(id, (map.get(id) || 0) + qty);
   };
   for (const it of items) {
@@ -174,7 +176,10 @@ export function canProduce(
 export function consumptionByIngredient(
   events: ProductionEvent[],
 ): { productId: string; name: string; quantity: number; unit: string }[] {
-  const map = new Map<string, { productId: string; name: string; quantity: number; unit: string }>();
+  const map = new Map<
+    string,
+    { productId: string; name: string; quantity: number; unit: string }
+  >();
   for (const e of events) {
     for (const ing of e.ingredients) {
       const prev = map.get(ing.productId);

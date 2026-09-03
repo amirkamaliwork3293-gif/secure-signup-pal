@@ -10,9 +10,12 @@ import {
   isProtectedCatalogField,
   mergeInvoicePricesFromCloud,
   mergeProductPricesFromCloud,
+  compactTombstones,
   mergeSettingsKeepBoth,
+  mergeTombstoneMaps,
   preferCloudValue,
   unionMergeById,
+  type TombstoneMap,
 } from "@/lib/catalog-integrity";
 import {
   stockDeltasForSoldItems,
@@ -55,6 +58,15 @@ export type Product = {
    * اگر خالی باشد، فروش فقط موجودی خود محصول را کم می‌کند.
    */
   recipe?: RecipeIngredient[];
+  /**
+   * اگر false باشد این محصول اصلاً با انبار کار ندارد
+   * (خدمات، مشاوره، تعمیرات، دیجیتال و هر چیز بدون موجودی).
+   * موجودی کم نمی‌شود، هشدار اتمام نمی‌آید و در انبار دیده نمی‌شود.
+   * پیش‌فرض / undefined یعنی پیگیری موجودی فعال است.
+   */
+  trackStock?: boolean;
+  /** زمان آخرین ویرایش این ردیف — برای برنده شدن نسخهٔ تازه‌تر هنگام ادغام ابری */
+  updatedAt?: number;
 };
 
 export const COUNT_UNIT = "عدد";
@@ -517,6 +529,11 @@ export type AppSettings = {
    * true یعنی دیده/بسته شده و دیگر نشان داده نشود.
    */
   apkWelcomeDismissed?: boolean;
+  /**
+   * شناسه‌های حذف‌شده (محصول/فاکتور/مشتری/...) تا حذف یک دستگاه
+   * روی گوشی و مرورگر دیگر هم اعمال شود. داخلی است و در تنظیمات دیده نمی‌شود.
+   */
+  catalogTombstones?: TombstoneMap;
 };
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
@@ -631,15 +648,51 @@ export function assertBusinessWriteAllowed(): boolean {
   return false;
 }
 
+/**
+ * فقط ردیف‌هایی که واقعاً عوض شده‌اند updatedAt می‌گیرند.
+ * اگر روی همه‌ی ردیف‌ها مهر بزنیم، نسخهٔ کهنهٔ همین دستگاه هنگام ادغام
+ * بر نسخهٔ تازه‌ی دستگاه دیگر برنده می‌شود.
+ */
+function stampChangedRows(key: string, value: unknown): unknown {
+  if (!Array.isArray(value) || !CLOUD_FIELDS[key] || key === INVOICE_KEY) return value;
+  const prev = read<unknown[]>(key, []);
+  const prevById = new Map<string, unknown>();
+  for (const row of prev) {
+    const id = catalogRowId(row);
+    if (id) prevById.set(id, row);
+  }
+  const now = Date.now();
+  return value.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+    const rec = row as Record<string, unknown>;
+    const id = catalogRowId(rec);
+    const old = id ? prevById.get(id) : undefined;
+    if (!old || typeof old !== "object") {
+      return rec.updatedAt ? rec : { ...rec, updatedAt: now };
+    }
+    const a = { ...rec };
+    const b = { ...(old as Record<string, unknown>) };
+    delete a.updatedAt;
+    delete b.updatedAt;
+    try {
+      if (JSON.stringify(a) === JSON.stringify(b)) return old;
+    } catch {
+      /* مقایسه نشد — مهر تازه می‌زنیم */
+    }
+    return { ...rec, updatedAt: now };
+  });
+}
+
 function write<T>(key: string, value: T): boolean {
   if (!assertBusinessWriteAllowed()) return false;
   const field = CLOUD_FIELDS[key];
+  const stamped = stampChangedRows(key, value) as T;
   if (field) {
     const prev = read<unknown>(key, Array.isArray(value) ? [] : null);
-    rememberRemovedIds(field, prev, value);
+    rememberRemovedIds(field, prev, stamped);
   }
-  writeLocalOnly(key, value);
-  scheduleCloudPush(key, value);
+  writeLocalOnly(key, stamped);
+  scheduleCloudPush(key, stamped);
   return true;
 }
 
@@ -687,8 +740,6 @@ function writeDirtySet(set: Set<string>) {
   } catch {}
 }
 
-type TombstoneMap = Record<string, string[]>;
-
 function readTombstones(): TombstoneMap {
   if (typeof window === "undefined") return {};
   try {
@@ -705,6 +756,31 @@ function writeTombstones(map: TombstoneMap) {
   try {
     localStorage.setItem(scopedKey(TOMBSTONE_KEY), JSON.stringify(map));
   } catch {}
+}
+
+function tombstoneMapsEqual(a: TombstoneMap, b: TombstoneMap): boolean {
+  try {
+    return (
+      JSON.stringify(compactTombstones(a) ?? {}) === JSON.stringify(compactTombstones(b) ?? {})
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** حذف یک دستگاه را در تنظیمات ابری هم می‌نویسد تا گوشی/مرورگر دیگر همان حذف را ببیند. */
+function persistTombstones(map: TombstoneMap) {
+  const compact = compactTombstones(map) ?? {};
+  writeTombstones(compact);
+  if (typeof window === "undefined") return;
+  const s = read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
+  const prev = s.catalogTombstones ?? {};
+  if (tombstoneMapsEqual(prev, compact)) return;
+  const next: AppSettings = compactTombstones(compact)
+    ? { ...s, catalogTombstones: compact }
+    : { ...s, catalogTombstones: undefined };
+  writeLocalOnly(SETTINGS_KEY, next);
+  scheduleCloudPush(SETTINGS_KEY, next);
 }
 
 function tombstoneSet(field: string): Set<string> {
@@ -724,8 +800,9 @@ function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
   const cur = new Set(map[field] || []);
   for (const id of removed) cur.add(id);
   for (const id of nextIds) cur.delete(id);
-  map[field] = [...cur];
-  writeTombstones(map);
+  if (cur.size === 0) delete map[field];
+  else map[field] = [...cur];
+  persistTombstones(map);
 }
 
 function markDirty(fields: string[]) {
@@ -1019,6 +1096,9 @@ async function flushCloudPush() {
       error = retry.error;
     }
     if (error) throw error;
+    lastLocalPushAt = Date.now();
+    const pushedAt = typeof payload.updated_at === "string" ? payload.updated_at : "";
+    if (pushedAt) lastCloudUpdatedAt = pushedAt;
     // Success: clear only the field values we actually pushed, and only if
     // they haven't been re-written to a newer value while the upsert was in
     // flight. Any newer writes stay pending and will trigger another flush.
@@ -1053,9 +1133,75 @@ async function flushCloudPush() {
   }
 }
 
-export async function hydrateFromCloud(userId: string) {
+let lastCloudUpdatedAt: string | null = null;
+let lastLocalPushAt = 0;
+let hydrateInFlight: Promise<void> | null = null;
+
+function applyCloudRow(data: Record<string, unknown>) {
+  // اول حذف‌های همه‌ی دستگاه‌ها را یکی می‌کنیم، بعد آرایه‌ها را ادغام می‌کنیم
+  // تا کالای حذف‌شده روی گوشی دیگر دوباره ظاهر نشود.
+  const cloudSettings = data.settings;
+  const mergedSettings = mergeSettingsKeepBoth(localValueForCloudField("settings"), cloudSettings);
+  const ts = mergeTombstoneMaps(readTombstones(), mergedSettings.catalogTombstones);
+  const compact = compactTombstones(ts);
+  writeTombstones(compact ?? {});
+  if (compact) mergedSettings.catalogTombstones = compact;
+  else delete mergedSettings.catalogTombstones;
+  writeLocalOnly(SETTINGS_KEY, mergedSettings);
+  if (catalogArraysDiffer(mergedSettings, cloudSettings)) {
+    pendingPush.settings = mergedSettings;
+    markDirty(["settings"]);
+  } else {
+    delete pendingPush.settings;
+    clearDirty(["settings"]);
+  }
+
+  const applyMerged = (field: string, key: string, cloudValue: unknown) => {
+    if (field === "settings") return;
+    if (field === "current_invoice") {
+      const localBoard = localValueForCloudField("current_invoice");
+      const hasLocalItems = (() => {
+        if (!localBoard || typeof localBoard !== "object") return false;
+        const board = localBoard as { items?: unknown[]; open?: { items?: unknown[] }[] };
+        if (Array.isArray(board.open)) {
+          return board.open.some((i) => Array.isArray(i.items) && i.items.length > 0);
+        }
+        return Array.isArray(board.items) && board.items.length > 0;
+      })();
+      if (hasLocalItems) return;
+      if (cloudValue != null) writeLocalOnly(key, cloudValue);
+      return;
+    }
+    const localVal = localValueForCloudField(field);
+    const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
+    const merged = unionMergeById(localVal, cloudArr, tombstoneSet(field));
+    writeLocalOnly(key, merged);
+    if (catalogArraysDiffer(merged, cloudArr)) {
+      pendingPush[field] = merged;
+      markDirty([field]);
+    } else {
+      delete pendingPush[field];
+      clearDirty([field]);
+    }
+  };
+  applyMerged("products", PRODUCTS_KEY, data.products);
+  applyMerged("categories", CATEGORIES_KEY, data.categories);
+  applyMerged("invoices", HISTORY_KEY, data.invoices);
+  applyMerged("current_invoice", INVOICE_KEY, data.current_invoice);
+  applyMerged("customers", CUSTOMERS_KEY, data.customers);
+  applyMerged("students", STUDENTS_KEY, data.students);
+  applyMerged("purchases", PURCHASES_KEY, data.purchases);
+  applyMerged("expenses", EXPENSES_KEY, data.expenses);
+  applyMerged("reminders", REMINDERS_KEY, data.reminders);
+  applyMerged("accounts", ACCOUNTS_KEY, data.accounts);
+  applyMerged("account_txs", ACCOUNT_TXS_KEY, data.account_txs);
+  applyMerged("production", PRODUCTION_KEY, data.production);
+  applyMerged("manual_ledger", MANUAL_LEDGER_KEY, data.manual_ledger);
+}
+
+async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promise<void> {
   cloudUserId = userId;
-  cloudHydrated = false;
+  if (!opts?.refresh) cloudHydrated = false;
   // Restore any unsynced local changes from a previous session so they get
   // re-pushed and are never overwritten by cloud data below.
   const dirty = readDirtySet();
@@ -1089,6 +1235,7 @@ export async function hydrateFromCloud(userId: string) {
           /* مقدار خراب — نادیده */
         }
       }
+      lastCloudUpdatedAt = null;
       markCloudHydrated();
       return; // بلوک finally صف را flush می‌کند
     }
@@ -1101,56 +1248,8 @@ export async function hydrateFromCloud(userId: string) {
     // هرگز آرایهٔ محلی را کامل با ابر عوض نکن — ادغام شناسه‌به‌شناسه.
     // اگر ابر قدیمی‌تر باشد (مثل بعد از حمله یا خطای ذخیره)، کالای جدید محلی می‌ماند
     // و دوباره به ابر فرستاده می‌شود. حذف عمدی همین دستگاه با tombstone حفظ می‌شود.
-    const applyMerged = (field: string, key: string, cloudValue: unknown) => {
-      if (field === "settings") {
-        const merged = mergeSettingsKeepBoth(localValueForCloudField("settings"), cloudValue);
-        writeLocalOnly(key, merged);
-        if (catalogArraysDiffer(merged, cloudValue)) {
-          pendingPush.settings = merged;
-          markDirty(["settings"]);
-        }
-        return;
-      }
-      if (field === "current_invoice") {
-        const localBoard = localValueForCloudField("current_invoice");
-        const hasLocalItems = (() => {
-          if (!localBoard || typeof localBoard !== "object") return false;
-          const board = localBoard as { items?: unknown[]; open?: { items?: unknown[] }[] };
-          if (Array.isArray(board.open)) {
-            return board.open.some((i) => Array.isArray(i.items) && i.items.length > 0);
-          }
-          return Array.isArray(board.items) && board.items.length > 0;
-        })();
-        if (hasLocalItems) return;
-        if (cloudValue != null) writeLocalOnly(key, cloudValue);
-        return;
-      }
-      const localVal = localValueForCloudField(field);
-      const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
-      const merged = unionMergeById(localVal, cloudArr, tombstoneSet(field));
-      writeLocalOnly(key, merged);
-      if (catalogArraysDiffer(merged, cloudArr)) {
-        pendingPush[field] = merged;
-        markDirty([field]);
-      } else {
-        delete pendingPush[field];
-        clearDirty([field]);
-      }
-    };
-    applyMerged("products", PRODUCTS_KEY, data.products);
-    applyMerged("categories", CATEGORIES_KEY, data.categories);
-    applyMerged("invoices", HISTORY_KEY, data.invoices);
-    applyMerged("current_invoice", INVOICE_KEY, data.current_invoice);
-    applyMerged("settings", SETTINGS_KEY, data.settings);
-    applyMerged("customers", CUSTOMERS_KEY, (data as Record<string, unknown>).customers);
-    applyMerged("students", STUDENTS_KEY, (data as Record<string, unknown>).students);
-    applyMerged("purchases", PURCHASES_KEY, (data as Record<string, unknown>).purchases);
-    applyMerged("expenses", EXPENSES_KEY, (data as Record<string, unknown>).expenses);
-    applyMerged("reminders", REMINDERS_KEY, (data as Record<string, unknown>).reminders);
-    applyMerged("accounts", ACCOUNTS_KEY, (data as Record<string, unknown>).accounts);
-    applyMerged("account_txs", ACCOUNT_TXS_KEY, (data as Record<string, unknown>).account_txs);
-    applyMerged("production", PRODUCTION_KEY, (data as Record<string, unknown>).production);
-    applyMerged("manual_ledger", MANUAL_LEDGER_KEY, (data as Record<string, unknown>).manual_ledger);
+    applyCloudRow(data as Record<string, unknown>);
+    lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
     markCloudHydrated();
   } catch (e) {
     console.error("[store] hydrate failed", e);
@@ -1161,9 +1260,11 @@ export async function hydrateFromCloud(userId: string) {
     });
     // Read failed: stay locked so local state can never overwrite cloud data.
     // Pending edits keep their dirty markers and retry after a successful read.
-    setTimeout(() => {
-      if (cloudUserId === userId && !cloudHydrated) void hydrateFromCloud(userId);
-    }, 15000);
+    if (!opts?.refresh) {
+      setTimeout(() => {
+        if (cloudUserId === userId && !cloudHydrated) void hydrateFromCloud(userId);
+      }, 15000);
+    }
   } finally {
     // Flush any restored offline edits back to the cloud.
     if (cloudHydrated && Object.keys(pendingPush).length > 0) {
@@ -1173,8 +1274,50 @@ export async function hydrateFromCloud(userId: string) {
   }
 }
 
+export async function hydrateFromCloud(userId: string) {
+  if (hydrateInFlight) return hydrateInFlight;
+  hydrateInFlight = pullUserData(userId);
+  try {
+    await hydrateInFlight;
+  } finally {
+    hydrateInFlight = null;
+  }
+}
+
+/**
+ * خواندن مجدد ابر وقتی برنامه باز است (تب دیگر / گوشی دیگر).
+ * اگر updated_at عوض نشده باشد فقط یک ستون کوچک خوانده می‌شود.
+ */
+export async function refreshFromCloud() {
+  if (!cloudUserId || !cloudHydrated) return;
+  if (hydrateInFlight) return hydrateInFlight;
+  if (Date.now() - lastLocalPushAt < 2000) return;
+  const userId = cloudUserId;
+  hydrateInFlight = (async () => {
+    try {
+      const { data, error } = await supabase
+        .from("user_data")
+        .select("updated_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error || !data) return;
+      if (lastCloudUpdatedAt && data.updated_at === lastCloudUpdatedAt) return;
+      if (cloudUserId !== userId) return;
+      await pullUserData(userId, { refresh: true });
+    } catch (e) {
+      console.warn("[store] refresh failed", e);
+    }
+  })();
+  try {
+    await hydrateInFlight;
+  } finally {
+    hydrateInFlight = null;
+  }
+}
+
 export function stopCloudSync() {
   cloudUserId = null;
+  lastCloudUpdatedAt = null;
   if (pushTimer) {
     clearTimeout(pushTimer);
     pushTimer = null;
@@ -1200,6 +1343,7 @@ if (typeof window !== "undefined") {
     if (Object.keys(pendingPush).length > 0) {
       flushCloudPush();
     }
+    void refreshFromCloud();
   });
 
   // بستن تب / رفتن اپ به پس‌زمینه: منتظر تایمر ۶۰۰ میلی‌ثانیه‌ای نمی‌مانیم و
@@ -1215,8 +1359,16 @@ if (typeof window !== "undefined") {
   };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushNow();
+    else if (document.visibilityState === "visible") void refreshFromCloud();
   });
   window.addEventListener("pagehide", flushNow);
+  // وقتی برنامه باز است، هر ۴۰ ثانیه اگر ابر عوض شده باشد داده را می‌آوریم
+  // تا همان اکانت روی گوشی/مرورگر دیگر آخرین تغییرات را ببیند.
+  window.setInterval(() => {
+    if (!cloudUserId || !cloudHydrated) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    void refreshFromCloud();
+  }, 40_000);
 }
 
 // ─── React hook ──────────────────────────────────────────────────────────────
@@ -1297,7 +1449,11 @@ export const products = {
     const list = read<Product[]>(PRODUCTS_KEY, []);
     write(
       PRODUCTS_KEY,
-      list.map((p) => (p.id === productId ? { ...p, stock: Math.max(0, p.stock - qty) } : p)),
+      list.map((p) =>
+        p.id === productId && productTracksStock(p)
+          ? { ...p, stock: Math.max(0, p.stock - qty) }
+          : p,
+      ),
     );
   },
 };
@@ -1377,6 +1533,7 @@ function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: Invoice
   if (ids.size === 0) return;
   let changed = false;
   const next = catalog.map((p) => {
+    if (!productTracksStock(p)) return p;
     const delta = (newDeltas.get(p.id) || 0) - (oldDeltas.get(p.id) || 0);
     if (!delta) return p;
     changed = true;
@@ -1404,6 +1561,7 @@ function reconcileStockForPurchaseEdit(oldItems: PurchaseItem[], newItems: Purch
   const list = read<Product[]>(PRODUCTS_KEY, []);
   let changed = false;
   const next = list.map((p) => {
+    if (!productTracksStock(p)) return p;
     const delta = deltaByProduct.get(p.id);
     if (!delta) return p;
     changed = true;
@@ -1578,7 +1736,7 @@ export const purchases = {
         const prev = nextProducts[idx];
         nextProducts[idx] = {
           ...prev,
-          stock: (prev.stock || 0) + item.quantity,
+          stock: productTracksStock(prev) ? (prev.stock || 0) + item.quantity : prev.stock || 0,
           buyPrice: item.buyPrice,
         };
         resolvedItems.push({ ...item, productId: prev.id, name: prev.name });
@@ -2144,6 +2302,7 @@ export const production = {
     const ingredients = expandRecipeForQty(product, qty, catalog);
     if (ingredients.length === 0) return null;
     const next = catalog.map((p) => {
+      if (!productTracksStock(p)) return p;
       if (p.id === productId) return { ...p, stock: (p.stock || 0) + qty };
       const used = ingredients.find((u) => u.productId === p.id);
       if (!used) return p;
@@ -3197,16 +3356,26 @@ export function formatNumberInput(s: string): string {
   return formatNumber(n);
 }
 
+/** پیگیری موجودی انبار — پیش‌فرض روشن؛ فقط با خاموش‌کردن صریح در تنظیمات off می‌شود */
+export function inventoryTrackingEnabled(s?: AppSettings): boolean {
+  return (s ?? settings.get()).trackInventory !== false;
+}
+
+/**
+ * آیا این محصول باید موجودی داشته باشد؟
+ * هم تنظیم سراسری انبار و هم انتخاب خود محصول (خدمات / بدون موجودی) را می‌بیند.
+ */
+export function productTracksStock(p: Product, s?: AppSettings): boolean {
+  if (!inventoryTrackingEnabled(s)) return false;
+  return p.trackStock !== false;
+}
+
 export function stockStatus(p: Product): "ok" | "low" | "out" {
+  if (!productTracksStock(p)) return "ok";
   if (p.stock <= 0) return "out";
   const threshold = p.lowStockThreshold ?? 5;
   if (p.stock <= threshold) return "low";
   return "ok";
-}
-
-/** پیگیری موجودی انبار — پیش‌فرض روشن؛ فقط با خاموش‌کردن صریح در تنظیمات off می‌شود */
-export function inventoryTrackingEnabled(s?: AppSettings): boolean {
-  return (s ?? settings.get()).trackInventory !== false;
 }
 
 /** روزهای باقیمانده تا انقضا (منفی یعنی منقضی‌شده). اگر تاریخ انقضا ثبت نشده باشد null. */

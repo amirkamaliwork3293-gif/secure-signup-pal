@@ -130,6 +130,7 @@ export function inventoryValue(list: Product[]) {
   let sale = 0;
   let units = 0;
   for (const p of list) {
+    if (p.trackStock === false) continue;
     const stock = Math.max(0, Number(p.stock) || 0);
     units += stock;
     cost += stock * (Number(p.buyPrice) || 0);

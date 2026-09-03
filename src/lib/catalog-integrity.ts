@@ -24,8 +24,7 @@ export function isProtectedCatalogField(field: string): field is ProtectedCatalo
 }
 
 /** فحاشی رایج که در خرابکاری روی نام کالا/فاکتور دیده شده — نه برای سانسور ورودی عادی */
-const INSULT_RE =
-  /کیر|کص|کس\s*کش|جنده|گایید|گوه|حروم\s*زاده|لاشی|fuck|shit|bitch|\bdick\b/iu;
+const INSULT_RE = /کیر|کص|کس\s*کش|جنده|گایید|گوه|حروم\s*زاده|لاشی|fuck|shit|bitch|\bdick\b/iu;
 
 const CJK_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u;
 
@@ -164,8 +163,7 @@ function invoiceLineFingerprint(inv: unknown): string {
   if (!row || typeof row !== "object") return "";
   const items = (row.items ?? [])
     .map(
-      (it) =>
-        `${String(it.productId ?? "")}:${Number(it.price) || 0}:${Number(it.quantity) || 0}`,
+      (it) => `${String(it.productId ?? "")}:${Number(it.price) || 0}:${Number(it.quantity) || 0}`,
     )
     .join(",");
   return `${String(row.id ?? "")}|${Number(row.total) || 0}|${items}`;
@@ -178,7 +176,13 @@ function invoiceLineFingerprint(inv: unknown): string {
  */
 export function invoicePricesDiverge(local: unknown, cloud: unknown): boolean {
   if (!Array.isArray(local) || !Array.isArray(cloud)) {
-    if (local && cloud && typeof local === "object" && typeof cloud === "object" && !Array.isArray(local)) {
+    if (
+      local &&
+      cloud &&
+      typeof local === "object" &&
+      typeof cloud === "object" &&
+      !Array.isArray(local)
+    ) {
       const localId = (local as { id?: unknown }).id;
       const cloudId = (cloud as { id?: unknown }).id;
       if (localId && localId === cloudId) {
@@ -249,7 +253,13 @@ export function mergeInvoicesKeepAll(local: unknown, cloud: unknown): unknown[] 
 }
 
 const VANDAL_PRICE = 9999;
-const PRODUCT_PRICE_KEYS = ["price", "buyPrice", "consumerPrice", "sellerPrice", "wholesalePrice"] as const;
+const PRODUCT_PRICE_KEYS = [
+  "price",
+  "buyPrice",
+  "consumerPrice",
+  "sellerPrice",
+  "wholesalePrice",
+] as const;
 const LINE_PRICE_KEYS = ["price", "buyPrice", "originalPrice"] as const;
 
 function isVandalPrice(value: unknown): boolean {
@@ -287,12 +297,7 @@ export type CatalogMergeOpts = {
   adoptCloudOnly?: boolean;
 };
 
-function appendCloudOnly(
-  out: unknown[],
-  seen: Set<string>,
-  cloudArr: unknown[],
-  adopt: boolean,
-) {
+function appendCloudOnly(out: unknown[], seen: Set<string>, cloudArr: unknown[], adopt: boolean) {
   if (!adopt) return;
   for (const row of cloudArr) {
     const rec = asRecord(row);
@@ -354,13 +359,17 @@ export function mergeProductPricesFromCloud(
     }
     const id = typeof rec.id === "string" ? rec.id : "";
     if (id) seen.add(id);
-    out.push(restorePriceKeys(rec, id ? cloudById.get(id) ?? null : null, PRODUCT_PRICE_KEYS));
+    out.push(restorePriceKeys(rec, id ? (cloudById.get(id) ?? null) : null, PRODUCT_PRICE_KEYS));
   }
   appendCloudOnly(out, seen, cloudArr, !!opts?.adoptCloudOnly);
   return out;
 }
 
-function restoreInvoiceItems(inv: Record<string, unknown>, backupInv: Record<string, unknown> | null, productsById: Map<string, Record<string, unknown>>): Record<string, unknown> {
+function restoreInvoiceItems(
+  inv: Record<string, unknown>,
+  backupInv: Record<string, unknown> | null,
+  productsById: Map<string, Record<string, unknown>>,
+): Record<string, unknown> {
   const items = Array.isArray(inv.items) ? inv.items : [];
   const backupItems = backupInv && Array.isArray(backupInv.items) ? backupInv.items : [];
   const backupByProduct = new Map<string, Record<string, unknown>>();
@@ -373,8 +382,8 @@ function restoreInvoiceItems(inv: Record<string, unknown>, backupInv: Record<str
     const rec = asRecord(it);
     if (!rec) return it;
     const pid = typeof rec.productId === "string" ? rec.productId : "";
-    const fromBackupItem = pid ? backupByProduct.get(pid) ?? null : null;
-    const fromProduct = pid ? productsById.get(pid) ?? null : null;
+    const fromBackupItem = pid ? (backupByProduct.get(pid) ?? null) : null;
+    const fromProduct = pid ? (productsById.get(pid) ?? null) : null;
     let fixed = restorePriceKeys(rec, fromBackupItem, LINE_PRICE_KEYS);
     if (isVandalPrice(fixed.price)) {
       fixed = restorePriceKeys(fixed, fromProduct, ["price", "buyPrice"]);
@@ -417,7 +426,7 @@ export function mergeInvoicePricesFromCloud(
     }
     const id = typeof rec.id === "string" ? rec.id : "";
     if (id) seen.add(id);
-    out.push(restoreInvoiceItems(rec, id ? cloudById.get(id) ?? null : null, productsById));
+    out.push(restoreInvoiceItems(rec, id ? (cloudById.get(id) ?? null) : null, productsById));
   }
   appendCloudOnly(out, seen, cloudArr, !!opts?.adoptCloudOnly);
   return out;
@@ -528,7 +537,11 @@ export function pickRicherCatalogRow(local: unknown, cloud: unknown): unknown {
   if (!localBad && cloudBad) return local;
   const loc = asRecord(local);
   const cl = asRecord(cloud);
-  if (loc && cl && (catalogHasVandalPrice([local], "products") || catalogHasVandalPrice([local], "invoices"))) {
+  if (
+    loc &&
+    cl &&
+    (catalogHasVandalPrice([local], "products") || catalogHasVandalPrice([local], "invoices"))
+  ) {
     const priced = restorePriceKeys(loc, cl, PRODUCT_PRICE_KEYS);
     if (Array.isArray(priced.items)) {
       return restoreInvoiceItems(priced, cl, new Map());
@@ -576,6 +589,44 @@ export function unionMergeById(
   return [...map.values(), ...noId];
 }
 
+/** شناسه‌های حذف‌شده به‌تفکیک ستون ابری — باید بین دستگاه‌ها یکی شود. */
+export type TombstoneMap = Record<string, string[]>;
+
+function asTombstoneMap(v: unknown): TombstoneMap {
+  const rec = asRecord(v);
+  if (!rec) return {};
+  const out: TombstoneMap = {};
+  for (const [field, ids] of Object.entries(rec)) {
+    if (!Array.isArray(ids)) continue;
+    const clean = ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+    if (clean.length) out[field] = clean;
+  }
+  return out;
+}
+
+/** اجتماع شناسه‌های حذف‌شده از چند دستگاه — هیچ حذفی گم نشود. */
+export function mergeTombstoneMaps(...maps: Array<unknown>): TombstoneMap {
+  const out: TombstoneMap = {};
+  for (const map of maps) {
+    for (const [field, ids] of Object.entries(asTombstoneMap(map))) {
+      const set = new Set(out[field] || []);
+      for (const id of ids) set.add(id);
+      out[field] = [...set];
+    }
+  }
+  return out;
+}
+
+/** نقشهٔ خالی را undefined می‌کند تا تنظیمات بی‌دلیل با ابر فرق نکند. */
+export function compactTombstones(map: TombstoneMap): TombstoneMap | undefined {
+  const out: TombstoneMap = {};
+  for (const field of Object.keys(map).sort()) {
+    const ids = [...new Set(map[field] || [])].filter(Boolean).sort();
+    if (ids.length) out[field] = ids;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** تنظیمات: مقدارهای محلی خالی‌نشده روی ابر می‌نشینند. */
 export function mergeSettingsKeepBoth(local: unknown, cloud: unknown): Record<string, unknown> {
   const c = asRecord(cloud) ?? {};
@@ -585,6 +636,9 @@ export function mergeSettingsKeepBoth(local: unknown, cloud: unknown): Record<st
   const cloudName = typeof c.shopName === "string" ? c.shopName.trim() : "";
   if (localName) out.shopName = localName;
   else if (cloudName) out.shopName = cloudName;
+  const ts = compactTombstones(mergeTombstoneMaps(c.catalogTombstones, l.catalogTombstones));
+  if (ts) out.catalogTombstones = ts;
+  else delete out.catalogTombstones;
   return out;
 }
 

@@ -10,6 +10,7 @@ import {
   formatToman,
   formatNumber,
   stockStatus,
+  productTracksStock,
   parseNumberInput,
   toDisplayAmount,
   fromDisplayAmount,
@@ -66,6 +67,8 @@ import {
   CalendarClock,
   Mic,
   Percent,
+  Boxes,
+  Sparkles,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -282,7 +285,8 @@ function ProductsPageInner() {
       "قیمت عمده/کارتنی (تومان)": p.wholesalePrice ?? "",
       "حداقل تعداد عمده": p.wholesaleMinQty ?? "",
       "درصد تخفیف": p.discountPercent ?? "",
-      "هشدار موجودی کم": p.lowStockThreshold ?? 5,
+      "پیگیری موجودی": p.trackStock === false ? "خیر" : "بله",
+      "هشدار موجودی کم": p.trackStock === false ? "" : (p.lowStockThreshold ?? 5),
       توضیحات: p.description ?? "",
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -310,6 +314,12 @@ function ProductsPageInner() {
   };
 
   const stockBadge = (p: Product) => {
+    if (!productTracksStock(p))
+      return (
+        <span className="text-[10px] font-medium text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded-md">
+          بدون موجودی
+        </span>
+      );
     const s = stockStatus(p);
     const unitLabel = p.unit || "عدد";
     if (s === "out")
@@ -673,7 +683,7 @@ function ProductsPageInner() {
                         </span>
                       );
                     })()}
-                    {p.stock > 0 && (
+                    {productTracksStock(p) && p.stock > 0 && (
                       <span className="text-[10px] text-muted-foreground">
                         ارزش: {formatToman(p.price * p.stock)}
                       </span>
@@ -861,6 +871,7 @@ function ProductModal({
   const [lowThreshold, setLow] = useState(
     initial?.lowStockThreshold ? String(initial.lowStockThreshold) : "5",
   );
+  const [trackStock, setTrackStock] = useState(initial?.trackStock !== false);
   const [unit, setUnit] = useState(initial?.unit ?? COUNT_UNIT);
   // فیلدهای اختیاری — صرفاً پیشنهادی، هیچ‌کدام الزامی نیستند
   const [showOptional, setShowOptional] = useState(
@@ -924,7 +935,10 @@ function ProductModal({
       code: code.trim(),
       stock: parseNumberInput(stock) || 0,
       description: desc.trim() || undefined,
-      lowStockThreshold: parseNumberInput(lowThreshold) || 5,
+      lowStockThreshold: trackStock
+        ? parseNumberInput(lowThreshold) || 5
+        : initial?.lowStockThreshold,
+      trackStock: trackStock ? undefined : false,
       unit,
       buyPrice: storedPrice(buyPrice),
       consumerPrice: storedPrice(consumerPrice),
@@ -998,26 +1012,85 @@ function ProductModal({
               className={inputCls}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label={unit !== COUNT_UNIT ? `قیمت هر ${unit} (${unitMoney}) *` : `قیمت (${unitMoney}) *`}>
-              <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
-            </Field>
-            {appSettings.trackInventory !== false && (
-              <Field
-                label={
-                  unit !== COUNT_UNIT ? `موجودی (${unit}) — اختیاری` : "موجودی انبار (اختیاری)"
-                }
-              >
-                <input
-                  value={stock}
-                  onChange={(e) => setStock(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="خالی بماند اگر انبار ندارید"
-                  className={inputCls}
-                />
-              </Field>
-            )}
-          </div>
+          <Field
+            label={
+              unit !== COUNT_UNIT ? `قیمت هر ${unit} (${unitMoney}) *` : `قیمت (${unitMoney}) *`
+            }
+          >
+            <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
+          </Field>
+          {appSettings.trackInventory !== false && (
+            <div className="rounded-2xl border border-border bg-secondary/30 p-2.5 space-y-2">
+              <div className="text-[11px] font-semibold text-foreground">موجودی این محصول</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTrackStock(true)}
+                  className={`rounded-xl border px-2.5 py-2 text-right transition ${
+                    trackStock
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  <span className="flex items-center gap-1 text-xs font-semibold">
+                    <Boxes className="h-3.5 w-3.5" />
+                    کالای انباری
+                  </span>
+                  <span className="mt-0.5 block text-[10px] font-normal leading-4">
+                    موجودی کم می‌شود و هشدار اتمام می‌آید
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrackStock(false)}
+                  className={`rounded-xl border px-2.5 py-2 text-right transition ${
+                    !trackStock
+                      ? "border-violet-500 bg-violet-50 text-violet-800"
+                      : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  <span className="flex items-center gap-1 text-xs font-semibold">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    خدمات / بدون موجودی
+                  </span>
+                  <span className="mt-0.5 block text-[10px] font-normal leading-4">
+                    بدون انبار، بدون هشدار اتمام موجودی
+                  </span>
+                </button>
+              </div>
+              {trackStock ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Field
+                    label={
+                      unit !== COUNT_UNIT ? `موجودی (${unit}) — اختیاری` : "موجودی انبار (اختیاری)"
+                    }
+                  >
+                    <input
+                      value={stock}
+                      onChange={(e) => setStock(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="خالی بماند اگر انبار ندارید"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="هشدار موجودی کم (اختیاری)">
+                    <input
+                      value={lowThreshold}
+                      onChange={(e) => setLow(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="۵"
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+              ) : (
+                <p className="text-[10px] leading-4 text-muted-foreground">
+                  برای خدمات، تعمیرات، مشاوره یا هر محصولی که انبار ندارد. فروش ثبت می‌شود ولی
+                  موجودی و هشدار اتمام هرگز نمی‌آید.
+                </p>
+              )}
+            </div>
+          )}
           <Field label="واحد فروش">
             <div className="flex flex-wrap gap-2">
               {unitDefs.map((u) => (
@@ -1078,33 +1151,16 @@ function ProductModal({
               </div>
             )}
           </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="دسته‌بندی">
-              <select
-                value={category}
-                onChange={(e) => setCat(e.target.value)}
-                className={inputCls}
-              >
-                <option value="">— بدون دسته —</option>
-                {catList.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {appSettings.trackInventory !== false && (
-              <Field label="هشدار موجودی کم (اختیاری)">
-                <input
-                  value={lowThreshold}
-                  onChange={(e) => setLow(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="۵"
-                  className={inputCls}
-                />
-              </Field>
-            )}
-          </div>
+          <Field label="دسته‌بندی">
+            <select value={category} onChange={(e) => setCat(e.target.value)} className={inputCls}>
+              <option value="">— بدون دسته —</option>
+              {catList.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="کد بارکد / QR">
             <div className="flex gap-2">
               <input
@@ -1220,23 +1276,23 @@ function ProductModal({
               </p>
               {fromDisplayAmount(parseNumberInput(buyPrice)) > 0 &&
                 fromDisplayAmount(parseNumberInput(price)) > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  سود هر واحد:{" "}
-                  <span
-                    className={
-                      fromDisplayAmount(parseNumberInput(price)) >=
-                      fromDisplayAmount(parseNumberInput(buyPrice))
-                        ? "font-semibold text-green-600"
-                        : "font-semibold text-destructive"
-                    }
-                  >
-                    {formatToman(
-                      fromDisplayAmount(parseNumberInput(price)) -
-                        fromDisplayAmount(parseNumberInput(buyPrice)),
-                    )}
-                  </span>
-                </p>
-              )}
+                  <p className="text-[11px] text-muted-foreground">
+                    سود هر واحد:{" "}
+                    <span
+                      className={
+                        fromDisplayAmount(parseNumberInput(price)) >=
+                        fromDisplayAmount(parseNumberInput(buyPrice))
+                          ? "font-semibold text-green-600"
+                          : "font-semibold text-destructive"
+                      }
+                    >
+                      {formatToman(
+                        fromDisplayAmount(parseNumberInput(price)) -
+                          fromDisplayAmount(parseNumberInput(buyPrice)),
+                      )}
+                    </span>
+                  </p>
+                )}
             </div>
           )}
 

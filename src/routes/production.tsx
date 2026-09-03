@@ -13,6 +13,7 @@ import {
   getUnitDefs,
   addUnitDef,
   COUNT_UNIT,
+  productTracksStock,
   type Product,
 } from "@/lib/store";
 import {
@@ -468,6 +469,7 @@ function ReportsTab({ list, events }: { list: Product[]; events: ProductionEvent
   const lowIngredients = list.filter((p) => {
     const usedAsIng = consumed.some((c) => c.productId === p.id);
     if (!usedAsIng) return false;
+    if (!productTracksStock(p)) return false;
     const s = p.stock || 0;
     return s <= (p.lowStockThreshold ?? 5);
   });

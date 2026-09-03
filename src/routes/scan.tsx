@@ -11,6 +11,7 @@ import {
   formatToman,
   stockStatus,
   inventoryTrackingEnabled,
+  productTracksStock,
 } from "@/lib/store";
 import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
@@ -25,7 +26,7 @@ export const Route = createFileRoute("/scan")({
 });
 
 type LastScan =
-  | { kind: "found"; name: string; price: number; code: string; stock: number }
+  | { kind: "found"; name: string; price: number; code: string; stock: number; warnLow?: boolean }
   | { kind: "unknown"; code: string }
   | null;
 
@@ -54,6 +55,7 @@ function ScanPageInner() {
         price: product.price,
         code,
         stock: product.stock,
+        warnLow: productTracksStock(product) && stockStatus(product) === "low",
       });
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(40);
     } else {
@@ -73,7 +75,14 @@ function ScanPageInner() {
     const current = invoice.getCurrent();
     const next = addProductToInvoice(current, p);
     invoice.save(next);
-    setLast({ kind: "found", name: p.name, price: p.price, code: p.code, stock: p.stock });
+    setLast({
+      kind: "found",
+      name: p.name,
+      price: p.price,
+      code: p.code,
+      stock: p.stock,
+      warnLow: productTracksStock(p) && stockStatus(p) === "low",
+    });
     setSearchQ("");
   };
 
@@ -164,7 +173,7 @@ function ScanPageInner() {
               <div className="text-sm text-foreground/80">
                 {last.name} — {formatToman(last.price)}
               </div>
-              {last.stock <= 5 && last.stock > 0 && (
+              {last.warnLow && (
                 <div className="mt-0.5 text-xs text-amber-600">
                   ⚠ موجودی کم: {last.stock.toLocaleString("fa-IR")} عدد
                 </div>

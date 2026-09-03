@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
-  products, invoice, formatToman, formatNumber, formatJalaliDate, type Product,
+  products, invoice, formatToman, formatNumber, formatJalaliDate, productTracksStock, type Product,
 } from "@/lib/store";
 import { productStats, inventoryValue } from "@/lib/analytics";
 import { Boxes, AlertTriangle, CalendarClock, TrendingUp, Ban, Search } from "lucide-react";
@@ -51,26 +51,27 @@ function InventoryPageInner() {
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("default");
 
-  const value = useMemo(() => inventoryValue(list), [list]);
+  const stocked = useMemo(() => list.filter((p) => productTracksStock(p)), [list]);
+  const value = useMemo(() => inventoryValue(stocked), [stocked]);
   const stats = useMemo(() => productStats(history, list), [history, list]);
   const soldQty = useMemo(() => new Map(stats.map((s) => [s.productId, s.qty])), [stats]);
   const statMap = useMemo(() => new Map(stats.map((s) => [s.productId, s])), [stats]);
 
   const low = useMemo(
-    () => list.filter((p) => p.stock <= (p.lowStockThreshold ?? 3)),
-    [list],
+    () => stocked.filter((p) => p.stock <= (p.lowStockThreshold ?? 3)),
+    [stocked],
   );
   const nearExpiry = useMemo(
-    () => list.filter((p) => p.expiryAt && p.expiryAt - Date.now() < 30 * DAY).sort((a, b) => (a.expiryAt! - b.expiryAt!)),
-    [list],
+    () => stocked.filter((p) => p.expiryAt && p.expiryAt - Date.now() < 30 * DAY).sort((a, b) => (a.expiryAt! - b.expiryAt!)),
+    [stocked],
   );
-  const dead = useMemo(() => list.filter((p) => !soldQty.get(p.id)), [list, soldQty]);
+  const dead = useMemo(() => stocked.filter((p) => !soldQty.get(p.id)), [stocked, soldQty]);
   const top = useMemo(
-    () => [...list].sort((a, b) => (soldQty.get(b.id) ?? 0) - (soldQty.get(a.id) ?? 0)).slice(0, 20),
-    [list, soldQty],
+    () => [...stocked].sort((a, b) => (soldQty.get(b.id) ?? 0) - (soldQty.get(a.id) ?? 0)).slice(0, 20),
+    [stocked, soldQty],
   );
 
-  const base = tab === "low" ? low : tab === "expiry" ? nearExpiry : tab === "dead" ? dead : tab === "top" ? top : list;
+  const base = tab === "low" ? low : tab === "expiry" ? nearExpiry : tab === "dead" ? dead : tab === "top" ? top : stocked;
   const shown = useMemo(() => {
     const s = q.trim();
     const arr = s
@@ -91,7 +92,7 @@ function InventoryPageInner() {
   }, [base, q, sortBy, statMap]);
 
   const count: Record<Tab, number> = {
-    all: list.length, low: low.length, expiry: nearExpiry.length, dead: dead.length, top: top.length,
+    all: stocked.length, low: low.length, expiry: nearExpiry.length, dead: dead.length, top: top.length,
   };
 
   return (

@@ -67,9 +67,8 @@ import {
   CalendarClock,
   Mic,
   Percent,
-  Boxes,
-  Sparkles,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { z } from "zod";
 
 const searchSchema = z.object({ code: z.string().optional(), q: z.string().optional() });
@@ -1020,45 +1019,17 @@ function ProductModal({
             <PriceInput value={price} onChange={setPrice} placeholder="۲۵٬۰۰۰" />
           </Field>
           {appSettings.trackInventory !== false && (
-            <div className="rounded-2xl border border-border bg-secondary/30 p-2.5 space-y-2">
-              <div className="text-[11px] font-semibold text-foreground">موجودی این محصول</div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTrackStock(true)}
-                  className={`rounded-xl border px-2.5 py-2 text-right transition ${
-                    trackStock
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-background text-muted-foreground"
-                  }`}
-                >
-                  <span className="flex items-center gap-1 text-xs font-semibold">
-                    <Boxes className="h-3.5 w-3.5" />
-                    کالای انباری
-                  </span>
-                  <span className="mt-0.5 block text-[10px] font-normal leading-4">
-                    موجودی کم می‌شود و هشدار اتمام می‌آید
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTrackStock(false)}
-                  className={`rounded-xl border px-2.5 py-2 text-right transition ${
-                    !trackStock
-                      ? "border-violet-500 bg-violet-50 text-violet-800"
-                      : "border-border bg-background text-muted-foreground"
-                  }`}
-                >
-                  <span className="flex items-center gap-1 text-xs font-semibold">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    خدمات / بدون موجودی
-                  </span>
-                  <span className="mt-0.5 block text-[10px] font-normal leading-4">
-                    بدون انبار، بدون هشدار اتمام موجودی
-                  </span>
-                </button>
-              </div>
-              {trackStock ? (
+            <>
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
+                <span className="text-xs font-medium">پیگیری موجودی</span>
+                <Switch
+                  dir="ltr"
+                  checked={trackStock}
+                  onCheckedChange={setTrackStock}
+                  aria-label="پیگیری موجودی"
+                />
+              </label>
+              {trackStock && (
                 <div className="grid grid-cols-2 gap-2">
                   <Field
                     label={
@@ -1083,13 +1054,8 @@ function ProductModal({
                     />
                   </Field>
                 </div>
-              ) : (
-                <p className="text-[10px] leading-4 text-muted-foreground">
-                  برای خدمات، تعمیرات، مشاوره یا هر محصولی که انبار ندارد. فروش ثبت می‌شود ولی
-                  موجودی و هشدار اتمام هرگز نمی‌آید.
-                </p>
               )}
-            </div>
+            </>
           )}
           <Field label="واحد فروش">
             <div className="flex flex-wrap gap-2">

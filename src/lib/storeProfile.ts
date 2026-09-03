@@ -1,16 +1,24 @@
 import { supabase } from "@/integrations/supabase/client";
+import { OfflineWriteError, assertOnlineServerWrite } from "@/lib/online-status";
 
 /** خطای اختصاصی برای پلن منقضی‌شده‌ی صاحب فروشگاه. */
 export class StoreSubscriptionExpiredError extends Error {
-  constructor() { super("SUBSCRIPTION_EXPIRED"); this.name = "StoreSubscriptionExpiredError"; }
+  constructor() {
+    super("SUBSCRIPTION_EXPIRED");
+    this.name = "StoreSubscriptionExpiredError";
+  }
 }
 
 async function ownerActive(userId: string): Promise<boolean> {
   try {
-    const { data, error } = await (supabase as any).rpc("is_subscription_active", { _user_id: userId });
+    const { data, error } = await (supabase as any).rpc("is_subscription_active", {
+      _user_id: userId,
+    });
     if (error) return true;
     return data === true;
-  } catch { return true; }
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -103,6 +111,7 @@ type StoreProfileRow = {
  *  - خطای واقعی شبکه (فقط در این حالت پیام اینترنت)
  */
 export function storeErrorMessage(e: unknown): string {
+  if (e instanceof OfflineWriteError) return e.message;
   const err = (e ?? {}) as SbError & { error_description?: string };
   const code = (err?.code ?? "").toString();
   const text = `${err?.message ?? ""} ${err?.details ?? ""} ${err?.hint ?? ""}`.trim();
@@ -137,10 +146,10 @@ export function storeErrorMessage(e: unknown): string {
 
 /** انتشار/به‌روزرسانی پروفایل عمومی فروشگاه برای کاربر جاری. */
 export async function publishStoreProfile(userId: string, p: PublicStoreProfile): Promise<void> {
+  assertOnlineServerWrite();
   // فیلتر آدرس‌های نامعتبر (blob:/data:/خالی) — این‌ها فقط روی مرورگر آپلودکننده کار می‌کنند
   // و برای مشتری‌ها قابل بارگذاری نیستند. فقط URLهای واقعی http(s) ذخیره می‌شوند.
-  const isPublicUrl = (u?: string | null) =>
-    !!u && /^https?:\/\//i.test(u.trim());
+  const isPublicUrl = (u?: string | null) => !!u && /^https?:\/\//i.test(u.trim());
   const safeLogo = isPublicUrl(p.logoUrl) ? p.logoUrl!.trim() : null;
   const safePortfolio = (p.portfolioImages ?? [])
     .map((x) => x.trim())
@@ -216,6 +225,7 @@ export async function fetchStoreProfile(userId: string): Promise<PublicStoreProf
 
 /** آپلود لوگوی فروشگاه در باکت عمومی و بازگرداندن URL عمومی. */
 export async function uploadStoreLogo(userId: string, file: File): Promise<string> {
+  assertOnlineServerWrite();
   const { prepareImageUpload, CACHE_ONE_WEEK } = await import("@/lib/imageCompress");
   // لوگو: ابعاد کوچک‌تر برای صرفه‌جویی بیشتر (پیش‌تنظیم استاندارد «logo»)
   const compressed = await prepareImageUpload(file, "logo");
@@ -245,7 +255,9 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
     throw res.error;
   }
   // باکت خصوصی است؛ از URL امضاشده با اعتبار طولانی استفاده می‌کنیم (۱۰ سال)
-  const signed = await sb.storage.from("store-assets").createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+  const signed = await sb.storage
+    .from("store-assets")
+    .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
   if (signed.error || !signed.data) {
     console.error("[storeProfile] sign url error:", signed.error);
     throw signed.error ?? new Error("امکان ساخت لینک تصویر فراهم نشد.");
@@ -255,6 +267,7 @@ export async function uploadStoreLogo(userId: string, file: File): Promise<strin
 
 /** آپلود یک تصویر نمونه‌کار در باکت `store-assets` و بازگرداندن URL امضاشده‌ی طولانی‌مدت. */
 export async function uploadPortfolioImage(userId: string, file: File): Promise<string> {
+  assertOnlineServerWrite();
   const { prepareImageUpload, CACHE_ONE_YEAR } = await import("@/lib/imageCompress");
   const compressed = await prepareImageUpload(file, "content");
   const ext =

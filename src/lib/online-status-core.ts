@@ -3,6 +3,13 @@
  */
 
 export const OFFLINE_WRITE_MESSAGE = "برای این کار باید آنلاین باشید";
+
+export class OfflineWriteError extends Error {
+  constructor() {
+    super(OFFLINE_WRITE_MESSAGE);
+    this.name = "OfflineWriteError";
+  }
+}
 export const OFFLINE_WRITE_BLOCKED_EVENT = "kamix-offline-write-blocked";
 export const ONLINE_CONFIRMED_EVENT = "kamix-online";
 

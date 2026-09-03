@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
@@ -121,6 +122,7 @@ function ProductsPageInner() {
 
   const remove = (id: string) => {
     if (!confirm("حذف این محصول؟")) return;
+    if (!requireOnlineWrite()) return;
     setList(list.filter((p) => p.id !== id));
   };
 
@@ -132,11 +134,13 @@ function ProductsPageInner() {
       )
     )
       return;
+    if (!requireOnlineWrite()) return;
     setList([]);
     setSelected(new Set());
   };
 
   const onCreate = (p: Omit<Product, "id">) => {
+    if (!requireOnlineWrite()) return;
     if (p.code && products.getAll().some((x) => x.code === p.code)) {
       alert("محصولی با همین کد قبلاً ثبت شده است.");
       return;
@@ -147,6 +151,7 @@ function ProductsPageInner() {
   };
 
   const onEdit = (p: Product) => {
+    if (!requireOnlineWrite()) return;
     setList(list.map((x) => (x.id === p.id ? p : x)));
     setEditTarget(null);
   };

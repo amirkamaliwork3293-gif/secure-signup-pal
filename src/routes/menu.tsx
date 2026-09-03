@@ -13,6 +13,7 @@ import {
 import {
   UtensilsCrossed, Plus, Trash2, QrCode, Image as ImageIcon, Loader2, X, Eye, Pencil, Power,
 } from "lucide-react";
+import { OfflineWriteError, requireOnlineWrite } from "@/lib/online-status";
 
 export const Route = createFileRoute("/menu")({
   head: () => ({ meta: [{ title: "منوی دیجیتال | KAMIX" }] }),
@@ -53,23 +54,31 @@ function MenuPage() {
 
   const addCat = async () => {
     if (!newCat.trim()) return;
+    if (!requireOnlineWrite()) return;
     try { await createCategory(userId, newCat); setNewCat(""); await reload(); }
-    catch (e: any) { alert(e?.message); }
+    catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message); }
   };
 
   const removeCat = async (id: string) => {
     if (!confirm("این دسته حذف شود؟ (آیتم‌های مرتبط بدون دسته می‌شوند)")) return;
-    await deleteCategory(id); await reload();
+    if (!requireOnlineWrite()) return;
+    try { await deleteCategory(id); await reload(); }
+    catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message); }
   };
 
   const toggleAvailable = async (it: MenuItem) => {
-    await updateItem(it.id, { is_available: !it.is_available });
-    await reload();
+    if (!requireOnlineWrite()) return;
+    try {
+      await updateItem(it.id, { is_available: !it.is_available });
+      await reload();
+    } catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message); }
   };
 
   const removeItem = async (id: string) => {
     if (!confirm("این آیتم حذف شود؟")) return;
-    await deleteItem(id); await reload();
+    if (!requireOnlineWrite()) return;
+    try { await deleteItem(id); await reload(); }
+    catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message); }
   };
 
   return (
@@ -192,14 +201,16 @@ function ItemModal({
 
   const pickImage = async (f: File | null) => {
     if (!f) return;
+    if (!requireOnlineWrite()) return;
     setUploading(true);
     try { setImageUrl(await uploadMenuImage(userId, f)); }
-    catch (e: any) { alert(e?.message || "خطا در آپلود"); }
+    catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message || "خطا در آپلود"); }
     setUploading(false);
   };
 
   const save = async () => {
     if (!name.trim()) { alert("نام آیتم لازم است."); return; }
+    if (!requireOnlineWrite()) return;
     const p = Number(price.replace(/[^\d.]/g, "")) || 0;
     setSaving(true);
     try {
@@ -215,7 +226,7 @@ function ItemModal({
         });
       }
       onSaved();
-    } catch (e: any) { alert(e?.message); }
+    } catch (e: any) { if (!(e instanceof OfflineWriteError)) alert(e?.message); }
     setSaving(false);
   };
 

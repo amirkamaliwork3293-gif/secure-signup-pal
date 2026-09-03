@@ -15,6 +15,7 @@ import {
   storeErrorMessage,
 } from "@/lib/storeProfile";
 import { openExternal } from "@/lib/openExternal";
+import { OfflineWriteError, requireOnlineWrite } from "@/lib/online-status";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import {
   Settings,
@@ -72,6 +73,7 @@ function SettingsPageInner() {
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
+    if (!requireOnlineWrite()) return;
     const nextName = shopName.trim() || "فروشگاه من";
     setSettings({
       ...appSettings,
@@ -607,6 +609,7 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
 
   const onPickPortfolio = async (files: FileList | null) => {
     if (!userId || !files || files.length === 0) return;
+    if (!requireOnlineWrite()) return;
     setPortfolioUploading(true);
     try {
       const urls: string[] = [];
@@ -616,6 +619,7 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
       }
       setPortfolio((prev) => [...prev, ...urls]);
     } catch (e) {
+      if (e instanceof OfflineWriteError) return;
       console.error("[settings] portfolio upload failed:", e);
       alert(storeErrorMessage(e));
     } finally {
@@ -646,11 +650,13 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
 
   const onPickLogo = async (file: File) => {
     if (!userId) return;
+    if (!requireOnlineWrite()) return;
     setUploading(true);
     try {
       const url = await uploadStoreLogo(userId, file);
       setLogoUrl(url);
     } catch (e) {
+      if (e instanceof OfflineWriteError) return;
       console.error("[settings] logo upload failed:", e);
       alert(storeErrorMessage(e));
     } finally {
@@ -660,6 +666,7 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
 
   const saveProfile = async () => {
     if (!userId) return;
+    if (!requireOnlineWrite()) return;
     const profile = {
       shopName: shopName.trim() || "فروشگاه من",
       address,
@@ -699,6 +706,7 @@ function StoreProfileSection({ shopName }: { shopName: string }) {
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     } catch (e) {
+      if (e instanceof OfflineWriteError) return;
       console.error("[settings] publish store profile failed:", e);
       alert(storeErrorMessage(e));
     } finally {

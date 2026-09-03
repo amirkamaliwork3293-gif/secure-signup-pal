@@ -12,6 +12,7 @@ import {
   OFFLINE_WRITE_BLOCKED_EVENT,
   OFFLINE_WRITE_MESSAGE,
   ONLINE_CONFIRMED_EVENT,
+  OfflineWriteError,
   type OnlineKind,
 } from "@/lib/online-status-core";
 
@@ -23,6 +24,7 @@ export {
   OFFLINE_WRITE_MESSAGE,
   OFFLINE_WRITE_BLOCKED_EVENT,
   ONLINE_CONFIRMED_EVENT,
+  OfflineWriteError,
   HEALTH_CHECK_PATH,
   HEALTH_CHECK_PARAM,
   HEALTH_TIMEOUT_MS,
@@ -79,6 +81,13 @@ export function requireOnlineWrite(): boolean {
 export function notifyOfflineWriteBlocked(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_BLOCKED_EVENT));
+}
+
+/** قبل از هر نوشتن مستقیم به سرور (منو، پروفایل فروشگاه، آپلود). */
+export function assertOnlineServerWrite(): void {
+  if (!isCapacitorOfflineReadOnly()) return;
+  notifyOfflineWriteBlocked();
+  throw new OfflineWriteError();
 }
 
 function publish(): void {

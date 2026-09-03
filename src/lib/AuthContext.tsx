@@ -6,6 +6,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
 import { isCapacitor } from "@/lib/isWebView";
+import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
 import {
   classifyUserAccess,
@@ -67,7 +68,9 @@ function toAuthState(session: Session, profile: UserProfile, isAdmin: boolean): 
       return { status: "authenticated", session, profile, isAdmin: true };
     }
     try {
-      void supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id);
+      if (!isCapacitorOfflineReadOnly()) {
+        void supabase.from("profiles").update({ status: "expired" }).eq("id", session.user.id);
+      }
     } catch {}
     return { status: "expired", username: profile.username, profile, session };
   }

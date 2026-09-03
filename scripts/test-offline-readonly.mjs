@@ -204,6 +204,14 @@ function shouldRegisterCapacitorShellWorker(native) {
   assert.match(storeSrc, /isCapacitorOfflineReadOnly/);
   assert.match(storeSrc, /rememberCloudRead/);
   assert.match(storeSrc, /notifyOfflineWriteBlocked/);
+
+  const menuSrc = readFileSync(join(root, "../src/lib/menu.ts"), "utf8");
+  assert.match(menuSrc, /assertOnlineServerWrite/);
+  assert.equal((menuSrc.match(/assertOnlineServerWrite\(\)/g) || []).length, 7);
+
+  const profileSrc = readFileSync(join(root, "../src/lib/storeProfile.ts"), "utf8");
+  assert.match(profileSrc, /assertOnlineServerWrite/);
+  assert.equal((profileSrc.match(/assertOnlineServerWrite\(\)/g) || []).length, 3);
 }
 
 console.log("offline-readonly ok");

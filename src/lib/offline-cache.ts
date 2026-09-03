@@ -70,10 +70,9 @@ export function listUserDisplayCacheKeys(userId: string, keys: string[]): string
 
 export function clearUserOfflineCache(
   userId: string,
-  storage: StorageLike & { length?: number; key?: (i: number) => string | null } | null = typeof window !==
-  "undefined"
-    ? localStorage
-    : null,
+  storage:
+    | (StorageLike & { length?: number; key?: (i: number) => string | null })
+    | null = typeof window !== "undefined" ? localStorage : null,
 ): string[] {
   if (!userId || !storage) return [];
   const keys: string[] = [];

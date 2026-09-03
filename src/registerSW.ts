@@ -39,9 +39,7 @@ async function registerCapacitorShellWorker(): Promise<void> {
   try {
     const regs = await navigator.serviceWorker.getRegistrations();
     await Promise.all(
-      regs
-        .filter((r) => !scriptUrlOf(r).includes("capacitor-sw.js"))
-        .map((r) => r.unregister()),
+      regs.filter((r) => !scriptUrlOf(r).includes("capacitor-sw.js")).map((r) => r.unregister()),
     );
   } catch {
     /* noop */
@@ -51,9 +49,7 @@ async function registerCapacitorShellWorker(): Promise<void> {
     if ("caches" in window) {
       const keys = await caches.keys();
       await Promise.all(
-        keys
-          .filter((k) => !k.startsWith(CAPACITOR_SW_CACHE_PREFIX))
-          .map((k) => caches.delete(k)),
+        keys.filter((k) => !k.startsWith(CAPACITOR_SW_CACHE_PREFIX)).map((k) => caches.delete(k)),
       );
     }
   } catch {
@@ -67,9 +63,12 @@ async function registerCapacitorShellWorker(): Promise<void> {
     });
     // هر بار باز شدن اپ، نسخهٔ جدید SW را از شبکه بخواه — نه از HTTP cache
     void registration.update();
-    setInterval(() => {
-      void registration.update();
-    }, 60 * 60 * 1000);
+    setInterval(
+      () => {
+        void registration.update();
+      },
+      60 * 60 * 1000,
+    );
   } catch {
     /* WebView قدیمی یا SW غیرفعال — اپ آنلاین همچنان کار می‌کند */
   }

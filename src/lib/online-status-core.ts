@@ -40,7 +40,8 @@ export async function probeReachability(opts?: {
   href?: string;
 }): Promise<boolean> {
   const timeoutMs = opts?.timeoutMs ?? HEALTH_TIMEOUT_MS;
-  const fetchImpl = opts?.fetchImpl ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
+  const fetchImpl =
+    opts?.fetchImpl ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
   if (!fetchImpl) return false;
   const url = opts?.href ?? healthCheckUrl();
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;

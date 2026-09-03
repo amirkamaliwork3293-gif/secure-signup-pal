@@ -122,7 +122,12 @@ function shouldRegisterCapacitorShellWorker(native) {
   const kept = listUserDisplayCacheKeys("user-a", keys);
   assert.deepEqual(
     kept.sort(),
-    ["acc.invoices.v1:user-a", "acc.products.v1:user-a", "auth_profile:user-a", offlineMetaKey("user-a")].sort(),
+    [
+      "acc.invoices.v1:user-a",
+      "acc.products.v1:user-a",
+      "auth_profile:user-a",
+      offlineMetaKey("user-a"),
+    ].sort(),
   );
   assert.ok(SENSITIVE_STORAGE_KEY_RE.test("sb-abc-auth-token"));
   assert.ok(!kept.includes("sb-xxxx-auth-token:user-a"));
@@ -134,7 +139,7 @@ function shouldRegisterCapacitorShellWorker(native) {
     ["auth_profile:user-a", "{}"],
     [offlineMetaKey("user-a"), "{}"],
     ["kamali.auth.lastScope.v1", "user-a"],
-    ["sb-proj-auth-token", "{\"access_token\":\"secret\"}"],
+    ["sb-proj-auth-token", '{"access_token":"secret"}'],
     ["acc.products.v1:user-b", "[1]"],
   ]);
   const memory = {

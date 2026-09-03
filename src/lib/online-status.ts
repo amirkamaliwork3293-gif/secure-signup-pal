@@ -30,7 +30,7 @@ export {
 } from "@/lib/online-status-core";
 
 export type OnlineSnapshot = {
-  online: boolean;
+  isOnline: boolean;
   kind: OnlineKind;
   lastSyncedAt: number | null;
   isCapacitorApp: boolean;
@@ -91,7 +91,7 @@ function snapshot(): OnlineSnapshot {
   const k = getOnlineKind();
   const uid = currentUserId();
   return {
-    online: k !== "offline",
+    isOnline: k !== "offline",
     kind: k,
     lastSyncedAt: uid ? readCloudReadAt(uid) : null,
     isCapacitorApp: isCapacitor(),
@@ -158,7 +158,7 @@ export function useOnlineStatus(): OnlineSnapshot {
       probeOk: native ? (navOnline ? null : false) : navOnline ? true : false,
     });
     return {
-      online: k !== "offline",
+      isOnline: k !== "offline",
       kind: k,
       lastSyncedAt: null,
       isCapacitorApp: native,
@@ -174,8 +174,8 @@ export function useOnlineStatus(): OnlineSnapshot {
     };
     window.addEventListener("kamix-online-status", onStatus);
     if (!isCapacitor()) {
-      const on = () => setState((s) => ({ ...s, online: true, kind: "online" }));
-      const off = () => setState((s) => ({ ...s, online: false, kind: "offline" }));
+      const on = () => setState((s) => ({ ...s, isOnline: true, kind: "online" }));
+      const off = () => setState((s) => ({ ...s, isOnline: false, kind: "offline" }));
       window.addEventListener("online", on);
       window.addEventListener("offline", off);
       return () => {

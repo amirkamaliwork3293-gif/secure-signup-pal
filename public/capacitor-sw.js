@@ -11,7 +11,6 @@
  *   - کش نسخه‌دار است و با آپدیت SW کش قدیمی پاک می‌شود
  *   - خودِ اسکریپت SW با updateViaCache:'none' همیشه از شبکه چک می‌شود
  * ============================================================ */
-/* eslint-disable no-restricted-globals */
 const SHELL_CACHE_VERSION = "v1";
 const CACHE_NAME = "kamix-capacitor-shell-" + SHELL_CACHE_VERSION;
 const HEALTH_PARAM = "kamix-health";

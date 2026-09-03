@@ -197,19 +197,17 @@ function shouldRegisterCapacitorShellWorker(native) {
 }
 
 {
-  const storeSrc = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), "../src/lib/store.ts"),
-    "utf8",
-  );
+  const here = dirname(fileURLToPath(import.meta.url));
+  const storeSrc = readFileSync(join(here, "../src/lib/store.ts"), "utf8");
   assert.match(storeSrc, /isCapacitorOfflineReadOnly/);
   assert.match(storeSrc, /rememberCloudRead/);
   assert.match(storeSrc, /notifyOfflineWriteBlocked/);
 
-  const menuSrc = readFileSync(join(root, "../src/lib/menu.ts"), "utf8");
+  const menuSrc = readFileSync(join(here, "../src/lib/menu.ts"), "utf8");
   assert.match(menuSrc, /assertOnlineServerWrite/);
   assert.equal((menuSrc.match(/assertOnlineServerWrite\(\)/g) || []).length, 7);
 
-  const profileSrc = readFileSync(join(root, "../src/lib/storeProfile.ts"), "utf8");
+  const profileSrc = readFileSync(join(here, "../src/lib/storeProfile.ts"), "utf8");
   assert.match(profileSrc, /assertOnlineServerWrite/);
   assert.equal((profileSrc.match(/assertOnlineServerWrite\(\)/g) || []).length, 3);
 }

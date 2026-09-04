@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { OfflineWriteError, assertOnlineServerWrite } from "@/lib/online-status";
+import { readDisplayJson, writeDisplayJson } from "@/lib/offline-cache";
 
 /** خطای اختصاصی برای پلن منقضی‌شده‌ی صاحب فروشگاه. */
 export class StoreSubscriptionExpiredError extends Error {
@@ -189,38 +190,47 @@ export async function publishStoreProfile(userId: string, p: PublicStoreProfile)
 
 /** خواندن پروفایل عمومی یک فروشگاه با شناسه‌ی کاربر (بدون نیاز به ورود). */
 export async function fetchStoreProfile(userId: string): Promise<PublicStoreProfile | null> {
-  if (!(await ownerActive(userId))) {
-    throw new StoreSubscriptionExpiredError();
+  const cacheKey = `kamix.storeprofile.display.v1:${userId}`;
+  try {
+    if (!(await ownerActive(userId))) {
+      throw new StoreSubscriptionExpiredError();
+    }
+    const { data, error } = await sb
+      .from("store_profiles")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      console.error("[storeProfile] fetch error:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        userId,
+      });
+      throw error;
+    }
+    if (!data) return null;
+    const isPublic = (u?: string | null) => !!u && /^https?:\/\//i.test(u);
+    const profile: PublicStoreProfile = {
+      shopName: data.shop_name ?? undefined,
+      address: data.address ?? undefined,
+      phones: data.phones ?? [],
+      hours: data.hours ?? undefined,
+      socials: data.socials ?? {},
+      description: data.description ?? undefined,
+      logoUrl: isPublic(data.logo_url) ? data.logo_url! : undefined,
+      portfolioImages: Array.isArray(data.portfolio_images)
+        ? data.portfolio_images.filter((x) => isPublic(x))
+        : [],
+    };
+    writeDisplayJson(cacheKey, profile);
+    return profile;
+  } catch (e) {
+    if (e instanceof StoreSubscriptionExpiredError) throw e;
+    const cached = readDisplayJson<PublicStoreProfile>(cacheKey);
+    if (cached) return cached;
+    throw e;
   }
-  const { data, error } = await sb
-    .from("store_profiles")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) {
-    console.error("[storeProfile] fetch error:", {
-      code: error.code,
-      message: error.message,
-      details: error.details,
-      userId,
-    });
-    throw error;
-  }
-  if (!data) return null;
-  const isPublic = (u?: string | null) => !!u && /^https?:\/\//i.test(u);
-  return {
-    shopName: data.shop_name ?? undefined,
-    address: data.address ?? undefined,
-    phones: data.phones ?? [],
-    hours: data.hours ?? undefined,
-    socials: data.socials ?? {},
-    description: data.description ?? undefined,
-    // آدرس‌های blob:/data: فقط روی مرورگر آپلودکننده کار می‌کنند؛ برای بقیه‌ی کاربران نادیده گرفته می‌شوند.
-    logoUrl: isPublic(data.logo_url) ? data.logo_url! : undefined,
-    portfolioImages: Array.isArray(data.portfolio_images)
-      ? data.portfolio_images.filter((x) => isPublic(x))
-      : [],
-  };
 }
 
 /** آپلود لوگوی فروشگاه در باکت عمومی و بازگرداندن URL عمومی. */

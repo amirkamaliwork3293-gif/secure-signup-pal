@@ -13,6 +13,7 @@ type SessionLike = {
   session?: { user?: { id?: string } };
   profile?: { username?: string };
   username?: string;
+  userId?: string;
 };
 
 /** روزهای باقی‌مانده تا پایان اشتراک (بالا-گرد). منفی یعنی منقضی. */
@@ -30,7 +31,11 @@ export function isSubscriptionExpiringSoon(endDate?: string | null, now = Date.n
 }
 
 export function isAppSession(state: SessionLike): boolean {
-  return state.status === "authenticated" || state.status === "expired";
+  return (
+    state.status === "authenticated" ||
+    state.status === "expired" ||
+    state.status === "offline-cached"
+  );
 }
 
 export function isSubscriptionReadOnly(state: SessionLike): boolean {
@@ -38,12 +43,17 @@ export function isSubscriptionReadOnly(state: SessionLike): boolean {
 }
 
 export function authUserId(state: SessionLike): string | null {
+  if (state.status === "offline-cached") return state.userId ?? null;
   if (state.status !== "authenticated" && state.status !== "expired") return null;
   return state.session?.user?.id ?? null;
 }
 
 export function authProfileUsername(state: SessionLike): string {
-  if (state.status === "authenticated" || state.status === "expired") {
+  if (
+    state.status === "authenticated" ||
+    state.status === "expired" ||
+    state.status === "offline-cached"
+  ) {
     return state.profile?.username ?? "";
   }
   if (state.status === "pending" || state.status === "rejected") return state.username ?? "";

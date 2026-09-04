@@ -7,7 +7,8 @@ import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
 import { isCapacitor } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
-import { clearUserOfflineCache } from "@/lib/offline-cache";
+import { clearUserOfflineCache, readLastUserScope } from "@/lib/offline-cache";
+import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
 import {
   classifyUserAccess,
   pickProfileForSession,
@@ -19,6 +20,7 @@ type AuthState =
   | { status: "loading" }
   | { status: "unauthenticated" }
   | { status: "expired"; username: string; profile: UserProfile; session: Session }
+  | { status: "offline-cached"; username: string; profile: UserProfile; userId: string }
   | { status: "pending"; username: string }
   | { status: "rejected"; username: string }
   | { status: "authenticated"; session: Session; profile: UserProfile; isAdmin: boolean };
@@ -80,38 +82,49 @@ function toAuthState(session: Session, profile: UserProfile, isAdmin: boolean): 
 async function loadState(session: Session): Promise<AuthState> {
   setStorageScope(session.user.id);
 
-  // hydrateFromCloud fails when offline — that's fine, local data is source of truth
-  try {
-    await hydrateFromCloud(session.user.id);
-  } catch {}
+  const skipNetwork = capacitorNetworkDown();
+  if (!skipNetwork) {
+    try {
+      await Promise.race([
+        hydrateFromCloud(session.user.id),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 2800);
+        }),
+      ]);
+    } catch {
+      /* local store remains source of truth */
+    }
+  }
 
   let live: UserProfile | null = null;
   let liveIsAdmin = false;
 
-  try {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", session.user.id)
-      .maybeSingle();
+  if (!skipNetwork) {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .maybeSingle();
 
-    if (!error && data) {
-      live = data as UserProfile;
-      try {
-        const { data: roleRow, error: roleErr } = await supabase
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", session.user.id)
-          .eq("role", "admin")
-          .maybeSingle();
-        liveIsAdmin = !roleErr && !!roleRow;
-      } catch {
-        liveIsAdmin = false;
+      if (!error && data) {
+        live = data as UserProfile;
+        try {
+          const { data: roleRow, error: roleErr } = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", session.user.id)
+            .eq("role", "admin")
+            .maybeSingle();
+          liveIsAdmin = !roleErr && !!roleRow;
+        } catch {
+          liveIsAdmin = false;
+        }
+        saveProfileCache(session.user.id, live, liveIsAdmin);
       }
-      saveProfileCache(session.user.id, live, liveIsAdmin);
+    } catch {
+      // شبکه/RLS — پایین‌تر از کش استفاده می‌شود. JWT معتبر را دور نمی‌اندازیم.
     }
-  } catch {
-    // شبکه/RLS — پایین‌تر از کش استفاده می‌شود. JWT معتبر را دور نمی‌اندازیم.
   }
 
   const picked = pickProfileForSession({
@@ -121,6 +134,36 @@ async function loadState(session: Session): Promise<AuthState> {
     cached: readProfileCache(session.user.id),
   });
   return toAuthState(session, picked.profile, picked.isAdmin);
+}
+
+function capacitorNetworkDown(): boolean {
+  if (!isCapacitor()) return false;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return isCapacitorOfflineReadOnly();
+}
+
+function scopedUserId(state: AuthState): string | null {
+  if (state.status === "authenticated" || state.status === "expired") return state.session.user.id;
+  if (state.status === "offline-cached") return state.userId;
+  return null;
+}
+
+function restoreLocalCapacitorAuth(): AuthState | null {
+  if (!isCapacitor()) return null;
+  const uid = readLastUserScope();
+  if (!uid) return null;
+  const cached = readProfileCache(uid);
+  if (!cached || cached.profile.id !== uid) return null;
+  setStorageScope(uid);
+  const kind = classifyUserAccess(cached.profile, false);
+  if (kind === "pending") return { status: "pending", username: cached.profile.username };
+  if (kind === "rejected") return { status: "rejected", username: cached.profile.username };
+  return {
+    status: "offline-cached",
+    username: cached.profile.username,
+    profile: cached.profile,
+    userId: uid,
+  };
 }
 
 function optimisticStateFromCache(session: Session): AuthState | null {
@@ -148,6 +191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) {
+      if (capacitorNetworkDown()) {
+        const local = restoreLocalCapacitorAuth();
+        if (local) {
+          setState(local);
+          return;
+        }
+      }
       setStorageScope(null);
       setState({ status: "unauthenticated" });
       return;
@@ -167,13 +217,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentRevision = ++revision;
 
       if (!session) {
-        const prev = stateRef.current;
-        const prevId =
-          prev.status === "authenticated" || prev.status === "expired"
-            ? prev.session.user.id
-            : null;
         stopCloudSync();
-        if (isCapacitor() && prevId) clearUserOfflineCache(prevId);
+        if (capacitorNetworkDown()) {
+          const local = restoreLocalCapacitorAuth();
+          if (local && !disposed && currentRevision === revision) {
+            setState(local);
+          }
+          return;
+        }
         setStorageScope(null);
         if (!disposed && currentRevision === revision) {
           setState({ status: "unauthenticated" });
@@ -187,8 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // current page and discard the in-progress file selection / form state).
       const cur = stateRef.current;
       const sameUser =
-        (cur.status === "authenticated" && cur.session.user.id === session.user.id) ||
-        (cur.status === "expired" && cur.session.user.id === session.user.id) ||
+        scopedUserId(cur) === session.user.id ||
         ((cur.status === "pending" || cur.status === "rejected") &&
           readProfileCache(session.user.id)?.profile.id === session.user.id);
       if (!disposed && currentRevision === revision && !sameUser) {
@@ -222,16 +272,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void syncSession(session);
     });
 
+    const onOnline = () => {
+      try {
+        void supabase.auth.startAutoRefresh();
+      } catch {
+        /* noop */
+      }
+      void refreshProfile();
+    };
+    const onOffline = () => {
+      try {
+        void supabase.auth.stopAutoRefresh();
+      } catch {
+        /* noop */
+      }
+    };
+    if (isCapacitor()) {
+      window.addEventListener("online", onOnline);
+      window.addEventListener("offline", onOffline);
+      window.addEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
+      if (typeof navigator !== "undefined" && navigator.onLine === false) onOffline();
+    }
+
     return () => {
       disposed = true;
       subscription.unsubscribe();
+      if (isCapacitor()) {
+        window.removeEventListener("online", onOnline);
+        window.removeEventListener("offline", onOffline);
+        window.removeEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
+      }
     };
   }, []);
 
   const signOut = async () => {
     const prev = stateRef.current;
-    const prevId =
-      prev.status === "authenticated" || prev.status === "expired" ? prev.session.user.id : null;
+    const prevId = scopedUserId(prev);
     stopCloudSync();
     await supabase.auth.signOut();
     if (isCapacitor() && prevId) clearUserOfflineCache(prevId);

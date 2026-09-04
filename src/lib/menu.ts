@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { assertOnlineServerWrite } from "@/lib/online-status";
+import { MENU_DISPLAY_PREFIX, readDisplayJson, writeDisplayJson } from "@/lib/offline-cache";
 
 /** آیا اشتراک صاحب فروشگاه فعال است؟ (تابع SECURITY DEFINER عمومی) */
 export async function isOwnerSubscriptionActive(userId: string): Promise<boolean> {
@@ -42,27 +43,47 @@ export type MenuItem = {
 };
 
 export async function listCategories(userId: string): Promise<MenuCategory[]> {
-  const { data, error } = await supabase
-    .from("menu_categories")
-    .select("id, user_id, name, sort_order")
-    .eq("user_id", userId)
-    .order("sort_order", { ascending: true })
-    .order("name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as MenuCategory[];
+  const key = `${MENU_DISPLAY_PREFIX}cats:${userId}`;
+  try {
+    const { data, error } = await supabase
+      .from("menu_categories")
+      .select("id, user_id, name, sort_order")
+      .eq("user_id", userId)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+    if (error) throw error;
+    const rows = (data ?? []) as MenuCategory[];
+    writeDisplayJson(key, rows);
+    return rows;
+  } catch (e) {
+    const cached = readDisplayJson<MenuCategory[]>(key);
+    if (cached) return cached;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return [];
+    throw e;
+  }
 }
 
 export async function listItems(userId: string): Promise<MenuItem[]> {
-  const { data, error } = await supabase
-    .from("menu_items")
-    .select(
-      "id, user_id, category_id, name, description, price, image_url, sort_order, is_available",
-    )
-    .eq("user_id", userId)
-    .order("sort_order", { ascending: true })
-    .order("name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as MenuItem[];
+  const key = `${MENU_DISPLAY_PREFIX}items:${userId}`;
+  try {
+    const { data, error } = await supabase
+      .from("menu_items")
+      .select(
+        "id, user_id, category_id, name, description, price, image_url, sort_order, is_available",
+      )
+      .eq("user_id", userId)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+    if (error) throw error;
+    const rows = (data ?? []) as MenuItem[];
+    writeDisplayJson(key, rows);
+    return rows;
+  } catch (e) {
+    const cached = readDisplayJson<MenuItem[]>(key);
+    if (cached) return cached;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return [];
+    throw e;
+  }
 }
 
 export async function createCategory(userId: string, name: string): Promise<MenuCategory> {

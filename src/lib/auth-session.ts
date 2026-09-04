@@ -96,7 +96,11 @@ export function classifyUserAccess(
 export function shouldSyncOnAuthEvent(event: string, currentStatus: string): boolean {
   if (event === "SIGNED_OUT") return true;
   if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
-    return currentStatus === "loading" || currentStatus === "unauthenticated";
+    return (
+      currentStatus === "loading" ||
+      currentStatus === "unauthenticated" ||
+      currentStatus === "offline-cached"
+    );
   }
   return false;
 }

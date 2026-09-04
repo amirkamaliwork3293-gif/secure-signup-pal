@@ -4,17 +4,36 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { Layout } from "@/components/Layout";
 import { formatToman } from "@/lib/store";
 import { getGoldPrices, type GoldQuote } from "@/lib/gold.functions";
+import { GOLD_DISPLAY_PREFIX, readDisplayJson, writeDisplayJson } from "@/lib/offline-cache";
+import { useAuth } from "@/lib/AuthContext";
+import { authUserId } from "@/lib/subscription-access";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseGoldVoice } from "@/lib/voice/gold-speech";
-import { RefreshCw, Mic, Loader2, TrendingUp, TrendingDown, Coins, Copy, Check } from "lucide-react";
+import {
+  RefreshCw,
+  Mic,
+  Loader2,
+  TrendingUp,
+  TrendingDown,
+  Coins,
+  Copy,
+  Check,
+} from "lucide-react";
 
 export const Route = createFileRoute("/gold")({
   head: () => ({
     meta: [
       { title: "طلا و نرخ لحظه‌ای | KAMIX" },
-      { name: "description", content: "نرخ لحظه‌ای طلا، سکه و ارز به همراه ماشین‌حساب فاکتور طلافروشی با ثبت صوتی فارسی." },
+      {
+        name: "description",
+        content:
+          "نرخ لحظه‌ای طلا، سکه و ارز به همراه ماشین‌حساب فاکتور طلافروشی با ثبت صوتی فارسی.",
+      },
       { property: "og:title", content: "بخش طلا — نرخ لحظه‌ای و فاکتور طلا | KAMIX" },
-      { property: "og:description", content: "نرخ لحظه‌ای طلا و سکه، محاسبه وزن، اجرت، سود و مالیات فاکتور طلافروشی." },
+      {
+        property: "og:description",
+        content: "نرخ لحظه‌ای طلا و سکه، محاسبه وزن، اجرت، سود و مالیات فاکتور طلافروشی.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -33,6 +52,8 @@ function pickGram18(items: GoldQuote[]): GoldQuote | undefined {
 }
 
 function GoldInner() {
+  const { state } = useAuth();
+  const userId = authUserId(state);
   const [items, setItems] = useState<GoldQuote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,45 +78,95 @@ function GoldInner() {
   const [heard, setHeard] = useState("");
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null);
 
-  const load = useCallback(async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getGoldPrices({ data: { force } });
-      if (res.ok) {
-        setItems(res.items);
-        setUpdatedAt(res.updatedAt);
-        setSource(res.source);
-        const g = pickGram18(res.items);
-        if (g && !rateTouched) setRate(g.price);
-      } else {
-        setError(res.error);
+  const load = useCallback(
+    async (force = false) => {
+      setLoading(true);
+      setError(null);
+      const cacheKey = userId ? `${GOLD_DISPLAY_PREFIX}${userId}` : null;
+      try {
+        const res = await getGoldPrices({ data: { force } });
+        if (res.ok) {
+          setItems(res.items);
+          setUpdatedAt(res.updatedAt);
+          setSource(res.source);
+          if (cacheKey)
+            writeDisplayJson(cacheKey, {
+              items: res.items,
+              updatedAt: res.updatedAt,
+              source: res.source,
+            });
+          const g = pickGram18(res.items);
+          if (g && !rateTouched) setRate(g.price);
+        } else {
+          const cached = cacheKey
+            ? readDisplayJson<{ items: GoldQuote[]; updatedAt?: string; source?: string }>(cacheKey)
+            : null;
+          if (cached?.items?.length) {
+            setItems(cached.items);
+            setUpdatedAt(cached.updatedAt ?? null);
+            setSource(cached.source ?? "کش آفلاین");
+            const g = pickGram18(cached.items);
+            if (g && !rateTouched) setRate(g.price);
+          } else {
+            setError(res.error);
+          }
+        }
+      } catch (e) {
+        const cached = cacheKey
+          ? readDisplayJson<{ items: GoldQuote[]; updatedAt?: string; source?: string }>(cacheKey)
+          : null;
+        if (cached?.items?.length) {
+          setItems(cached.items);
+          setUpdatedAt(cached.updatedAt ?? null);
+          setSource(cached.source ?? "کش آفلاین");
+          const g = pickGram18(cached.items);
+          if (g && !rateTouched) setRate(g.price);
+        } else {
+          setError(String((e as Error)?.message ?? e));
+        }
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(String((e as Error)?.message ?? e));
-    } finally {
-      setLoading(false);
-    }
-  }, [rateTouched]);
+    },
+    [rateTouched, userId],
+  );
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
     const rec = createRecognizer();
     recRef.current = rec;
     setEngine(rec.engine);
-    return () => { void rec.stop(); };
+    return () => {
+      void rec.stop();
+    };
   }, []);
 
   const applyVoice = (text: string) => {
     setHeard(text);
     const p = parseGoldVoice(text);
     let applied = false;
-    if (p.grams !== null) { setGrams(String(p.grams)); applied = true; }
-    if (p.suut !== null) { setSuut(String(p.suut)); applied = true; }
-    if (p.karat !== null) { setKarat(String(p.karat)); applied = true; }
-    if (p.wagePercent !== null) { setWage(String(p.wagePercent)); applied = true; }
-    setVoiceMsg(applied ? null : "چیزی تشخیص داده نشد — مثلاً بگویید: «دو گرم و دو سوت عیار ۱۸ اجرت ۷ درصد»");
+    if (p.grams !== null) {
+      setGrams(String(p.grams));
+      applied = true;
+    }
+    if (p.suut !== null) {
+      setSuut(String(p.suut));
+      applied = true;
+    }
+    if (p.karat !== null) {
+      setKarat(String(p.karat));
+      applied = true;
+    }
+    if (p.wagePercent !== null) {
+      setWage(String(p.wagePercent));
+      applied = true;
+    }
+    setVoiceMsg(
+      applied ? null : "چیزی تشخیص داده نشد — مثلاً بگویید: «دو گرم و دو سوت عیار ۱۸ اجرت ۷ درصد»",
+    );
   };
 
   const startListening = async () => {
@@ -106,9 +177,18 @@ function GoldInner() {
     setListening(true);
     await rec.start({
       onPartial: (t) => setHeard(t),
-      onResult: (t) => { setListening(false); applyVoice(t); },
-      onError: (m) => { setListening(false); setVoiceMsg(m); },
-      onUnavailable: (m) => { setListening(false); setVoiceMsg(m); },
+      onResult: (t) => {
+        setListening(false);
+        applyVoice(t);
+      },
+      onError: (m) => {
+        setListening(false);
+        setVoiceMsg(m);
+      },
+      onUnavailable: (m) => {
+        setListening(false);
+        setVoiceMsg(m);
+      },
       onEnd: () => setListening(false),
     });
   };
@@ -142,7 +222,11 @@ function GoldInner() {
             onClick={() => void load(true)}
             className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
           >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
             بروزرسانی
           </button>
         </div>
@@ -165,12 +249,26 @@ function GoldInner() {
                   <div className="mb-2 text-xs text-muted-foreground">{title}</div>
                   <div className="grid grid-cols-2 gap-2">
                     {rows.map((q) => (
-                      <div key={q.key} className="rounded-xl border border-border/60 bg-background p-3">
+                      <div
+                        key={q.key}
+                        className="rounded-xl border border-border/60 bg-background p-3"
+                      >
                         <div className="truncate text-xs text-muted-foreground">{q.name}</div>
-                        <div className="mt-1 text-sm font-bold">{q.price.toLocaleString("fa-IR")} <span className="text-[10px] font-normal text-muted-foreground">{q.unit}</span></div>
+                        <div className="mt-1 text-sm font-bold">
+                          {q.price.toLocaleString("fa-IR")}{" "}
+                          <span className="text-[10px] font-normal text-muted-foreground">
+                            {q.unit}
+                          </span>
+                        </div>
                         {q.changePercent !== null && (
-                          <div className={`mt-0.5 flex items-center gap-1 text-[10px] ${q.changePercent >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                            {q.changePercent >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                          <div
+                            className={`mt-0.5 flex items-center gap-1 text-[10px] ${q.changePercent >= 0 ? "text-emerald-600" : "text-red-500"}`}
+                          >
+                            {q.changePercent >= 0 ? (
+                              <TrendingUp className="h-3 w-3" />
+                            ) : (
+                              <TrendingDown className="h-3 w-3" />
+                            )}
                             {Math.abs(q.changePercent).toLocaleString("fa-IR")}٪
                           </div>
                         )}
@@ -185,7 +283,14 @@ function GoldInner() {
                 <span>آخرین بروزرسانی: {new Date(updatedAt).toLocaleTimeString("fa-IR")}</span>
                 {source && (
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-                    منبع: {source === "cache" ? "کش" : source === "cache-stale" ? "کش (قدیمی)" : source.startsWith("tgju") ? `TGJU${source === "tgju" ? "" : " (پشتیبان)"}` : source}
+                    منبع:{" "}
+                    {source === "cache"
+                      ? "کش"
+                      : source === "cache-stale"
+                        ? "کش (قدیمی)"
+                        : source.startsWith("tgju")
+                          ? `TGJU${source === "tgju" ? "" : " (پشتیبان)"}`
+                          : source}
                   </span>
                 )}
               </div>
@@ -219,7 +324,14 @@ function GoldInner() {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="نرخ هر گرم طلای ۱۸ (تومان)" value={rate ? String(rate) : ""} onChange={(v) => { setRateTouched(true); setRate(parseFloat(v) || 0); }} />
+          <Field
+            label="نرخ هر گرم طلای ۱۸ (تومان)"
+            value={rate ? String(rate) : ""}
+            onChange={(v) => {
+              setRateTouched(true);
+              setRate(parseFloat(v) || 0);
+            }}
+          />
           <Field label="عیار" value={karat} onChange={setKarat} />
           <Field label="وزن (گرم)" value={grams} onChange={setGrams} />
           <Field label="سوت (هزارم گرم)" value={suut} onChange={setSuut} />
@@ -228,7 +340,12 @@ function GoldInner() {
         </div>
 
         <label className="mt-3 flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={taxOn} onChange={(e) => setTaxOn(e.target.checked)} className="h-4 w-4" />
+          <input
+            type="checkbox"
+            checked={taxOn}
+            onChange={(e) => setTaxOn(e.target.checked)}
+            className="h-4 w-4"
+          />
           احتساب مالیات بر ارزش افزوده ۹٪ (روی اجرت و سود)
         </label>
 
@@ -260,7 +377,15 @@ function GoldInner() {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] text-muted-foreground">{label}</span>

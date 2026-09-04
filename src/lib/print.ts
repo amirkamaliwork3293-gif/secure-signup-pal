@@ -184,7 +184,10 @@ export async function printHtml(html: string, title = "چاپ"): Promise<boolean
 }
 
 function inferIframeSize(html: string): { width: string; height: string } {
+  // فیش حرارتی ۸۰mm باید قبل از تطبیق اندازهٔ سفارشی لیبل بررسی شود
   if (/size:\s*80mm/i.test(html)) return { width: "80mm", height: "240mm" };
+  const customMm = html.match(/@page\s*\{[^}]*size:\s*([\d.]+)mm\s+([\d.]+)mm/i);
+  if (customMm) return { width: `${customMm[1]}mm`, height: `${customMm[2]}mm` };
   if (/size:\s*A5/i.test(html)) return { width: "148mm", height: "210mm" };
   if (/size:\s*letter/i.test(html)) return { width: "215.9mm", height: "279.4mm" };
   return { width: "210mm", height: "297mm" };

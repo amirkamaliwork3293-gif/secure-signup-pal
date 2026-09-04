@@ -6,7 +6,7 @@ import { settings, storePublicUrl } from "@/lib/store";
 import { PAPER_SIZES, type PaperSize } from "@/lib/print";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/AuthContext";
-import { authUserId } from "@/lib/subscription-access";
+import { authUserId, authProfileUsername } from "@/lib/subscription-access";
 import {
   publishStoreProfile,
   uploadStoreLogo,
@@ -435,8 +435,7 @@ function Group({
 
 function ChangePasswordSection() {
   const { state } = useAuth();
-  const username =
-    state.status === "authenticated" || state.status === "expired" ? state.profile.username : "";
+  const username = authProfileUsername(state);
 
   const [open, setOpen] = useState(false);
   const [currentPass, setCurrentPass] = useState("");

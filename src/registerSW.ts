@@ -34,6 +34,24 @@ function scriptUrlOf(reg: ServiceWorkerRegistration): string {
   return reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || "";
 }
 
+function warmControlledClient(): void {
+  if (typeof document === "undefined") return;
+  const urls = [location.origin + "/", location.href];
+  document.querySelectorAll("script[src], link[href]").forEach((el) => {
+    const href = el.getAttribute("src") || el.getAttribute("href");
+    if (!href) return;
+    try {
+      urls.push(new URL(href, location.origin).href);
+    } catch {
+      /* noop */
+    }
+  });
+  navigator.serviceWorker.controller?.postMessage({
+    type: "KAMIX_WARM_SHELL",
+    urls: [...new Set(urls)],
+  });
+}
+
 async function registerCapacitorShellWorker(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
   try {
@@ -63,6 +81,17 @@ async function registerCapacitorShellWorker(): Promise<void> {
     });
     // هر بار باز شدن اپ، نسخهٔ جدید SW را از شبکه بخواه — نه از HTTP cache
     void registration.update();
+    if (navigator.serviceWorker.controller) {
+      warmControlledClient();
+    } else {
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => {
+          warmControlledClient();
+        },
+        { once: true },
+      );
+    }
     setInterval(
       () => {
         void registration.update();

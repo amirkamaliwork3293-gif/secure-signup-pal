@@ -179,6 +179,11 @@ function shouldRegisterCapacitorShellWorker(native) {
   assert.doesNotMatch(sw, /supabase/i);
   assert.match(sw, /url\.origin !== self\.location\.origin/);
   assert.match(sw, /Cache First نیست/);
+  assert.match(sw, /ignoreSearch/);
+  assert.match(sw, /__kamix_app_shell__/);
+  assert.match(sw, /navigationFallbackResponse/);
+  assert.match(sw, /Webpage not available/);
+  assert.match(sw, /NAV_FALLBACK_HTML/);
 
   const oldSw = readFileSync(join(root, "../public/sw.js"), "utf8");
   assert.match(oldSw, /Self-destructing/);
@@ -210,6 +215,33 @@ function shouldRegisterCapacitorShellWorker(native) {
   const profileSrc = readFileSync(join(here, "../src/lib/storeProfile.ts"), "utf8");
   assert.match(profileSrc, /assertOnlineServerWrite/);
   assert.equal((profileSrc.match(/assertOnlineServerWrite\(\)/g) || []).length, 3);
+}
+
+{
+  const here = dirname(fileURLToPath(import.meta.url));
+  const { writeDisplayJson, readDisplayJson, readLastUserScope, SCOPE_KEY, LAST_USER_SCOPE_KEY } =
+    await import("../src/lib/offline-cache.ts");
+  const store = new Map();
+  const memory = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  };
+  writeDisplayJson("sb-proj-auth-token", { access_token: "secret" }, memory);
+  assert.equal(store.has("sb-proj-auth-token"), false, "توکن در کش نمایشی ذخیره نشود");
+  writeDisplayJson("kamix.menu.display.v1:cats:user-a", [{ id: "1" }], memory);
+  assert.deepEqual(readDisplayJson("kamix.menu.display.v1:cats:user-a", memory), [{ id: "1" }]);
+  memory.setItem(SCOPE_KEY, "user-a");
+  assert.equal(readLastUserScope(memory), "user-a");
+  memory.setItem(SCOPE_KEY, "anon");
+  memory.setItem(LAST_USER_SCOPE_KEY, "user-b");
+  assert.equal(readLastUserScope(memory), "user-b");
+}
+
+{
+  const { isAppSession, authUserId } = await import("../src/lib/subscription-access.ts");
+  assert.equal(isAppSession({ status: "offline-cached", userId: "u1" }), true);
+  assert.equal(authUserId({ status: "offline-cached", userId: "u1" }), "u1");
 }
 
 console.log("offline-readonly ok");

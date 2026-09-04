@@ -12,6 +12,7 @@ import appCss from "../styles.css?url";
 import { AuthProvider } from "@/lib/AuthContext";
 import { initServiceWorker } from "@/registerSW";
 import { initOnlineMonitoring } from "@/lib/online-status";
+import { warmCapacitorAppShell } from "@/lib/prefetch-app-shell";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { RenewRequiredDialog } from "@/components/RenewRequiredDialog";
 
@@ -19,17 +20,16 @@ function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
+        <h1 className="text-xl font-semibold text-foreground">این صفحه پیدا نشد</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
+          می‌توانید به بخش دیگری از برنامه بروید.
         </p>
         <div className="mt-6">
           <Link
             to="/"
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Go home
+            رفتن به فاکتور
           </Link>
         </div>
       </div>
@@ -45,10 +45,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
+          این بخش الان باز نشد
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          اطلاعات ذخیره‌شده روی دستگاه باقی است. دوباره تلاش کنید یا به صفحهٔ دیگری بروید.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -58,14 +58,14 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
             }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Try again
+            تلاش مجدد
           </button>
-          <a
-            href="/"
+          <Link
+            to="/"
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
-            Go home
-          </a>
+            رفتن به فاکتور
+          </Link>
         </div>
       </div>
     </div>
@@ -80,7 +80,7 @@ const OG_IMAGE = `${BASE_URL}/og-image.png`;
 // <head> اجرا می‌شود (قبل از رندر body) و با ست‌کردن data-app روی <html>، صفحه‌ی
 // معرفی (Landing) را که در HTML سمت سرور وجود دارد با CSS پنهان می‌کند تا حتی
 // یک لحظه هم داخل اپلیکیشن دیده نشود. همان منطق lib/isWebView.ts، به‌صورت خام.
-const APP_DETECT_JS = `try{var q=new URLSearchParams(location.search).get("app");if(q==="1"||q==="android"||q==="true"){try{localStorage.setItem("kamix_is_app","1")}catch(e){}}var s=null;try{s=localStorage.getItem("kamix_is_app")}catch(e){}if(window.Capacitor||s==="1"||/KAMIX(App)?/i.test(navigator.userAgent||""))document.documentElement.setAttribute("data-app","1")}catch(e){}`;
+const APP_DETECT_JS = `try{var q=new URLSearchParams(location.search).get("app");if(q==="1"||q==="android"||q==="true"){try{localStorage.setItem("kamix_is_app","1")}catch(e){}}var s=null;try{s=localStorage.getItem("kamix_is_app")}catch(e){}if(window.Capacitor||s==="1"||/KAMIX(App)?/i.test(navigator.userAgent||""))document.documentElement.setAttribute("data-app","1");if(window.Capacitor&&navigator.serviceWorker){navigator.serviceWorker.register("/capacitor-sw.js",{scope:"/",updateViaCache:"none"}).catch(function(){})}}catch(e){}`;
 
 const organizationLd = {
   "@context": "https://schema.org",
@@ -197,6 +197,7 @@ function RootComponent() {
     // وب: SW قدیمی پاک می‌شود. اپ Capacitor: پوستهٔ Network-First ثبت می‌شود.
     initServiceWorker();
     initOnlineMonitoring();
+    warmCapacitorAppShell();
   }
 
   return (

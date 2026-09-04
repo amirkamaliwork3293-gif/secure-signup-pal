@@ -75,6 +75,7 @@ assert.equal(shouldSyncOnAuthEvent("SIGNED_OUT", "authenticated"), true);
 assert.equal(shouldSyncOnAuthEvent("SIGNED_IN", "authenticated"), false);
 assert.equal(shouldSyncOnAuthEvent("SIGNED_IN", "expired"), false);
 assert.equal(shouldSyncOnAuthEvent("SIGNED_IN", "unauthenticated"), true);
+assert.equal(shouldSyncOnAuthEvent("SIGNED_IN", "offline-cached"), true);
 assert.equal(shouldSyncOnAuthEvent("INITIAL_SESSION", "unauthenticated"), true);
 assert.equal(shouldSyncOnAuthEvent("INITIAL_SESSION", "authenticated"), false);
 assert.equal(shouldSyncOnAuthEvent("USER_UPDATED", "authenticated"), false);

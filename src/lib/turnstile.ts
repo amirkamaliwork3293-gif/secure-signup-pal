@@ -11,6 +11,35 @@ export const TURNSTILE_FAILED_ERROR =
   "تأیید امنیتی ناموفق بود. صفحه را تازه کنید و دوباره تلاش کنید.";
 export const TURNSTILE_UNAVAILABLE_ERROR =
   "بررسی امنیتی الان در دسترس نیست. کمی بعد دوباره تلاش کنید.";
+export const TURNSTILE_WIDGET_BLOCKED_ERROR =
+  "کادر امنیتی کلادفلر روی این اینترنت یا مرورگر باز نشد. صفحه را در کروم یا فایرفاکس باز کنید (نه داخل تلگرام/اینستاگرام)، مسدودکنندهٔ تبلیغات را خاموش کنید، یا فیلترشکن را روشن کنید و دوباره تلاش کنید.";
+
+export const TURNSTILE_LOAD_TIMEOUT_MS = 12_000;
+
+export type TurnstileWidgetStatus = "loading" | "ready" | "blocked";
+
+/** پیام مناسب وقتی توکن نیست — اگر کادر اصلاً نیامده، «تیک بزنید» گمراه‌کننده است. */
+export function turnstileMissingTokenError(status: TurnstileWidgetStatus | undefined): string {
+  if (status === "blocked") return TURNSTILE_WIDGET_BLOCKED_ERROR;
+  if (status === "loading") return "کادر امنیتی هنوز آماده نشده. چند ثانیه صبر کنید و دوباره بزنید.";
+  return TURNSTILE_REQUIRED_ERROR;
+}
+
+/** مرورگر داخل اپ دیگر معمولاً iframe کلادفلر را نشان نمی‌دهد. */
+export function isRestrictedBrowserForTurnstile(userAgent: string): boolean {
+  return /Instagram|FBAN|FBAV|FB_IAB|Line\/|WhatsApp|Telegram|Twitter|LinkedInApp|Snapchat|MicroMessenger|Bytedance|TikTok|Pinterest|;\s*wv\)/i.test(
+    userAgent,
+  );
+}
+
+export function turnstileScriptTimedOut(
+  startedAtMs: number,
+  nowMs: number,
+  widgetReady: boolean,
+  timeoutMs = TURNSTILE_LOAD_TIMEOUT_MS,
+): boolean {
+  return !widgetReady && nowMs - startedAtMs >= timeoutMs;
+}
 
 const MAX_TOKEN = 2048;
 

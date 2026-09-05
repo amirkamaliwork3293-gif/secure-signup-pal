@@ -10,7 +10,11 @@ import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
 import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
 import { markPendingOnboarding } from "@/lib/onboarding";
-import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
+import {
+  clientTurnstileSiteKey,
+  turnstileMissingTokenError,
+  type TurnstileWidgetStatus,
+} from "@/lib/turnstile";
 import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
@@ -89,6 +93,7 @@ function RegisterPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileReset, setTurnstileReset] = useState(0);
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileWidgetStatus>("loading");
 
   const [card, setCard] = useState({
     card_number: "",
@@ -183,7 +188,7 @@ function RegisterPage() {
       return;
     }
     if (turnstileSiteKey && !turnstileToken) {
-      setError(TURNSTILE_REQUIRED_ERROR);
+      setError(turnstileMissingTokenError(turnstileStatus));
       return;
     }
     setLoading(true);
@@ -562,6 +567,7 @@ function RegisterPage() {
           siteKey={turnstileSiteKey}
           onToken={setTurnstileToken}
           resetSignal={turnstileReset}
+          onStatus={setTurnstileStatus}
         />
 
         <button

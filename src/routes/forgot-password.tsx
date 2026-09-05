@@ -3,7 +3,11 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { getPublicSettings, submitPasswordResetRequest } from "@/lib/auth.functions";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
-import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
+import {
+  clientTurnstileSiteKey,
+  turnstileMissingTokenError,
+  type TurnstileWidgetStatus,
+} from "@/lib/turnstile";
 import { ArrowRight, KeyRound, Loader2, Receipt, CheckCircle2 } from "lucide-react";
 
 export const Route = createFileRoute("/forgot-password")({
@@ -32,6 +36,7 @@ function ForgotPasswordPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileReset, setTurnstileReset] = useState(0);
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileWidgetStatus>("loading");
 
   useEffect(() => {
     getPublicSettings()
@@ -54,7 +59,7 @@ function ForgotPasswordPage() {
       return;
     }
     if (turnstileSiteKey && !turnstileToken) {
-      setError(TURNSTILE_REQUIRED_ERROR);
+      setError(turnstileMissingTokenError(turnstileStatus));
       return;
     }
     setLoading(true);
@@ -130,6 +135,7 @@ function ForgotPasswordPage() {
               siteKey={turnstileSiteKey}
               onToken={setTurnstileToken}
               resetSignal={turnstileReset}
+              onStatus={setTurnstileStatus}
             />
             <button
               type="button"

@@ -7,7 +7,11 @@ import {
   setPasswordAfterApproval,
 } from "@/lib/auth.functions";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
-import { clientTurnstileSiteKey, TURNSTILE_REQUIRED_ERROR } from "@/lib/turnstile";
+import {
+  clientTurnstileSiteKey,
+  turnstileMissingTokenError,
+  type TurnstileWidgetStatus,
+} from "@/lib/turnstile";
 import { KeyRound, Loader2, Eye, EyeOff, Search, Clock, X, Check } from "lucide-react";
 import { PLAN_LABEL } from "@/lib/supabase";
 
@@ -37,6 +41,7 @@ function SetPasswordPage() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileReset, setTurnstileReset] = useState(0);
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileWidgetStatus>("loading");
 
   const check = useServerFn(checkRequestStatus);
   const setPass = useServerFn(setPasswordAfterApproval);
@@ -70,7 +75,7 @@ function SetPasswordPage() {
     }
     if (password !== confirm) { setError("تکرار رمز عبور صحیح نیست."); return; }
     if (turnstileSiteKey && !turnstileToken) {
-      setError(TURNSTILE_REQUIRED_ERROR);
+      setError(turnstileMissingTokenError(turnstileStatus));
       return;
     }
     setLoading(true);
@@ -165,6 +170,7 @@ function SetPasswordPage() {
               siteKey={turnstileSiteKey}
               onToken={setTurnstileToken}
               resetSignal={turnstileReset}
+              onStatus={setTurnstileStatus}
             />
 
             <button

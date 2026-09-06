@@ -65,9 +65,15 @@ function SettingsPageInner() {
   const [showMenuFeature, setShowMenuFeature] = useState(!!appSettings.showMenuFeature);
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
-  const [showRemindersFeature, setShowRemindersFeature] = useState(appSettings.showRemindersFeature !== false);
-  const [speakRemindersAloud, setSpeakRemindersAloud] = useState(appSettings.speakRemindersAloud !== false);
-  const [showProductionFeature, setShowProductionFeature] = useState(!!appSettings.showProductionFeature);
+  const [showRemindersFeature, setShowRemindersFeature] = useState(
+    appSettings.showRemindersFeature !== false,
+  );
+  const [speakRemindersAloud, setSpeakRemindersAloud] = useState(
+    appSettings.speakRemindersAloud !== false,
+  );
+  const [showProductionFeature, setShowProductionFeature] = useState(
+    !!appSettings.showProductionFeature,
+  );
   const [trackInventory, setTrackInventory] = useState(appSettings.trackInventory !== false);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
     appSettings.currencyUnit === "rial" ? "rial" : "toman",

@@ -47,7 +47,8 @@ check(
 
 check(
   "empty title fallback",
-  dueAlertSpeechText({ type: "reminder", title: "   ", overdue: false }) === "یادآوری امروز: یک یادآوری",
+  dueAlertSpeechText({ type: "reminder", title: "   ", overdue: false }) ===
+    "یادآوری امروز: یک یادآوری",
 );
 
 console.log("\nall reminder-speech checks passed");

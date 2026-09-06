@@ -1,11 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import {
-  clientIp,
-  enforceRateLimit,
-  requireActiveSubscription,
-} from "@/lib/rate-limit.server";
+import { clientIp, enforceRateLimit, requireActiveSubscription } from "@/lib/rate-limit.server";
 
 /**
  * تبدیل متن به صدای زن فارسی.
@@ -42,7 +38,9 @@ async function requestSpeech(opts: {
   url: string;
   apiKey: string;
   body: Record<string, unknown>;
-}): Promise<{ ok: true; bytes: Uint8Array; mime: string } | { ok: false; status: number; detail: string }> {
+}): Promise<
+  { ok: true; bytes: Uint8Array; mime: string } | { ok: false; status: number; detail: string }
+> {
   const res = await fetch(opts.url, {
     method: "POST",
     headers: {
@@ -55,7 +53,8 @@ async function requestSpeech(opts: {
     const txt = await res.text().catch(() => "");
     return { ok: false, status: res.status, detail: txt.slice(0, 240) };
   }
-  const mime = (res.headers.get("content-type") || "audio/mpeg").split(";")[0]!.trim() || "audio/mpeg";
+  const mime =
+    (res.headers.get("content-type") || "audio/mpeg").split(";")[0]!.trim() || "audio/mpeg";
   if (mime.includes("json")) {
     const txt = await res.text().catch(() => "");
     return { ok: false, status: res.status, detail: txt.slice(0, 240) };

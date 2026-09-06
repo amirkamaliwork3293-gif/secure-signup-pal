@@ -146,12 +146,15 @@ function playUrl(url: string): Promise<void> {
       if (currentAudio === a) currentAudio = null;
       reject(new Error("پخش صدا ناموفق بود."));
     };
-    void a.play().then(() => {
-      unlocked = true;
-    }).catch((err) => {
-      if (currentAudio === a) currentAudio = null;
-      reject(err);
-    });
+    void a
+      .play()
+      .then(() => {
+        unlocked = true;
+      })
+      .catch((err) => {
+        if (currentAudio === a) currentAudio = null;
+        reject(err);
+      });
   });
 }
 

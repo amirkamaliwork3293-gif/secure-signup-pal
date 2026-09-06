@@ -69,7 +69,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const syncFailed = sync.failed && sync.pending > 0 && loggedIn;
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
-  useEffect(() => { setMoreOpen(false); }, [pathname]);
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
   useEffect(() => {
     if (loggedIn) installSpeechUnlock();
   }, [loggedIn]);

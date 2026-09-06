@@ -13,7 +13,6 @@ import {
   MessageCircle,
   Phone,
   Send,
-  Volume2,
   Wallet,
   X,
 } from "lucide-react";
@@ -37,14 +36,6 @@ import {
 } from "@/lib/store";
 import { openExternal, toIntlPhone, telHref } from "@/lib/openExternal";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
-import { dueAlertSpeechText } from "@/lib/voice/reminder-speech";
-import {
-  installSpeechUnlock,
-  kickDueSpeechPlayback,
-  speakDueAlerts,
-  speakText,
-  stopSpeaking,
-} from "@/lib/voice/speak";
 
 const SNOOZE_MINUTES = 60;
 const DISMISS_KEY = "acc.dueAlerts.dismissed.v1";
@@ -139,22 +130,6 @@ function collectAlerts(
   return items.sort((a, b) => rank(a) - rank(b));
 }
 
-function speechForAlert(item: AlertItem): string {
-  if (item.type === "settlement") {
-    return dueAlertSpeechText({
-      type: "settlement",
-      customerName: customerFullName(item.customer),
-      when: item.when,
-    });
-  }
-  return dueAlertSpeechText({
-    type: "reminder",
-    title: item.reminder.title,
-    overdue: reminderStatus(item.reminder) === "overdue",
-    note: item.reminder.note,
-  });
-}
-
 export function DueAlertsDialog({ includeReminders = true }: { includeReminders?: boolean }) {
   const [reminderList] = remindersStore.useAll();
   const [customerList] = customersStore.useAll();
@@ -176,29 +151,10 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
     () => collectAlerts(reminderList, customerList, dismissed, includeReminders),
     [reminderList, customerList, dismissed, includeReminders],
   );
-  const [appSettings] = settings.useAll();
-  const speakOn = appSettings.speakRemindersAloud !== false;
-  const dueKeys = due.map((item) => item.key).join("|");
 
   useEffect(() => {
     if (index >= due.length) setIndex(0);
   }, [due.length, index]);
-
-  useEffect(() => {
-    installSpeechUnlock();
-  }, []);
-
-  useEffect(() => {
-    if (!speakOn || due.length === 0) {
-      stopSpeaking();
-      return;
-    }
-    try {
-      speakDueAlerts(due.map((item) => ({ key: item.key, text: speechForAlert(item) })));
-    } catch {
-      /* صدا هرگز نباید پنجره‌ی سررسید یا داده را خراب کند */
-    }
-  }, [speakOn, dueKeys, due]);
 
   if (due.length === 0) return null;
   const current = due[Math.min(index, due.length - 1)];
@@ -224,29 +180,12 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
         role="dialog"
         aria-modal="true"
         aria-labelledby="due-alert-title"
-        onPointerDown={() => kickDueSpeechPlayback()}
       >
         <div className="w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-elegant animate-in fade-in zoom-in-95 duration-200">
-          <AlertHeader
-            item={current}
-            extraCount={due.length - 1}
-            onClose={dismissCurrent}
-            onSpeak={speakOn ? () => void speakText(speechForAlert(current)) : undefined}
-          />
+          <AlertHeader item={current} extraCount={due.length - 1} onClose={dismissCurrent} />
 
           <div className="px-5 py-4">
             <AlertBody item={current} />
-
-            {speakOn && (
-              <button
-                type="button"
-                onClick={() => kickDueSpeechPlayback()}
-                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 py-2.5 text-sm font-semibold text-amber-800 dark:text-amber-300"
-              >
-                <Volume2 className="h-4 w-4" />
-                بشنو — خواندن یادآوری با صدا
-              </button>
-            )}
 
             {customer && customerBalance(customer) > 0 && (
               <div className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs">
@@ -408,12 +347,10 @@ function AlertHeader({
   item,
   extraCount,
   onClose,
-  onSpeak,
 }: {
   item: AlertItem;
   extraCount: number;
   onClose: () => void;
-  onSpeak?: () => void;
 }) {
   const overdue =
     item.type === "settlement"
@@ -443,23 +380,10 @@ function AlertHeader({
       </span>
       <Bell className="h-3.5 w-3.5" />
       <span id="due-alert-title">{label}</span>
-      {extraCount > 0 ? (
+      {extraCount > 0 && (
         <span className="mr-auto rounded-full bg-background/70 px-2 py-0.5 text-[10px]">
           +{formatNumber(extraCount)} مورد دیگر
         </span>
-      ) : (
-        <span className="mr-auto" />
-      )}
-      {onSpeak && (
-        <button
-          type="button"
-          onClick={onSpeak}
-          className="grid h-7 w-7 place-items-center rounded-lg hover:bg-background/60"
-          aria-label="خواندن با صدا"
-          title="بشنو"
-        >
-          <Volume2 className="h-3.5 w-3.5" />
-        </button>
       )}
       <button
         type="button"

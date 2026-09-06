@@ -111,7 +111,16 @@ function newKey() {
 
 /** خواندن پاسخ با صدای دستگاه — کاملاً اختیاری و بی‌خطر */
 function speak(text: string) {
-  void import("@/lib/voice/speak").then((m) => m.speakText(text)).catch(() => {});
+  try {
+    const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "fa-IR";
+    synth.speak(u);
+  } catch {
+    /* اگر موتور خواندن نبود، بی‌صدا رد می‌شویم */
+  }
 }
 
 /**

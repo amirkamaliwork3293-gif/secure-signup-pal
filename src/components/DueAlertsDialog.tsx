@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Phone,
   Send,
+  Volume2,
   Wallet,
   X,
 } from "lucide-react";
@@ -36,6 +37,8 @@ import {
 } from "@/lib/store";
 import { openExternal, toIntlPhone, telHref } from "@/lib/openExternal";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
+import { dueAlertSpeechText } from "@/lib/voice/reminder-speech";
+import { installSpeechUnlock, speakDueAlerts, speakText, stopSpeaking } from "@/lib/voice/speak";
 
 const SNOOZE_MINUTES = 60;
 const DISMISS_KEY = "acc.dueAlerts.dismissed.v1";
@@ -130,6 +133,22 @@ function collectAlerts(
   return items.sort((a, b) => rank(a) - rank(b));
 }
 
+function speechForAlert(item: AlertItem): string {
+  if (item.type === "settlement") {
+    return dueAlertSpeechText({
+      type: "settlement",
+      customerName: customerFullName(item.customer),
+      when: item.when,
+    });
+  }
+  return dueAlertSpeechText({
+    type: "reminder",
+    title: item.reminder.title,
+    overdue: reminderStatus(item.reminder) === "overdue",
+    note: item.reminder.note,
+  });
+}
+
 export function DueAlertsDialog({ includeReminders = true }: { includeReminders?: boolean }) {
   const [reminderList] = remindersStore.useAll();
   const [customerList] = customersStore.useAll();
@@ -151,10 +170,25 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
     () => collectAlerts(reminderList, customerList, dismissed, includeReminders),
     [reminderList, customerList, dismissed, includeReminders],
   );
+  const [appSettings] = settings.useAll();
+  const speakOn = appSettings.speakRemindersAloud !== false;
+  const dueKeys = due.map((item) => item.key).join("|");
 
   useEffect(() => {
     if (index >= due.length) setIndex(0);
   }, [due.length, index]);
+
+  useEffect(() => {
+    installSpeechUnlock();
+  }, []);
+
+  useEffect(() => {
+    if (!speakOn || due.length === 0) {
+      if (due.length === 0) stopSpeaking();
+      return;
+    }
+    speakDueAlerts(due.map((item) => ({ key: item.key, text: speechForAlert(item) })));
+  }, [speakOn, dueKeys, due]);
 
   if (due.length === 0) return null;
   const current = due[Math.min(index, due.length - 1)];
@@ -182,7 +216,12 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
         aria-labelledby="due-alert-title"
       >
         <div className="w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-elegant animate-in fade-in zoom-in-95 duration-200">
-          <AlertHeader item={current} extraCount={due.length - 1} onClose={dismissCurrent} />
+          <AlertHeader
+            item={current}
+            extraCount={due.length - 1}
+            onClose={dismissCurrent}
+            onSpeak={speakOn ? () => void speakText(speechForAlert(current)) : undefined}
+          />
 
           <div className="px-5 py-4">
             <AlertBody item={current} />
@@ -347,10 +386,12 @@ function AlertHeader({
   item,
   extraCount,
   onClose,
+  onSpeak,
 }: {
   item: AlertItem;
   extraCount: number;
   onClose: () => void;
+  onSpeak?: () => void;
 }) {
   const overdue =
     item.type === "settlement"
@@ -380,10 +421,23 @@ function AlertHeader({
       </span>
       <Bell className="h-3.5 w-3.5" />
       <span id="due-alert-title">{label}</span>
-      {extraCount > 0 && (
+      {extraCount > 0 ? (
         <span className="mr-auto rounded-full bg-background/70 px-2 py-0.5 text-[10px]">
           +{formatNumber(extraCount)} مورد دیگر
         </span>
+      ) : (
+        <span className="mr-auto" />
+      )}
+      {onSpeak && (
+        <button
+          type="button"
+          onClick={onSpeak}
+          className="grid h-7 w-7 place-items-center rounded-lg hover:bg-background/60"
+          aria-label="خواندن با صدا"
+          title="بشنو"
+        >
+          <Volume2 className="h-3.5 w-3.5" />
+        </button>
       )}
       <button
         type="button"

@@ -500,6 +500,11 @@ export type AppSettings = {
   /** نمایش بخش «یادآوری‌ها» (پیگیری مشتریان و وظایف) در نوار پایین — پیش‌فرض فعال */
   showRemindersFeature?: boolean;
   /**
+   * خواندن صوتی یادآوری‌ها وقتی پنجره‌ی سررسید باز می‌شود.
+   * پیش‌فرض فعال است؛ در مغازه شلوغ می‌توان خاموش کرد.
+   */
+  speakRemindersAloud?: boolean;
+  /**
    * نمایش بخش «تولید و فرمول» — پیش‌فرض غیرفعال تا برای فروشگاه‌هایی
    * که تولید ندارند برنامه شلوغ نشود.
    */
@@ -561,6 +566,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showStudentsFeature: false,
   showGoldFeature: false,
   showRemindersFeature: true,
+  speakRemindersAloud: true,
   showProductionFeature: false,
   trackInventory: true,
 };

@@ -7,6 +7,7 @@ import { useOnlineStatus } from "@/lib/online-status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { DueAlertsDialog } from "@/components/DueAlertsDialog";
+import { installSpeechUnlock } from "@/lib/voice/speak";
 import { SmartAssistant } from "@/components/SmartAssistant";
 import { OnboardingTour } from "@/components/OnboardingTour";
 import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
@@ -69,6 +70,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (loggedIn) installSpeechUnlock();
+  }, [loggedIn]);
 
   return (
     <div

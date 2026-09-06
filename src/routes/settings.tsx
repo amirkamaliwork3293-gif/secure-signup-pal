@@ -43,6 +43,7 @@ import {
   Bell,
   Factory,
   Boxes,
+  Volume2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
@@ -65,6 +66,7 @@ function SettingsPageInner() {
   const [showStudentsFeature, setShowStudentsFeature] = useState(!!appSettings.showStudentsFeature);
   const [showGoldFeature, setShowGoldFeature] = useState(!!appSettings.showGoldFeature);
   const [showRemindersFeature, setShowRemindersFeature] = useState(appSettings.showRemindersFeature !== false);
+  const [speakRemindersAloud, setSpeakRemindersAloud] = useState(appSettings.speakRemindersAloud !== false);
   const [showProductionFeature, setShowProductionFeature] = useState(!!appSettings.showProductionFeature);
   const [trackInventory, setTrackInventory] = useState(appSettings.trackInventory !== false);
   const [currencyUnit, setCurrencyUnit] = useState<"toman" | "rial">(
@@ -84,6 +86,7 @@ function SettingsPageInner() {
       showStudentsFeature,
       showGoldFeature,
       showRemindersFeature,
+      speakRemindersAloud,
       showProductionFeature,
       trackInventory,
       currencyUnit,
@@ -327,6 +330,25 @@ function SettingsPageInner() {
           </label>
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
             یادآوری وظایف، سررسیدها و پیگیری مشتریان — با هشدار «امروز / سررسید گذشته» در نوار پایین.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-background p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <Volume2 className="h-4 w-4 text-primary" />
+              خواندن صوتی یادآوری
+            </span>
+            <input
+              type="checkbox"
+              checked={speakRemindersAloud}
+              onChange={(e) => setSpeakRemindersAloud(e.target.checked)}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            وقتی وارد برنامه می‌شوید و پنجره‌ی سررسید باز می‌شود، یادآوری با صدای زن خوانده می‌شود.
+            هر مورد روزی یک‌بار. در مغازه شلوغ خاموش کنید.
           </p>
         </div>
 

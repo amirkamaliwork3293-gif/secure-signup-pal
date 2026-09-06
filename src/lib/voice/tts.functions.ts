@@ -108,6 +108,7 @@ async function requestSpeech(opts: {
       signal,
       headers: {
         Authorization: `Bearer ${opts.apiKey}`,
+        "Lovable-API-Key": opts.apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(opts.body),
@@ -135,9 +136,13 @@ export const synthesizeSpeech = createServerFn({ method: "POST" })
   .inputValidator((data) => InputSchema.parse(data))
   .handler(async ({ data, context }): Promise<SynthesizeResult> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await requireActiveSubscription(context.supabase, context.userId);
-    await enforceRateLimit(supabaseAdmin, "tts", context.userId, 40, 3600);
-    await enforceRateLimit(supabaseAdmin, "tts-ip", clientIp(), 80, 3600);
+    try {
+      await requireActiveSubscription(context.supabase, context.userId);
+      await enforceRateLimit(supabaseAdmin, "tts", context.userId, 40, 3600);
+      await enforceRateLimit(supabaseAdmin, "tts-ip", clientIp(), 80, 3600);
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
 
     const text = data.text.trim();
     const lovableKey = process.env.LOVABLE_API_KEY;
@@ -151,22 +156,33 @@ export const synthesizeSpeech = createServerFn({ method: "POST" })
         const endpoint = useOpenAI
           ? "https://api.openai.com/v1/audio/speech"
           : "https://ai.gateway.lovable.dev/v1/audio/speech";
-        const prefix = useOpenAI ? "" : "openai/";
-        const attempts: Record<string, unknown>[] = [
-          {
-            model: `${prefix}gpt-4o-mini-tts`,
-            voice: "nova",
-            input: text,
-            instructions: FEMALE_INSTRUCTIONS,
-            response_format: "mp3",
-          },
-          {
-            model: `${prefix}tts-1`,
-            voice: "nova",
-            input: text,
-            response_format: "mp3",
-          },
-        ];
+        const attempts: Record<string, unknown>[] = useOpenAI
+          ? [
+              {
+                model: "gpt-4o-mini-tts",
+                voice: "nova",
+                input: text,
+                instructions: FEMALE_INSTRUCTIONS,
+                response_format: "mp3",
+              },
+              { model: "tts-1", voice: "nova", input: text, response_format: "mp3" },
+            ]
+          : [
+              {
+                model: "openai/gpt-4o-mini-tts",
+                voice: "nova",
+                input: text,
+                instructions: FEMALE_INSTRUCTIONS,
+                response_format: "mp3",
+              },
+              { model: "openai/tts-1", voice: "nova", input: text, response_format: "mp3" },
+              {
+                model: "google/gemini-2.5-flash-preview-tts",
+                voice: "Kore",
+                input: text,
+                response_format: "mp3",
+              },
+            ];
         for (const body of attempts) {
           const result = await requestSpeech({ url: endpoint, apiKey, body });
           if (result.ok) {

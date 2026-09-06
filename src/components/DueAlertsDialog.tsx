@@ -38,7 +38,13 @@ import {
 import { openExternal, toIntlPhone, telHref } from "@/lib/openExternal";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
 import { dueAlertSpeechText } from "@/lib/voice/reminder-speech";
-import { installSpeechUnlock, speakDueAlerts, speakText, stopSpeaking } from "@/lib/voice/speak";
+import {
+  installSpeechUnlock,
+  kickDueSpeechPlayback,
+  speakDueAlerts,
+  speakText,
+  stopSpeaking,
+} from "@/lib/voice/speak";
 
 const SNOOZE_MINUTES = 60;
 const DISMISS_KEY = "acc.dueAlerts.dismissed.v1";
@@ -218,6 +224,7 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
         role="dialog"
         aria-modal="true"
         aria-labelledby="due-alert-title"
+        onPointerDown={() => kickDueSpeechPlayback()}
       >
         <div className="w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-elegant animate-in fade-in zoom-in-95 duration-200">
           <AlertHeader
@@ -229,6 +236,17 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
 
           <div className="px-5 py-4">
             <AlertBody item={current} />
+
+            {speakOn && (
+              <button
+                type="button"
+                onClick={() => kickDueSpeechPlayback()}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 py-2.5 text-sm font-semibold text-amber-800 dark:text-amber-300"
+              >
+                <Volume2 className="h-4 w-4" />
+                بشنو — خواندن یادآوری با صدا
+              </button>
+            )}
 
             {customer && customerBalance(customer) > 0 && (
               <div className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs">

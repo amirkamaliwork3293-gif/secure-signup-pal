@@ -1,27 +1,23 @@
 /**
- * پخش گفتار با فایل صوتی (نه speechSynthesis).
+ * پخش گفتار یادآوری با یک عنصر Audio مشترک.
  *
- * موتور خواندن دستگاه در سایت و اپ کامیکس کار نمی‌کند؛ اینجا متن روی سرور
- * به MP3 تبدیل می‌شود و با Audio پخش می‌گردد — همان مسیری که مرورگر برای
- * هر فایل صوتی دیگر اجازه می‌دهد.
+ * علت بی‌صدایی قبلی: play() بعد از await شبکه بود و مرورگر/وب‌ویو قطعش می‌کرد؛
+ * unlock هم روی Audio جداگانه‌ای بود. اینجا play() در همان لمس کاربر صدا می‌شود.
  */
 import { jalaliToTimestamp, toJalali } from "@/lib/store";
+import { synthesizeSpeech } from "@/lib/voice/tts.functions";
 
 const SPOKEN_KEY = "acc.dueAlerts.spoken.v1";
-const SILENT_WAV =
-  "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
 type QueueItem = { key: string; text: string };
 
-const audioCache = new Map<string, string>();
-const startedKeys = new Set<string>();
+const blobCache = new Map<string, string>();
+const playedKeys = new Set<string>();
 let queue: QueueItem[] = [];
-let running = false;
-let generation = 0;
-let currentAudio: HTMLAudioElement | null = null;
-let unlocked = false;
-let pendingStart: (() => void) | null = null;
-let unlockInstalled = false;
+let player: HTMLAudioElement | null = null;
+let heldUtterance: SpeechSynthesisUtterance | null = null;
+let draining = false;
+let endedBound = false;
 
 function endOfTehranToday(): number {
   const j = toJalali(Date.now());
@@ -53,15 +49,46 @@ function writeSpoken(map: Record<string, number>) {
   }
 }
 
-export function wasSpokenToday(key: string): boolean {
+function markSpokenToday(key: string) {
+  if (!key) return;
+  const map = readSpoken();
+  map[key] = endOfTehranToday();
+  writeSpoken(map);
+}
+
+function wasSpokenToday(key: string): boolean {
   const map = readSpoken();
   return typeof map[key] === "number" && map[key]! > Date.now();
 }
 
-export function markSpokenToday(key: string) {
-  const map = readSpoken();
-  map[key] = endOfTehranToday();
-  writeSpoken(map);
+function googleTtsUrl(text: string): string {
+  return (
+    "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=" +
+    encodeURIComponent(text.slice(0, 180))
+  );
+}
+
+function getPlayer(): HTMLAudioElement {
+  if (player) return player;
+  const a = document.createElement("audio");
+  a.setAttribute("playsinline", "true");
+  a.setAttribute("webkit-playsinline", "true");
+  a.preload = "auto";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  player = a;
+  if (!endedBound) {
+    endedBound = true;
+    a.addEventListener("ended", () => {
+      const done = queue.shift();
+      if (done?.key) {
+        playedKeys.add(done.key);
+        markSpokenToday(done.key);
+      }
+      playNext(false);
+    });
+  }
+  return a;
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -72,155 +99,130 @@ function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-function isAutoplayBlock(err: unknown): boolean {
-  const msg = String((err as Error)?.message ?? err ?? "");
-  const name = String((err as { name?: string })?.name ?? "");
-  return /notallowed|not-allowed|interact|gesture|user.?agent/i.test(`${name} ${msg}`);
-}
-
-/** اولین لمس/کلید، قفل پخش خودکار مرورگر را باز می‌کند تا یادآوری بدون دکمه اضافه شنیده شود. */
-export function installSpeechUnlock() {
-  if (typeof window === "undefined" || unlockInstalled) return;
-  unlockInstalled = true;
-  const onGesture = () => {
-    const a = new Audio(SILENT_WAV);
-    a.volume = 0.01;
-    void a
-      .play()
-      .then(() => {
-        unlocked = true;
-        window.removeEventListener("pointerdown", onGesture, true);
-        window.removeEventListener("keydown", onGesture, true);
-        const run = pendingStart;
-        pendingStart = null;
-        run?.();
-      })
-      .catch(() => {
-        /* هنوز قفل است؛ ژست بعدی دوباره تلاش می‌کند */
-      });
-  };
-  window.addEventListener("pointerdown", onGesture, { capture: true });
-  window.addEventListener("keydown", onGesture, { capture: true });
-}
-
-export function stopSpeaking() {
-  generation += 1;
-  queue = [];
-  running = false;
-  pendingStart = null;
+async function prefetchServer(text: string): Promise<void> {
+  if (blobCache.has(text)) return;
   try {
-    currentAudio?.pause();
+    const res = await synthesizeSpeech({ data: { text } });
+    if (!res.ok) return;
+    const bytes = base64ToBytes(res.audioBase64);
+    const blob = new Blob([bytes as BlobPart], { type: res.mime || "audio/mpeg" });
+    blobCache.set(text, URL.createObjectURL(blob));
+  } catch {
+    /* مسیر گوگل/دستگاه باقی است */
+  }
+}
+
+function speakWithDevice(text: string): boolean {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    heldUtterance = u;
+    u.lang = "fa-IR";
+    const voices = synth.getVoices?.() ?? [];
+    const fa = voices.find((v) => /fa/i.test(v.lang) || /persian|farsi|فارسی/i.test(v.name));
+    if (fa) u.voice = fa;
+    u.rate = 0.95;
+    u.onend = () => {
+      const done = queue.shift();
+      if (done?.key) {
+        playedKeys.add(done.key);
+        markSpokenToday(done.key);
+      }
+      playNext(false);
+    };
+    synth.speak(u);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function srcFor(text: string): string {
+  return blobCache.get(text) || googleTtsUrl(text);
+}
+
+/** play() را بدون await قبلی صدا بزن — باید داخل ژست لمس باشد. */
+function playNext(fromGesture: boolean) {
+  const item = queue[0];
+  if (!item) {
+    draining = false;
+    return;
+  }
+  draining = true;
+  const a = getPlayer();
+  const src = srcFor(item.text);
+  try {
+    a.pause();
   } catch {
     /* ignore */
   }
-  currentAudio = null;
-}
-
-async function fetchAudioUrl(text: string): Promise<string> {
-  const cached = audioCache.get(text);
-  if (cached) return cached;
-  const { synthesizeSpeech } = await import("./tts.functions");
-  const res = await synthesizeSpeech({ data: { text } });
-  if (!res.ok) throw new Error(res.error);
-  const bytes = base64ToBytes(res.audioBase64);
-  const blob = new Blob([bytes as BlobPart], { type: res.mime || "audio/mpeg" });
-  const url = URL.createObjectURL(blob);
-  audioCache.set(text, url);
-  return url;
-}
-
-function playUrl(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    try {
-      currentAudio?.pause();
-    } catch {
-      /* ignore */
-    }
-    const a = new Audio(url);
-    currentAudio = a;
-    a.onended = () => {
-      if (currentAudio === a) currentAudio = null;
-      resolve();
-    };
-    a.onerror = () => {
-      if (currentAudio === a) currentAudio = null;
-      reject(new Error("پخش صدا ناموفق بود."));
-    };
-    void a
-      .play()
-      .then(() => {
-        unlocked = true;
-      })
-      .catch((err) => {
-        if (currentAudio === a) currentAudio = null;
-        reject(err);
-      });
-  });
-}
-
-async function runQueue() {
-  if (running) return;
-  const my = generation;
-  running = true;
-  try {
-    while (queue.length > 0) {
-      if (my !== generation) return;
-      const item = queue.shift();
-      if (!item) break;
-      try {
-        const url = await fetchAudioUrl(item.text);
-        if (my !== generation) return;
-        await playUrl(url);
-        if (my !== generation) return;
-        if (item.key) markSpokenToday(item.key);
-      } catch (err) {
-        if (my !== generation) return;
-        if (isAutoplayBlock(err)) {
-          queue.unshift(item);
-          pendingStart = () => {
-            void runQueue();
-          };
-          return;
-        }
-        console.warn("[speak]", err);
+  a.src = src;
+  const started = a.play();
+  if (started && typeof started.catch === "function") {
+    void started.catch(() => {
+      if (fromGesture && speakWithDevice(item.text)) return;
+      if (!fromGesture) {
+        draining = false;
+        return;
       }
-    }
-  } finally {
-    if (my === generation) running = false;
+      queue.shift();
+      playNext(true);
+    });
   }
-}
-
-/** پخش یک جمله — برای دکمه «بشنو» و دستیار. همیشه تلاش می‌کند، حتی اگر امروز خوانده شده باشد. */
-export async function speakText(text: string): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-  stopSpeaking();
-  queue = [{ key: "", text: trimmed.slice(0, 500) }];
-  await runQueue();
 }
 
 /**
- * صف یادآوری‌ها: هر کلید روزی یک‌بار. اگر پخش خودکار قفل باشد، با اولین لمس ادامه می‌دهد.
+ * لمس پنجره‌ی سررسید / دکمه‌ی بشنو.
+ * بلافاصله play() می‌شود تا مرورگر صدا را قطع نکند.
  */
+export function kickDueSpeechPlayback() {
+  if (typeof window === "undefined") return;
+  const a = getPlayer();
+  if (!a.paused && !a.ended && a.currentTime > 0) return;
+  playNext(true);
+}
+
+export function installSpeechUnlock() {
+  /* پخش با لمس پنجره انجام می‌شود؛ اینجا چیزی قفل نمی‌کنیم. */
+}
+
+export function stopSpeaking() {
+  queue = [];
+  draining = false;
+  try {
+    player?.pause();
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    /* ignore */
+  }
+  heldUtterance = null;
+}
+
+export async function speakText(text: string): Promise<void> {
+  const trimmed = text.trim().slice(0, 500);
+  if (!trimmed) return;
+  stopSpeaking();
+  queue = [{ key: "", text: trimmed }];
+  void prefetchServer(trimmed);
+  playNext(true);
+}
+
 export function speakDueAlerts(items: QueueItem[]) {
-  installSpeechUnlock();
-  const next: QueueItem[] = [];
+  if (typeof window === "undefined") return;
   for (const item of items) {
     const text = item.text.trim().slice(0, 500);
-    if (!text) continue;
-    if (!item.key) continue;
-    if (wasSpokenToday(item.key) || startedKeys.has(item.key)) continue;
-    startedKeys.add(item.key);
-    next.push({ key: item.key, text });
+    if (!text || !item.key) continue;
+    if (wasSpokenToday(item.key) || playedKeys.has(item.key)) continue;
+    if (queue.some((q) => q.key === item.key)) continue;
+    queue.push({ key: item.key, text });
+    void prefetchServer(text);
   }
-  if (next.length === 0) return;
-  queue.push(...next);
-  if (!unlocked) {
-    pendingStart = () => {
-      void runQueue();
-    };
-    void runQueue();
-    return;
-  }
-  void runQueue();
+  // تلاش اولیه؛ اگر مرورگر قطع کرد، لمس پنجره kickDueSpeechPlayback را می‌زند
+  playNext(false);
 }

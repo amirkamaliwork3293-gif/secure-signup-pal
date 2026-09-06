@@ -34,6 +34,12 @@ function bytesToBase64(bytes: Uint8Array): string {
 const FEMALE_INSTRUCTIONS =
   "Speak in Persian (Farsi) only, as a warm adult woman. Clear, natural, unhurried. Do not add words that are not in the text.";
 
+function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return run(ctrl.signal).finally(() => clearTimeout(timer));
+}
+
 function splitForGoogle(text: string, max = 180): string[] {
   const t = text.trim();
   if (t.length <= max) return [t];
@@ -69,14 +75,17 @@ async function fromGoogleTranslateFa(
     const url =
       "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=" +
       encodeURIComponent(chunk);
-    const res = await fetch(url, {
-      headers: {
-        accept: "audio/mpeg,audio/*;q=0.9,*/*;q=0.8",
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        referer: "https://translate.google.com/",
-      },
-    });
+    const res = await withTimeout(12_000, (signal) =>
+      fetch(url, {
+        signal,
+        headers: {
+          accept: "audio/mpeg,audio/*;q=0.9,*/*;q=0.8",
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          referer: "https://translate.google.com/",
+        },
+      }),
+    );
     if (!res.ok) return { ok: false, detail: `google-tts ${res.status}` };
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength < 256) return { ok: false, detail: "google-tts empty" };
@@ -93,14 +102,17 @@ async function requestSpeech(opts: {
 }): Promise<
   { ok: true; bytes: Uint8Array; mime: string } | { ok: false; status: number; detail: string }
 > {
-  const res = await fetch(opts.url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(opts.body),
-  });
+  const res = await withTimeout(20_000, (signal) =>
+    fetch(opts.url, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(opts.body),
+    }),
+  );
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     return { ok: false, status: res.status, detail: txt.slice(0, 240) };

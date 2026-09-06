@@ -184,10 +184,14 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
 
   useEffect(() => {
     if (!speakOn || due.length === 0) {
-      if (due.length === 0) stopSpeaking();
+      stopSpeaking();
       return;
     }
-    speakDueAlerts(due.map((item) => ({ key: item.key, text: speechForAlert(item) })));
+    try {
+      speakDueAlerts(due.map((item) => ({ key: item.key, text: speechForAlert(item) })));
+    } catch {
+      /* صدا هرگز نباید پنجره‌ی سررسید یا داده را خراب کند */
+    }
   }, [speakOn, dueKeys, due]);
 
   if (due.length === 0) return null;

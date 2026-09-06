@@ -7,13 +7,17 @@ import { supabase, type UserProfile } from "@/lib/supabase";
 import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
 import { isCapacitor } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
-import { clearUserOfflineCache, readLastUserScope } from "@/lib/offline-cache";
+import { clearUserOfflineCache } from "@/lib/offline-cache";
 import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
 import {
   classifyUserAccess,
+  clearStaySignedIn,
   pickProfileForSession,
+  readStaySignedIn,
   shouldKeepExistingSession,
+  shouldRestoreDeviceSession,
   shouldSyncOnAuthEvent,
+  writeStaySignedIn,
 } from "@/lib/auth-session";
 
 type AuthState =
@@ -133,7 +137,25 @@ async function loadState(session: Session): Promise<AuthState> {
     liveIsAdmin,
     cached: readProfileCache(session.user.id),
   });
+  writeStaySignedIn(session.user.id);
   return toAuthState(session, picked.profile, picked.isAdmin);
+}
+
+function restoreDeviceAuth(): AuthState | null {
+  const stayId = readStaySignedIn();
+  if (!stayId) return null;
+  const cached = readProfileCache(stayId);
+  if (!cached || cached.profile.id !== stayId) return null;
+  setStorageScope(stayId);
+  const kind = classifyUserAccess(cached.profile, false);
+  if (kind === "pending") return { status: "pending", username: cached.profile.username };
+  if (kind === "rejected") return { status: "rejected", username: cached.profile.username };
+  return {
+    status: "offline-cached",
+    username: cached.profile.username,
+    profile: cached.profile,
+    userId: stayId,
+  };
 }
 
 function capacitorNetworkDown(): boolean {
@@ -146,24 +168,6 @@ function scopedUserId(state: AuthState): string | null {
   if (state.status === "authenticated" || state.status === "expired") return state.session.user.id;
   if (state.status === "offline-cached") return state.userId;
   return null;
-}
-
-function restoreLocalCapacitorAuth(): AuthState | null {
-  if (!isCapacitor()) return null;
-  const uid = readLastUserScope();
-  if (!uid) return null;
-  const cached = readProfileCache(uid);
-  if (!cached || cached.profile.id !== uid) return null;
-  setStorageScope(uid);
-  const kind = classifyUserAccess(cached.profile, false);
-  if (kind === "pending") return { status: "pending", username: cached.profile.username };
-  if (kind === "rejected") return { status: "rejected", username: cached.profile.username };
-  return {
-    status: "offline-cached",
-    username: cached.profile.username,
-    profile: cached.profile,
-    userId: uid,
-  };
 }
 
 function optimisticStateFromCache(session: Session): AuthState | null {
@@ -185,25 +189,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "unauthenticated" });
   const stateRef = useRef(state);
   stateRef.current = state;
+  const explicitSignOutRef = useRef(false);
+
+  const adoptNoSession = () => {
+    if (explicitSignOutRef.current) {
+      explicitSignOutRef.current = false;
+      clearStaySignedIn();
+      setStorageScope(null);
+      setState({ status: "unauthenticated" });
+      return;
+    }
+    const stayId = readStaySignedIn();
+    if (
+      shouldRestoreDeviceSession({
+        hasLiveSession: false,
+        explicitSignOut: false,
+        stayUserId: stayId,
+      })
+    ) {
+      const local = restoreDeviceAuth();
+      if (local) {
+        setState(local);
+        return;
+      }
+    }
+    if (shouldKeepExistingSession("unauthenticated", stateRef.current.status, false, Boolean(stayId))) {
+      return;
+    }
+    setStorageScope(null);
+    setState({ status: "unauthenticated" });
+  };
 
   const refreshProfile = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) {
-      if (capacitorNetworkDown()) {
-        const local = restoreLocalCapacitorAuth();
-        if (local) {
-          setState(local);
-          return;
-        }
-      }
-      setStorageScope(null);
-      setState({ status: "unauthenticated" });
+      adoptNoSession();
       return;
     }
     const next = await loadState(session);
-    if (shouldKeepExistingSession(next.status, stateRef.current.status, true)) {
+    if (shouldKeepExistingSession(next.status, stateRef.current.status, true, true)) {
       return;
     }
     setState(next);
@@ -218,16 +244,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!session) {
         stopCloudSync();
-        if (capacitorNetworkDown()) {
-          const local = restoreLocalCapacitorAuth();
-          if (local && !disposed && currentRevision === revision) {
-            setState(local);
-          }
-          return;
-        }
-        setStorageScope(null);
         if (!disposed && currentRevision === revision) {
-          setState({ status: "unauthenticated" });
+          adoptNoSession();
         }
         return;
       }
@@ -253,7 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const nextState = await loadState(session);
       if (!disposed && currentRevision === revision) {
-        if (shouldKeepExistingSession(nextState.status, stateRef.current.status, true)) {
+        if (shouldKeepExistingSession(nextState.status, stateRef.current.status, true, true)) {
           return;
         }
         setState(nextState);
@@ -306,6 +324,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    explicitSignOutRef.current = true;
+    clearStaySignedIn();
     const prev = stateRef.current;
     const prevId = scopedUserId(prev);
     stopCloudSync();

@@ -27,7 +27,7 @@ assert.ok(GENERIC_RATE_MESSAGE.includes("درخواست"));
 
 const signupOn = signupRateCaps(true);
 const signupOff = signupRateCaps(false);
-assert.equal(signupOn.ipMax, 12);
+assert.equal(signupOn.ipMax, 20);
 assert.equal(signupOn.globalMax, 80);
 assert.ok(signupOff.ipMax < signupOn.ipMax);
 assert.ok(signupOff.globalMax < signupOn.globalMax);

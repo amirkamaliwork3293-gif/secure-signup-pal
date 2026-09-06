@@ -8,9 +8,12 @@ import {
   SIGNUP_RETRY_LATER,
   SIGNUP_USERNAME_TAKEN,
   isAuthUserAlreadyRegistered,
+  missingSignupColumnFromError,
   publicSignupCreateUserError,
   publicSignupProfileError,
   shouldRetrySignupWithoutOptionalColumns,
+  shouldReuseExistingAuthUser,
+  stripSignupColumn,
 } from "../src/lib/signup-errors.ts";
 import { settleQuery } from "../src/lib/settle-query.ts";
 
@@ -22,6 +25,12 @@ assert.ok(!publicSignupCreateUserError("column profiles.secret does not exist").
 assert.equal(publicSignupProfileError("duplicate key"), SIGNUP_USERNAME_TAKEN);
 assert.equal(shouldRetrySignupWithoutOptionalColumns("Could not find the 'phone' column"), true);
 assert.equal(shouldRetrySignupWithoutOptionalColumns("over quota"), false);
+assert.equal(missingSignupColumnFromError("Could not find the 'client_ip' column of 'signup_requests'"), "client_ip");
+assert.equal(missingSignupColumnFromError("permission denied"), null);
+assert.equal("phone" in stripSignupColumn({ phone: "09", username: "ali" }, "phone"), false);
+assert.equal(shouldReuseExistingAuthUser("User already registered", false), true);
+assert.equal(shouldReuseExistingAuthUser("User already registered", true), false);
+assert.equal(shouldReuseExistingAuthUser("network down", false), false);
 
 const thenableNoCatch = {
   then(onFulfilled, onRejected) {
@@ -64,6 +73,13 @@ assert.equal(
   false,
   "ثبت‌نام نباید رمز کاربر موجود را با updateUserById عوض کند",
 );
+assert.equal(
+  signupHandler.includes("deleteUser"),
+  false,
+  "ثبت‌نام ناقص نباید حساب را پاک کند — رمز و درخواست می‌سوزد",
+);
+assert.match(signupHandler, /shouldReuseExistingAuthUser/);
+assert.match(signupHandler, /findAuthUserByUsername/);
 
 const pwUpdates = [...authSrc.matchAll(/updateUserById/g)];
 assert.equal(

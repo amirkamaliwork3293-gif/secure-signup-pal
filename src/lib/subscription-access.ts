@@ -39,7 +39,16 @@ export function isAppSession(state: SessionLike): boolean {
 }
 
 export function isSubscriptionReadOnly(state: SessionLike): boolean {
-  return state.status === "expired";
+  if (state.status === "expired") return true;
+  if (state.status === "offline-cached") {
+    const end = (state as { profile?: { end_date?: string | null; status?: string } }).profile;
+    if (end?.status === "expired") return true;
+    if (end?.end_date) {
+      const t = new Date(end.end_date).getTime();
+      if (Number.isFinite(t) && t < Date.now()) return true;
+    }
+  }
+  return false;
 }
 
 export function authUserId(state: SessionLike): string | null {

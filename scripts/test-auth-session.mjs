@@ -4,11 +4,16 @@
  */
 import assert from "node:assert/strict";
 import {
+  STAY_SIGNED_IN_KEY,
   classifyUserAccess,
+  clearStaySignedIn,
   pickProfileForSession,
+  readStaySignedIn,
   shouldKeepExistingSession,
+  shouldRestoreDeviceSession,
   shouldSyncOnAuthEvent,
   synthesizeProfileFromSession,
+  writeStaySignedIn,
 } from "../src/lib/auth-session.ts";
 
 const session = {
@@ -84,7 +89,33 @@ assert.equal(shouldSyncOnAuthEvent("TOKEN_REFRESHED", "authenticated"), false);
 assert.equal(shouldKeepExistingSession("unauthenticated", "authenticated", true), true);
 assert.equal(shouldKeepExistingSession("unauthenticated", "loading", true), false);
 assert.equal(shouldKeepExistingSession("unauthenticated", "authenticated", false), false);
+assert.equal(shouldKeepExistingSession("unauthenticated", "authenticated", false, true), true);
 assert.equal(shouldKeepExistingSession("expired", "authenticated", true), false);
+
+assert.equal(
+  shouldRestoreDeviceSession({ hasLiveSession: false, explicitSignOut: false, stayUserId: "u1" }),
+  true,
+);
+assert.equal(
+  shouldRestoreDeviceSession({ hasLiveSession: false, explicitSignOut: true, stayUserId: "u1" }),
+  false,
+);
+assert.equal(
+  shouldRestoreDeviceSession({ hasLiveSession: true, explicitSignOut: false, stayUserId: "u1" }),
+  false,
+);
+
+const mem = new Map();
+const storage = {
+  getItem: (k) => mem.get(k) ?? null,
+  setItem: (k, v) => void mem.set(k, v),
+  removeItem: (k) => void mem.delete(k),
+};
+writeStaySignedIn("u1", storage);
+assert.equal(readStaySignedIn(storage), "u1");
+assert.equal(mem.get(STAY_SIGNED_IN_KEY), "u1");
+clearStaySignedIn(storage);
+assert.equal(readStaySignedIn(storage), null);
 
 const expiredProfile = { ...active, status: "expired", end_date: "2020-01-01" };
 assert.equal(classifyUserAccess(expiredProfile, false, Date.parse("2026-09-02")), "expired");

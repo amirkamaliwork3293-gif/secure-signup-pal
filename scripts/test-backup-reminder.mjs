@@ -52,6 +52,21 @@ assert.equal(isAppSession({ status: "expired" }), true);
 assert.equal(isAppSession({ status: "pending" }), false);
 assert.equal(isSubscriptionReadOnly({ status: "expired" }), true);
 assert.equal(isSubscriptionReadOnly({ status: "authenticated" }), false);
+assert.equal(isAppSession({ status: "offline-cached" }), true);
+assert.equal(
+  isSubscriptionReadOnly({
+    status: "offline-cached",
+    profile: { status: "expired", end_date: "2020-01-01" },
+  }),
+  true,
+);
+assert.equal(
+  isSubscriptionReadOnly({
+    status: "offline-cached",
+    profile: { status: "active", end_date: "2027-01-01" },
+  }),
+  false,
+);
 assert.equal(authUserId({ status: "expired", session: { user: { id: "u1" } } }), "u1");
 assert.equal(authUserId({ status: "unauthenticated" }), null);
 

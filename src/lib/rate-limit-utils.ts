@@ -44,7 +44,7 @@ export type PublicRateCaps = {
 
 export function signupRateCaps(turnstileEnforced: boolean): PublicRateCaps {
   return turnstileEnforced
-    ? { ipMax: 12, ipWindow: 3600, globalMax: 80, globalWindow: 3600 }
+    ? { ipMax: 20, ipWindow: 3600, globalMax: 80, globalWindow: 3600 }
     : { ipMax: 3, ipWindow: 3600, globalMax: 15, globalWindow: 3600 };
 }
 

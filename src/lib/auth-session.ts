@@ -105,13 +105,64 @@ export function shouldSyncOnAuthEvent(event: string, currentStatus: string): boo
   return false;
 }
 
-/** اگر JWT هنوز هست، وضعیت unauthenticated را نپذیر — نشست قبلی را نگه دار. */
+export const STAY_SIGNED_IN_KEY = "kamali.auth.stay.v1";
+
+type StayStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+export function readStaySignedIn(storage?: StayStorage | null): string | null {
+  const s = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+  if (!s) return null;
+  try {
+    const id = s.getItem(STAY_SIGNED_IN_KEY);
+    return id && id !== "anon" ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStaySignedIn(userId: string, storage?: StayStorage | null): void {
+  const s = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+  if (!s || !userId || userId === "anon") return;
+  try {
+    s.setItem(STAY_SIGNED_IN_KEY, userId);
+  } catch {
+    /* quota */
+  }
+}
+
+export function clearStaySignedIn(storage?: StayStorage | null): void {
+  const s = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+  if (!s) return;
+  try {
+    s.removeItem(STAY_SIGNED_IN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** اگر JWT هنوز هست یا «ماندن در دستگاه» فعال است، وضعیت unauthenticated را نپذیر. */
 export function shouldKeepExistingSession(
   nextStatus: string,
   currentStatus: string,
   hasSession: boolean,
+  staySignedIn = false,
 ): boolean {
-  if (!hasSession) return false;
   if (nextStatus !== "unauthenticated") return false;
-  return currentStatus !== "unauthenticated" && currentStatus !== "loading";
+  if (currentStatus === "unauthenticated" || currentStatus === "loading") return false;
+  return hasSession || staySignedIn;
+}
+
+/** خروج واقعی فقط با دکمهٔ خروج؛ قطع توکن/شبکه کاربر را به ورود نفرستد. */
+export function shouldRestoreDeviceSession(opts: {
+  hasLiveSession: boolean;
+  explicitSignOut: boolean;
+  stayUserId: string | null;
+}): boolean {
+  if (opts.explicitSignOut) return false;
+  if (opts.hasLiveSession) return false;
+  return Boolean(opts.stayUserId);
 }

@@ -24,10 +24,13 @@ import {
   isTurnstileConfigured,
 } from "@/lib/turnstile.server";
 import {
-  SIGNUP_RETRY_LATER,
+  isAuthUserAlreadyRegistered,
+  missingSignupColumnFromError,
   publicSignupCreateUserError,
   publicSignupProfileError,
   shouldRetrySignupWithoutOptionalColumns,
+  shouldReuseExistingAuthUser,
+  stripSignupColumn,
 } from "@/lib/signup-errors";
 import {
   mergeSettingsKeepBoth,
@@ -191,6 +194,24 @@ async function findAdminAuthUser(supabaseAdmin: any, expectedUser: string) {
     const { data } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
     const users = data?.users ?? [];
     const hit = users.find((u: any) => u.email === ADMIN_EMAIL);
+    if (hit) return hit;
+    if (users.length < 200) break;
+  }
+  return null;
+}
+
+/** کاربر auth با این یوزرنیم — فقط برای ادامهٔ ثبت‌نام ناقص؛ رمز را دست نمی‌زند. */
+async function findAuthUserByUsername(supabaseAdmin: any, username: string) {
+  const email = toEmail(username);
+  const want = username.toLowerCase();
+  for (let page = 1; page <= 20; page++) {
+    const { data } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    const users = data?.users ?? [];
+    const hit = users.find((u: { email?: string | null; user_metadata?: Record<string, unknown> }) => {
+      const md = String(u.user_metadata?.username ?? "").toLowerCase();
+      const em = String(u.email ?? "").toLowerCase();
+      return md === want || em === email.toLowerCase();
+    });
     if (hit) return hit;
     if (users.length < 200) break;
   }
@@ -370,25 +391,33 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     });
     // حساب موجود را هرگز با رمز فرم جدید بازنویسی نکن — بعد از نفوذ، رمز کاربران
     // نباید خودکار عوض شود. اگر یوزرنیم تکراری است فقط همان پیام را بده.
-    if (createErr || !created.user) throw new Error(publicSignupCreateUserError(createErr?.message));
+    let userId = created?.user?.id as string | undefined;
+    if (!userId) {
+      if (shouldReuseExistingAuthUser(createErr?.message, Boolean(existingProfile))) {
+        const leftover = await findAuthUserByUsername(supabaseAdmin, username);
+        if (leftover?.id) {
+          userId = leftover.id;
+        }
+      }
+      if (!userId) throw new Error(publicSignupCreateUserError(createErr?.message));
+    }
 
     const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
-      id: created.user.id,
+      id: userId,
       username,
       first_name: data.first_name.trim(),
       last_name: data.last_name.trim(),
       plan: data.plan,
       status: "pending",
     });
-    if (profileErr) {
-      // cleanup so the username isn't burned by a half-created account
-      await settleQuery(supabaseAdmin.auth.admin.deleteUser(created.user.id));
+    if (profileErr && !isAuthUserAlreadyRegistered(profileErr.message)) {
+      // حساب را پاک نکن — تلاش بعد همان کاربر را ادامه می‌دهد و رمز ثابت می‌ماند.
       throw new Error(publicSignupProfileError(profileErr.message));
     }
 
     // کوئری PostgREST Promise نیست — `.catch` روی insert وجود ندارد و ثبت‌نام را می‌خواباند.
     await settleQuery(
-      supabaseAdmin.from("user_roles").insert({ user_id: created.user.id, role: "user" }),
+      supabaseAdmin.from("user_roles").insert({ user_id: userId, role: "user" }),
     );
 
     // Try inserting with the optional columns; if one doesn't exist yet (migration
@@ -411,25 +440,31 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     if (data.receipt_note) optional.receipt_note = data.receipt_note;
     if (ip && ip !== "unknown") optional.client_ip = ip.slice(0, 80);
 
-    let result = await supabaseAdmin
-      .from("signup_requests")
-      .insert({ ...requestBase, ...optional } as any)
-      .select("id")
-      .single();
+    let payload: Record<string, unknown> = { ...requestBase, ...optional };
+    let result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
 
-    if (shouldRetrySignupWithoutOptionalColumns(result.error?.message)) {
-      // Column not yet migrated — retry with the base columns only
-      result = await supabaseAdmin
-        .from("signup_requests")
-        .insert(requestBase)
-        .select("id")
-        .single();
+    for (let attempt = 0; attempt < 6 && result.error; attempt++) {
+      const missing = missingSignupColumnFromError(result.error.message);
+      if (missing && missing in payload) {
+        payload = stripSignupColumn(payload, missing);
+      } else if (shouldRetrySignupWithoutOptionalColumns(result.error.message)) {
+        payload = { first_name: requestBase.first_name, last_name: requestBase.last_name, username, plan: requestBase.plan };
+      } else {
+        break;
+      }
+      result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
     }
     if (result.error) {
-      await settleQuery(supabaseAdmin.from("profiles").delete().eq("id", created.user.id));
-      await settleQuery(supabaseAdmin.from("user_roles").delete().eq("user_id", created.user.id));
-      await settleQuery(supabaseAdmin.auth.admin.deleteUser(created.user.id));
-      throw new Error(SIGNUP_RETRY_LATER);
+      const { data: existingRow } = await supabaseAdmin
+        .from("signup_requests")
+        .select("id")
+        .eq("username", username)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingRow?.id) return { id: existingRow.id };
+      // پروفایل pending ساخته شده — درخواست را رد نکن و حساب را حذف نکن.
+      return { id: userId };
     }
 
     return { id: result.data.id };

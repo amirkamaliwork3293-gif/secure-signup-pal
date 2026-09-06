@@ -90,12 +90,17 @@ export function classifyUserAccess(
 
 /**
  * کدام رویداد auth باید دوباره پروفایل را از شبکه بخواند؟
- * SIGNED_IN تکراری (فوکوس تب / رفرش توکن) و USER_UPDATED نباید کاربر را
- * به خاطر خطای لحظه‌ای پروفایل از برنامه بیرون بیندازد.
+ * SIGNED_IN تکراری همان کاربر را نادیده می‌گیریم؛ ورود با یوزرنیم دیگر نه.
  */
-export function shouldSyncOnAuthEvent(event: string, currentStatus: string): boolean {
+export function shouldSyncOnAuthEvent(
+  event: string,
+  currentStatus: string,
+  currentUserId?: string | null,
+  nextUserId?: string | null,
+): boolean {
   if (event === "SIGNED_OUT") return true;
   if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+    if (nextUserId && currentUserId && nextUserId !== currentUserId) return true;
     return (
       currentStatus === "loading" ||
       currentStatus === "unauthenticated" ||

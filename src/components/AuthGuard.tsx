@@ -4,7 +4,8 @@ import { LandingPage } from "@/components/LandingPage";
 import { isWebView } from "@/lib/isWebView";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { SubscriptionAccessProvider } from "@/components/SubscriptionAccess";
-import { ShieldOff, Lock, Clock } from "lucide-react";
+import { ShieldOff, Clock } from "lucide-react";
+import { shouldShowAdminLogin } from "@/lib/account-isolation";
 
 const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 
@@ -45,10 +46,24 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
     return <LandingPage />;
   }
 
+  if (
+    shouldShowAdminLogin({
+      adminOnly,
+      status: state.status,
+      isAdmin: state.status === "authenticated" && state.isAdmin,
+    })
+  ) {
+    return (
+      <Suspense fallback={<LoginFallback />}>
+        <LoginPage adminMode />
+      </Suspense>
+    );
+  }
+
   if (state.status === "unauthenticated") {
     // داخل اپلیکیشن (وب‌ویو) یا مسیر ادمین → مستقیم صفحه‌ی ورود.
     // در مرورگر وب → ابتدا صفحه‌ی معرفی نمایش داده می‌شود.
-    return isWebView() || adminOnly ? (
+    return isWebView() ? (
       <Suspense fallback={<LoginFallback />}>
         <LoginPage adminMode={adminOnly} />
       </Suspense>
@@ -94,25 +109,6 @@ export function AuthGuard({ children, adminOnly = false }: Props) {
         title="درخواست شما رد شده است"
         desc={<>برای اطلاعات بیشتر با مدیر تماس بگیرید.</>}
         action={<SignOutBtn onClick={signOut} />}
-      />
-    );
-  }
-
-  if (adminOnly && (state.status !== "authenticated" || !state.isAdmin)) {
-    return (
-      <CenterMessage
-        icon={<Lock className="h-8 w-8 text-amber-500" />}
-        iconBg="bg-amber-500/10"
-        title="دسترسی ممنوع"
-        desc={<>این بخش فقط برای مدیر سیستم است.</>}
-        action={
-          <button
-            onClick={() => window.history.back()}
-            className="rounded-xl border border-border px-5 py-2.5 text-sm font-medium hover:bg-accent"
-          >
-            بازگشت
-          </button>
-        }
       />
     );
   }

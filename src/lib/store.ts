@@ -32,6 +32,7 @@ import {
   ONLINE_CONFIRMED_EVENT,
 } from "@/lib/online-status";
 import { rememberCloudRead } from "@/lib/offline-cache";
+import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -715,6 +716,35 @@ let cloudUserId: string | null = null;
 // with empty arrays. Restored offline edits are flushed explicitly after
 // hydration finishes.
 let cloudHydrated = false;
+let hydrateEpoch = 0;
+
+function clearInMemoryPush() {
+  for (const k of Object.keys(pendingPush)) delete pendingPush[k];
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+}
+
+/**
+ * قبل از هر ورود/تعویض اکانت: اسکوپ حافظه همان userId شود و صف همگام‌سازی
+ * کاربر قبلی دور ریخته شود تا فاکتور/کالا به اکانت دیگری نرود.
+ */
+export function beginUserScope(userId: string) {
+  if (!userId || userId === "anon") return;
+  if (cloudUserId && cloudUserId !== userId) {
+    clearInMemoryPush();
+    cloudHydrated = false;
+    lastCloudUpdatedAt = null;
+    hydrateEpoch += 1;
+  }
+  cloudUserId = userId;
+  setStorageScope(userId);
+}
 
 function markCloudHydrated() {
   cloudHydrated = true;
@@ -1009,8 +1039,13 @@ async function flushCloudPush() {
   if (!cloudUserId) return;
   // اپ آفلاین: هیچ درخواستی به سرور فرستاده نشود (نه صف جدید، نه امید به شکست).
   if (isCapacitorOfflineReadOnly()) return;
-  if (!cloudHydrated) {
-    // Keep everything queued; hydrateFromCloud() triggers the flush when done.
+  if (
+    !canFlushCloudPush({
+      cloudUserId,
+      cloudHydrated,
+      storageScope: getStorageScope(),
+    })
+  ) {
     return;
   }
   const fieldsToPush = { ...pendingPush };
@@ -1109,6 +1144,7 @@ async function flushCloudPush() {
       error = retry.error;
     }
     if (error) throw error;
+    if (cloudUserId !== userId || getStorageScope() !== userId) return;
     lastLocalPushAt = Date.now();
     const pushedAt = typeof payload.updated_at === "string" ? payload.updated_at : "";
     if (pushedAt) lastCloudUpdatedAt = pushedAt;
@@ -1212,8 +1248,9 @@ function applyCloudRow(data: Record<string, unknown>) {
   applyMerged("manual_ledger", MANUAL_LEDGER_KEY, data.manual_ledger);
 }
 
-async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promise<void> {
-  cloudUserId = userId;
+async function pullUserData(userId: string, opts?: { refresh?: boolean; epoch?: number }): Promise<void> {
+  const epoch = opts?.epoch ?? hydrateEpoch;
+  beginUserScope(userId);
   if (!opts?.refresh) cloudHydrated = false;
   // Restore any unsynced local changes from a previous session so they get
   // re-pushed and are never overwritten by cloud data below.
@@ -1233,6 +1270,17 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw error;
+    if (
+      shouldAbortHydrate({
+        requestedUserId: userId,
+        cloudUserId,
+        storageScope: getStorageScope(),
+        epoch,
+        currentEpoch: hydrateEpoch,
+      })
+    ) {
+      return;
+    }
     if (!data) {
       // اولین دستگاه این کاربر: هر چیزی که به‌صورت محلی وجود دارد باید بالا برود.
       // به‌جای insert دستی (که قبلاً فقط ۵ فیلد را می‌فرستاد و مشتریان/هزینه‌ها/
@@ -1262,6 +1310,17 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
     // هرگز آرایهٔ محلی را کامل با ابر عوض نکن — ادغام شناسه‌به‌شناسه.
     // اگر ابر قدیمی‌تر باشد (مثل بعد از حمله یا خطای ذخیره)، کالای جدید محلی می‌ماند
     // و دوباره به ابر فرستاده می‌شود. حذف عمدی همین دستگاه با tombstone حفظ می‌شود.
+    if (
+      shouldAbortHydrate({
+        requestedUserId: userId,
+        cloudUserId,
+        storageScope: getStorageScope(),
+        epoch,
+        currentEpoch: hydrateEpoch,
+      })
+    ) {
+      return;
+    }
     applyCloudRow(data as Record<string, unknown>);
     lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
     markCloudHydrated();
@@ -1283,7 +1342,16 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
     }
   } finally {
     // Flush any restored offline edits back to the cloud.
-    if (cloudHydrated && Object.keys(pendingPush).length > 0) {
+    if (
+      cloudHydrated &&
+      Object.keys(pendingPush).length > 0 &&
+      canFlushCloudPush({
+        cloudUserId,
+        cloudHydrated,
+        storageScope: getStorageScope(),
+      }) &&
+      cloudUserId === userId
+    ) {
       if (pushTimer) clearTimeout(pushTimer);
       pushTimer = setTimeout(flushCloudPush, 600);
     }
@@ -1291,12 +1359,17 @@ async function pullUserData(userId: string, opts?: { refresh?: boolean }): Promi
 }
 
 export async function hydrateFromCloud(userId: string) {
-  if (hydrateInFlight) return hydrateInFlight;
-  hydrateInFlight = pullUserData(userId);
+  if (hydrateInFlight && cloudUserId === userId && getStorageScope() === userId) {
+    return hydrateInFlight;
+  }
+  beginUserScope(userId);
+  const epoch = hydrateEpoch;
+  const run = pullUserData(userId, { epoch });
+  hydrateInFlight = run;
   try {
-    await hydrateInFlight;
+    await run;
   } finally {
-    hydrateInFlight = null;
+    if (hydrateInFlight === run) hydrateInFlight = null;
   }
 }
 
@@ -1332,17 +1405,11 @@ export async function refreshFromCloud() {
 }
 
 export function stopCloudSync() {
+  hydrateEpoch += 1;
   cloudUserId = null;
+  cloudHydrated = false;
   lastCloudUpdatedAt = null;
-  if (pushTimer) {
-    clearTimeout(pushTimer);
-    pushTimer = null;
-  }
-  if (retryTimer) {
-    clearTimeout(retryTimer);
-    retryTimer = null;
-  }
-  for (const k of Object.keys(pendingPush)) delete pendingPush[k];
+  clearInMemoryPush();
   // Do NOT clear the persisted dirty set here — it must survive sign-out /
   // reload so a subsequent sign-in can still resync offline edits.
 }

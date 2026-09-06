@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
-import { setStorageScope, hydrateFromCloud, stopCloudSync } from "@/lib/store";
+import { setStorageScope, hydrateFromCloud, stopCloudSync, beginUserScope } from "@/lib/store";
 import { isCapacitor } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
@@ -19,6 +19,7 @@ import {
   shouldSyncOnAuthEvent,
   writeStaySignedIn,
 } from "@/lib/auth-session";
+import { keepLiveAdminRole } from "@/lib/account-isolation";
 
 type AuthState =
   | { status: "loading" }
@@ -83,8 +84,11 @@ function toAuthState(session: Session, profile: UserProfile, isAdmin: boolean): 
   return { status: "authenticated", session, profile, isAdmin };
 }
 
-async function loadState(session: Session): Promise<AuthState> {
-  setStorageScope(session.user.id);
+async function loadState(
+  session: Session,
+  prev?: { userId: string | null; isAdmin: boolean },
+): Promise<AuthState> {
+  beginUserScope(session.user.id);
 
   const skipNetwork = capacitorNetworkDown();
   if (!skipNetwork) {
@@ -102,6 +106,7 @@ async function loadState(session: Session): Promise<AuthState> {
 
   let live: UserProfile | null = null;
   let liveIsAdmin = false;
+  let roleQuerySucceeded = false;
 
   if (!skipNetwork) {
     try {
@@ -120,11 +125,14 @@ async function loadState(session: Session): Promise<AuthState> {
             .eq("user_id", session.user.id)
             .eq("role", "admin")
             .maybeSingle();
-          liveIsAdmin = !roleErr && !!roleRow;
+          if (!roleErr) {
+            liveIsAdmin = !!roleRow;
+            roleQuerySucceeded = true;
+          }
         } catch {
-          liveIsAdmin = false;
+          roleQuerySucceeded = false;
         }
-        saveProfileCache(session.user.id, live, liveIsAdmin);
+        saveProfileCache(session.user.id, live, roleQuerySucceeded ? liveIsAdmin : false);
       }
     } catch {
       // شبکه/RLS — پایین‌تر از کش استفاده می‌شود. JWT معتبر را دور نمی‌اندازیم.
@@ -137,8 +145,14 @@ async function loadState(session: Session): Promise<AuthState> {
     liveIsAdmin,
     cached: readProfileCache(session.user.id),
   });
+  const isAdmin = keepLiveAdminRole({
+    sameUser: Boolean(prev?.userId && prev.userId === session.user.id),
+    previousIsAdmin: Boolean(prev?.isAdmin),
+    roleQuerySucceeded,
+    liveIsAdmin: picked.source === "live" ? liveIsAdmin : false,
+  });
   writeStaySignedIn(session.user.id);
-  return toAuthState(session, picked.profile, picked.isAdmin);
+  return toAuthState(session, picked.profile, isAdmin);
 }
 
 function restoreDeviceAuth(): AuthState | null {
@@ -228,7 +242,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       adoptNoSession();
       return;
     }
-    const next = await loadState(session);
+    const cur = stateRef.current;
+    const next = await loadState(session, {
+      userId: scopedUserId(cur),
+      isAdmin: cur.status === "authenticated" && cur.isAdmin,
+    });
     if (shouldKeepExistingSession(next.status, stateRef.current.status, true, true)) {
       return;
     }
@@ -269,7 +287,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const nextState = await loadState(session);
+      const nextState = await loadState(session, {
+        userId: scopedUserId(cur),
+        isAdmin: cur.status === "authenticated" && cur.isAdmin,
+      });
       if (!disposed && currentRevision === revision) {
         if (shouldKeepExistingSession(nextState.status, stateRef.current.status, true, true)) {
           return;
@@ -282,11 +303,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void syncSession(session);
     });
 
+    let signedOutTimer: ReturnType<typeof setTimeout> | null = null;
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       const cur = stateRef.current;
-      if (!shouldSyncOnAuthEvent(event, cur.status)) return;
+      const curId = scopedUserId(cur);
+      if (event === "SIGNED_OUT") {
+        if (signedOutTimer) clearTimeout(signedOutTimer);
+        signedOutTimer = setTimeout(() => {
+          signedOutTimer = null;
+          void syncSession(null);
+        }, 350);
+        return;
+      }
+      if (signedOutTimer) {
+        clearTimeout(signedOutTimer);
+        signedOutTimer = null;
+      }
+      if (!shouldSyncOnAuthEvent(event, cur.status, curId, session?.user.id ?? null)) return;
       void syncSession(session);
     });
 
@@ -314,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       disposed = true;
+      if (signedOutTimer) clearTimeout(signedOutTimer);
       subscription.unsubscribe();
       if (isCapacitor()) {
         window.removeEventListener("online", onOnline);

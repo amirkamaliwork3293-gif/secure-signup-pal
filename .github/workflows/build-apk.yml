@@ -456,6 +456,9 @@ jobs:
               print(f'Patched {path}')
           PYEOF
 
+      - name: Patch Android reminder notifications (AlarmManager)
+        run: python3 scripts/apk-native/patch-reminder-notifications.py android
+
       - name: Build Debug APK
         run: |
           cd android

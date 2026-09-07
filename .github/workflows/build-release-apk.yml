@@ -160,6 +160,9 @@ jobs:
           with open(path, 'w') as f: f.write(content)
           PYEOF
 
+      - name: Patch Android reminder notifications (AlarmManager)
+        run: python3 scripts/apk-native/patch-reminder-notifications.py android
+
       - name: Prepare keystore (use secret if present, otherwise auto-generate)
         id: keystore
         env:

@@ -13,6 +13,7 @@ import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { isAppSession, isSubscriptionReadOnly } from "@/lib/subscription-access";
+import { syncReminderNotifications } from "@/lib/reminder-notifications";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -69,6 +70,15 @@ export function Layout({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
+
+  // نوتیفیکیشن سیستم‌عامل فقط روی APK (پل KamaliReminders). سایت no-op است.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const enabled = loggedIn && appSettings.showRemindersFeature !== false;
+      syncReminderNotifications(enabled ? remindersList : [], enabled);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [loggedIn, remindersList, appSettings.showRemindersFeature]);
 
   return (
     <div

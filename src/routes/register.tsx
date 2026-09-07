@@ -28,10 +28,6 @@ import {
   EyeOff,
   KeyRound,
   Smartphone,
-  Mic,
-  ScanLine,
-  Package,
-  BarChart3,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -330,9 +326,7 @@ function RegisterPage() {
   };
 
   const selectedCfg = plansCfg[plan];
-  const selectedOriginal = selectedCfg?.price ?? 0;
   const selectedPrice = selectedCfg ? effectivePrice(selectedCfg, now) : 0;
-  const selectedDiscounted = selectedCfg ? isDiscountActive(selectedCfg, now) : false;
   const recommendedPlan: SubscriptionPlan | null =
     visiblePlans.length === 0
       ? null
@@ -401,57 +395,6 @@ function RegisterPage() {
       <RegisterNav />
 
       <div className="rg-layout">
-        <aside className="rg-aside">
-          <span className="rg-aside-fold" aria-hidden="true" />
-          <div className="rg-chips">
-            <span className="rg-chip">۳ گام ساده</span>
-            <span className="rg-chip">فعال‌سازی پس از تایید</span>
-          </div>
-          <h1>مغازه‌ات را از روی گوشی جمع‌وجور کن</h1>
-          <p className="rg-aside-lead">
-            ثبت‌نام کوتاه است: مشخصات، یک طرح، واریز کارت‌به‌کارت. بعد از تایید مدیر، فاکتور با صدا،
-            انبار و بارکد روی موبایل آماده‌اند.
-          </p>
-          <div className="rg-perks">
-            <div className="rg-perk">
-              <i>
-                <Mic className="h-3.5 w-3.5" />
-              </i>
-              فاکتور را با صدا بگو
-            </div>
-            <div className="rg-perk">
-              <i>
-                <ScanLine className="h-3.5 w-3.5" />
-              </i>
-              اسکن بارکد با دوربین
-            </div>
-            <div className="rg-perk">
-              <i>
-                <Package className="h-3.5 w-3.5" />
-              </i>
-              انبار و موجودی دمِ دست
-            </div>
-            <div className="rg-perk">
-              <i>
-                <BarChart3 className="h-3.5 w-3.5" />
-              </i>
-              گزارش فروش و سود
-            </div>
-          </div>
-          {selectedCfg && (
-            <div className="rg-aside-pick">
-              <span>طرح انتخابی شما</span>
-              <strong>
-                {PLAN_LABEL[plan]} · {PLAN_DURATION_LABEL[plan]}
-              </strong>
-              <b>
-                {formatToman(selectedPrice)}
-                {selectedDiscounted && <s>{formatToman(selectedOriginal)}</s>}
-              </b>
-            </div>
-          )}
-        </aside>
-
         <div className="relative rg-panel">
           <div className="rg-banner">
             <Smartphone className="h-4 w-4" />

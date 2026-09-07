@@ -14,8 +14,15 @@ type KamaliRemindersBridge = {
 };
 
 function nativeBridge(): KamaliRemindersBridge | undefined {
-  if (typeof window === "undefined") return undefined;
-  return (window as Window & { KamaliReminders?: KamaliRemindersBridge }).KamaliReminders;
+  try {
+    const root = globalThis as typeof globalThis & {
+      KamaliReminders?: KamaliRemindersBridge;
+      window?: { KamaliReminders?: KamaliRemindersBridge };
+    };
+    return root.window?.KamaliReminders ?? root.KamaliReminders;
+  } catch {
+    return undefined;
+  }
 }
 
 function formatDueClock(dueAt: number): string {

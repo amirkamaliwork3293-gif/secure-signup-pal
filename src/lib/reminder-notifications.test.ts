@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { futureNotificationPayloads } from "./reminder-notifications.ts";
+import { futureNotificationPayloads, syncReminderNotifications } from "./reminder-notifications.ts";
 import type { Reminder } from "./store.ts";
 
 function reminder(partial: Partial<Reminder> & Pick<Reminder, "id" | "dueAt">): Reminder {
@@ -33,5 +33,22 @@ const many = Array.from({ length: 80 }, (_, i) =>
   reminder({ id: `r${i}`, title: `t${i}`, dueAt: now + (i + 1) * 60_000 }),
 );
 assert.equal(futureNotificationPayloads(many, now).length, 64);
+
+const g = globalThis as typeof globalThis & { window?: { KamaliReminders?: { sync: (json: string) => void; last?: string } } };
+const origWindow = g.window;
+g.window = {};
+syncReminderNotifications(items, true, now);
+g.window = {
+  KamaliReminders: {
+    sync(json: string) {
+      this.last = json;
+    },
+  },
+};
+syncReminderNotifications(items, true, now);
+const sent = JSON.parse(g.window.KamaliReminders?.last ?? "[]") as { id: string }[];
+assert.equal(sent.length, 1);
+assert.equal(sent[0].id, "later");
+g.window = origWindow;
 
 console.log("reminder-notifications tests passed");

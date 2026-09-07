@@ -5,7 +5,7 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 
@@ -41,7 +41,6 @@ public class ReminderAlarmReceiver extends BroadcastReceiver {
             PendingIntent content = PendingIntent.getActivity(context, requestCode, launch, flags);
 
             Uri sound = ReminderScheduler.alarmSound();
-            AudioAttributes attrs = ReminderScheduler.alarmAttrs();
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, ReminderScheduler.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_popup_reminder)
                     .setContentTitle(title)
@@ -55,11 +54,7 @@ public class ReminderAlarmReceiver extends BroadcastReceiver {
                     .setContentIntent(content);
 
             if (sound != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    builder.setSound(sound, attrs);
-                } else {
-                    builder.setSound(sound);
-                }
+                builder.setSound(sound, AudioManager.STREAM_ALARM);
             }
 
             if (id != null && !id.isEmpty()) {

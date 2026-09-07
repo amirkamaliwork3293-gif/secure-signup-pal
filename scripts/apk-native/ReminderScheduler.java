@@ -7,6 +7,9 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
 
@@ -17,12 +20,29 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ReminderScheduler {
-    public static final String CHANNEL_ID = "kamali_reminders";
+    /** کانال جدید با صدای آلارم — کانال قدیمی صدا را عوض نمی‌کند. */
+    public static final String CHANNEL_ID = "kamali_reminders_ring";
     public static final String PREFS = "kamali_reminder_alarms";
     public static final String KEY_JSON = "items_json";
+    public static final String KEY_DONE = "done_ids_json";
     public static final String EXTRA_ID = "reminder_id";
     public static final String EXTRA_TITLE = "reminder_title";
     public static final String EXTRA_BODY = "reminder_body";
+    public static final String EXTRA_MARK_DONE = "reminder_mark_done";
+
+    public static Uri alarmSound() {
+        Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+        if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+        if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        return uri;
+    }
+
+    public static AudioAttributes alarmAttrs() {
+        return new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
+    }
 
     public static void ensureChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
@@ -30,11 +50,17 @@ public class ReminderScheduler {
         if (manager == null) return;
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "یادآوری‌ها",
+                "یادآوری با زنگ",
                 NotificationManager.IMPORTANCE_HIGH
         );
-        channel.setDescription("یادآوری سررسیدهای ثبت‌شده در کامیکس");
+        channel.setDescription("زنگ و بنر سررسید یادآوری‌های کامیکس");
         channel.enableVibration(true);
+        channel.setVibrationPattern(new long[]{0, 500, 250, 500, 250, 800});
+        channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
+        Uri sound = alarmSound();
+        if (sound != null) {
+            channel.setSound(sound, alarmAttrs());
+        }
         manager.createNotificationChannel(channel);
     }
 
@@ -65,6 +91,68 @@ public class ReminderScheduler {
     public static void rescheduleAll(Context context) {
         List<Item> items = load(context);
         scheduleAll(context, items);
+    }
+
+    public static synchronized void completeFromNotification(Context context, String id) {
+        if (id == null || id.trim().isEmpty()) return;
+        rememberDoneId(context, id);
+        List<Item> items = load(context);
+        Item found = null;
+        List<Item> rest = new ArrayList<>();
+        for (Item item : items) {
+            if (id.equals(item.id)) found = item;
+            else rest.add(item);
+        }
+        if (found != null) {
+            AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (alarmManager != null) {
+                try {
+                    alarmManager.cancel(pendingFor(context, found));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        save(context, rest);
+        try {
+            NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) manager.cancel(id.hashCode());
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static synchronized String takeCompletedJson(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String json = prefs.getString(KEY_DONE, "[]");
+        prefs.edit().putString(KEY_DONE, "[]").apply();
+        return json == null || json.trim().isEmpty() ? "[]" : json;
+    }
+
+    public static PendingIntent pendingDoneFor(Context context, String id) {
+        Intent intent = new Intent(context, ReminderAlarmReceiver.class);
+        intent.setAction("com.kamali.inventory.REMINDER_DONE." + id);
+        intent.putExtra(EXTRA_ID, id);
+        intent.putExtra(EXTRA_MARK_DONE, true);
+        int requestCode = id.hashCode() ^ 0x51ed;
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return PendingIntent.getBroadcast(context, requestCode, intent, flags);
+    }
+
+    private static void rememberDoneId(Context context, String id) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        JSONArray array;
+        try {
+            array = new JSONArray(prefs.getString(KEY_DONE, "[]"));
+        } catch (Exception e) {
+            array = new JSONArray();
+        }
+        for (int i = 0; i < array.length(); i++) {
+            if (id.equals(array.optString(i, ""))) return;
+        }
+        array.put(id);
+        prefs.edit().putString(KEY_DONE, array.toString()).apply();
     }
 
     private static void replaceAll(Context context, List<Item> next) {

@@ -11,6 +11,7 @@ export type ReminderNotificationPayload = {
 
 type KamaliRemindersBridge = {
   sync?: (json: string) => void;
+  takeCompleted?: () => string;
 };
 
 function nativeBridge(): KamaliRemindersBridge | undefined {
@@ -71,5 +72,18 @@ export function syncReminderNotifications(
     bridge.sync(JSON.stringify(payload));
   } catch {
     /* native bridge must never break the web app */
+  }
+}
+
+/** شناسه‌هایی که از دکمهٔ «انجام شد» روی نوتیف گوشی آمده‌اند. */
+export function takeCompletedReminderIds(): string[] {
+  try {
+    const bridge = nativeBridge();
+    if (!bridge || typeof bridge.takeCompleted !== "function") return [];
+    const parsed: unknown = JSON.parse(bridge.takeCompleted() || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is string => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
   }
 }

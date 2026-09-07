@@ -751,6 +751,7 @@ const REMINDER_NOISE = new Set([
   "اینده",
   "هر",
   "نیم",
+  "ربع",
   "و",
   "برای",
   "را",
@@ -778,7 +779,7 @@ function isReminderNoise(t: string): boolean {
 
 function isWhenNoise(t: string): boolean {
   if (t in JMONTH_INDEX) return true;
-  return /^(تاریخ|ساعت|دقیقه|صبح|عصر|شب|ظهر|بعدازظهر|فردا|پسفردا|امروز|هفته|ماه|سال|روز|دیگه|اینده|نیم)$/.test(
+  return /^(تاریخ|ساعت|دقیقه|صبح|عصر|شب|ظهر|بعدازظهر|فردا|پسفردا|امروز|هفته|ماه|سال|روز|دیگه|اینده|نیم|ربع)$/.test(
     t,
   );
 }
@@ -809,32 +810,114 @@ type WhenPart = {
   restNorm: string;
 };
 
-function extractTime(semi: string): TimePart | null {
+const PERIOD_TOKENS = new Set(["صبح", "عصر", "شب", "ظهر", "بعدازظهر", "بعد", "از"]);
+
+/** عدد ساعت/دقیقه: «۲۲»، «هفده»، «بیست و دو»، «چهل و پنج» */
+function parseFaClockInt(
+  tokens: string[],
+  i: number,
+  max: number,
+): { n: number; next: number } | null {
+  if (i >= tokens.length) return null;
+  const t = tokens[i];
+  if (/^\d{1,2}$/.test(t)) {
+    const n = parseInt(t, 10);
+    if (n >= 0 && n <= max) return { n, next: i + 1 };
+    return null;
+  }
+  const w = NUMBER_WORDS[t];
+  if (w === undefined) return null;
+  if (w >= 20 && w <= 50 && w % 10 === 0 && tokens[i + 1] === "و") {
+    const ones = NUMBER_WORDS[tokens[i + 2]];
+    if (ones !== undefined && ones >= 1 && ones <= 9) {
+      const n = w + ones;
+      if (n <= max) return { n, next: i + 3 };
+    }
+  }
+  if (w <= max) return { n: w, next: i + 1 };
+  return null;
+}
+
+function skipPeriodTokens(tokens: string[], i: number): number {
+  while (i < tokens.length && PERIOD_TOKENS.has(tokens[i])) i++;
+  return i;
+}
+
+function applyClockPeriod(h: number, semi: string): number {
   const evening = /عصر|شب|بعد از ظهر|بعدازظهر/.test(semi);
   const noon = /ظهر/.test(semi) && !/بعد ?از ?ظهر|بعدازظهر/.test(semi);
-  const applyPeriod = (h: number): number => {
-    if ((evening || noon) && h < 12) return h + 12;
-    if (/صبح/.test(semi) && h === 12) return 0;
-    return h;
-  };
+  if (evening && h === 12) return 0;
+  if ((evening || noon) && h < 12) return h + 12;
+  if (/صبح/.test(semi) && h === 12) return 0;
+  return h;
+}
 
-  const colon = semi.match(/(\d{1,2})\s*:\s*(\d{1,2})/);
+function extractTime(rawSemi: string): TimePart | null {
+  const semi = rawSemi
+    .replace(/ساعت(\d)/g, "ساعت $1")
+    .replace(/(\d{1,2})\s*و\s*(\d{1,2})/g, "$1 و $2")
+    .replace(/(\d{1,2})دقیقه/g, "$1 دقیقه")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const colon = semi.match(/(?:ساعت\s+)?(\d{1,2})\s*:\s*(\d{1,2})/);
   if (colon) {
-    const h = applyPeriod(parseInt(colon[1], 10));
+    const h = applyClockPeriod(parseInt(colon[1], 10), semi);
     const min = parseInt(colon[2], 10);
     if (h >= 0 && h <= 23 && min >= 0 && min <= 59) {
       return { h, min, matched: colon[0] };
     }
   }
 
-  const bare = semi.match(
-    /ساعت\s*((?:\d{1,2})|(?:یک|یه|دو|سه|چهار|چار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده))(\s*و\s*نیم)?/,
-  );
-  if (bare) {
-    const rawH = /^\d+$/.test(bare[1]) ? parseInt(bare[1], 10) : (NUMBER_WORDS[bare[1]] ?? -1);
-    const h = applyPeriod(rawH);
-    const min = bare[2] ? 30 : 0;
-    if (h >= 0 && h <= 23) return { h, min, matched: bare[0] };
+  const tokens = tokensOf(semi);
+  const saatIdx = tokens.indexOf("ساعت");
+  if (saatIdx >= 0) {
+    const hour = parseFaClockInt(tokens, saatIdx + 1, 23);
+    if (hour) {
+      let i = skipPeriodTokens(tokens, hour.next);
+      let min = 0;
+      if (tokens[i] === "و") {
+        if (tokens[i + 1] === "نیم") {
+          min = 30;
+          i += 2;
+        } else if (tokens[i + 1] === "ربع") {
+          min = 15;
+          i += 2;
+        } else if (tokens[i + 1] === "سه" && tokens[i + 2] === "ربع") {
+          min = 45;
+          i += 3;
+        } else {
+          const minute = parseFaClockInt(tokens, i + 1, 59);
+          if (minute) {
+            min = minute.n;
+            i = minute.next;
+            if (tokens[i] === "دقیقه") i++;
+          }
+        }
+      }
+      i = skipPeriodTokens(tokens, i);
+      const h = applyClockPeriod(hour.n, semi);
+      if (h >= 0 && h <= 23 && min >= 0 && min <= 59) {
+        return { h, min, matched: tokens.slice(saatIdx, i).join(" ") };
+      }
+    }
+  }
+
+  // «۲۲ و ۱۷ دقیقه» بدون گفتن کلمه‌ی ساعت
+  const loose = tokensOf(semi);
+  for (let i = 0; i < loose.length; i++) {
+    if (loose[i] === "ساعت") continue;
+    const hour = parseFaClockInt(loose, i, 23);
+    if (!hour || loose[hour.next] !== "و") continue;
+    const minute = parseFaClockInt(loose, hour.next + 1, 59);
+    if (!minute) continue;
+    let end = minute.next;
+    if (loose[end] !== "دقیقه") continue;
+    end++;
+    const h = applyClockPeriod(hour.n, semi);
+    if (h >= 0 && h <= 23) {
+      return { h, min: minute.n, matched: loose.slice(i, end).join(" ") };
+    }
   }
   return null;
 }

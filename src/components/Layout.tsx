@@ -13,7 +13,7 @@ import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { isAppSession, isSubscriptionReadOnly } from "@/lib/subscription-access";
-import { syncReminderNotifications } from "@/lib/reminder-notifications";
+import { syncReminderNotifications, takeCompletedReminderIds } from "@/lib/reminder-notifications";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -79,6 +79,30 @@ export function Layout({ children }: { children: ReactNode }) {
     }, 400);
     return () => window.clearTimeout(timer);
   }, [loggedIn, remindersList, appSettings.showRemindersFeature]);
+
+  // دکمهٔ «انجام شد» روی بنر گوشی — وقتی برنامه باز است یا باز می‌شود اعمال می‌شود.
+  useEffect(() => {
+    if (!loggedIn) return;
+    const apply = () => {
+      for (const id of takeCompletedReminderIds()) {
+        try {
+          remindersStore.markDone(id);
+        } catch {
+          /* نادیده */
+        }
+      }
+    };
+    apply();
+    const poll = window.setInterval(apply, 2500);
+    const onVis = () => {
+      if (document.visibilityState === "visible") apply();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [loggedIn]);
 
   return (
     <div

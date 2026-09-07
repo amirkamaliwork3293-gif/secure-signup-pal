@@ -6,6 +6,7 @@
 
 import { parseAssistantCommand, type AssistantContext } from "../src/lib/voice/assistant-nlu";
 import type { Customer, Expense, Invoice, Product } from "../src/lib/store";
+import { toJalali } from "../src/lib/store";
 
 const now = Date.parse("2026-08-21T12:00:00+03:30");
 
@@ -293,5 +294,52 @@ if (lastNameOnly.kind !== "customer_debt" || lastNameOnly.clearWinner) {
   console.error("bare last name must not auto-pick a کمالی", lastNameOnly);
   process.exit(1);
 }
+
+function assertReminderClock(input: string, expect: { jd?: number; jm?: number; h: number; min: number }) {
+  const intent = parseAssistantCommand(input, ctx);
+  if (intent.kind !== "reminder") {
+    console.error(`expected reminder for «${input}»`, intent);
+    process.exit(1);
+  }
+  if (intent.timeDefaulted) {
+    console.error(`time should be spoken in «${input}»`, intent);
+    process.exit(1);
+  }
+  const j = toJalali(intent.dueAt);
+  if (!j) {
+    console.error(`no jalali for «${input}»`, intent.dueAt);
+    process.exit(1);
+  }
+  if (j.h !== expect.h || j.min !== expect.min) {
+    console.error(`clock mismatch «${input}» → ${j.h}:${j.min} expected ${expect.h}:${expect.min}`, intent);
+    process.exit(1);
+  }
+  if (expect.jd !== undefined && j.jd !== expect.jd) {
+    console.error(`day mismatch «${input}» → ${j.jd} expected ${expect.jd}`, j);
+    process.exit(1);
+  }
+  if (expect.jm !== undefined && j.jm !== expect.jm) {
+    console.error(`month mismatch «${input}» → ${j.jm} expected ${expect.jm}`, j);
+    process.exit(1);
+  }
+  console.log(`ok clock: «${input}» → ${j.jy}/${j.jm}/${j.jd} ${j.h}:${String(j.min).padStart(2, "0")}`);
+}
+
+assertReminderClock("یادآوری پرداخت قبض برای ۱۶ شهریور ساعت ۲۲ و ۱۷ دقیقه", {
+  jd: 16,
+  jm: 6,
+  h: 22,
+  min: 17,
+});
+assertReminderClock("یادآوری پرداخت قبض برای ۱۶ شهریور ساعت بیست و دو و هفده دقیقه", {
+  jd: 16,
+  jm: 6,
+  h: 22,
+  min: 17,
+});
+assertReminderClock("یادآوری پرداخت بدهی ساعت ۱۳:۳۰ تاریخ ۴/۴/۱۴۰۵", { jd: 4, jm: 4, h: 13, min: 30 });
+assertReminderClock("الارم فردا ساعت ۱۰ و ۵ دقیقه", { h: 10, min: 5 });
+assertReminderClock("یادم باشه ساعت ده و ربع", { h: 10, min: 15 });
+assertReminderClock("یادآوری ساعت ۸ شب و ۴۵ دقیقه", { h: 20, min: 45 });
 
 console.log("answer checks passed");

@@ -5,6 +5,8 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.net.Uri;
 import android.os.Build;
 
 import androidx.core.app.NotificationCompat;
@@ -13,8 +15,14 @@ public class ReminderAlarmReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         try {
-            ReminderScheduler.ensureChannel(context);
             String id = intent != null ? intent.getStringExtra(ReminderScheduler.EXTRA_ID) : null;
+            boolean markDone = intent != null && intent.getBooleanExtra(ReminderScheduler.EXTRA_MARK_DONE, false);
+            if (markDone) {
+                ReminderScheduler.completeFromNotification(context, id);
+                return;
+            }
+
+            ReminderScheduler.ensureChannel(context);
             String title = intent != null ? intent.getStringExtra(ReminderScheduler.EXTRA_TITLE) : null;
             String body = intent != null ? intent.getStringExtra(ReminderScheduler.EXTRA_BODY) : null;
             if (title == null || title.trim().isEmpty()) title = "یادآوری";
@@ -32,15 +40,35 @@ public class ReminderAlarmReceiver extends BroadcastReceiver {
             int requestCode = id != null ? id.hashCode() : 0;
             PendingIntent content = PendingIntent.getActivity(context, requestCode, launch, flags);
 
+            Uri sound = ReminderScheduler.alarmSound();
+            AudioAttributes attrs = ReminderScheduler.alarmAttrs();
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, ReminderScheduler.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_popup_reminder)
                     .setContentTitle(title)
                     .setContentText(body)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
                     .setAutoCancel(true)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setDefaults(NotificationCompat.DEFAULT_ALL)
+                    .setCategory(NotificationCompat.CATEGORY_ALARM)
+                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setVibrate(new long[]{0, 500, 250, 500, 250, 800})
                     .setContentIntent(content);
+
+            if (sound != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    builder.setSound(sound, attrs);
+                } else {
+                    builder.setSound(sound);
+                }
+            }
+
+            if (id != null && !id.isEmpty()) {
+                builder.addAction(
+                        android.R.drawable.checkbox_on_background,
+                        "انجام شد",
+                        ReminderScheduler.pendingDoneFor(context, id)
+                );
+            }
 
             NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
             if (manager != null) {

@@ -42,4 +42,13 @@ public class ReminderJsBridge {
         }
         ReminderScheduler.syncFromJson(activity.getApplicationContext(), json);
     }
+
+    @JavascriptInterface
+    public String takeCompleted() {
+        try {
+            return ReminderScheduler.takeCompletedJson(activity.getApplicationContext());
+        } catch (Exception ignored) {
+            return "[]";
+        }
+    }
 }

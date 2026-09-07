@@ -265,8 +265,9 @@ function RegisterPage() {
             حساب شما با یوزرنیم{" "}
             <strong dir="ltr" className="inline-block">{usernameField.toLowerCase()}</strong>{" "}
             ساخته شد و در انتظار تایید مدیر است.
-            <br />
-            به‌محض تایید، با همین یوزرنیم و رمز عبوری که انتخاب کردید وارد شوید — بدون هیچ مرحله اضافه.
+          </p>
+          <p className="mt-3 rounded-xl bg-muted/70 px-3 py-2.5 text-[12px] leading-6 text-foreground">
+            یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد می‌شوید.
           </p>
           <Link
             to="/login"
@@ -386,6 +387,9 @@ function RegisterPage() {
             </div>
           </div>
         </div>
+        <p className="text-[11px] leading-5 text-muted-foreground">
+          یوزرنیم و رمز را جای امنی ذخیره کنید؛ بعد از تایید مدیر با همین‌ها وارد می‌شوید.
+        </p>
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">پلن اشتراک</label>

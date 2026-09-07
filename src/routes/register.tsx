@@ -15,7 +15,7 @@ import {
   turnstileMissingTokenError,
   type TurnstileWidgetStatus,
 } from "@/lib/turnstile";
-import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff, KeyRound } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
 
@@ -64,13 +64,10 @@ function isValidIranPhone(p: string): boolean {
 
 function CredentialsHint({ children }: { children: ReactNode }) {
   return (
-    <div
-      role="note"
-      className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] font-medium leading-5 text-destructive"
-    >
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+    <p role="note" className="flex items-start gap-1.5 text-[11px] leading-5 text-destructive">
+      <KeyRound className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
       <span>{children}</span>
-    </div>
+    </p>
   );
 }
 
@@ -278,7 +275,7 @@ function RegisterPage() {
             <strong dir="ltr" className="inline-block">{usernameField.toLowerCase()}</strong>{" "}
             ساخته شد و در انتظار تایید مدیر است.
           </p>
-          <div className="mt-3 text-start">
+          <div className="mt-3">
             <CredentialsHint>
               یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد می‌شوید.
             </CredentialsHint>

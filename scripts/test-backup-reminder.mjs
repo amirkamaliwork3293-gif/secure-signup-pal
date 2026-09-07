@@ -15,6 +15,7 @@ import {
   isSubscriptionReadOnly,
   isAppSession,
   authUserId,
+  profileAccessKind,
   SUBSCRIPTION_WARN_DAYS,
 } from "../src/lib/subscription-access.ts";
 
@@ -69,5 +70,16 @@ assert.equal(
 );
 assert.equal(authUserId({ status: "expired", session: { user: { id: "u1" } } }), "u1");
 assert.equal(authUserId({ status: "unauthenticated" }), null);
+
+assert.equal(profileAccessKind({ status: "pending" }), "pending");
+assert.equal(profileAccessKind({ status: "rejected" }), "rejected");
+assert.equal(profileAccessKind({ status: "active", end_date: in8 }, now), "active");
+assert.equal(
+  profileAccessKind({ status: "active", end_date: yesterday }, now),
+  "expired",
+  "end_date گذشته باید منقضی شود حتی اگر status هنوز active باشد",
+);
+assert.equal(profileAccessKind({ status: "expired", end_date: in8 }, now), "expired");
+assert.equal(profileAccessKind({ status: "active" }, now), "active");
 
 console.log("ok: backup reminder + subscription helpers");

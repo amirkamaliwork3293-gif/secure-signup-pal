@@ -13,6 +13,7 @@ import { openExternal, toIntlPhone } from "@/lib/openExternal";
 import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
 import { useAuth } from "@/lib/AuthContext";
+import { profileAccessKind } from "@/lib/subscription-access";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
@@ -184,8 +185,8 @@ function AdminPage() {
   };
 
   const pending = requests.filter((r) => r.status === "pending");
-  const activeUsers = users.filter((u) => u.status === "active");
-  const expiredUsers = users.filter((u) => u.status === "expired");
+  const activeUsers = users.filter((u) => profileAccessKind(u) === "active");
+  const expiredUsers = users.filter((u) => profileAccessKind(u) === "expired");
   const pendingResets = resetRequests.filter((r) => r.status === "pending");
 
   return (
@@ -643,8 +644,9 @@ function UsersTab({
       <ul className="space-y-2">
         {filtered.map((u) => {
           const isActing = acting === u.id;
+          const access = profileAccessKind(u);
           const daysLeft = u.end_date
-            ? Math.max(0, Math.ceil((new Date(u.end_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+            ? Math.ceil((new Date(u.end_date).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
             : null;
           return (
             <li key={u.id} className="rounded-2xl border border-border bg-card p-4">
@@ -669,14 +671,14 @@ function UsersTab({
                         تا {formatJalaliDate(u.end_date)}
                         {daysLeft !== null && (
                           <span className={daysLeft < 7 ? "text-destructive" : ""}>
-                            {" "}({daysLeft} روز)
+                            {daysLeft <= 0 ? " (منقضی)" : ` (${daysLeft} روز)`}
                           </span>
                         )}
                       </span>
                     )}
                   </div>
                 </div>
-                <StatusBadge status={u.status} />
+                <StatusBadge status={access} />
               </div>
 
               <div className="mt-3">
@@ -1817,7 +1819,7 @@ function CustomersTab({
                       </span>
                       <span>{formatJalaliDateTime(r.created_at)}</span>
                       {phone && <span dir="ltr" className="rounded bg-secondary px-2 py-0.5">{phone}</span>}
-                      {profile && <StatusBadge status={profile.status} />}
+                      {profile && <StatusBadge status={profileAccessKind(profile)} />}
                     </div>
                   </div>
                 </div>

@@ -122,4 +122,11 @@ const expiredProfile = { ...active, status: "expired", end_date: "2020-01-01" };
 assert.equal(classifyUserAccess(expiredProfile, false, Date.parse("2026-09-02")), "expired");
 assert.equal(classifyUserAccess(expiredProfile, true, Date.parse("2026-09-02")), "authenticated");
 
+const staleActive = { ...active, status: "active", end_date: "2026-01-01" };
+assert.equal(
+  classifyUserAccess(staleActive, false, Date.parse("2026-09-02")),
+  "expired",
+  "تاریخ پایان گذشته باید منقضی شود حتی اگر status هنوز active باشد",
+);
+
 console.log("auth-session ok");

@@ -16,6 +16,20 @@ type SessionLike = {
   userId?: string;
 };
 
+export function profileAccessKind(
+  profile: { status?: string | null; end_date?: string | null },
+  now = Date.now(),
+): "pending" | "rejected" | "expired" | "active" {
+  if (profile.status === "rejected") return "rejected";
+  if (profile.status === "pending") return "pending";
+  if (profile.end_date) {
+    const end = new Date(profile.end_date).getTime();
+    if (Number.isFinite(end) && end < now) return "expired";
+  }
+  if (profile.status === "expired") return "expired";
+  return "active";
+}
+
 /** روزهای باقی‌مانده تا پایان اشتراک (بالا-گرد). منفی یعنی منقضی. */
 export function daysLeftFrom(endDate?: string | null, now = Date.now()): number | null {
   if (!endDate) return null;
@@ -41,12 +55,8 @@ export function isAppSession(state: SessionLike): boolean {
 export function isSubscriptionReadOnly(state: SessionLike): boolean {
   if (state.status === "expired") return true;
   if (state.status === "offline-cached") {
-    const end = (state as { profile?: { end_date?: string | null; status?: string } }).profile;
-    if (end?.status === "expired") return true;
-    if (end?.end_date) {
-      const t = new Date(end.end_date).getTime();
-      if (Number.isFinite(t) && t < Date.now()) return true;
-    }
+    const profile = (state as { profile?: { end_date?: string | null; status?: string } }).profile;
+    if (profile && profileAccessKind(profile) === "expired") return true;
   }
   return false;
 }

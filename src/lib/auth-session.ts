@@ -3,6 +3,7 @@
  * نقش ادمین فقط از پاسخ زندهٔ سرور می‌آید، نه از کش قابل‌دستکاری.
  */
 import type { ProfileStatus, UserProfile } from "@/lib/supabase";
+import { profileAccessKind } from "./subscription-access.ts";
 
 export type SessionUserLike = {
   id: string;
@@ -78,14 +79,8 @@ export function classifyUserAccess(
   now = Date.now(),
 ): "authenticated" | "expired" | "pending" | "rejected" {
   if (isAdmin) return "authenticated";
-  if (profile.status === "rejected") return "rejected";
-  if (profile.status === "pending") return "pending";
-  if (profile.end_date) {
-    const end = new Date(profile.end_date).getTime();
-    if (Number.isFinite(end) && end < now) return "expired";
-  }
-  if (profile.status === "expired") return "expired";
-  return "authenticated";
+  const kind = profileAccessKind(profile, now);
+  return kind === "active" ? "authenticated" : kind;
 }
 
 /**

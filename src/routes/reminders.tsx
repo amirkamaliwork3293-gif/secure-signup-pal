@@ -4,23 +4,31 @@ import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
   reminders as remindersStore,
-  activeReminders,
   reminderStatus,
   customers as customersStore,
   customerFullName,
   customerBalance,
   formatNumber,
   formatJalaliDate,
+  formatJalaliShort,
   jalaliToTimestamp,
   toJalali,
   jalaliMonthLength,
   JMONTHS_LONG,
   type Reminder,
-  type ReminderStatus,
   type Customer,
 } from "@/lib/store";
 import {
-  Bell,
+  WEEKDAY_SAT_FIRST,
+  WEEKDAY_SHORT,
+  jalaliDayKey,
+  remindersOnDay,
+  saturdayOfWeek,
+  weekDays,
+  weekStats,
+  startOfJalaliDay,
+} from "@/lib/reminder-week";
+import {
   Plus,
   Trash2,
   Pencil,
@@ -28,10 +36,11 @@ import {
   X,
   Repeat,
   User,
-  CalendarClock,
-  ListChecks,
   Phone,
   Send,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
 } from "lucide-react";
 import { openExternal, telHref } from "@/lib/openExternal";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
@@ -39,15 +48,15 @@ import { DebtContactDialog } from "@/components/DebtContactDialog";
 export const Route = createFileRoute("/reminders")({
   head: () => ({
     meta: [
-      { title: "یادآوری‌ها | KAMIX" },
+      { title: "برنامه هفته | KAMIX" },
       {
         name: "description",
-        content: "یادآوری وظایف، سررسیدها و پیگیری مشتریان — هیچ‌چیز از قلم نمی‌افتد.",
+        content: "برنامهٔ هفتگی مغازه: کار امروز، سررسیدها و یادآوری‌ها در یک نگاه.",
       },
-      { property: "og:title", content: "یادآوری‌ها | KAMIX" },
+      { property: "og:title", content: "برنامه هفته | KAMIX" },
       {
         property: "og:description",
-        content: "پیگیری مشتریان و وظایف کسب‌وکار را با یادآوری‌های زمان‌دار مدیریت کنید.",
+        content: "کارهای هفته را ببینید، تیک بزنید و طبق برنامه پیش بروید.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -61,75 +70,164 @@ const INPUT =
 const SELECT =
   "w-full rounded-xl border border-input bg-background px-2 py-2.5 text-center text-sm outline-none focus:border-primary";
 
-const STATUS_META: Record<ReminderStatus, { label: string; className: string }> = {
-  overdue: { label: "سررسید گذشته", className: "bg-destructive/10 text-destructive" },
-  "due-today": { label: "امروز", className: "bg-amber-500/15 text-amber-600" },
-  soon: { label: "به‌زودی", className: "bg-primary/10 text-primary" },
-  upcoming: { label: "آینده", className: "bg-muted text-muted-foreground" },
-  done: { label: "انجام‌شده", className: "bg-success/15 text-success" },
-};
-
-type Tab = "active" | "done";
+type Board = "week" | "later" | "done";
 
 function RemindersPageInner() {
   const [list] = remindersStore.useAll();
   const [customersList] = customersStore.useAll();
-  const [tab, setTab] = useState<Tab>("active");
+  const [board, setBoard] = useState<Board>("week");
+  const [anchor, setAnchor] = useState(() => Date.now());
+  const [selectedKey, setSelectedKey] = useState(() => jalaliDayKey(Date.now()));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [formDueAt, setFormDueAt] = useState<number | undefined>(undefined);
   const [contactTarget, setContactTarget] = useState<{ customer: Customer; title: string } | null>(
     null,
   );
 
-  const active = useMemo(() => activeReminders(list), [list]);
-  const done = useMemo(
+  const days = useMemo(() => weekDays(anchor), [anchor]);
+  const weekStart = days[0]?.start ?? saturdayOfWeek(anchor);
+  const selected = days.find((d) => d.key === selectedKey) ?? days.find((d) => d.isToday) ?? days[0];
+
+  useEffect(() => {
+    if (!days.some((d) => d.key === selectedKey)) {
+      const today = days.find((d) => d.isToday);
+      setSelectedKey(today?.key ?? days[0]?.key ?? "");
+    }
+  }, [days, selectedKey]);
+
+  const stats = useMemo(() => weekStats(list, weekStart, Date.now()), [list, weekStart]);
+  const overdue = useMemo(
+    () =>
+      list
+        .filter((r) => !r.done && reminderStatus(r) === "overdue")
+        .sort((a, b) => a.dueAt - b.dueAt),
+    [list],
+  );
+  const dayItems = useMemo(
+    () => (selected ? remindersOnDay(list, selected.key) : []),
+    [list, selected],
+  );
+  const dayOpen = dayItems.filter((r) => !r.done && reminderStatus(r) !== "overdue");
+  const dayDone = dayItems.filter((r) => r.done);
+  const later = useMemo(() => {
+    const end = weekStart + 7 * 86_400_000;
+    return list
+      .filter((r) => !r.done && startOfJalaliDay(r.dueAt) >= end)
+      .sort((a, b) => a.dueAt - b.dueAt);
+  }, [list, weekStart]);
+  const doneList = useMemo(
     () => list.filter((r) => r.done).sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0)),
     [list],
   );
-  const visible = tab === "active" ? active : done;
 
-  const overdueCount = active.filter((r) => reminderStatus(r) === "overdue").length;
-  const todayCount = active.filter((r) => reminderStatus(r) === "due-today").length;
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setFormDueAt(undefined);
+  };
+
+  const openNew = (dueAt?: number) => {
+    setEditingId(null);
+    setFormDueAt(dueAt);
+    setShowForm(true);
+  };
+
+  const weekLabel = (() => {
+    const a = days[0];
+    const b = days[6];
+    if (!a || !b) return "";
+    if (a.jm === b.jm) {
+      return `${formatNumber(a.jd)} تا ${formatNumber(b.jd)} ${JMONTHS_LONG[a.jm - 1]}`;
+    }
+    return `${formatNumber(a.jd)} ${JMONTHS_LONG[a.jm - 1]} تا ${formatNumber(b.jd)} ${JMONTHS_LONG[b.jm - 1]}`;
+  })();
+
+  const shiftWeek = (dir: number) => {
+    const next = weekStart + dir * 7 * 86_400_000;
+    setAnchor(next + 12 * 60 * 60 * 1000);
+    setBoard("week");
+    const nextDays = weekDays(next + 12 * 60 * 60 * 1000);
+    const today = nextDays.find((d) => d.isToday);
+    setSelectedKey(today?.key ?? nextDays[0]?.key ?? "");
+  };
 
   return (
     <Layout>
-      <h1 className="mb-4 flex items-center gap-2 text-lg font-bold">
-        <Bell className="h-5 w-5 text-primary" />
-        یادآوری‌ها
-      </h1>
-
-      {(overdueCount > 0 || todayCount > 0) && (
-        <section className="mb-4 grid grid-cols-2 gap-2">
-          {overdueCount > 0 && (
-            <div className="rounded-2xl bg-destructive/10 p-3 text-center">
-              <div className="text-lg font-bold text-destructive">{formatNumber(overdueCount)}</div>
-              <div className="text-[11px] text-destructive/80">سررسید گذشته</div>
+      <header className="mb-4 overflow-hidden rounded-3xl border border-border bg-card shadow-card">
+        <div className="bg-gradient-primary px-4 py-4 text-primary-foreground">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-[11px] font-medium text-primary-foreground/80">برنامه مغازه</div>
+              <h1 className="text-lg font-bold leading-tight">هفته کاری</h1>
             </div>
-          )}
-          {todayCount > 0 && (
-            <div className="rounded-2xl bg-amber-500/10 p-3 text-center">
-              <div className="text-lg font-bold text-amber-600">{formatNumber(todayCount)}</div>
-              <div className="text-[11px] text-amber-600/80">سررسید امروز</div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => shiftWeek(-1)}
+                className="grid h-8 w-8 place-items-center rounded-xl bg-white/15 hover:bg-white/25"
+                aria-label="هفته قبل"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = Date.now();
+                  setAnchor(now);
+                  setSelectedKey(jalaliDayKey(now));
+                  setBoard("week");
+                }}
+                className="rounded-xl bg-white/15 px-2.5 py-1.5 text-[11px] font-semibold hover:bg-white/25"
+              >
+                این هفته
+              </button>
+              <button
+                type="button"
+                onClick={() => shiftWeek(1)}
+                className="grid h-8 w-8 place-items-center rounded-xl bg-white/15 hover:bg-white/25"
+                aria-label="هفته بعد"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
             </div>
-          )}
-        </section>
-      )}
+          </div>
+          <div className="mt-1 text-[12px] text-primary-foreground/85">{weekLabel}</div>
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between text-[11px] text-primary-foreground/80">
+              <span>
+                {stats.total === 0
+                  ? "هنوز کاری برای این هفته نیست"
+                  : `${formatNumber(stats.done)} از ${formatNumber(stats.total)} انجام شد`}
+              </span>
+              <span>{stats.todayOpen > 0 ? `${formatNumber(stats.todayOpen)} کار امروز` : "امروز خالی است"}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
+              <div
+                className="h-full rounded-full bg-white transition-all duration-500"
+                style={{ width: `${Math.round(stats.progress * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </header>
 
-      <div className="mb-4 flex gap-2">
+      <div className="mb-3 grid grid-cols-3 gap-1.5 rounded-2xl bg-muted/70 p-1">
         {(
           [
-            ["active", `فعال (${formatNumber(active.length)})`],
-            ["done", `انجام‌شده (${formatNumber(done.length)})`],
-          ] as [Tab, string][]
-        ).map(([t, label]) => (
+            ["week", "این هفته"],
+            ["later", later.length ? `بعداً (${formatNumber(later.length)})` : "بعداً"],
+            ["done", "انجام‌شده"],
+          ] as [Board, string][]
+        ).map(([id, label]) => (
           <button
-            key={t}
+            key={id}
             type="button"
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-xl px-2 py-2 text-xs font-medium transition ${
-              tab === t
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "border border-border bg-background text-muted-foreground hover:bg-accent"
+            onClick={() => setBoard(id)}
+            className={`rounded-xl px-2 py-2 text-[11px] font-semibold transition ${
+              board === id
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {label}
@@ -137,160 +235,206 @@ function RemindersPageInner() {
         ))}
       </div>
 
-      {!showForm && !editingId && (
-        <button
-          onClick={() => {
-            setShowForm(true);
-            setEditingId(null);
-          }}
-          className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-foreground"
-        >
-          <Plus className="h-4 w-4" />
-          یادآوری جدید
-        </button>
-      )}
+      {board === "week" && (
+        <>
+          <div className="mb-3 grid grid-cols-7 gap-1">
+            {days.map((day) => {
+              const items = remindersOnDay(list, day.key);
+              const openCount = items.filter((r) => !r.done).length;
+              const hasOverdue = items.some((r) => !r.done && reminderStatus(r) === "overdue");
+              const active = selected?.key === day.key;
+              return (
+                <button
+                  key={day.key}
+                  type="button"
+                  onClick={() => {
+                    setSelectedKey(day.key);
+                    setBoard("week");
+                  }}
+                  className={`relative rounded-2xl px-0.5 py-2 text-center transition ${
+                    active
+                      ? "bg-primary text-primary-foreground shadow-elegant"
+                      : day.isToday
+                        ? "bg-primary/10 text-foreground"
+                        : "bg-card text-muted-foreground ring-1 ring-border"
+                  }`}
+                >
+                  <div className="text-[10px] font-medium opacity-80">{WEEKDAY_SHORT[day.dowSat]}</div>
+                  <div className="text-sm font-bold leading-tight">{formatNumber(day.jd)}</div>
+                  <div className="mt-1 flex h-1.5 items-center justify-center gap-0.5">
+                    {openCount > 0 ? (
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          hasOverdue ? "bg-destructive" : active ? "bg-primary-foreground" : "bg-primary"
+                        }`}
+                      />
+                    ) : (
+                      <span className={`h-1 w-1 rounded-full ${active ? "bg-primary-foreground/40" : "bg-border"}`} />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
 
-      {showForm && !editingId && (
-        <ReminderForm
-          customers={customersList}
-          onCancel={() => setShowForm(false)}
-          onSave={(r) => {
-            remindersStore.add(r);
-            setShowForm(false);
-          }}
-        />
-      )}
-
-      {visible.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          {tab === "active" ? (
-            <div className="flex flex-col items-center gap-2">
-              <ListChecks className="h-6 w-6 text-muted-foreground/60" />
-              یادآوری فعالی وجود ندارد.
-            </div>
-          ) : (
-            "هنوز هیچ یادآوری‌ای انجام نشده است."
+          {overdue.length > 0 && (
+            <section className="mb-3">
+              <SectionTitle tone="danger">عقب‌افتاده · باید زودتر انجام شود</SectionTitle>
+              <ul className="space-y-2">
+                {overdue.map((r) => (
+                  <ReminderCard
+                    key={r.id}
+                    reminder={r}
+                    customers={customersList}
+                    editing={editingId === r.id}
+                    onEdit={() => {
+                      setShowForm(false);
+                      setEditingId(r.id);
+                    }}
+                    onCancelEdit={() => setEditingId(null)}
+                    onContact={setContactTarget}
+                  />
+                ))}
+              </ul>
+            </section>
           )}
-        </div>
-      ) : (
-        <ul className="space-y-2">
-          {visible.map((r) =>
-            editingId === r.id ? (
+
+          <section className="mb-3">
+            <div className="mb-2 flex items-end justify-between gap-2">
+              <SectionTitle>
+                {selected?.isToday ? "امروز" : selected ? WEEKDAY_SAT_FIRST[selected.dowSat] : "روز"}
+                {selected ? ` · ${formatJalaliShort(selected.start)}` : ""}
+              </SectionTitle>
+              <span className="text-[11px] text-muted-foreground">
+                {dayOpen.length === 0
+                  ? "کاری باز نیست"
+                  : `${formatNumber(dayOpen.length)} کار باز`}
+              </span>
+            </div>
+
+            {!showForm && !editingId && (
+              <button
+                type="button"
+                onClick={() =>
+                  openNew(
+                    selected
+                      ? jalaliToTimestamp(selected.jy, selected.jm, selected.jd, 9, 0)
+                      : undefined,
+                  )
+                }
+                className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-2xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-elegant"
+              >
+                <Plus className="h-4 w-4" />
+                کار جدید برای این روز
+              </button>
+            )}
+
+            {showForm && !editingId && (
               <ReminderForm
-                key={r.id}
-                initial={r}
                 customers={customersList}
-                onCancel={() => setEditingId(null)}
-                onSave={(updated) => {
-                  remindersStore.update({ ...r, ...updated });
-                  setEditingId(null);
+                presetDueAt={formDueAt}
+                onCancel={closeForm}
+                onSave={(r) => {
+                  remindersStore.add(r);
+                  closeForm();
+                  setSelectedKey(jalaliDayKey(r.dueAt));
+                  setAnchor(r.dueAt);
+                  setBoard("week");
                 }}
               />
+            )}
+
+            {dayOpen.length === 0 && dayDone.length === 0 && !showForm ? (
+              <EmptyDay />
             ) : (
-              <li key={r.id} className="rounded-2xl border border-border bg-card p-3 shadow-card">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold">{r.title}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                      <span
-                        className={`rounded-full px-2 py-0.5 ${STATUS_META[reminderStatus(r)].className}`}
-                      >
-                        {STATUS_META[reminderStatus(r)].label}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <CalendarClock className="h-3 w-3" />
-                        {formatJalaliDate(r.dueAt)}
-                      </span>
-                      {r.customerName && (
-                        <span className="flex items-center gap-1">
-                          <User className="h-3 w-3" />
-                          {r.customerName}
-                        </span>
-                      )}
-                      {!!r.recurringDays && (
-                        <span className="flex items-center gap-1 text-primary">
-                          <Repeat className="h-3 w-3" />
-                          هر {formatNumber(r.recurringDays)} روز
-                        </span>
-                      )}
-                    </div>
-                    {r.note && (
-                      <div className="mt-1 text-[11px] text-muted-foreground">{r.note}</div>
-                    )}
-                    {!r.done &&
-                      r.customerId &&
-                      (() => {
-                        const linked = customersList.find((c) => c.id === r.customerId);
-                        if (!linked) return null;
-                        const phone = linked.phone?.trim();
-                        return (
-                          <div className="mt-2 grid grid-cols-2 gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setContactTarget({ customer: linked, title: r.title })}
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-primary/10 py-1.5 text-[11px] font-semibold text-primary"
-                            >
-                              <Send className="h-3 w-3" />
-                              پیامک
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!phone}
-                              onClick={() => phone && openExternal(telHref(phone))}
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/10 py-1.5 text-[11px] font-semibold text-sky-700 disabled:opacity-40 dark:text-sky-400"
-                            >
-                              <Phone className="h-3 w-3" />
-                              تماس
-                            </button>
-                          </div>
-                        );
-                      })()}
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <div className="flex gap-1">
-                      {!r.done ? (
-                        <button
-                          onClick={() => remindersStore.markDone(r.id)}
-                          className="grid h-7 w-7 place-items-center rounded-lg border border-border text-success hover:bg-success/10"
-                          title="انجام شد"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => remindersStore.markUndone(r.id)}
-                          className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
-                          title="برگرداندن به فعال"
-                        >
-                          <Repeat className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setEditingId(r.id);
-                          setShowForm(false);
-                        }}
-                        className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-accent"
-                        title="ویرایش"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm("این یادآوری حذف شود؟")) remindersStore.remove(r.id);
-                        }}
-                        className="grid h-7 w-7 place-items-center rounded-lg border border-border text-destructive hover:bg-destructive/10"
-                        title="حذف"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ),
+              <ul className="space-y-2">
+                {dayOpen.map((r) => (
+                  <ReminderCard
+                    key={r.id}
+                    reminder={r}
+                    customers={customersList}
+                    editing={editingId === r.id}
+                    onEdit={() => {
+                      setShowForm(false);
+                      setEditingId(r.id);
+                    }}
+                    onCancelEdit={() => setEditingId(null)}
+                    onContact={setContactTarget}
+                  />
+                ))}
+                {dayDone.length > 0 && (
+                  <li className="pt-1 text-[11px] font-medium text-muted-foreground">
+                    {selected?.isToday ? "انجام‌شده امروز" : "انجام‌شده این روز"}
+                  </li>
+                )}
+                {dayDone.map((r) => (
+                  <ReminderCard
+                    key={r.id}
+                    reminder={r}
+                    customers={customersList}
+                    editing={editingId === r.id}
+                    onEdit={() => {
+                      setShowForm(false);
+                      setEditingId(r.id);
+                    }}
+                    onCancelEdit={() => setEditingId(null)}
+                    onContact={setContactTarget}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+
+      {board === "later" && (
+        <section>
+          <SectionTitle>بعد از این هفته</SectionTitle>
+          {later.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+              کار دورتری ثبت نشده است.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {later.map((r) => (
+                <ReminderCard
+                  key={r.id}
+                  reminder={r}
+                  customers={customersList}
+                  editing={editingId === r.id}
+                  onEdit={() => setEditingId(r.id)}
+                  onCancelEdit={() => setEditingId(null)}
+                  onContact={setContactTarget}
+                />
+              ))}
+            </ul>
           )}
-        </ul>
+        </section>
+      )}
+
+      {board === "done" && (
+        <section>
+          <SectionTitle>کارهای انجام‌شده</SectionTitle>
+          {doneList.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+              هنوز تیکی نخورده است. با زدن دایره کنار هر کار، انجام می‌شود.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {doneList.map((r) => (
+                <ReminderCard
+                  key={r.id}
+                  reminder={r}
+                  customers={customersList}
+                  editing={editingId === r.id}
+                  onEdit={() => setEditingId(r.id)}
+                  onCancelEdit={() => setEditingId(null)}
+                  onContact={setContactTarget}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
       )}
 
       {contactTarget && (
@@ -309,14 +453,193 @@ function RemindersPageInner() {
   );
 }
 
+function SectionTitle({
+  children,
+  tone = "default",
+}: {
+  children: React.ReactNode;
+  tone?: "default" | "danger";
+}) {
+  return (
+    <h2
+      className={`mb-2 text-[12px] font-bold ${
+        tone === "danger" ? "text-destructive" : "text-foreground"
+      }`}
+    >
+      {children}
+    </h2>
+  );
+}
+
+function EmptyDay() {
+  return (
+    <div className="rounded-2xl border border-dashed border-border bg-card/50 px-4 py-8 text-center">
+      <CalendarDays className="mx-auto mb-2 h-6 w-6 text-muted-foreground/50" />
+      <p className="text-sm text-muted-foreground">برای این روز هنوز کاری نیست.</p>
+      <p className="mt-1 text-[11px] text-muted-foreground/80">یک کار کوچک هم کافی است تا برنامه جلو برود.</p>
+    </div>
+  );
+}
+
+function clockFa(ts: number): string {
+  const j = toJalali(ts);
+  if (!j) return "";
+  return `${formatNumber(String(j.h).padStart(2, "0"))}:${formatNumber(String(j.min).padStart(2, "0"))}`;
+}
+
+function ReminderCard({
+  reminder: r,
+  customers,
+  editing,
+  onEdit,
+  onCancelEdit,
+  onContact,
+}: {
+  reminder: Reminder;
+  customers: Customer[];
+  editing: boolean;
+  onEdit: () => void;
+  onCancelEdit: () => void;
+  onContact: (target: { customer: Customer; title: string }) => void;
+}) {
+  if (editing) {
+    return (
+      <li>
+        <ReminderForm
+          initial={r}
+          customers={customers}
+          onCancel={onCancelEdit}
+          onSave={(updated) => {
+            remindersStore.update({ ...r, ...updated });
+            onCancelEdit();
+          }}
+        />
+      </li>
+    );
+  }
+
+  const st = reminderStatus(r);
+  const linked = r.customerId ? customers.find((c) => c.id === r.customerId) : undefined;
+  const phone = linked?.phone?.trim();
+
+  return (
+    <li
+      className={`rounded-2xl border bg-card p-3 shadow-card transition ${
+        r.done
+          ? "border-success/20 bg-success/[0.04]"
+          : st === "overdue"
+            ? "border-destructive/25"
+            : "border-border"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={() => (r.done ? remindersStore.markUndone(r.id) : remindersStore.markDone(r.id))}
+          className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
+            r.done
+              ? "border-success bg-success text-success-foreground shadow-sm"
+              : "border-border bg-background hover:border-primary hover:bg-primary/5"
+          }`}
+          title={r.done ? "برگرداندن به برنامه" : "انجام شد"}
+          aria-label={r.done ? "برگرداندن به برنامه" : "انجام شد"}
+        >
+          <Check
+            className={`h-4 w-4 transition-all duration-200 ${
+              r.done ? "scale-100 opacity-100" : "scale-75 opacity-30"
+            }`}
+            strokeWidth={r.done ? 3 : 2}
+          />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div
+              className={`text-sm font-semibold leading-snug ${
+                r.done ? "text-muted-foreground line-through decoration-success/50" : ""
+              }`}
+            >
+              {r.title}
+            </div>
+            <div className="shrink-0 pt-0.5 text-[12px] font-bold tabular-nums text-primary">
+              {clockFa(r.dueAt)}
+            </div>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span>{formatJalaliDate(r.dueAt)}</span>
+            {r.customerName && (
+              <span className="inline-flex items-center gap-0.5">
+                <User className="h-3 w-3" />
+                {r.customerName}
+              </span>
+            )}
+            {!!r.recurringDays && (
+              <span className="inline-flex items-center gap-0.5 text-primary">
+                <Repeat className="h-3 w-3" />
+                هر {formatNumber(r.recurringDays)} روز
+              </span>
+            )}
+          </div>
+          {r.note && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{r.note}</p>}
+
+          {!r.done && linked && (
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onContact({ customer: linked, title: r.title })}
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-primary/10 py-1.5 text-[11px] font-semibold text-primary"
+              >
+                <Send className="h-3 w-3" />
+                پیامک
+              </button>
+              <button
+                type="button"
+                disabled={!phone}
+                onClick={() => phone && openExternal(telHref(phone))}
+                className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/10 py-1.5 text-[11px] font-semibold text-sky-700 disabled:opacity-40 dark:text-sky-400"
+              >
+                <Phone className="h-3 w-3" />
+                تماس
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2 flex justify-end gap-1">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+          title="ویرایش"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (confirm("این کار از برنامه حذف شود؟")) remindersStore.remove(r.id);
+          }}
+          className="grid h-7 w-7 place-items-center rounded-lg text-destructive/80 hover:bg-destructive/10"
+          title="حذف"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function ReminderForm({
   initial,
   customers,
+  presetDueAt,
   onSave,
   onCancel,
 }: {
   initial?: Reminder;
   customers: Customer[];
+  presetDueAt?: number;
   onSave: (r: Omit<Reminder, "id" | "createdAt" | "done" | "doneAt">) => void;
   onCancel: () => void;
 }) {
@@ -324,7 +647,8 @@ function ReminderForm({
   const [note, setNote] = useState(initial?.note ?? "");
   const [customerId, setCustomerId] = useState(initial?.customerId ?? "");
   const nowJ = toJalali(Date.now()) ?? { jy: 1403, jm: 1, jd: 1, h: 9, min: 0 };
-  const initJ = initial ? (toJalali(initial.dueAt) ?? nowJ) : { ...nowJ, h: 9, min: 0 };
+  const seed = initial?.dueAt ?? presetDueAt;
+  const initJ = seed ? (toJalali(seed) ?? nowJ) : { ...nowJ, h: 9, min: 0 };
   const [jy, setJy] = useState(initJ.jy);
   const [jm, setJm] = useState(initJ.jm);
   const [jd, setJd] = useState(initJ.jd);
@@ -342,7 +666,7 @@ function ReminderForm({
 
   const submit = () => {
     if (!title.trim()) {
-      setErr("عنوان یادآوری را وارد کنید.");
+      setErr("عنوان کار را بنویسید.");
       return;
     }
     const customer = customers.find((c) => c.id === customerId);
@@ -358,12 +682,13 @@ function ReminderForm({
 
   return (
     <div className="mb-4 space-y-3 rounded-2xl border border-border bg-card p-4 shadow-card">
-      <Field label="عنوان یادآوری">
+      <Field label="چه کاری است؟">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="مثلاً پیگیری پرداخت آقای رضایی"
           className={INPUT}
+          autoFocus={!initial}
         />
       </Field>
 
@@ -384,7 +709,7 @@ function ReminderForm({
         </Field>
       )}
 
-      <Field label="سررسید (شمسی)">
+      <Field label="روز">
         <div className="grid grid-cols-3 gap-1.5">
           <select value={jd} onChange={(e) => setJd(+e.target.value)} className={SELECT}>
             {Array.from({ length: daysInSelectedMonth }, (_, i) => i + 1).map((d) => (
@@ -429,7 +754,7 @@ function ReminderForm({
         </div>
       </Field>
 
-      <Field label="توضیحات (اختیاری)">
+      <Field label="توضیح کوتاه (اختیاری)">
         <input value={note} onChange={(e) => setNote(e.target.value)} className={INPUT} />
       </Field>
 
@@ -442,22 +767,41 @@ function ReminderForm({
             className="h-4 w-4"
           />
           <Repeat className="h-3.5 w-3.5 text-primary" />
-          یادآوری تکرارشونده
+          تکرار شود
         </label>
         {recurring && (
-          <div className="mt-2 flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">هر</span>
-            <input
-              inputMode="numeric"
-              value={formatNumber(recurringDays)}
-              onChange={(e) =>
-                setRecurringDays(Math.max(1, +e.target.value.replace(/\D/g, "") || 1))
-              }
-              className="w-20 rounded-lg border border-input bg-card px-2 py-1.5 text-center outline-none focus:border-primary"
-            />
-            <span className="text-muted-foreground">
-              روز یک‌بار — پس از «انجام شد»، یادآوری بعدی خودکار ساخته می‌شود
-            </span>
+          <div className="mt-2 space-y-2">
+            <div className="flex gap-1.5">
+              {[
+                [7, "هر هفته"],
+                [30, "هر ماه"],
+              ].map(([n, label]) => (
+                <button
+                  key={String(n)}
+                  type="button"
+                  onClick={() => setRecurringDays(Number(n))}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+                    recurringDays === n
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">هر</span>
+              <input
+                inputMode="numeric"
+                value={formatNumber(recurringDays)}
+                onChange={(e) =>
+                  setRecurringDays(Math.max(1, +e.target.value.replace(/\D/g, "") || 1))
+                }
+                className="w-20 rounded-lg border border-input bg-card px-2 py-1.5 text-center outline-none focus:border-primary"
+              />
+              <span className="text-muted-foreground">روز یک‌بار</span>
+            </div>
           </div>
         )}
       </div>
@@ -468,13 +812,15 @@ function ReminderForm({
 
       <div className="flex gap-2">
         <button
+          type="button"
           onClick={submit}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
         >
           <Check className="h-4 w-4" />
-          ذخیره یادآوری
+          ذخیره در برنامه
         </button>
         <button
+          type="button"
           onClick={onCancel}
           className="flex items-center gap-1.5 rounded-xl border border-border px-4 py-2.5 text-sm"
         >

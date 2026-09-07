@@ -31,7 +31,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# Secrets — never commit
+# Python bytecode from APK native patcher tests
+__pycache__/
+*.pyc
 .env
 .env.*
 !.env.example

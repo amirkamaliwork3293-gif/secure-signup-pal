@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitSignupRequest, getPublicSettings } from "@/lib/auth.functions";
@@ -15,7 +15,7 @@ import {
   turnstileMissingTokenError,
   type TurnstileWidgetStatus,
 } from "@/lib/turnstile";
-import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff } from "lucide-react";
+import { Receipt, Loader2, Copy, Check, CreditCard, ArrowRight, Upload, X, Eye, EyeOff, AlertTriangle } from "lucide-react";
 
 const REGISTER_URL = "https://kamixapp.ir/register";
 
@@ -60,6 +60,18 @@ function formatRemaining(ms: number): string {
 function isValidIranPhone(p: string): boolean {
   const v = p.replace(/\s+/g, "").replace(/^\+98/, "0").replace(/^98/, "0");
   return /^09\d{9}$/.test(v);
+}
+
+function CredentialsHint({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="note"
+      className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] font-medium leading-5 text-destructive"
+    >
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span>{children}</span>
+    </div>
+  );
 }
 
 function RegisterPage() {
@@ -266,9 +278,11 @@ function RegisterPage() {
             <strong dir="ltr" className="inline-block">{usernameField.toLowerCase()}</strong>{" "}
             ساخته شد و در انتظار تایید مدیر است.
           </p>
-          <p className="mt-3 rounded-xl bg-muted/70 px-3 py-2.5 text-[12px] leading-6 text-foreground">
-            یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد می‌شوید.
-          </p>
+          <div className="mt-3 text-start">
+            <CredentialsHint>
+              یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد می‌شوید.
+            </CredentialsHint>
+          </div>
           <Link
             to="/login"
             className="mt-5 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
@@ -387,9 +401,9 @@ function RegisterPage() {
             </div>
           </div>
         </div>
-        <p className="text-[11px] leading-5 text-muted-foreground">
+        <CredentialsHint>
           یوزرنیم و رمز را جای امنی ذخیره کنید؛ بعد از تایید مدیر با همین‌ها وارد می‌شوید.
-        </p>
+        </CredentialsHint>
 
         <div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">پلن اشتراک</label>

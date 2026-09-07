@@ -68,6 +68,7 @@ def run_case(label: str, main_src: str) -> None:
         man = manifest.read_text(encoding="utf-8")
         assert "KamaliReminders" in main, f"{label}: missing JS interface"
         assert (java / "ReminderScheduler.java").exists(), f"{label}: scheduler not copied"
+        assert (java / "ReminderRingtone.java").exists(), f"{label}: ringtone player not copied"
         assert "POST_NOTIFICATIONS" in man, f"{label}: missing notify permission"
         assert "ReminderAlarmReceiver" in man, f"{label}: missing alarm receiver"
         assert "ReminderBootReceiver" in man, f"{label}: missing boot receiver"

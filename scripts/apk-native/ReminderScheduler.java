@@ -94,6 +94,7 @@ public class ReminderScheduler {
     }
 
     public static synchronized void completeFromNotification(Context context, String id) {
+        ReminderRingtone.stop();
         if (id == null || id.trim().isEmpty()) return;
         rememberDoneId(context, id);
         List<Item> items = load(context);

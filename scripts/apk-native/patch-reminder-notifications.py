@@ -25,6 +25,7 @@ def copy_java(dest: Path) -> None:
         "ReminderScheduler.java",
         "ReminderAlarmReceiver.java",
         "ReminderBootReceiver.java",
+        "ReminderRingtone.java",
     ):
         shutil.copyfile(ROOT / name, dest / name)
         print(f"copied {name}")

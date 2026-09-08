@@ -19,12 +19,17 @@ const SNOOZE_MINUTES = 60;
 export function ReminderToast() {
   const [list] = remindersStore.useAll();
   const [dismissed, setDismissed] = useState<string[]>([]);
-  // هر دقیقه دوباره ارزیابی می‌شود تا یادآوری‌ای که همین حالا سررسید شده هم دیده شود
-  const [, setTick] = useState(0);
+  // سررسید نزدیک را با تایم‌اوت همان لحظه ارزیابی می‌کنیم تا آلارم همین دقیقه هم دیده شود
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setTick((v) => v + 1), 60_000);
-    return () => clearInterval(t);
-  }, []);
+    const now = Date.now();
+    const upcoming = list
+      .filter((r) => !r.done && !dismissed.includes(r.id) && r.dueAt > now)
+      .sort((a, b) => a.dueAt - b.dueAt)[0];
+    const delay = upcoming ? Math.max(250, Math.min(60_000, upcoming.dueAt - now + 80)) : 60_000;
+    const t = window.setTimeout(() => setTick((v) => v + 1), delay);
+    return () => window.clearTimeout(t);
+  }, [list, dismissed, tick]);
 
   const due = useMemo(
     () =>
@@ -37,7 +42,7 @@ export function ReminderToast() {
           return st === "overdue";
         })
         .sort((a, b) => a.dueAt - b.dueAt),
-    [list, dismissed],
+    [list, dismissed, tick],
   );
 
   if (due.length === 0) return null;

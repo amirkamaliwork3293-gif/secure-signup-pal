@@ -140,16 +140,23 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
     heading?: string;
     presetText?: string;
   } | null>(null);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const t = setInterval(() => setTick((v) => v + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
+    const now = Date.now();
+    const upcoming = includeReminders
+      ? reminderList
+          .filter((r) => !r.done && r.dueAt > now)
+          .sort((a, b) => a.dueAt - b.dueAt)[0]
+      : undefined;
+    const delay = upcoming ? Math.max(250, Math.min(30_000, upcoming.dueAt - now + 80)) : 30_000;
+    const t = window.setTimeout(() => setTick((v) => v + 1), delay);
+    return () => window.clearTimeout(t);
+  }, [reminderList, includeReminders, tick]);
 
   const due = useMemo(
     () => collectAlerts(reminderList, customerList, dismissed, includeReminders),
-    [reminderList, customerList, dismissed, includeReminders],
+    [reminderList, customerList, dismissed, includeReminders, tick],
   );
 
   useEffect(() => {

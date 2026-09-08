@@ -47,6 +47,7 @@ import {
   emptyExpense,
   emptyManualLedger,
   expenses as expensesStore,
+  formatJalaliDate,
   formatJalaliDateTime,
   formatNumber,
   formatToman,
@@ -68,6 +69,7 @@ import {
   type AssistantIntent,
   type CustomerLedgerRole,
 } from "@/lib/voice/assistant-nlu";
+import { jalaliDayKey } from "@/lib/reminder-week";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import type { ParsedCandidate, ParsedItem } from "@/lib/voice/persian-nlu";
 import type { ParsedProductItem } from "@/lib/voice/product-nlu";
@@ -573,6 +575,14 @@ export function SmartAssistant() {
     navigate({ to: "/invoices", search: { q: name } });
   };
 
+  const openRemindersDay = (at: number) => {
+    void recognizerRef.current?.stop();
+    setOpen(false);
+    setCards([]);
+    setTranscript("");
+    navigate({ to: "/reminders", search: { day: jalaliDayKey(at) } });
+  };
+
   const addToInvoice = (product: Product, quantity: number, unitPrice?: number): "ok" | "out" => {
     if (inventoryTrackingEnabled() && stockStatus(product) === "out") return "out";
     const current = invoice.getCurrent();
@@ -831,6 +841,19 @@ export function SmartAssistant() {
             status: "done",
             title: `فاکتورهای «${name}» باز شد`,
             detail: `${formatNumber(intent.invoices.length)} فاکتور پیدا شد.`,
+          },
+        ];
+      }
+
+      case "open_reminders": {
+        openRemindersDay(intent.at);
+        return [
+          {
+            key: newKey(),
+            heard,
+            status: "done",
+            title: `برنامهٔ ${formatJalaliDate(intent.at)} باز شد`,
+            detail: "یادآوری‌های همان روز در صفحهٔ برنامه هفته نشان داده می‌شود.",
           },
         ];
       }

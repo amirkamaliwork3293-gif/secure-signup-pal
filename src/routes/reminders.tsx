@@ -44,8 +44,12 @@ import {
 } from "lucide-react";
 import { openExternal, telHref } from "@/lib/openExternal";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
+import { z } from "zod";
+
+const searchSchema = z.object({ day: z.string().optional() });
 
 export const Route = createFileRoute("/reminders")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "برنامه هفته | KAMIX" },
@@ -72,12 +76,28 @@ const SELECT =
 
 type Board = "week" | "later" | "done";
 
+function parseReminderDayParam(day: string | undefined): { key: string; ts: number } | null {
+  if (!day) return null;
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(day.trim());
+  if (!m) return null;
+  const jy = Number(m[1]);
+  const jm = Number(m[2]);
+  const jd = Number(m[3]);
+  if (jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+  const ts = jalaliToTimestamp(jy, jm, jd, 12, 0);
+  if (!Number.isFinite(ts)) return null;
+  return { key: jalaliDayKey(ts), ts };
+}
+
 function RemindersPageInner() {
+  const { day: incomingDay } = Route.useSearch();
   const [list] = remindersStore.useAll();
   const [customersList] = customersStore.useAll();
   const [board, setBoard] = useState<Board>("week");
-  const [anchor, setAnchor] = useState(() => Date.now());
-  const [selectedKey, setSelectedKey] = useState(() => jalaliDayKey(Date.now()));
+  const [anchor, setAnchor] = useState(() => parseReminderDayParam(incomingDay)?.ts ?? Date.now());
+  const [selectedKey, setSelectedKey] = useState(
+    () => parseReminderDayParam(incomingDay)?.key ?? jalaliDayKey(Date.now()),
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formDueAt, setFormDueAt] = useState<number | undefined>(undefined);
@@ -88,6 +108,14 @@ function RemindersPageInner() {
   const days = useMemo(() => weekDays(anchor), [anchor]);
   const weekStart = days[0]?.start ?? saturdayOfWeek(anchor);
   const selected = days.find((d) => d.key === selectedKey) ?? days.find((d) => d.isToday) ?? days[0];
+
+  useEffect(() => {
+    const parsed = parseReminderDayParam(incomingDay);
+    if (!parsed) return;
+    setAnchor(parsed.ts);
+    setSelectedKey(parsed.key);
+    setBoard("week");
+  }, [incomingDay]);
 
   useEffect(() => {
     if (!days.some((d) => d.key === selectedKey)) {

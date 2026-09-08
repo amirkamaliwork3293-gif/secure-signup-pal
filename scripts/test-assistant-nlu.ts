@@ -114,6 +114,12 @@ const cases: { input: string; expect: Expect }[] = [
   },
   { input: "فاکتور آقای کمالی را باز کن", expect: { kind: "open_invoice" } },
   { input: "یادآوری پرداخت بدهی ساعت ۱۳:۳۰ تاریخ ۴/۴/۱۴۰۵", expect: { kind: "reminder" } },
+  { input: "برنامه امروز را نشان بده", expect: { kind: "open_reminders" } },
+  { input: "یادآوری های امروز را نشان بده", expect: { kind: "open_reminders" } },
+  { input: "یادآوری های امروز", expect: { kind: "open_reminders" } },
+  { input: "یادآوری های ۲۰ شهریور", expect: { kind: "open_reminders" } },
+  { input: "برنامه ۲۰ شهریور", expect: { kind: "open_reminders" } },
+  { input: "برنامه های ۲۰ شهریور را نشان بده", expect: { kind: "open_reminders" } },
   { input: "امروز صد میلیون فروش داشتم", expect: { kind: "manual_ledger" } },
   { input: "پنجاه میلیون سود کردم", expect: { kind: "manual_ledger" } },
   { input: "امروز ۱۰۰ میلیون فروش داشتم", expect: { kind: "manual_ledger" } },
@@ -341,5 +347,40 @@ assertReminderClock("یادآوری پرداخت بدهی ساعت ۱۳:۳۰ ت�
 assertReminderClock("الارم فردا ساعت ۱۰ و ۵ دقیقه", { h: 10, min: 5 });
 assertReminderClock("یادم باشه ساعت ده و ربع", { h: 10, min: 15 });
 assertReminderClock("یادآوری ساعت ۸ شب و ۴۵ دقیقه", { h: 20, min: 45 });
+
+function assertOpenReminders(input: string, expect: { jd?: number; jm?: number; today?: boolean }) {
+  const intent = parseAssistantCommand(input, ctx);
+  if (intent.kind !== "open_reminders") {
+    console.error(`expected open_reminders for «${input}»`, intent);
+    process.exit(1);
+  }
+  const j = toJalali(intent.at);
+  if (!j) {
+    console.error(`no jalali for «${input}»`, intent.at);
+    process.exit(1);
+  }
+  if (expect.today) {
+    const today = toJalali(now);
+    if (!today || j.jy !== today.jy || j.jm !== today.jm || j.jd !== today.jd) {
+      console.error(`today mismatch «${input}» → ${j.jy}/${j.jm}/${j.jd}`, today);
+      process.exit(1);
+    }
+  }
+  if (expect.jd !== undefined && j.jd !== expect.jd) {
+    console.error(`day mismatch «${input}» → ${j.jd} expected ${expect.jd}`, j);
+    process.exit(1);
+  }
+  if (expect.jm !== undefined && j.jm !== expect.jm) {
+    console.error(`month mismatch «${input}» → ${j.jm} expected ${expect.jm}`, j);
+    process.exit(1);
+  }
+  console.log(`ok open: «${input}» → ${j.jy}/${j.jm}/${j.jd}`);
+}
+
+assertOpenReminders("برنامه امروز", { today: true });
+assertOpenReminders("یادآوری های امروز را نشان بده", { today: true });
+assertOpenReminders("یادآوری های ۲۰ شهریور", { jd: 20, jm: 6 });
+assertOpenReminders("برنامه ۲۰ شهریور", { jd: 20, jm: 6 });
+assertOpenReminders("برنامه های بیست شهریور", { jd: 20, jm: 6 });
 
 console.log("answer checks passed");

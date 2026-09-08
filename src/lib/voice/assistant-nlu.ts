@@ -10,6 +10,7 @@
  *   product_add         افزودن کالا به فهرست محصولات
  *   product_price_edit  ویرایش قیمت کالا
  *   reminder            یادآوری با تاریخ شمسی و ساعت
+ *   open_reminders       نمایش برنامه/یادآوری‌های یک روز
  *   open_invoice        باز کردن فاکتورهای یک مشتری
  *   query               سؤال گزارشی (فقط خواندن)
  *   manual_ledger       ثبت فروش/سود/یادداشت روزانه بدون فاکتور
@@ -134,6 +135,12 @@ export type AssistantIntent =
       /** تاریخ گفته نشد و «امروز» فرض شد */
       dateDefaulted: boolean;
       recurringDays?: number;
+    }
+  | {
+      kind: "open_reminders";
+      raw: string;
+      /** روزی که باید در صفحهٔ یادآوری‌ها باز شود */
+      at: number;
     }
   | { kind: "query"; raw: string; queryKind: QueryKind; answer: string }
   | {
@@ -743,6 +750,7 @@ const REMINDER_NOISE = new Set([
   "پس",
   "پسفردا",
   "امروز",
+  "دیروز",
   "هفته",
   "ماه",
   "سال",
@@ -779,7 +787,7 @@ function isReminderNoise(t: string): boolean {
 
 function isWhenNoise(t: string): boolean {
   if (t in JMONTH_INDEX) return true;
-  return /^(تاریخ|ساعت|دقیقه|صبح|عصر|شب|ظهر|بعدازظهر|فردا|پسفردا|امروز|هفته|ماه|سال|روز|دیگه|اینده|نیم|ربع)$/.test(
+  return /^(تاریخ|ساعت|دقیقه|صبح|عصر|شب|ظهر|بعدازظهر|فردا|پسفردا|امروز|دیروز|هفته|ماه|سال|روز|دیگه|اینده|نیم|ربع)$/.test(
     t,
   );
 }
@@ -1019,6 +1027,7 @@ function relativeDayOffset(norm: string): { days: number; matched: string } | nu
     return { days: 2, matched: /پس ?فردا/.exec(norm)?.[0] ?? "پسفردا" };
   }
   if (/فردا/.test(norm)) return { days: 1, matched: "فردا" };
+  if (/دیروز/.test(norm)) return { days: -1, matched: "دیروز" };
   const week = norm.match(/هفته (دیگه|بعد|اینده)/);
   if (week) return { days: 7, matched: week[0] };
   const month = norm.match(/ماه (دیگه|بعد|اینده)/);
@@ -1189,6 +1198,42 @@ function parseProductPriceEdit(raw: string, norm: string, ctx: AssistantContext)
   };
 }
 
+function looksLikeOpenReminders(raw: string, norm: string, now: number): boolean {
+  if (/یادم بنداز|یادم باشه|یادم نره|بیدارم کن|به یادم/.test(norm)) return false;
+  const hasNoun = /برنامه|یاداور|یادآوری|الارم|آلارم/.test(norm);
+  if (!hasNoun) return false;
+
+  const show =
+    /نشان(?:م)? بده|نشون(?:م)? بده|نمایش(?: بده)?|باز کن|بازکن|برو(?: به)?|ببینم|بیار|لیست/.test(
+      norm,
+    );
+  const plural = /(?:یاداور(?:ی)?|یادآوری|الارم|آلارم|برنامه)\s*ها/.test(norm);
+  const isProgram = /برنامه/.test(norm);
+  const time = extractTime(normalizeKeepSeparators(raw));
+  const day = !!(
+    relativeDayOffset(norm) ||
+    extractNumericJalali(normalizeKeepSeparators(raw)) ||
+    extractSpokenJalali(norm, now)
+  );
+
+  if (/بذار|بگذار|ثبت کن/.test(norm) && !show) return false;
+  if (time && !show && !plural && !isProgram) return false;
+  if (show) return true;
+  if (plural && (day || !time)) return true;
+  if (isProgram && (show || day || plural)) return true;
+  return false;
+}
+
+function parseOpenReminders(raw: string, ctx: AssistantContext): AssistantIntent {
+  const now = ctx.now ?? Date.now();
+  const when = extractWhen(raw, now, 12);
+  return {
+    kind: "open_reminders",
+    raw,
+    at: when.dateSpoken ? when.at : now,
+  };
+}
+
 function parseReminder(raw: string, norm: string, ctx: AssistantContext): AssistantIntent {
   const now = ctx.now ?? Date.now();
   const when = extractWhen(raw, now, 9);
@@ -1325,22 +1370,25 @@ function parseOpenInvoice(raw: string, norm: string, ctx: AssistantContext): Ass
 
 /**
  * تشخیص نیت یک دستور صوتی. ترتیب بررسی مهم است:
- *   ۱) یادآوری
- *   ۲) باز کردن فاکتور — پیش از بدهی، چون «فاکتور آقای …» نام مشتری دارد
- *   ۳) ثبت فروش/سود دستی — پیش از سؤال، چون «امروز صد میلیون فروش داشتم» ثبت است نه پرسش
- *   ۴) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» / «چقدر سود داشتم» فقط سؤال است
- *   ۵) ویرایش قیمت
- *   ۶) افزودن محصول به فهرست کالاها
- *   ۷) بدهی / طلبکاری / تسویه مشتری
- *   ۸) هزینه
- *   ۹) فاکتور فقط اگر کالا تطبیق شد یا جمله واقعاً دستور ثبت کالا باشد
- *   ۱۰) وگرنه unknown با راهنما — نه «کالایی پیدا نشد»
+ *   ۱) نمایش برنامه/یادآوری‌های یک روز — پیش از ثبت یادآوری
+ *   ۲) یادآوری
+ *   ۳) باز کردن فاکتور — پیش از بدهی، چون «فاکتور آقای …» نام مشتری دارد
+ *   ۴) ثبت فروش/سود دستی — پیش از سؤال، چون «امروز صد میلیون فروش داشتم» ثبت است نه پرسش
+ *   ۵) سؤال گزارشی — پیش از «بدهی»، چون «چند تا بدهکار دارم؟» / «چقدر سود داشتم» فقط سؤال است
+ *   ۶) ویرایش قیمت
+ *   ۷) افزودن محصول به فهرست کالاها
+ *   ۸) بدهی / طلبکاری / تسویه مشتری
+ *   ۹) هزینه
+ *   ۱۰) فاکتور فقط اگر کالا تطبیق شد یا جمله واقعاً دستور ثبت کالا باشد
+ *   ۱۱) وگرنه unknown با راهنما — نه «کالایی پیدا نشد»
  */
 export function parseAssistantCommand(text: string, context: AssistantContext): AssistantIntent {
   const raw = (text ?? "").trim();
   const norm = normalizeFa(raw);
   if (!norm) return { kind: "unknown", raw, reason: "چیزی شنیده نشد." };
 
+  const now = context.now ?? Date.now();
+  if (looksLikeOpenReminders(raw, norm, now)) return parseOpenReminders(raw, context);
   if (RE_REMINDER.test(norm)) return parseReminder(raw, norm, context);
   if (RE_OPEN_INVOICE.test(norm)) return parseOpenInvoice(raw, norm, context);
   if (looksLikeManualLedger(norm)) return parseManualLedger(raw, norm, context);

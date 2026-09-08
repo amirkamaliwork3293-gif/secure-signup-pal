@@ -75,7 +75,7 @@ public class ReminderScheduler {
                 JSONObject obj = array.getJSONObject(i);
                 String id = obj.optString("id", "");
                 long at = obj.optLong("at", 0);
-                if (id.isEmpty() || at <= now + 3000) continue;
+                if (id.isEmpty() || at <= now) continue;
                 Item item = new Item();
                 item.id = id;
                 item.title = obj.optString("title", "یادآوری");
@@ -169,14 +169,15 @@ public class ReminderScheduler {
         if (alarmManager == null) return;
         long now = System.currentTimeMillis();
         for (Item item : items) {
-            if (item.at <= now + 3000) continue;
+            if (item.at <= now) continue;
+            long triggerAt = Math.max(item.at, now + 200);
             PendingIntent pending = pendingFor(context, item);
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     if (alarmManager.canScheduleExactAlarms()) {
-                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.at, pending);
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending);
                     } else {
-                        long delay = Math.max(0, item.at - now);
+                        long delay = Math.max(0, triggerAt - now);
                         alarmManager.setAndAllowWhileIdle(
                                 AlarmManager.ELAPSED_REALTIME_WAKEUP,
                                 SystemClock.elapsedRealtime() + delay,
@@ -184,13 +185,13 @@ public class ReminderScheduler {
                         );
                     }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, item.at, pending);
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending);
                 } else {
-                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, item.at, pending);
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pending);
                 }
             } catch (SecurityException ignored) {
                 try {
-                    alarmManager.set(AlarmManager.RTC_WAKEUP, item.at, pending);
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, pending);
                 } catch (Exception ignored2) {
                 }
             } catch (Exception ignored) {

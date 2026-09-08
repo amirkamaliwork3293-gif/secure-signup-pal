@@ -24,6 +24,7 @@ import {
   type RecipeIngredient,
   type ProductionEvent,
 } from "@/lib/production";
+import { dueAtReadyToNotify } from "@/lib/reminder-notifications";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 import { isCapacitor } from "@/lib/isWebView";
 import {
@@ -2191,16 +2192,26 @@ export const reminders = {
   save: (list: Reminder[]) => write(REMINDERS_KEY, list),
 
   add: (r: Omit<Reminder, "id" | "createdAt" | "done" | "doneAt">) => {
-    const created: Reminder = { ...r, id: cryptoId(), createdAt: Date.now(), done: false };
+    const created: Reminder = {
+      ...r,
+      id: cryptoId(),
+      createdAt: Date.now(),
+      done: false,
+      dueAt: dueAtReadyToNotify(r.dueAt),
+    };
     write(REMINDERS_KEY, [created, ...read<Reminder[]>(REMINDERS_KEY, [])]);
     return created;
   },
 
   update: (updated: Reminder) => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
+    const prev = list.find((r) => r.id === updated.id);
+    const dueAt =
+      !prev || prev.dueAt !== updated.dueAt ? dueAtReadyToNotify(updated.dueAt) : updated.dueAt;
+    const next = { ...updated, dueAt };
     write(
       REMINDERS_KEY,
-      list.map((r) => (r.id === updated.id ? updated : r)),
+      list.map((r) => (r.id === updated.id ? next : r)),
     );
   },
 

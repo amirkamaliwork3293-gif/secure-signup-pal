@@ -2310,6 +2310,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
       paidAmount: paymentMethod === "credit" ? paid : undefined,
     });
     invoice.archive(finalInv);
+    if (!invoice.getHistory().some((h) => h.id === finalInv.id)) return;
     if (paymentMethod === "credit" && debt > 0) {
       customers.recordInvoiceDebt(customerInfo, finalInv, { amount: debt, note: "فاکتور نسیه" });
     } else {

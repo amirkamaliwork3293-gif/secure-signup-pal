@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson } from "@/lib/search";
+import { mergeOpenInvoiceBoard, historyIds, extractOpenInvoices } from "@/lib/store-merge";
 import {
   catalogArraysDiffer,
   catalogHasVandalPrice,
@@ -421,6 +422,8 @@ const TOMBSTONE_KEY = "acc.tombstones.v1";
 // Persisted set of cloud field names that have local changes not yet confirmed
 // synced to the server. Survives reloads so offline edits are never dropped.
 const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
+/** فاکتورهایی که از تب باز ثبت شده‌اند تا hydrate دوباره بازشان نکند */
+const CLOSED_OPEN_IDS_KEY = "acc.closedOpenInvoiceIds.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
@@ -759,6 +762,7 @@ export function isCloudHydrated() {
   return cloudHydrated;
 }
 const pendingPush: Record<string, unknown> = {};
+let flushChain: Promise<void> = Promise.resolve();
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = 5000;
@@ -830,14 +834,19 @@ function tombstoneSet(field: string): Set<string> {
 }
 
 function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
-  if (!Array.isArray(prev) || !Array.isArray(next)) return;
-  const nextIds = new Set(next.map(catalogRowId).filter(Boolean));
+  const idsOf = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.map(catalogRowId).filter(Boolean);
+    return extractOpenInvoices(value).map(catalogRowId).filter(Boolean);
+  };
+  const prevIds = idsOf(prev);
+  const nextIds = idsOf(next);
+  if (prevIds.length === 0 && nextIds.length === 0) return;
+  const nextSet = new Set(nextIds);
   const removed: string[] = [];
-  for (const row of prev) {
-    const id = catalogRowId(row);
-    if (id && !nextIds.has(id)) removed.push(id);
+  for (const id of prevIds) {
+    if (id && !nextSet.has(id)) removed.push(id);
   }
-  if (removed.length === 0 && nextIds.size === 0) return;
+  if (removed.length === 0 && nextIds.length === 0) return;
   const map = readTombstones();
   const cur = new Set(map[field] || []);
   for (const id of removed) cur.add(id);
@@ -845,6 +854,28 @@ function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
   if (cur.size === 0) delete map[field];
   else map[field] = [...cur];
   persistTombstones(map);
+}
+
+function readIdSet(key: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(scopedKey(key));
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function addIdToSet(key: string, id: string, cap = 2000) {
+  if (!id || typeof window === "undefined") return;
+  const set = readIdSet(key);
+  set.add(id);
+  let arr = [...set];
+  if (arr.length > cap) arr = arr.slice(arr.length - cap);
+  try {
+    localStorage.setItem(scopedKey(key), JSON.stringify(arr));
+  } catch {}
 }
 
 function markDirty(fields: string[]) {
@@ -1036,150 +1067,157 @@ function isCloudPermissionError(
 }
 
 async function flushCloudPush() {
+  flushChain = flushChain.then(() => runFlushCloudPush()).catch((err) => {
+    console.error("[store] flush chain", err);
+  });
+  return flushChain;
+}
+
+async function runFlushCloudPush() {
   pushTimer = null;
-  if (!cloudUserId) return;
-  // اپ آفلاین: هیچ درخواستی به سرور فرستاده نشود (نه صف جدید، نه امید به شکست).
-  if (isCapacitorOfflineReadOnly()) return;
-  if (
-    !canFlushCloudPush({
-      cloudUserId,
-      cloudHydrated,
-      storageScope: getStorageScope(),
-    })
-  ) {
-    return;
-  }
-  const fieldsToPush = { ...pendingPush };
-  const userId = cloudUserId;
-  await dropVandalizedCatalogPushes(userId, fieldsToPush);
-  const fieldNames = Object.keys(fieldsToPush);
-  if (fieldNames.length === 0) {
-    publishSyncState({
-      pending: readDirtySet().size,
-      failed: false,
-      lastError: undefined,
-    });
-    return;
-  }
-  const payload: Record<string, unknown> = {
-    ...fieldsToPush,
-    user_id: userId,
-    updated_at: new Date().toISOString(),
-  };
-  try {
-    let { error } = await supabase
-      .from("user_data")
-      .upsert(payload as never, { onConflict: "user_id" });
-    if (isCloudPermissionError(error)) {
-      const { error: refreshError } = await supabase.auth.refreshSession();
-      if (!refreshError) {
+  let guard = 0;
+  while (guard++ < 8) {
+    if (!cloudUserId) return;
+    if (isCapacitorOfflineReadOnly()) return;
+    if (
+      !canFlushCloudPush({
+        cloudUserId,
+        cloudHydrated,
+        storageScope: getStorageScope(),
+      })
+    ) {
+      return;
+    }
+    const fieldsToPush = { ...pendingPush };
+    const userId = cloudUserId;
+    await dropVandalizedCatalogPushes(userId, fieldsToPush);
+    const fieldNames = Object.keys(fieldsToPush);
+    if (fieldNames.length === 0) {
+      publishSyncState({
+        pending: readDirtySet().size,
+        failed: false,
+        lastError: undefined,
+      });
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      ...fieldsToPush,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+    };
+    try {
+      let { error } = await supabase
+        .from("user_data")
+        .upsert(payload as never, { onConflict: "user_id" });
+      if (isCloudPermissionError(error)) {
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (!refreshError) {
+          const retry = await supabase
+            .from("user_data")
+            .upsert(payload as never, { onConflict: "user_id" });
+          error = retry.error;
+        }
+      }
+      if (error && /customers/.test(error.message) && "customers" in payload) {
+        delete payload.customers;
         const retry = await supabase
           .from("user_data")
           .upsert(payload as never, { onConflict: "user_id" });
         error = retry.error;
       }
-    }
-    // If the customers column doesn't exist yet in this deployment, retry without
-    // it so syncing of products/invoices/settings is never blocked.
-    if (error && /customers/.test(error.message) && "customers" in payload) {
-      delete payload.customers;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /students/.test(error.message) && "students" in payload) {
-      delete payload.students;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /purchases/.test(error.message) && "purchases" in payload) {
-      delete payload.purchases;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /expenses/.test(error.message) && "expenses" in payload) {
-      delete payload.expenses;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /reminders/.test(error.message) && "reminders" in payload) {
-      delete payload.reminders;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /accounts/.test(error.message) && "accounts" in payload) {
-      delete payload.accounts;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /account_txs/.test(error.message) && "account_txs" in payload) {
-      delete payload.account_txs;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /production/.test(error.message) && "production" in payload) {
-      delete payload.production;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error && /manual_ledger/.test(error.message) && "manual_ledger" in payload) {
-      delete payload.manual_ledger;
-      const retry = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      error = retry.error;
-    }
-    if (error) throw error;
-    if (cloudUserId !== userId || getStorageScope() !== userId) return;
-    lastLocalPushAt = Date.now();
-    const pushedAt = typeof payload.updated_at === "string" ? payload.updated_at : "";
-    if (pushedAt) lastCloudUpdatedAt = pushedAt;
-    // Success: clear only the field values we actually pushed, and only if
-    // they haven't been re-written to a newer value while the upsert was in
-    // flight. Any newer writes stay pending and will trigger another flush.
-    const confirmed: string[] = [];
-    for (const f of fieldNames) {
-      if (pendingPush[f] === fieldsToPush[f]) {
-        delete pendingPush[f];
-        confirmed.push(f);
+      if (error && /students/.test(error.message) && "students" in payload) {
+        delete payload.students;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
       }
+      if (error && /purchases/.test(error.message) && "purchases" in payload) {
+        delete payload.purchases;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /expenses/.test(error.message) && "expenses" in payload) {
+        delete payload.expenses;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /reminders/.test(error.message) && "reminders" in payload) {
+        delete payload.reminders;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /accounts/.test(error.message) && "accounts" in payload) {
+        delete payload.accounts;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /account_txs/.test(error.message) && "account_txs" in payload) {
+        delete payload.account_txs;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /production/.test(error.message) && "production" in payload) {
+        delete payload.production;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error && /manual_ledger/.test(error.message) && "manual_ledger" in payload) {
+        delete payload.manual_ledger;
+        const retry = await supabase
+          .from("user_data")
+          .upsert(payload as never, { onConflict: "user_id" });
+        error = retry.error;
+      }
+      if (error) throw error;
+      if (cloudUserId !== userId || getStorageScope() !== userId) return;
+      lastLocalPushAt = Date.now();
+      const pushedAt = typeof payload.updated_at === "string" ? payload.updated_at : "";
+      if (pushedAt) lastCloudUpdatedAt = pushedAt;
+      const confirmed: string[] = [];
+      for (const f of fieldNames) {
+        if (pendingPush[f] === fieldsToPush[f]) {
+          delete pendingPush[f];
+          confirmed.push(f);
+        } else {
+          // upsert قدیمی ممکن است پیش‌نویس را برگردانده باشد — دوباره بفرست
+          markDirty([f]);
+        }
+      }
+      clearDirty(confirmed);
+      retryDelay = 5000;
+      publishSyncState({
+        pending: readDirtySet().size,
+        failed: false,
+        lastError: undefined,
+        lastOkAt: Date.now(),
+      });
+      if (Object.keys(pendingPush).length === 0) return;
+    } catch (e) {
+      console.error("[store] cloud push failed", { fields: fieldNames, error: e });
+      for (const f of fieldNames) {
+        if (!(f in pendingPush)) pendingPush[f] = fieldsToPush[f];
+      }
+      publishSyncState({
+        pending: readDirtySet().size,
+        failed: true,
+        lastError: (e as { message?: string })?.message || String(e),
+      });
+      scheduleRetry();
+      return;
     }
-    clearDirty(confirmed);
-    retryDelay = 5000;
-    publishSyncState({
-      pending: readDirtySet().size,
-      failed: false,
-      lastError: undefined,
-      lastOkAt: Date.now(),
-    });
-  } catch (e) {
-    console.error("[store] cloud push failed", { fields: fieldNames, error: e });
-    // Failure: keep values in pendingPush and dirty markers persisted, then
-    // retry with exponential backoff. The online listener also retries.
-    for (const f of fieldNames) {
-      if (!(f in pendingPush)) pendingPush[f] = fieldsToPush[f];
-    }
-    publishSyncState({
-      pending: readDirtySet().size,
-      failed: true,
-      lastError: (e as { message?: string })?.message || String(e),
-    });
-    scheduleRetry();
   }
 }
 
@@ -1210,16 +1248,25 @@ function applyCloudRow(data: Record<string, unknown>) {
     if (field === "settings") return;
     if (field === "current_invoice") {
       const localBoard = localValueForCloudField("current_invoice");
-      const hasLocalItems = (() => {
-        if (!localBoard || typeof localBoard !== "object") return false;
-        const board = localBoard as { items?: unknown[]; open?: { items?: unknown[] }[] };
-        if (Array.isArray(board.open)) {
-          return board.open.some((i) => Array.isArray(i.items) && i.items.length > 0);
-        }
-        return Array.isArray(board.items) && board.items.length > 0;
-      })();
-      if (hasLocalItems) return;
-      if (cloudValue != null) writeLocalOnly(key, cloudValue);
+      const registered = new Set<string>([
+        ...historyIds(localValueForCloudField("invoices")),
+        ...historyIds(data.invoices),
+        ...tombstoneSet("current_invoice"),
+        ...readIdSet(CLOSED_OPEN_IDS_KEY),
+      ]);
+      const merged = mergeOpenInvoiceBoard(localBoard, cloudValue, registered);
+      const toWrite =
+        merged.open.length === 0
+          ? (() => {
+              const fresh = emptyInvoice();
+              return { open: [fresh], activeId: fresh.id };
+            })()
+          : merged;
+      writeLocalOnly(key, toWrite);
+      if (catalogArraysDiffer(toWrite, cloudValue)) {
+        pendingPush.current_invoice = toWrite;
+        markDirty(["current_invoice"]);
+      }
       return;
     }
     const localVal = localValueForCloudField(field);
@@ -1672,6 +1719,12 @@ export const invoice = {
                 prev.open.find((i) => i.id === prev.activeId) ?? prev.open[0],
               )
             : v;
+        if (
+          read<Invoice[]>(HISTORY_KEY, []).some((h) => h.id === next.id) ||
+          readIdSet(CLOSED_OPEN_IDS_KEY).has(next.id)
+        ) {
+          return prev;
+        }
         return {
           activeId: next.id,
           open: prev.open.some((i) => i.id === next.id)
@@ -1687,6 +1740,12 @@ export const invoice = {
     return b.open.find((i) => i.id === b.activeId) ?? b.open[0];
   },
   save: (inv: Invoice) => {
+    if (
+      read<Invoice[]>(HISTORY_KEY, []).some((h) => h.id === inv.id) ||
+      readIdSet(CLOSED_OPEN_IDS_KEY).has(inv.id)
+    ) {
+      return;
+    }
     const b = readBoard();
     const open = b.open.some((i) => i.id === inv.id)
       ? b.open.map((i) => (i.id === inv.id ? inv : i))
@@ -1755,6 +1814,7 @@ export const invoice = {
       reconcileStockForInvoiceEdit([], stamped.items);
     }
     write(HISTORY_KEY, [stamped, ...hist]);
+    addIdToSet(CLOSED_OPEN_IDS_KEY, stamped.id);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
     const filtered = b.open.filter((i) => i.id !== stamped.id);
@@ -1764,6 +1824,11 @@ export const invoice = {
     } else {
       writeBoard({ open: filtered, activeId: filtered[0].id });
     }
+    if (pushTimer) {
+      clearTimeout(pushTimer);
+      pushTimer = null;
+    }
+    void flushCloudPush();
     return stamped;
   },
   updateHistory: (updated: Invoice) => {

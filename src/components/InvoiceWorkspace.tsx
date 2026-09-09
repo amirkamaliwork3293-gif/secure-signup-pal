@@ -314,6 +314,7 @@ export function InvoiceWorkspace() {
       ...chequePayload,
     };
     const saved = invoice.archive(finalInv);
+    if (!invoice.getHistory().some((h) => h.id === saved.id)) return;
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
     if (paymentMethod === "credit") {
       const debt = Math.max(0, baseTotal - paid);

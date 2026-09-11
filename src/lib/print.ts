@@ -53,7 +53,7 @@ declare global {
   }
 }
 
-/** اندازه کاغذ چاپ فاکتور — با @page و مقیاس خودکار روی یک صفحه جا می‌شود */
+/** اندازه کاغذ چاپ فاکتور — با @page تنظیم می‌شود؛ فاکتورهای بلند چند صفحه می‌شوند */
 export type PaperSize = "A4" | "A5" | "Letter";
 
 export const PAPER_SIZES: { id: PaperSize; label: string; wMm: number; hMm: number }[] = [
@@ -67,51 +67,26 @@ export function normalizePaperSize(v?: string | null): PaperSize {
   return "A4";
 }
 
-/** CSS اندازه صفحه + اسکریپت مقیاس تا کل فاکتور در یک برگه جا شود */
-export function printFitAssets(paper: PaperSize, marginMm = 7): { css: string; script: string } {
-  const spec = PAPER_SIZES.find((p) => p.id === paper) ?? PAPER_SIZES[0];
+/**
+ * CSS اندازه صفحه برای چاپ.
+ * مقیاس اجباری (zoom/transform) عمداً حذف شده — همان اسکریپت فاکتور را تا ۴۲٪
+ * کوچک می‌کرد و در پیش‌نمایش روی صفحه هم اجرا می‌شد. فاکتورهای بلند روی چند
+ * صفحه چاپ می‌شوند تا نوشته‌ها خوانا بمانند.
+ */
+export function printFitAssets(paper: PaperSize, marginMm = 10): { css: string; script: string } {
   const cssSize = paper === "Letter" ? "letter" : paper;
   const css = `
   @page { size: ${cssSize} portrait; margin: ${marginMm}mm; }
   html, body { margin: 0 !important; }
   #print-root { width: 100%; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
   @media print {
     body { padding: 0 !important; background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     #print-root { box-shadow: none !important; }
   }
   `;
-  const script = `<script>
-(function(){
-  var PAGE_W = ${spec.wMm};
-  var PAGE_H = ${spec.hMm};
-  var MARGIN = ${marginMm};
-  function fit(){
-    var root = document.getElementById('print-root');
-    if (!root) return;
-    root.style.zoom = '1';
-    root.style.transform = 'none';
-    var availW = (PAGE_W - MARGIN * 2) * 96 / 25.4;
-    var availH = (PAGE_H - MARGIN * 2) * 96 / 25.4;
-    var w = Math.max(root.scrollWidth, root.offsetWidth);
-    var h = Math.max(root.scrollHeight, root.offsetHeight);
-    var s = Math.min(1, availW / Math.max(1, w), availH / Math.max(1, h));
-    if (s < 0.995) {
-      s = Math.max(0.42, s);
-      if ('zoom' in root.style) root.style.zoom = String(s);
-      else {
-        root.style.transformOrigin = 'top center';
-        root.style.transform = 'scale(' + s + ')';
-      }
-    }
-  }
-  window.addEventListener('load', fit);
-  window.addEventListener('beforeprint', fit);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit).catch(function(){});
-  setTimeout(fit, 250);
-  setTimeout(fit, 700);
-})();
-</script>`;
-  return { css, script };
+  return { css, script: "" };
 }
 
 /** آیا داخل اپلیکیشن نیتیو (APK) هستیم؟ */

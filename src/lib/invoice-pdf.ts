@@ -10,27 +10,34 @@ import { jsPDF } from "jspdf";
 import {
   formatNumber,
   formatAmount,
-  currencyLabel,
-  formatJalaliDate,
+  formatJalaliDateTime,
   PAYMENT_LABEL,
-  formatChequeDue,
   invoiceDocumentTitle,
   type Invoice,
 } from "@/lib/store";
-import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
+import { lineTotal } from "@/lib/invoice-math";
+import {
+  invoiceAmountLines,
+  customerDisplayName,
+  qtyWithUnit,
+  DEFAULT_INVOICE_ACCENT,
+  DEFAULT_INVOICE_GOLD,
+} from "@/lib/invoice-document";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
 const PAGE_H = 297 * SCALE;
-const MARGIN = 14 * SCALE;
+const MARGIN = 12 * SCALE;
 const FONT = "Vazirmatn, Tahoma, 'Segoe UI', sans-serif";
 
-const INK = "#111111";
-const MUTED = "#555555";
-const BORDER = "#bbbbbb";
-const HEAD_BG = "#f0f0f0";
-const ZEBRA_BG = "#fafafa";
+const NAVY = DEFAULT_INVOICE_ACCENT;
+const GOLD = DEFAULT_INVOICE_GOLD;
+const INK = "#1a2332";
+const MUTED = "#5d6b7a";
+const BORDER = "#c9d4e0";
+const ZEBRA_BG = "#f4f7fb";
+const PAPER = "#ffffff";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -55,7 +62,7 @@ function newPage(): { canvas: HTMLCanvasElement; ctx: Ctx } {
   canvas.width = PAGE_W;
   canvas.height = PAGE_H;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, PAGE_W, PAGE_H);
   ctx.direction = "rtl";
   ctx.textBaseline = "middle";
@@ -88,8 +95,25 @@ function columns() {
   };
 }
 
-const ROW_H = 9 * SCALE;
-const HEAD_H = 10 * SCALE;
+const ROW_H = 11 * SCALE;
+const HEAD_H = 12 * SCALE;
+const SIG_H = 24 * SCALE;
+
+function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function drawGoldRule(ctx: Ctx, y: number) {
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, 1.1 * SCALE);
+}
 
 function drawHeader(
   ctx: Ctx,
@@ -98,86 +122,128 @@ function drawHeader(
   logoImg?: HTMLImageElement | null,
 ): number {
   const shopName = inv.shopName || "فروشگاه";
-  let y = MARGIN + 4 * SCALE;
+  const docTitle = invoiceDocumentTitle(inv);
+  let y = MARGIN;
 
+  const barH = pageNo === 1 ? 32 * SCALE : 22 * SCALE;
+  ctx.fillStyle = NAVY;
+  ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, barH);
+
+  let textX = PAGE_W - MARGIN - 4 * SCALE;
   if (pageNo === 1 && logoImg) {
-    const maxH = 16 * SCALE;
-    const maxW = 40 * SCALE;
+    const maxH = 22 * SCALE;
+    const maxW = 28 * SCALE;
     const ratio = Math.min(maxW / logoImg.width, maxH / logoImg.height, 1);
     const w = logoImg.width * ratio;
     const h = logoImg.height * ratio;
-    ctx.drawImage(logoImg, PAGE_W / 2 - w / 2, y, w, h);
-    y += h + 3 * SCALE;
+    const lx = PAGE_W - MARGIN - 3 * SCALE - w;
+    const ly = y + (barH - h) / 2;
+    ctx.fillStyle = "#ffffff";
+    roundRect(ctx, lx - 2 * SCALE, ly - 2 * SCALE, w + 4 * SCALE, h + 4 * SCALE, 2 * SCALE);
+    ctx.fill();
+    ctx.drawImage(logoImg, lx, ly, w, h);
+    textX = lx - 4 * SCALE;
   }
 
-  ctx.fillStyle = INK;
-  ctx.textAlign = "center";
-  ctx.font = `700 ${7 * SCALE}px ${FONT}`;
-  ctx.fillText(shopName, PAGE_W / 2, y);
-  y += 7 * SCALE;
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "right";
+  ctx.font = `700 ${7.2 * SCALE}px ${FONT}`;
+  ctx.fillText(fitText(ctx, shopName, textX - MARGIN - 52 * SCALE), textX, y + 11 * SCALE);
 
   ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
-  ctx.fillStyle = MUTED;
-  ctx.fillText(
+  ctx.fillStyle = "rgba(255,255,255,.88)";
+  const sub =
     pageNo === 1
-      ? invoiceDocumentTitle(inv)
-      : `ادامه ${invoiceDocumentTitle(inv)} — صفحه ${formatNumber(pageNo)}`,
-    PAGE_W / 2,
-    y,
-  );
-  y += 5 * SCALE;
+      ? [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""]
+          .filter(Boolean)
+          .join("  ·  ") || `${docTitle} کالا و خدمات`
+      : `ادامه ${docTitle} — صفحه ${formatNumber(pageNo)}`;
+  ctx.fillText(fitText(ctx, sub, textX - MARGIN - 52 * SCALE), textX, y + 20 * SCALE);
 
-  // آدرس/تلفن فروشگاه — فقط در صفحه اول و در صورت وجود
-  if (pageNo === 1 && (inv.shopAddress || inv.shopPhone)) {
-    ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
-    ctx.fillStyle = MUTED;
-    const line = [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""]
-      .filter(Boolean)
-      .join("   |   ");
-    ctx.fillText(fitText(ctx, line, PAGE_W - MARGIN * 2), PAGE_W / 2, y);
-    y += 4.5 * SCALE;
+  ctx.fillStyle = "rgba(255,255,255,.12)";
+  roundRect(ctx, MARGIN + 4 * SCALE, y + 5 * SCALE, 48 * SCALE, barH - 10 * SCALE, 2.2 * SCALE);
+  ctx.fill();
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.fillStyle = GOLD;
+  ctx.textAlign = "center";
+  ctx.font = `700 ${3.1 * SCALE}px ${FONT}`;
+  ctx.fillText(fitText(ctx, docTitle, 44 * SCALE), MARGIN + 28 * SCALE, y + 11 * SCALE);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${4.4 * SCALE}px ${FONT}`;
+  ctx.fillText(inv.id.toUpperCase(), MARGIN + 28 * SCALE, y + 19 * SCALE);
+  if (pageNo === 1) {
+    ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    ctx.fillText(
+      fitText(ctx, formatJalaliDateTime(inv.createdAt), 44 * SCALE),
+      MARGIN + 28 * SCALE,
+      y + 25.5 * SCALE,
+    );
   }
 
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = 0.5 * SCALE;
-  ctx.beginPath();
-  ctx.moveTo(MARGIN, y);
-  ctx.lineTo(PAGE_W - MARGIN, y);
-  ctx.stroke();
-  y += 6 * SCALE;
+  y += barH;
+  drawGoldRule(ctx, y);
+  y += 4 * SCALE;
 
   if (pageNo === 1) {
-    const customer = inv.customer;
-    const customerName = customer
-      ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
-      : "—";
-    const date = formatJalaliDate(inv.createdAt);
+    const boxH = 28 * SCALE;
+    const gap = 3 * SCALE;
+    const boxW = (PAGE_W - MARGIN * 2 - gap) / 2;
+    const sellerX = PAGE_W - MARGIN - boxW;
+    const buyerX = MARGIN;
+    const drawParty = (x: number, title: string, lines: [string, string][]) => {
+      ctx.strokeStyle = BORDER;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, boxW, boxH);
+      ctx.fillStyle = NAVY;
+      ctx.fillRect(x, y, boxW, 7 * SCALE);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${3.2 * SCALE}px ${FONT}`;
+      ctx.textAlign = "right";
+      ctx.fillText(title, x + boxW - 3 * SCALE, y + 3.6 * SCALE);
+      ctx.fillStyle = INK;
+      ctx.font = `400 ${3.3 * SCALE}px ${FONT}`;
+      let ly = y + 11 * SCALE;
+      for (const [k, v] of lines) {
+        ctx.fillStyle = MUTED;
+        ctx.font = `400 ${2.8 * SCALE}px ${FONT}`;
+        ctx.fillText(k, x + boxW - 3 * SCALE, ly);
+        ctx.fillStyle = INK;
+        ctx.font = `600 ${3.3 * SCALE}px ${FONT}`;
+        ctx.fillText(fitText(ctx, v || "—", boxW - 22 * SCALE), x + boxW - 20 * SCALE, ly);
+        ly += 5.2 * SCALE;
+      }
+    };
+    const customerName = customerDisplayName(inv) || "—";
     const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—";
-
-    ctx.font = `400 ${3.6 * SCALE}px ${FONT}`;
-    const colR = PAGE_W - MARGIN; // ستون راست
-    const colL = PAGE_W / 2 - 2 * SCALE; // ستون چپ
-    const meta: [string, string, number][] = [
-      [`شماره: ${inv.id.toUpperCase()}`, "", colR],
-      [`تاریخ: ${date}`, "", colL],
-      [`مشتری: ${customerName}`, "", colR],
-      [`تلفن: ${customer?.phone || "—"} · پرداخت: ${payment}`, "", colL],
-    ];
-    ctx.textAlign = "right";
-    ctx.fillStyle = INK;
-    for (let i = 0; i < meta.length; i++) {
-      const rowY = y + Math.floor(i / 2) * 6 * SCALE;
-      ctx.fillText(fitText(ctx, meta[i][0], PAGE_W / 2 - MARGIN - 2 * SCALE), meta[i][2], rowY);
-    }
-    y += Math.ceil(meta.length / 2) * 6 * SCALE + 3 * SCALE;
+    drawParty(sellerX, "مشخصات فروشنده", [
+      ["نام", shopName],
+      ["تلفن", inv.shopPhone || "—"],
+      ["نشانی", inv.shopAddress || "—"],
+    ]);
+    drawParty(buyerX, "مشخصات خریدار", [
+      ["نام", customerName],
+      ["تلفن", inv.customer?.phone || "—"],
+      ["پرداخت", payment],
+    ]);
+    y += boxH + 3 * SCALE;
 
     if (inv.notes) {
-      ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
+      ctx.fillStyle = "#fff8e6";
+      ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, 8 * SCALE);
+      ctx.strokeStyle = "#ead9a0";
+      ctx.strokeRect(MARGIN, y, PAGE_W - MARGIN * 2, 8 * SCALE);
+      ctx.fillStyle = "#5c4a12";
+      ctx.font = `400 ${3.3 * SCALE}px ${FONT}`;
       ctx.textAlign = "right";
-      ctx.fillStyle = MUTED;
-      const notesText = fitText(ctx, `توضیحات: ${inv.notes}`, PAGE_W - MARGIN * 2);
-      ctx.fillText(notesText, PAGE_W - MARGIN, y);
-      y += 5.5 * SCALE;
+      ctx.fillText(
+        fitText(ctx, `توضیحات: ${inv.notes}`, PAGE_W - MARGIN * 2 - 6 * SCALE),
+        PAGE_W - MARGIN - 3 * SCALE,
+        y + 4 * SCALE,
+      );
+      y += 10 * SCALE;
     }
   }
 
@@ -186,29 +252,20 @@ function drawHeader(
 
 function drawTableHead(ctx: Ctx, y: number): number {
   const cols = columns();
-  ctx.fillStyle = HEAD_BG;
+  ctx.fillStyle = NAVY;
   ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, HEAD_H);
-  ctx.strokeStyle = BORDER;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(MARGIN, y, PAGE_W - MARGIN * 2, HEAD_H);
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(MARGIN, y + HEAD_H - SCALE, PAGE_W - MARGIN * 2, SCALE);
 
-  ctx.fillStyle = INK;
-  ctx.font = `600 ${3.6 * SCALE}px ${FONT}`;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
   const cy = y + HEAD_H / 2;
   ctx.fillText("#", cols.idx.x - cols.idx.w / 2, cy);
-  ctx.fillText("نام کالا", cols.name.x - cols.name.w / 2, cy);
+  ctx.fillText("شرح کالا / خدمات", cols.name.x - cols.name.w / 2, cy);
   ctx.fillText("تعداد", cols.qty.x - cols.qty.w / 2, cy);
-  ctx.fillText("قیمت واحد", cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText("جمع", cols.total.x - cols.total.w / 2, cy);
-
-  // خطوط عمودی سرستون
-  for (const c of Object.values(cols)) {
-    ctx.beginPath();
-    ctx.moveTo(c.x - c.w, y);
-    ctx.lineTo(c.x - c.w, y + HEAD_H);
-    ctx.stroke();
-  }
+  ctx.fillText("مبلغ واحد", cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText("مبلغ کل", cols.total.x - cols.total.w / 2, cy);
   return y + HEAD_H;
 }
 
@@ -230,155 +287,99 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number])
 
   const cy = y + ROW_H / 2;
   ctx.fillStyle = INK;
-  ctx.font = `400 ${3.5 * SCALE}px ${FONT}`;
+  ctx.font = `400 ${3.8 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
   ctx.fillText(formatNumber(i + 1), cols.idx.x - cols.idx.w / 2, cy);
-  ctx.fillText(
-    formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
-    cols.qty.x - cols.qty.w / 2,
-    cy,
-  );
-  ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText(qtyWithUnit(item), cols.qty.x - cols.qty.w / 2, cy);
+  const priceText = item.originalPrice ? `${formatAmount(item.price)}` : formatAmount(item.price);
+  ctx.fillText(priceText, cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
+  ctx.fillStyle = NAVY;
   ctx.fillText(formatAmount(lineTotal(item)), cols.total.x - cols.total.w / 2, cy);
 
+  ctx.fillStyle = INK;
+  ctx.font = `600 ${3.8 * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText(fitText(ctx, item.name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);
+  const name = item.discountPercent
+    ? `${item.name}  ٪${formatNumber(item.discountPercent)} تخفیف`
+    : item.name;
+  ctx.fillText(fitText(ctx, name, cols.name.w - 3 * SCALE), cols.name.x - 1.5 * SCALE, cy);
 
   return y + ROW_H;
 }
 
-/** یک سطر از جدول مبالغ انتهای فاکتور */
-function drawSummaryRow(
-  ctx: Ctx,
-  y: number,
-  label: string,
-  value: string,
-  strong: boolean,
-): number {
-  const cols = columns();
-  const h = strong ? HEAD_H : ROW_H;
-  if (strong) {
-    ctx.fillStyle = HEAD_BG;
-    ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, h);
+function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
+  const lines = invoiceAmountLines(inv);
+  const boxW = 88 * SCALE;
+  const x = MARGIN;
+  const cur = y + 4 * SCALE;
+  ctx.strokeStyle = NAVY;
+  ctx.lineWidth = 1.5;
+  const h = lines.reduce(
+    (s, l) => s + (l.kind === "grand" || l.kind === "due" ? HEAD_H : ROW_H),
+    0,
+  );
+  ctx.strokeRect(x, cur, boxW, h);
+  let ly = cur;
+  for (const line of lines) {
+    const rowH = line.kind === "grand" || line.kind === "due" ? HEAD_H : ROW_H;
+    if (line.kind === "grand") {
+      ctx.fillStyle = NAVY;
+      ctx.fillRect(x, ly, boxW, rowH);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${4 * SCALE}px ${FONT}`;
+    } else if (line.kind === "due") {
+      ctx.fillStyle = "#fff1f0";
+      ctx.fillRect(x, ly, boxW, rowH);
+      ctx.fillStyle = "#9b1c1c";
+      ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
+    } else {
+      ctx.fillStyle = INK;
+      ctx.font = `400 ${3.6 * SCALE}px ${FONT}`;
+    }
+    const cy = ly + rowH / 2;
+    ctx.textAlign = "right";
+    ctx.fillText(fitText(ctx, line.label, boxW * 0.52), x + boxW - 3 * SCALE, cy);
+    ctx.textAlign = "left";
+    ctx.fillText(fitText(ctx, line.value, boxW * 0.42), x + 3 * SCALE, cy);
+    ly += rowH;
   }
+
+  const sigY = cur;
+  const sigW = (PAGE_W - MARGIN * 2 - boxW - 8 * SCALE) / 2;
+  const sellerX = PAGE_W - MARGIN - sigW;
+  const buyerX = sellerX - 4 * SCALE - sigW;
+  ctx.setLineDash([4, 4]);
   ctx.strokeStyle = BORDER;
   ctx.lineWidth = 1;
-  ctx.strokeRect(MARGIN, y, PAGE_W - MARGIN * 2, h);
-
-  const cy = y + h / 2;
-  ctx.fillStyle = INK;
-  ctx.font = `${strong ? 700 : 400} ${(strong ? 3.8 : 3.5) * SCALE}px ${FONT}`;
+  ctx.strokeRect(sellerX, sigY, sigW, SIG_H);
+  ctx.strokeRect(buyerX, sigY, sigW, SIG_H);
+  ctx.setLineDash([]);
+  ctx.fillStyle = MUTED;
+  ctx.font = `600 ${3.2 * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText(label, PAGE_W - MARGIN - 2 * SCALE, cy);
-  ctx.textAlign = "center";
-  ctx.fillText(value, cols.total.x - cols.total.w / 2, cy);
-  return y + h;
+  ctx.fillText("مهر و امضای فروشنده", sellerX + sigW - 3 * SCALE, sigY + 5 * SCALE);
+  ctx.fillText("امضای خریدار", buyerX + sigW - 3 * SCALE, sigY + 5 * SCALE);
+
+  return Math.max(ly, sigY + SIG_H) + 2 * SCALE;
 }
 
-/**
- * جدول مبالغ پایان فاکتور. قبلاً فقط «جمع کل» چاپ می‌شد؛ در نتیجه روی فاکتور
- * تخفیف‌دار جمعِ ستون اقلام با جمع کل نمی‌خواند و روی فاکتور نسیه هیچ اشاره‌ای
- * به مانده‌ی بدهی نبود. حالا دقیقاً همان سطرهای نسخه‌ی چاپی HTML رسم می‌شود.
- */
-function drawTotal(ctx: Ctx, y: number, inv: Invoice): number {
-  const t = invoiceTotals(inv);
-  let cur = y;
-  if (t.discount > 0 || t.tax > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      "جمع اقلام",
-      `${formatAmount(t.subtotal)} ${currencyLabel()}`,
-      false,
-    );
-  }
-  if (t.discount > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      `تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}`,
-      `${formatAmount(t.discount)} ${currencyLabel()}`,
-      false,
-    );
-  }
-  if (t.tax > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      `مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}`,
-      `${formatAmount(t.tax)} ${currencyLabel()}`,
-      false,
-    );
-  }
-  cur = drawSummaryRow(ctx, cur, "جمع کل", `${formatAmount(t.total)} ${currencyLabel()}`, true);
-  if (t.paid > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      "پرداخت نقدی",
-      `${formatAmount(t.paid)} ${currencyLabel()}`,
-      false,
-    );
-  }
-  const cheques = invoiceCheques(inv);
-  if (cheques.length > 0) {
-    for (let i = 0; i < cheques.length; i++) {
-      const c = cheques[i];
-      cur = drawSummaryRow(
-        ctx,
-        cur,
-        chequeLineLabel(c, i, formatChequeDue),
-        `${formatAmount(c.amount)} ${currencyLabel()}`,
-        false,
-      );
-    }
-  } else if (t.checkAmount > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      `مبلغ چک${inv.checkNumber ? ` (${inv.checkNumber})` : ""}`,
-      `${formatAmount(t.checkAmount)} ${currencyLabel()}`,
-      false,
-    );
-  }
-  if (t.remaining > 0) {
-    cur = drawSummaryRow(
-      ctx,
-      cur,
-      `مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}`,
-      `${formatAmount(t.remaining)} ${currencyLabel()}`,
-      true,
-    );
-  }
-  return cur;
-}
-
-/** ارتفاع موردنیاز جدول مبالغ — برای رزرو جا در صفحه‌بندی */
 function totalBlockHeight(inv: Invoice): number {
-  const t = invoiceTotals(inv);
-  let h = HEAD_H; // جمع کل
-  if (t.discount > 0 || t.tax > 0) h += ROW_H; // جمع اقلام
-  if (t.discount > 0) h += ROW_H;
-  if (t.tax > 0) h += ROW_H;
-  if (t.paid > 0) h += ROW_H;
-  const nCheques = Math.max(invoiceCheques(inv).length, t.checkAmount > 0 ? 1 : 0);
-  if (nCheques > 0) h += ROW_H * nCheques;
-  if (t.remaining > 0) h += HEAD_H;
-  return h;
+  const lines = invoiceAmountLines(inv);
+  const sums = lines.reduce(
+    (h, l) => h + (l.kind === "grand" || l.kind === "due" ? HEAD_H : ROW_H),
+    0,
+  );
+  return Math.max(sums, SIG_H) + 6 * SCALE;
 }
 
 function drawFooter(ctx: Ctx, y: number, inv: Invoice) {
   const shopName = inv.shopName || "فروشگاه";
-  ctx.strokeStyle = "#dddddd";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(MARGIN, y + 4 * SCALE);
-  ctx.lineTo(PAGE_W - MARGIN, y + 4 * SCALE);
-  ctx.stroke();
-  ctx.fillStyle = "#888888";
-  ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
+  drawGoldRule(ctx, y + 2 * SCALE);
+  ctx.fillStyle = MUTED;
+  ctx.font = `400 ${3.3 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
-  ctx.fillText(`با تشکر از خرید شما — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);
+  ctx.fillText(`با سپاس از اعتماد شما — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);
 }
 
 async function renderInvoiceCanvases(inv: Invoice): Promise<HTMLCanvasElement[]> {
@@ -399,7 +400,7 @@ async function renderInvoiceCanvases(inv: Invoice): Promise<HTMLCanvasElement[]>
     let y = drawHeader(ctx, inv, pageNo, logoImg);
     y = drawTableHead(ctx, y);
 
-    const reservedBottom = MARGIN + 14 * SCALE;
+    const reservedBottom = MARGIN + 18 * SCALE;
     const totalsH = totalBlockHeight(inv);
     while (i < items.length && y + ROW_H + totalsH <= PAGE_H - reservedBottom) {
       y = drawRow(ctx, y, i, items[i]);

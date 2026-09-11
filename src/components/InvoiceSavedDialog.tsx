@@ -10,7 +10,7 @@ import { formatToman } from "@/lib/store";
 import { invoiceTotals } from "@/lib/invoice-math";
 import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
-import { buildShareText } from "@/components/InvoiceActions";
+import { buildShareText } from "@/lib/invoice-document";
 
 export function InvoiceSavedDialog({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const [preview, setPreview] = useState(false);

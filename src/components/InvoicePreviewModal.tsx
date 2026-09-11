@@ -1,10 +1,10 @@
 /**
- * پیش‌نمایش بزرگ فاکتور داخل خود برنامه.
+ * پیش‌نمایش بزرگ فاکتور داخل خود برنامه — مستقل از اندازه کاغذ چاپ.
  * ذخیره تصویر اینجا نیست — در WebView اپ را می‌بندد و پلاگین نیتیو در دسترس نیست.
  */
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, Printer, Receipt, X, Send } from "lucide-react";
+import { Eye, Printer, Receipt, X, Send, Minus, Plus } from "lucide-react";
 import type { Invoice } from "@/lib/store";
 import { invoiceDocumentTitle, settings } from "@/lib/store";
 import {
@@ -15,12 +15,8 @@ import {
   type PaperSize,
   PAPER_SIZES,
 } from "@/lib/print";
-import { normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
-import {
-  buildInvoiceHTML,
-  buildThermalInvoiceHTML,
-  buildShareText,
-} from "@/components/InvoiceActions";
+import { buildInvoiceHTML, type InvoiceTemplate } from "@/lib/invoice-template";
+import { buildThermalInvoiceHTML, buildShareText } from "@/lib/invoice-document";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 
 type Props = {
@@ -39,10 +35,15 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
   const [busy, setBusy] = useState<"print" | "thermal" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [messaging, setMessaging] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   const title = heading || invoiceDocumentTitle(inv);
-  const html = useMemo(
-    () => buildInvoiceHTML(inv, fontSize, normalizeTemplate(template), paper),
+  const screenHtml = useMemo(
+    () => buildInvoiceHTML(inv, fontSize, template, paper, "screen"),
+    [inv, fontSize, template, paper],
+  );
+  const printDoc = useMemo(
+    () => buildInvoiceHTML(inv, fontSize, template, paper, "print"),
     [inv, fontSize, template, paper],
   );
 
@@ -51,7 +52,7 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
     setBusy("print");
     setNotice(null);
     try {
-      const ok = await printHtml(html, `${invoiceDocumentTitle(inv)} ${inv.id.toUpperCase()}`);
+      const ok = await printHtml(printDoc, `${invoiceDocumentTitle(inv)} ${inv.id.toUpperCase()}`);
       if (!ok) {
         setNotice(
           isAppShell()
@@ -81,12 +82,12 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-3">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-[96vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-background shadow-2xl sm:rounded-3xl"
+        className="flex max-h-[98vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl bg-background shadow-2xl sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -104,31 +105,63 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-3">
+        <div className="min-h-0 flex-1 overflow-auto bg-[#d7e0ea] p-2 sm:p-4">
           <iframe
             title={title}
-            srcDoc={html}
-            className="mx-auto h-[min(70vh,820px)] w-full rounded-xl border border-border bg-white shadow-sm"
+            srcDoc={screenHtml}
+            className="mx-auto w-full rounded-xl border border-black/5 bg-transparent"
+            style={{
+              height: "min(72vh, 980px)",
+              zoom,
+              minHeight: 520,
+            }}
           />
         </div>
 
         <div className="space-y-2 border-t border-border p-3">
-          <div className="flex flex-wrap gap-1.5">
-            {PAPER_SIZES.map((p) => (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              {PAPER_SIZES.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPaper(p.id)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+                    paper === p.id
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  {p.id}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
               <button
-                key={p.id}
                 type="button"
-                onClick={() => setPaper(p.id)}
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
-                  paper === p.id
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-background text-muted-foreground"
-                }`}
+                onClick={() => setZoom((z) => Math.max(0.85, Math.round((z - 0.1) * 10) / 10))}
+                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                aria-label="کوچک‌تر"
               >
-                {p.id}
+                <Minus className="h-3.5 w-3.5" />
               </button>
-            ))}
+              <span className="min-w-10 text-center text-[11px] font-medium tabular-nums">
+                {Math.round(zoom * 100)}٪
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(1.45, Math.round((z + 0.1) * 10) / 10))}
+                className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                aria-label="بزرگ‌تر"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
+          <p className="text-[11px] leading-5 text-muted-foreground">
+            این پیش‌نمایش برای خواندن روی صفحه است و کوچک نمی‌شود. اندازه کاغذ فقط هنگام چاپ اعمال
+            می‌شود.
+          </p>
 
           <div className="grid grid-cols-2 gap-2">
             <button

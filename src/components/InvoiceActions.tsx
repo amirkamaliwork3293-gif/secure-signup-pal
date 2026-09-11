@@ -1,26 +1,17 @@
 /**
  * InvoiceActions.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * دوتایی عملیات فاکتور: پرینت (A4/حرارتی — شامل ذخیره‌ی PDF از طریق دیالوگ چاپ مرورگر)، اشتراک‌گذاری
+ * عملیات فاکتور: مشاهده، پرینت (A4/حرارتی)، اشتراک PDF و پیام به مشتری.
+ * HTML سند فاکتور در ‎@/lib/invoice-document‎ ساخته می‌شود.
  */
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
+import { Eye, Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
+import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
 import type { Invoice } from "@/lib/store";
-import {
-  settings,
-  formatJalaliDate,
-  formatJalaliDateTime,
-  PAYMENT_LABEL,
-  formatAmount,
-  formatNumber,
-  currencyLabel,
-  formatChequeDue,
-  invoiceDocumentTitle,
-} from "@/lib/store";
-import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
+import { settings, invoiceDocumentTitle } from "@/lib/store";
 import {
   printHtml,
   OLD_APP_MESSAGE,
@@ -29,291 +20,13 @@ import {
   canNativeFileShare,
   saveBase64File,
   downloadBlob,
-  printFitAssets,
   PAPER_SIZES,
   normalizePaperSize,
   type PaperSize,
 } from "@/lib/print";
-import {
-  normalizeTemplate,
-  buildTemplatedInvoiceHTML,
-  itemUnitLabel,
-  type InvoiceTemplate,
-} from "@/lib/invoice-template";
-import { COUNT_UNIT } from "@/lib/store";
+import { buildInvoiceHTML, type InvoiceTemplate } from "@/lib/invoice-template";
+import { buildThermalInvoiceHTML, buildShareText } from "@/lib/invoice-document";
 import { shareText } from "@/lib/openExternal";
-import { escapeHtml } from "@/lib/html-escape";
-
-// escaper مشترک — نسخه‌ی محلی قبلی نقل‌قول‌ها را escape نمی‌کرد.
-const escHtml = escapeHtml;
-
-// ─── HTML فاکتور ────────────────────────────────────────────────────────────
-
-/** واحد نمایشی کنار تعداد — فقط وقتی واحد غیر از «عدد» باشد */
-function qtyWithUnit(item: Invoice["items"][number]): string {
-  const unit = itemUnitLabel(item.unit);
-  const q = item.quantity.toLocaleString("fa-IR");
-  return unit && unit !== COUNT_UNIT ? `${q} ${unit}` : q;
-}
-
-export function buildInvoiceHTML(
-  inv: Invoice,
-  fontSize: number = 13,
-  template?: Partial<InvoiceTemplate> | null,
-  paper: PaperSize = "A4",
-): string {
-  const tpl = normalizeTemplate(template);
-  if (tpl.enabled) return buildTemplatedInvoiceHTML(inv, tpl, fontSize, paper);
-  const date = formatJalaliDateTime(inv.createdAt);
-  const customer = inv.customer;
-  const customerName = customer
-    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ") || "—"
-    : "—";
-
-  const t = invoiceTotals(inv);
-  const rows = inv.items
-    .map(
-      (item, i) => `<tr>
-        <td class="idx">${(i + 1).toLocaleString("fa-IR")}</td>
-        <td class="name">${escHtml(item.name)}${
-          item.discountPercent
-            ? ` <span class="off">٪${item.discountPercent.toLocaleString("fa-IR")} تخفیف</span>`
-            : ""
-        }</td>
-        <td class="qty">${qtyWithUnit(item)}</td>
-        <td class="price">${
-          item.originalPrice ? `<s>${formatAmount(item.originalPrice)}</s> ` : ""
-        }${formatAmount(item.price)}</td>
-        <td class="sum">${formatAmount(lineTotal(item))}</td>
-      </tr>`,
-    )
-    .join("");
-
-  const shopName = inv.shopName || "فروشگاه";
-  const docTitle = invoiceDocumentTitle(inv);
-  const fs = fontSize;
-  const compact = paper === "A5";
-  const fit = printFitAssets(paper);
-  const chequeRows = invoiceCheques(inv)
-    .map(
-      (c, i) =>
-        `<div class="row"><span>${escHtml(chequeLineLabel(c, i, formatChequeDue))}</span><span>${formatAmount(c.amount)} ${currencyLabel()}</span></div>`,
-    )
-    .join("");
-
-  return `<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>${escHtml(docTitle)} ${escHtml(inv.id.toUpperCase())}</title>
-<style>
-  ${fit.css}
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:#1a2332;direction:rtl;padding:${compact ? 8 : 14}px;background:#fff}
-  .sheet{border:1px solid #c9d4e0;border-radius:12px;overflow:hidden;background:#fff}
-  .hero{display:flex;align-items:center;gap:12px;padding:${compact ? "10px 12px" : "14px 16px"};background:linear-gradient(135deg,#0b3d5c 0%,#145a86 55%,#1a6fa3 100%);color:#fff}
-  .hero .logo{width:${compact ? 46 : 58}px;height:${compact ? 46 : 58}px;object-fit:contain;border-radius:10px;background:#fff;flex-shrink:0;padding:3px}
-  .hero .who{flex:1;min-width:0}
-  .hero h1{font-size:${Math.round(fs * 1.45)}px;font-weight:700;letter-spacing:-.02em;word-break:break-word;line-height:1.25}
-  .hero .sub{font-size:${Math.round(fs * 0.78)}px;opacity:.88;margin-top:3px;word-break:break-word}
-  .badge{flex-shrink:0;text-align:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);border-radius:10px;padding:8px 12px;min-width:92px}
-  .badge .k{font-size:${Math.round(fs * 0.7)}px;opacity:.8}
-  .badge .v{font-size:${Math.round(fs * 0.95)}px;font-weight:700;margin-top:2px;color:#f3d48b}
-  .meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border-bottom:1px solid #e4ebf2;background:#f6f9fc}
-  .meta .cell{padding:${compact ? "6px 10px" : "8px 12px"};border-left:1px solid #e4ebf2;min-width:0}
-  .meta .cell .k{display:block;font-size:${Math.round(fs * 0.72)}px;color:#6b7c8f;margin-bottom:2px}
-  .meta .cell .v{font-weight:600;font-size:${Math.round(fs * 0.9)}px;word-break:break-word}
-  .note{margin:0;padding:8px 12px;background:#fff8e8;border-bottom:1px solid #f0e2b8;font-size:${Math.round(fs * 0.85)}px;color:#5c4a12;word-break:break-word}
-  table{width:100%;border-collapse:collapse;table-layout:fixed}
-  thead th{background:#0b3d5c;color:#fff;font-weight:600;padding:${compact ? "6px 6px" : "8px 8px"};font-size:${Math.round(fs * 0.82)}px;text-align:center}
-  tbody td{padding:${compact ? "5px 6px" : "7px 8px"};border-bottom:1px solid #e8eef4;font-size:${Math.round(fs * 0.86)}px;text-align:center;word-break:break-word;overflow-wrap:anywhere}
-  tbody tr:nth-child(even) td{background:#f7fafc}
-  td.idx{width:8%;color:#6b7c8f}
-  td.name{text-align:right;width:40%}
-  td.qty{width:14%;white-space:nowrap}
-  td.price,td.sum{width:19%}
-  .off{color:#0f9d58;font-size:.82em;font-weight:700}
-  s{color:#9aa8b5;margin-left:4px}
-  .bottom{display:flex;gap:12px;align-items:stretch;padding:${compact ? "8px 10px 10px" : "12px 14px 14px"};flex-wrap:wrap}
-  .signs{flex:1;min-width:140px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .signs .box{border:1px dashed #c9d4e0;border-radius:8px;padding:8px 10px 28px;font-size:${Math.round(fs * 0.78)}px;color:#6b7c8f}
-  .sums{margin-right:auto;min-width:min(100%,220px);border:1px solid #d5e0ea;border-radius:10px;overflow:hidden}
-  .sums .row{display:flex;justify-content:space-between;gap:12px;padding:5px 10px;font-size:${Math.round(fs * 0.86)}px;border-bottom:1px solid #eef3f7}
-  .sums .row:last-child{border-bottom:0}
-  .sums .row.grand{background:#0b3d5c;color:#fff;font-weight:700;font-size:${Math.round(fs * 0.95)}px}
-  .sums .row.due{color:#b42318;font-weight:700;background:#fff1f0}
-  .foot{text-align:center;font-size:${Math.round(fs * 0.75)}px;color:#8a97a6;padding:8px 10px 4px;letter-spacing:.02em}
-</style>
-</head>
-<body>
-<div id="print-root">
-<div class="sheet">
-  <div class="hero">
-    ${inv.shopLogoUrl ? `<img class="logo" src="${escHtml(inv.shopLogoUrl)}" alt="لوگو"/>` : ""}
-    <div class="who">
-      <h1>${escHtml(shopName)}</h1>
-      <div class="sub">${escHtml([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join("  ·  ") || `${docTitle} کالا و خدمات`)}</div>
-    </div>
-    <div class="badge">
-      <div class="k">${escHtml(docTitle)}</div>
-      <div class="v">${escHtml(inv.id.toUpperCase())}</div>
-    </div>
-  </div>
-  <div class="meta">
-    <div class="cell"><span class="k">تاریخ</span><span class="v">${escHtml(date)}</span></div>
-    <div class="cell"><span class="k">مشتری</span><span class="v">${escHtml(customerName)}</span></div>
-    <div class="cell"><span class="k">تلفن مشتری</span><span class="v">${escHtml(customer?.phone || "—")}</span></div>
-    <div class="cell"><span class="k">روش پرداخت</span><span class="v">${escHtml(inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—")}</span></div>
-  </div>
-  ${inv.notes ? `<div class="note"><strong>توضیحات: </strong>${escHtml(inv.notes)}</div>` : ""}
-  <table>
-    <thead><tr><th>#</th><th>شرح کالا / خدمات</th><th>تعداد</th><th>مبلغ واحد</th><th>مبلغ کل</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <div class="bottom">
-    <div class="signs">
-      <div class="box">مهر و امضای فروشنده</div>
-      <div class="box">امضای خریدار</div>
-    </div>
-    <div class="sums">
-      ${t.discount || t.tax ? `<div class="row"><span>جمع اقلام</span><span>${formatAmount(t.subtotal)} ${currencyLabel()}</span></div>` : ""}
-      ${t.discount ? `<div class="row"><span>تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</span><span>${formatAmount(t.discount)} ${currencyLabel()}</span></div>` : ""}
-      ${t.tax ? `<div class="row"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${formatAmount(t.tax)} ${currencyLabel()}</span></div>` : ""}
-      <div class="row grand"><span>جمع کل</span><span>${formatAmount(t.total)} ${currencyLabel()}</span></div>
-      ${t.paid ? `<div class="row"><span>پرداخت نقدی</span><span>${formatAmount(t.paid)} ${currencyLabel()}</span></div>` : ""}
-      ${chequeRows || (t.checkAmount ? `<div class="row"><span>مبلغ چک${inv.checkNumber ? ` (${escHtml(inv.checkNumber)})` : ""}</span><span>${formatAmount(t.checkAmount)} ${currencyLabel()}</span></div>` : "")}
-      ${t.remaining > 0 ? `<div class="row due"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${formatAmount(t.remaining)} ${currencyLabel()}</span></div>` : ""}
-    </div>
-  </div>
-</div>
-<div class="foot">با سپاس از اعتماد شما — ${escHtml(shopName)}</div>
-</div>
-${fit.script}
-</body>
-</html>`;
-}
-
-// ─── HTML فاکتور حرارتی (۸۰ میلی‌متر) — مخصوص پرینتر فیش/رسید ─────────────
-export function buildThermalInvoiceHTML(inv: Invoice): string {
-  const date = formatJalaliDateTime(inv.createdAt);
-  const customer = inv.customer;
-  const customerName = customer
-    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
-    : "";
-  const shopName = inv.shopName || "فروشگاه";
-  const fmt = formatAmount;
-  const t = invoiceTotals(inv);
-  const rows = inv.items
-    .map(
-      (it) => `
-      <div class="row">
-        <div class="name">${escHtml(it.name)}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
-        <div class="line"><span>${qtyWithUnit(it)} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(lineTotal(it))}</span></div>
-      </div>`,
-    )
-    .join("");
-  return `<!DOCTYPE html>
-<html lang="fa" dir="rtl"><head>
-<meta charset="utf-8"/>
-<title>فیش ${escHtml(inv.id.toUpperCase())}</title>
-<style>
-  @page { size: 80mm auto; margin: 0; }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
-  .center{text-align:center}
-  .shop{font-weight:700;font-size:14px}
-  .muted{color:#444;font-size:10.5px}
-  .sep{border-top:1px dashed #000;margin:6px 0}
-  .meta{font-size:11px}
-  .meta div{display:flex;justify-content:space-between;gap:6px}
-  .row{padding:3px 0}
-  .name{font-weight:700}
-  .line{display:flex;justify-content:space-between;font-size:11px;color:#222}
-  .total{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-top:4px}
-  .foot{font-size:10.5px;text-align:center;margin-top:6px}
-  .logo{display:block;margin:0 auto 4px;max-width:56mm;max-height:28mm;object-fit:contain}
-  @media print { body { width: 80mm; } }
-</style></head><body>
-${inv.shopLogoUrl ? `<img class="logo" src="${escHtml(inv.shopLogoUrl)}" alt="لوگو" />` : ""}
-<div class="center shop">${escHtml(shopName)}</div>
-<div class="center muted">${escHtml(invoiceDocumentTitle(inv))}</div>
-${
-  inv.shopAddress || inv.shopPhone
-    ? `<div class="center muted">${escHtml([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join(" — "))}</div>`
-    : ""
-}
-<div class="sep"></div>
-<div class="meta">
-  <div><span>شماره:</span><span>${escHtml(inv.id.toUpperCase())}</span></div>
-  <div><span>تاریخ:</span><span>${escHtml(date)}</span></div>
-  ${customerName ? `<div><span>مشتری:</span><span>${escHtml(customerName)}</span></div>` : ""}
-  ${customer?.phone ? `<div><span>تلفن:</span><span>${escHtml(customer.phone)}</span></div>` : ""}
-  ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
-</div>
-${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${escHtml(inv.notes)}</div>` : ""}
-<div class="sep"></div>
-${rows}
-<div class="sep"></div>
-${t.discount || t.tax ? `<div class="line"><span>جمع اقلام</span><span>${fmt(t.subtotal)}</span></div>` : ""}
-${t.discount ? `<div class="line"><span>تخفیف${t.discountPercent ? ` (${formatNumber(t.discountPercent)}٪)` : ""}</span><span>${fmt(t.discount)}</span></div>` : ""}
-${t.tax ? `<div class="line"><span>مالیات${t.taxPercent ? ` (${formatNumber(t.taxPercent)}٪)` : ""}</span><span>${fmt(t.tax)}</span></div>` : ""}
-<div class="total"><span>جمع کل</span><span>${fmt(t.total)} ${currencyLabel()}</span></div>
-${t.paid ? `<div class="line"><span>پرداخت نقدی</span><span>${fmt(t.paid)}</span></div>` : ""}
-${invoiceCheques(inv)
-  .map(
-    (c, i) =>
-      `<div class="line"><span>${escHtml(chequeLineLabel(c, i, formatChequeDue))}</span><span>${fmt(c.amount)}</span></div>`,
-  )
-  .join("")}
-${t.checkAmount && invoiceCheques(inv).length === 0 ? `<div class="line"><span>مبلغ چک${inv.checkNumber ? ` (${escHtml(inv.checkNumber)})` : ""}</span><span>${fmt(t.checkAmount)}</span></div>` : ""}
-${t.remaining > 0 ? `<div class="line"><span>مانده${inv.paymentMethod === "credit" ? " نسیه" : ""}</span><span>${fmt(t.remaining)}</span></div>` : ""}
-<div class="foot">با تشکر از خرید شما</div>
-</body></html>`;
-}
-
-// ─── متن ساده برای اشتراک‌گذاری ───────────────────────────────────────────
-
-export function buildShareText(inv: Invoice): string {
-  const date = formatJalaliDate(inv.createdAt);
-  const customer = inv.customer;
-  const customerName = customer
-    ? [customer.firstName, customer.lastName].filter(Boolean).join(" ")
-    : "";
-  // متن اشتراکی هم باید دقیقاً همان اعداد فاکتور چاپی را نشان بدهد؛ قبلاً فقط
-  // «جمع کل» را داشت و مشتری با جمع‌زدن ردیف‌ها به عدد دیگری می‌رسید.
-  const t = invoiceTotals(inv);
-  const lines = [
-    `🧾 ${invoiceDocumentTitle(inv)} ${inv.shopName || "فروشگاه"}`,
-    `📅 تاریخ: ${date}`,
-    customerName ? `👤 مشتری: ${customerName}` : "",
-    inv.notes ? `📝 توضیحات: ${inv.notes}` : "",
-    `─────────────────`,
-    ...inv.items.map(
-      (item) =>
-        `• ${item.name}  ×${qtyWithUnit(item)}  =  ${formatAmount(lineTotal(item))} ${currencyLabel()}`,
-    ),
-    `─────────────────`,
-    t.discount || t.tax ? `جمع اقلام: ${formatAmount(t.subtotal)} ${currencyLabel()}` : "",
-    t.discount
-      ? `تخفیف${t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: ${formatAmount(t.discount)} ${currencyLabel()}`
-      : "",
-    t.tax
-      ? `مالیات${t.taxPercent ? ` (٪${formatNumber(t.taxPercent)})` : ""}: ${formatAmount(t.tax)} ${currencyLabel()}`
-      : "",
-    `💰 جمع کل: ${formatAmount(t.total)} ${currencyLabel()}`,
-    t.paid ? `پرداخت نقدی: ${formatAmount(t.paid)} ${currencyLabel()}` : "",
-    ...invoiceCheques(inv).map(
-      (c, i) =>
-        `${chequeLineLabel(c, i, formatChequeDue)}: ${formatAmount(c.amount)} ${currencyLabel()}`,
-    ),
-    t.checkAmount && invoiceCheques(inv).length === 0
-      ? `مبلغ چک: ${formatAmount(t.checkAmount)} ${currencyLabel()}`
-      : "",
-    t.remaining > 0 ? `مانده: ${formatAmount(t.remaining)} ${currencyLabel()}` : "",
-  ].filter(Boolean);
-  return lines.join("\n");
-}
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -336,6 +49,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const [messaging, setMessaging] = useState(false);
   const [paperMenu, setPaperMenu] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [preview, setPreview] = useState(false);
 
   const handlePrint = async (chosen: PaperSize = paper) => {
     if (printing) return;
@@ -345,7 +59,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
       setSettings({ ...appSettings, invoicePaperSize: chosen });
     }
     try {
-      const html = buildInvoiceHTML(inv, fontSize, template, chosen);
+      const html = buildInvoiceHTML(inv, fontSize, template, chosen, "print");
       const ok = await printHtml(html, `${invoiceDocumentTitle(inv)} ${inv.id.toUpperCase()}`);
       if (!ok) {
         alert(
@@ -444,57 +158,75 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setPaperMenu(true)}
-        disabled={printing}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
-        title="پرینت فاکتور"
+      <div
+        className={
+          size === "sm"
+            ? "flex flex-wrap items-center justify-end gap-0.5"
+            : "flex min-w-0 flex-1 flex-wrap gap-1.5"
+        }
       >
-        <Printer className={iconSize} />
-        {showLabels && <span>پرینت</span>}
-      </button>
+        <button
+          type="button"
+          onClick={() => setPreview(true)}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
+          title="مشاهده فاکتور"
+        >
+          <Eye className={iconSize} />
+          {showLabels && <span>مشاهده</span>}
+        </button>
 
-      <button
-        type="button"
-        onClick={handleThermalPrint}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="چاپ حرارتی ۸۰ میلی‌متر (فیش/رسید)"
-      >
-        <Receipt className={iconSize} />
-        {showLabels && <span>چاپ حرارتی</span>}
-      </button>
+        <button
+          type="button"
+          onClick={() => setPaperMenu(true)}
+          disabled={printing}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
+          title="پرینت فاکتور"
+        >
+          <Printer className={iconSize} />
+          {showLabels && <span>پرینت</span>}
+        </button>
 
-      <button
-        type="button"
-        onClick={handleSharePdf}
-        disabled={sharingPdf}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
-        title="ارسال فایل PDF فاکتور (واتساپ و…)"
-      >
-        <FileDown className={iconSize} />
-        {showLabels && <span>{sharingPdf ? "در حال آماده‌سازی…" : "ارسال PDF"}</span>}
-      </button>
+        <button
+          type="button"
+          onClick={handleThermalPrint}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
+          title="چاپ حرارتی ۸۰ میلی‌متر (فیش/رسید)"
+        >
+          <Receipt className={iconSize} />
+          {showLabels && <span>چاپ حرارتی</span>}
+        </button>
 
-      <button
-        type="button"
-        onClick={handleShare}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
-        title="ارسال فاکتور"
-      >
-        <Share2 className={iconSize} />
-        {showLabels && <span>ارسال</span>}
-      </button>
+        <button
+          type="button"
+          onClick={handleSharePdf}
+          disabled={sharingPdf}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
+          title="ارسال فایل PDF فاکتور (واتساپ و…)"
+        >
+          <FileDown className={iconSize} />
+          {showLabels && <span>{sharingPdf ? "در حال آماده‌سازی…" : "ارسال PDF"}</span>}
+        </button>
 
-      <button
-        type="button"
-        onClick={() => setMessaging(true)}
-        className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
-        title="ارسال متن فاکتور با واتساپ/پیامک (قابل ویرایش)"
-      >
-        <MessageSquare className={iconSize} />
-        {showLabels && <span>پیام به مشتری</span>}
-      </button>
+        <button
+          type="button"
+          onClick={handleShare}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
+          title="ارسال فاکتور"
+        >
+          <Share2 className={iconSize} />
+          {showLabels && <span>ارسال</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMessaging(true)}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-primary/10 text-primary hover:bg-primary/20" : ""}`}
+          title="ارسال متن فاکتور با واتساپ/پیامک (قابل ویرایش)"
+        >
+          <MessageSquare className={iconSize} />
+          {showLabels && <span>پیام به مشتری</span>}
+        </button>
+      </div>
 
       {paperMenu &&
         createPortal(
@@ -508,7 +240,8 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
             >
               <div className="text-sm font-bold">اندازه کاغذ چاپ</div>
               <p className="text-[11px] leading-5 text-muted-foreground">
-                متن فاکتور روی کاغذ انتخابی در یک صفحه جا می‌گیرد و به صفحه دوم نمی‌رود.
+                اندازه کاغذ فقط روی چاپ اثر دارد. پیش‌نمایش داخل برنامه همیشه خوانا است. فاکتورهای
+                بلند در چاپ روی چند صفحه می‌آیند تا نوشته‌ها ریز نشوند.
               </p>
               <div className="grid gap-1.5">
                 {PAPER_SIZES.map((p) => (
@@ -537,6 +270,8 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
           </div>,
           document.body,
         )}
+
+      {preview && <InvoicePreviewModal inv={inv} onClose={() => setPreview(false)} allowSend />}
 
       {messaging && (
         <InvoiceMessageDialog

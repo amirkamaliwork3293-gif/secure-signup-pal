@@ -91,6 +91,7 @@ function InvoiceDesignPage() {
         tpl,
         appSettings.invoiceFontSize ?? 13,
         (appSettings.invoicePaperSize as "A4" | "A5" | "Letter") || "A4",
+        "screen",
       ),
     [sample, tpl, appSettings.invoiceFontSize, appSettings.invoicePaperSize],
   );
@@ -491,7 +492,7 @@ function InvoiceDesignPage() {
             <iframe
               title="پیش‌نمایش فاکتور"
               srcDoc={previewHtml}
-              className="h-[70vh] w-full border-0 bg-white"
+              className="h-[78vh] w-full border-0 bg-[#d7e0ea]"
             />
           </div>
         </div>

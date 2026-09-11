@@ -195,6 +195,7 @@ export function invoiceChromeCss(opts: {
   .kv .lbl{color:#667788;font-size:${Math.round(fs * 0.78)}px;flex:0 0 auto}
   .kv .val{font-weight:700;font-size:${Math.round(fs * 0.95)}px;word-break:break-word;min-width:0}
   table.items{width:100%;border-collapse:collapse;table-layout:fixed}
+  .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   table.items thead th{background:${ink};color:#fff;font-weight:700;padding:${opts.compact ? "7px 6px" : "9px 8px"};font-size:${Math.round(fs * 0.82)}px;text-align:center;border-bottom:2px solid ${gold}}
   table.items tbody td{padding:${opts.compact ? "6px 6px" : "8px 8px"};border-bottom:1px solid #e4ebf2;font-size:${Math.round(fs * 0.92)}px;text-align:center;word-break:break-word;overflow-wrap:anywhere;vertical-align:middle}
   table.items tbody tr:nth-child(even) td{background:#f4f7fb}
@@ -249,6 +250,7 @@ export function invoiceChromeCss(opts: {
     .party:last-child{border-left:1px solid #d5dee8}
     .masthead{flex-wrap:wrap}
     .doc-mark{width:100%}
+    table.items, table.tpl{min-width:540px}
   }
   `;
 }
@@ -368,10 +370,12 @@ export function buildDefaultInvoiceHTML(
       </div>
     </section>
   </div>
+  <div class="table-wrap">
   <table class="items">
     <thead><tr><th>#</th><th>شرح کالا / خدمات</th><th>تعداد</th><th>مبلغ واحد</th><th>مبلغ کل</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="5">—</td></tr>`}</tbody>
   </table>
+  </div>
   <div class="closing">
     <div class="closing-main">
       ${inv.notes ? `<div class="note-box"><strong>توضیحات: </strong>${esc(inv.notes)}</div>` : ""}

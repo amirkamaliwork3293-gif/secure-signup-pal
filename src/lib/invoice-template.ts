@@ -431,7 +431,7 @@ export function buildTemplatedInvoiceHTML(
   </header>
   <div class="gold-rule"></div>
   ${blocksHtml}
-  <div class="block"><table class="tpl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="block"><div class="table-wrap"><table class="tpl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></div>
   ${t.showTotals ? `<div class="tpl-totals"><table>${totalsRows}</table></div>` : ""}
   ${inv.notes ? `<div class="tpl-note"><strong>توضیحات: </strong>${esc(inv.notes)}</div>` : ""}
   ${t.footerNote ? `<div class="tpl-note">${esc(t.footerNote)}</div>` : ""}

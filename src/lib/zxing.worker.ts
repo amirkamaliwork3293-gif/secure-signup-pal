@@ -1,83 +1,53 @@
 /**
- * zxing.worker.ts — دیکود بارکد در Web Worker
+ * zxing.worker.ts — دیکود بارکد خارج از ترد اصلی
  *
- * دیکود ZXing سنگین‌ترین کار اسکنر است؛ اجرای آن داخل Worker یعنی ترد اصلی
- * (پیش‌نمایش دوربین و UI) هرگز قفل نمی‌شود و اسکنر حتی روی گوشی‌های ضعیف
- * روان می‌ماند.
- *
- * ورودی:  { id, width, height, lum: Uint8ClampedArray (luminance), thorough }
+ * ImageBitmap از ترد اصلی منتقل می‌شود (بدون getImageData روی UI).
+ * ورودی:  { id, bitmap: ImageBitmap, extra?: boolean }
  * خروجی: { id, text: string | null }
  */
-import {
-  BarcodeFormat,
-  DecodeHintType,
-  RGBLuminanceSource,
-  BinaryBitmap,
-  HybridBinarizer,
-  MultiFormatReader,
-} from "@zxing/library";
+import { decodeRgba } from "./zxing-decode";
 
-const FAST_HINTS = new Map<DecodeHintType, unknown>([
-  [DecodeHintType.TRY_HARDER, false],
-  [DecodeHintType.CHARACTER_SET, "UTF-8"],
-  [
-    DecodeHintType.POSSIBLE_FORMATS,
-    [
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A,
-      BarcodeFormat.UPC_E,
-      BarcodeFormat.CODE_128,
-      // CODE_39 / ITF / DATA_MATRIX / PDF417 / AZTEC: thorough only.
-      // ITF + 2D industrial formats can stall MultiFormatReader on noise
-      // (worker never postMessages; main thread stays busy forever).
-    ],
-  ],
-]);
+let canvas: OffscreenCanvas | null = null;
+let ctx: OffscreenCanvasRenderingContext2D | null = null;
 
-const THOROUGH_HINTS = new Map<DecodeHintType, unknown>([
-  [DecodeHintType.TRY_HARDER, true],
-  [DecodeHintType.CHARACTER_SET, "UTF-8"],
-  [
-    DecodeHintType.POSSIBLE_FORMATS,
-    [
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-      BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
-      BarcodeFormat.ITF, BarcodeFormat.CODABAR,
-      BarcodeFormat.DATA_MATRIX, BarcodeFormat.PDF_417,
-      BarcodeFormat.AZTEC,
-    ],
-  ],
-]);
-
-const fastReader = new MultiFormatReader();
-fastReader.setHints(FAST_HINTS);
-const thoroughReader = new MultiFormatReader();
-thoroughReader.setHints(THOROUGH_HINTS);
+function ensureCanvas(w: number, h: number): OffscreenCanvasRenderingContext2D {
+  if (!canvas || canvas.width !== w || canvas.height !== h) {
+    canvas = new OffscreenCanvas(w, h);
+    ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
+  }
+  if (!ctx) throw new Error("no-2d");
+  return ctx;
+}
 
 type DecodeRequest = {
   id: number;
-  width: number;
-  height: number;
-  lum: Uint8ClampedArray;
-  thorough: boolean;
+  bitmap: ImageBitmap;
+  extra?: boolean;
 };
 
+function decodeBitmap(bitmap: ImageBitmap, extra: boolean): string | null {
+  const width = bitmap.width | 0;
+  const height = bitmap.height | 0;
+  if (width < 8 || height < 8) return null;
+  const c = ensureCanvas(width, height);
+  c.drawImage(bitmap, 0, 0, width, height);
+  const imageData = c.getImageData(0, 0, width, height);
+  return decodeRgba(imageData.data, width, height, extra);
+}
+
 self.onmessage = (e: MessageEvent<DecodeRequest>) => {
-  const { id, width, height, lum, thorough } = e.data;
+  const { id, bitmap, extra } = e.data;
   let text: string | null = null;
-  const reader = thorough ? thoroughReader : fastReader;
   try {
-    const src = new RGBLuminanceSource(lum, width, height);
-    const bmp = new BinaryBitmap(new HybridBinarizer(src));
-    text = reader.decode(bmp).getText();
+    text = decodeBitmap(bitmap, !!extra);
   } catch {
     text = null;
   } finally {
-    reader.reset();
+    try {
+      bitmap.close();
+    } catch {
+      /* already transferred / closed */
+    }
+    (self as unknown as Worker).postMessage({ id, text });
   }
-  (self as unknown as Worker).postMessage({ id, text });
 };

@@ -3,7 +3,7 @@
  * اجرا: node --experimental-strip-types scripts/test-device-tier.mjs
  */
 import assert from "node:assert/strict";
-import { classifyDeviceTier } from "../src/lib/device-tier.ts";
+import { classifyDeviceTier, decodeBudget } from "../src/lib/device-tier.ts";
 
 const cases = [
   { name: "3GB octa (Chrome reports mem=2)", mem: 2, cores: 8, expect: "mid" },
@@ -48,5 +48,8 @@ assert.equal(
   "high",
   "۴–۸ گیگ + هشت هسته باید high باشد (کروم ۴ گزارش می‌کند)",
 );
+
+assert.equal(decodeBudget("low").maxW > decodeBudget("low").maxH, true);
+assert.equal(decodeBudget("high").maxW, 960);
 
 console.log("device-tier: ok");

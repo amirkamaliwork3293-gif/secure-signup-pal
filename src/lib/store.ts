@@ -35,6 +35,7 @@ import {
 } from "@/lib/online-status";
 import { rememberCloudRead } from "@/lib/offline-cache";
 import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
+import { findProductByCode } from "@/lib/barcode-match";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1563,16 +1564,7 @@ export const products = {
   useAll: () => useStore<Product[]>(PRODUCTS_KEY, []),
   getAll: () => read<Product[]>(PRODUCTS_KEY, []),
   save: (list: Product[]) => write(PRODUCTS_KEY, list),
-  findByCode: (code: string) => {
-    const list = read<Product[]>(PRODUCTS_KEY, []);
-    const t = code.trim();
-    if (!t) return undefined;
-    const exact = list.find((p) => p.code === t);
-    if (exact) return exact;
-    const digits = t.replace(/\D/g, "");
-    if (!digits) return undefined;
-    return list.find((p) => String(p.code || "").replace(/\D/g, "") === digits);
-  },
+  findByCode: (code: string) => findProductByCode(read<Product[]>(PRODUCTS_KEY, []), code),
   findById: (id: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.id === id),
   update: (updated: Product) => {
     const list = read<Product[]>(PRODUCTS_KEY, []);

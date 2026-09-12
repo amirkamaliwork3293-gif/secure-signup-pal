@@ -40,9 +40,18 @@ export function detectDeviceTier(): DeviceTier {
   });
 }
 
-/** اندازهٔ کانواس دیکود — mid/high برای بارکد ریز جزئیات کافی دارند. */
+/**
+ * سقف پیکسل دیکود (عرض × ارتفاع) — نسبت کادر اسکن جداگانه حفظ می‌شود.
+ * ارتفاع کم برای بارکد ۱بعدی کافی است؛ عرض بالا میله‌های باریک را نگه می‌دارد.
+ */
+export function decodeBudget(tier: DeviceTier): { maxW: number; maxH: number } {
+  if (tier === "low") return { maxW: 512, maxH: 240 };
+  if (tier === "mid") return { maxW: 720, maxH: 320 };
+  return { maxW: 960, maxH: 400 };
+}
+
+/** سازگاری با کد قبلی؛ دیگر کانواس را به ۴:۳ نکش. */
 export function decodeCanvasSize(tier: DeviceTier): { dw: number; dh: number } {
-  if (tier === "low") return { dw: 416, dh: 312 };
-  if (tier === "mid") return { dw: 640, dh: 480 };
-  return { dw: 800, dh: 600 };
+  const { maxW, maxH } = decodeBudget(tier);
+  return { dw: maxW, dh: maxH };
 }

@@ -1,7 +1,7 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { RequireActiveSubscription } from "@/components/RequireActiveSubscription";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Layout } from "@/components/Layout";
 import { Scanner } from "@/components/Scanner";
 import {
@@ -37,10 +37,13 @@ function ScanPageInner() {
   const [searchQ, setSearchQ] = useState("");
   const [allProducts] = products.useAll();
   const searchRef = useRef<HTMLInputElement>(null);
+  const lastAddRef = useRef<{ id: string; at: number } | null>(null);
 
-  const handleCode = (code: string) => {
+  const handleCode = useCallback((code: string) => {
     const product = products.findByCode(code);
     if (product) {
+      const now = Date.now();
+      if (lastAddRef.current?.id === product.id && now - lastAddRef.current.at < 800) return;
       const status = stockStatus(product);
       if (inventoryTrackingEnabled() && status === "out") {
         setLast({ kind: "unknown", code: `اتمام موجودی: ${product.name}` });
@@ -48,6 +51,7 @@ function ScanPageInner() {
         return;
       }
       if (!requireOnlineWrite()) return;
+      lastAddRef.current = { id: product.id, at: now };
       const current = invoice.getCurrent();
       const next = addProductToInvoice(current, product);
       invoice.save(next);
@@ -64,7 +68,7 @@ function ScanPageInner() {
       setLast({ kind: "unknown", code });
       setPaused(true);
     }
-  };
+  }, []);
 
   const addFromSearch = (productId: string) => {
     if (!requireOnlineWrite()) return;

@@ -1,34 +1,24 @@
 /**
- * Scanner.tsx — Ultra-fast barcode & QR scanner (v3 — optimized)
+ * Scanner.tsx — اسکن بارکد/QR موبایل (v4)
  *
- * Core optimizations over v2:
- *   1. Native BarcodeDetector + ZXing run TRULY in parallel every frame
- *      (v2 returned early when native was pending, dropping frames)
- *   2. Dynamic resolution: starts at 480p, bumps to 720p after first success
- *   3. Scan-zone crop tightened to 70%×50% (less pixels, faster decode)
- *   4. ZXing runs in a dedicated Web Worker → zero main-thread blocking
- *      (watchdog recycles a hung decode; blank frames are skipped)
- *   5. Native promise stacking fixed with a generation counter (not a flag)
- *   6. Adaptive cooldown: 800ms same-code, 0ms different-code
- *   7. Camera: tries 60fps first, then 30fps — higher fps = more decode chances
- *   8. Focus-distance lock after first successful scan (prevents refocus lag)
- *   9. imageData only extracted when needed (not every frame on native path)
- *  10. requestAnimationFrame kept — no polling timers
+ * علت لگ و نخواندن در نسخهٔ قبل:
+ *   1. onDetected هر اسکن والد را رندر می‌کرد → useEffect دوربین را قطع و از نو می‌ساخت
+ *   2. کادر عریض روی کانواس ۴:۳ کش می‌آمد و میله‌های EAN/Code128 خراب می‌شد
+ *   3. getImageData + استخراج روشنایی روی ترد اصلی هر فریم
+ *   4. Native و ZXing همزمان + TRY_HARDER/ITF که Worker را قفل و watchdog را آتش می‌کرد
+ *
+ * مسیر جدید:
+ *   - دوربین فقط یک‌بار روی mount روشن می‌شود (onDetected از طریق ref)
+ *   - Native BarcodeDetector روی ImageBitmap بریده‌شده (GPU)
+ *   - ZXing فقط اگر Native نبود یا چیزی نخواند؛ داخل Worker
+ *   - نسبت تصویر کادر حفظ می‌شود
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import {
-  BarcodeFormat,
-  DecodeHintType,
-  RGBLuminanceSource,
-  BinaryBitmap,
-  HybridBinarizer,
-  MultiFormatReader,
-} from "@zxing/library";
 import { Flashlight, FlashlightOff, RefreshCw } from "lucide-react";
-import { decodeCanvasSize, detectDeviceTier } from "@/lib/device-tier";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { decodeBudget, detectDeviceTier } from "@/lib/device-tier";
+import { cropSourceRect, fitDecodeSize } from "@/lib/scanner-engine";
+import { normalizeScannedCode, scannedCodesMatch } from "@/lib/barcode-match";
 
 type Props = {
   onDetected: (code: string, format?: string) => void;
@@ -36,7 +26,7 @@ type Props = {
 };
 
 type NativeBarcode = { rawValue: string; format: string };
-type NativeDetector = { detect: (src: CanvasImageSource) => Promise<NativeBarcode[]> };
+type NativeDetector = { detect: (src: ImageBitmap | HTMLVideoElement) => Promise<NativeBarcode[]> };
 
 declare global {
   interface Window {
@@ -44,49 +34,22 @@ declare global {
   }
 }
 
-// ─── Formats ─────────────────────────────────────────────────────────────────
-
-const FAST_HINTS = new Map<DecodeHintType, unknown>([
-  [DecodeHintType.TRY_HARDER, false],
-  [DecodeHintType.CHARACTER_SET, "UTF-8"],
-  [
-    DecodeHintType.POSSIBLE_FORMATS,
-    [
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A,
-      BarcodeFormat.UPC_E,
-      BarcodeFormat.CODE_128,
-    ],
-  ],
-]);
-
-const THOROUGH_HINTS = new Map<DecodeHintType, unknown>([
-  [DecodeHintType.TRY_HARDER, true],
-  [DecodeHintType.CHARACTER_SET, "UTF-8"],
-  [
-    DecodeHintType.POSSIBLE_FORMATS,
-    [
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A,  BarcodeFormat.UPC_E,
-      BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
-      BarcodeFormat.ITF, BarcodeFormat.CODABAR,
-      BarcodeFormat.DATA_MATRIX, BarcodeFormat.PDF_417,
-      BarcodeFormat.AZTEC,
-    ],
-  ],
-]);
-
 const NATIVE_FORMATS = [
-  "ean_13","ean_8","upc_a","upc_e","code_128",
-  "qr_code","code_39","itf","data_matrix","pdf417","aztec","codabar",
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "code_128",
+  "qr_code",
+  "code_39",
+  "itf",
+  "data_matrix",
+  "pdf417",
+  "aztec",
+  "codabar",
 ];
 
-const CORE_NATIVE_FORMATS = [
-  "ean_13", "ean_8", "upc_a", "upc_e", "code_128", "qr_code", "code_39",
-];
+const CORE_NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "qr_code", "code_39"];
 
 function createNativeDetector(): NativeDetector | null {
   if (!window.BarcodeDetector) return null;
@@ -105,34 +68,7 @@ function createNativeDetector(): NativeDetector | null {
   return null;
 }
 
-// ─── BT.601 luminance (SIMD-friendly) ────────────────────────────────────────
-
-function extractLuminance(data: Uint8ClampedArray, size: number): Uint8ClampedArray {
-  const lum = new Uint8ClampedArray(size);
-  for (let i = 0, j = 0; j < size; i += 4, j++) {
-    lum[j] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-  }
-  return lum;
-}
-
-/** Sampled variance — blank/unfocused frames have near-zero contrast. */
-function luminanceVariance(lum: Uint8ClampedArray): number {
-  let n = 0, sum = 0, sum2 = 0;
-  for (let i = 0; i < lum.length; i += 17) {
-    const v = lum[i];
-    sum += v;
-    sum2 += v * v;
-    n++;
-  }
-  if (n < 8) return 0;
-  const mean = sum / n;
-  return sum2 / n - mean * mean;
-}
-
 function spawnZxingWorker(): Worker | null {
-  // Vite only emits a worker chunk when `new Worker(new URL(..., import.meta.url), …)`
-  // is written as a single expression. Splitting the URL into a variable inlines
-  // the file as a data: URL and the worker never loads.
   try {
     return new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
   } catch {
@@ -140,83 +76,62 @@ function spawnZxingWorker(): Worker | null {
   }
 }
 
-function zxingDecode(imageData: ImageData, reader: MultiFormatReader): string | null {
-  try {
-    const lum = extractLuminance(imageData.data, imageData.width * imageData.height);
-    const src = new RGBLuminanceSource(lum, imageData.width, imageData.height);
-    const bmp = new BinaryBitmap(new HybridBinarizer(src));
-    return reader.decode(bmp).getText();
-  } catch {
-    return null;
-  }
-}
-
-// ─── Device tier (module-level, SSR-safe) ────────────────────────────────────
-// Chrome deviceMemory is a power-of-two floor (3GB→2, 6GB→4). See device-tier.ts.
+type RVFCVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: () => void) => number;
+  cancelVideoFrameCallback?: (id: number) => void;
+};
 
 const DEVICE_TIER = detectDeviceTier();
-const { dw: DW, dh: DH } = decodeCanvasSize(DEVICE_TIER);
-
-// ─── Component ───────────────────────────────────────────────────────────────
-
-// Default scan-zone crop (W × H, centred). User can resize via slider.
-const BASE_W = 0.78, BASE_H = 0.46;
+const BUDGET = decodeBudget(DEVICE_TIER);
+const BASE_W = 0.78;
+const BASE_H = 0.46;
 
 export function Scanner({ onDetected, paused }: Props) {
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const streamRef      = useRef<MediaStream | null>(null);
-  const pausedRef      = useRef(false);
-  const rafRef         = useRef<number>(0);
-  const lastCodeRef    = useRef<{ code: string; at: number } | null>(null);
-  const fastReader     = useRef<MultiFormatReader | null>(null);
-  const thoroughReader = useRef<MultiFormatReader | null>(null);
-  const nativeRef      = useRef<NativeDetector | null>(null);
-  const offscreen      = useRef<OffscreenCanvas | HTMLCanvasElement | null>(null);
-  const offCtx         = useRef<OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null>(null);
-  // Generation counter: each new native call gets a generation number.
-  // If a newer call resolves first, the older one is silently discarded.
-  const nativeGenRef   = useRef(0);
-  const nativeRunRef   = useRef(0); // last dispatched generation
-  const nativeInflight = useRef(false); // guard: skip if previous detect still running
-  // ZXing Web Worker — decode off the main thread (kills UI lag)
-  const workerRef      = useRef<Worker | null>(null);
-  const workerBusy     = useRef(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const pausedRef = useRef(false);
+  const onDetectedRef = useRef(onDetected);
+  const lastCodeRef = useRef<{ code: string; at: number } | null>(null);
+  const nativeRef = useRef<NativeDetector | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerBusy = useRef(false);
   const workerWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const workerFails    = useRef(0);
-  const lastZxingAt    = useRef(0);
-
-  const [error,          setError]          = useState<string | null>(null);
-  const [torchOn,        setTorchOn]        = useState(false);
-  const [torchSupported, setTorchSupported] = useState(false);
-  const [zoomSupported,  setZoomSupported]  = useState(false);
-  const [zoom,           setZoom]           = useState(1);
+  const extraTick = useRef(0);
+  const nativeBitmapOk = useRef(true);
+  const pinchStartRef = useRef<number | null>(null);
+  const pinchZoomStartRef = useRef(1);
   const zoomMinRef = useRef(1);
   const zoomMaxRef = useRef(10);
-  const [flash,          setFlash]          = useState(false);
-  const [engine,         setEngine]         = useState<string>("...");
-  const [fps,            setFps]            = useState(0);
-
   const fpsCountRef = useRef(0);
   const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track whether ZXing should use thorough pass (alternates every frame)
-  const thoroughToggle = useRef(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // ── adjustable scan box ───────────────────────────────────────────────────
-  // 0.4 (tiny — best for very small barcodes) … 1.4 (wide — large labels)
+  const [error, setError] = useState<string | null>(null);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [zoomSupported, setZoomSupported] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [flash, setFlash] = useState(false);
+  const [engine, setEngine] = useState<string>("...");
+  const [fps, setFps] = useState(0);
   const [boxScale, setBoxScale] = useState(1);
+
+  onDetectedRef.current = onDetected;
+  pausedRef.current = !!paused;
+
   const crop = useMemo(() => {
     const w = Math.min(0.96, Math.max(0.22, BASE_W * boxScale));
     const h = Math.min(0.86, Math.max(0.16, BASE_H * boxScale));
     return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
   }, [boxScale]);
   const cropRef = useRef(crop);
-  useEffect(() => { cropRef.current = crop; }, [crop]);
+  cropRef.current = crop;
 
-  // ── short beep on detection ───────────────────────────────────────────────
-  const audioCtxRef = useRef<AudioContext | null>(null);
   const beep = useCallback(() => {
     try {
-      const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+      const AC =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!audioCtxRef.current) audioCtxRef.current = new AC();
       const ctx = audioCtxRef.current;
       if (ctx.state === "suspended") ctx.resume().catch(() => {});
@@ -231,70 +146,47 @@ export function Scanner({ onDetected, paused }: Props) {
       o.connect(g).connect(ctx.destination);
       o.start(t0);
       o.stop(t0 + 0.14);
-    } catch { /* silent */ }
+    } catch {
+      /* silent */
+    }
   }, []);
 
-  useEffect(() => { pausedRef.current = !!paused; }, [paused]);
+  const emit = useCallback(
+    (code: string, fmt?: string) => {
+      if (pausedRef.current) return;
+      const t = normalizeScannedCode(code);
+      if (!t) return;
+      const now = Date.now();
+      const last = lastCodeRef.current;
+      if (last && scannedCodesMatch(last.code, t) && now - last.at < 800) return;
+      lastCodeRef.current = { code: t, at: now };
+      setFlash(true);
+      setTimeout(() => setFlash(false), 220);
+      navigator.vibrate?.(35);
+      beep();
+      onDetectedRef.current(t, fmt);
+    },
+    [beep],
+  );
+  const emitRef = useRef(emit);
+  emitRef.current = emit;
 
-  // ── emit ──────────────────────────────────────────────────────────────────
-  const emit = useCallback((code: string, fmt?: string) => {
-    if (pausedRef.current) return;
-    const t = code.trim();
-    if (!t) return;
-    const now = Date.now();
-    const last = lastCodeRef.current;
-    if (last?.code === t && now - last.at < 800) return; // 800ms same-code cooldown
-    // Different code fires immediately — no cooldown
-    lastCodeRef.current = { code: t, at: now };
+  useEffect(() => {
+    let cancelled = false;
+    let frameWait: number | null = null;
+    let resolveFrame: (() => void) | null = null;
+    const videoEl = videoRef.current;
 
-    setFlash(true);
-    setTimeout(() => setFlash(false), 220);
-    navigator.vibrate?.(35);
-    beep();
-    onDetected(t, fmt);
-  }, [onDetected, beep]);
+    fpsTimerRef.current = setInterval(() => {
+      setFps(fpsCountRef.current);
+      fpsCountRef.current = 0;
+    }, 1000);
 
-  // ── scan loop ─────────────────────────────────────────────────────────────
-  const startLoop = useCallback((video: HTMLVideoElement) => {
-    let ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
-    try {
-      const oc = new OffscreenCanvas(DW, DH);
-      offscreen.current = oc;
-      ctx = oc.getContext("2d", { willReadFrequently: true, alpha: false }) as OffscreenCanvasRenderingContext2D;
-    } catch {
-      const c = document.createElement("canvas");
-      c.width = DW; c.height = DH;
-      offscreen.current = c;
-      ctx = c.getContext("2d", { willReadFrequently: true, alpha: false })!;
-    }
-    offCtx.current = ctx;
-
-    const fr = new MultiFormatReader(); fr.setHints(FAST_HINTS);
-    fastReader.current = fr;
-    const tr = new MultiFormatReader(); tr.setHints(THOROUGH_HINTS);
-    thoroughReader.current = tr;
-
-    const budgetMs = DEVICE_TIER === "low" ? 350 : 250;
     const clearWatchdog = () => {
       if (workerWatchdog.current) {
         clearTimeout(workerWatchdog.current);
         workerWatchdog.current = null;
       }
-    };
-
-    const armWatchdog = () => {
-      clearWatchdog();
-      workerWatchdog.current = setTimeout(() => {
-        workerWatchdog.current = null;
-        workerFails.current += 1;
-        console.warn("[scanner] ZXing worker decode exceeded", budgetMs, "ms — recycling");
-        workerRef.current?.terminate();
-        workerRef.current = null;
-        workerBusy.current = false;
-        // Always respawn. Giving up would leave WebView/Firefox (no Native)
-        // with no decoder after a few noisy frames.
-        attachWorker(spawnZxingWorker());
-      }, budgetMs);
     };
 
     const attachWorker = (w: Worker | null) => {
@@ -305,251 +197,326 @@ export function Scanner({ onDetected, paused }: Props) {
       w.onmessage = (e: MessageEvent<{ id: number; text: string | null }>) => {
         clearWatchdog();
         workerBusy.current = false;
-        workerFails.current = 0;
-        if (e.data.text) emit(e.data.text, "ZXing-W");
+        if (e.data.text) emitRef.current(e.data.text, "ZXing");
       };
       w.onerror = (ev) => {
         console.warn("[scanner] ZXing worker error", ev.message);
         clearWatchdog();
         workerBusy.current = false;
-        w.terminate();
+        try {
+          w.terminate();
+        } catch {
+          /* ignore */
+        }
         workerRef.current = null;
-        workerFails.current += 1;
-        attachWorker(spawnZxingWorker());
+        if (!cancelled) attachWorker(spawnZxingWorker());
       };
       workerRef.current = w;
     };
 
-    if (!workerRef.current) attachWorker(spawnZxingWorker());
+    const armWatchdog = () => {
+      clearWatchdog();
+      workerWatchdog.current = setTimeout(() => {
+        workerWatchdog.current = null;
+        workerBusy.current = false;
+        console.warn("[scanner] ZXing worker decode timed out — recycling");
+        try {
+          workerRef.current?.terminate();
+        } catch {
+          /* ignore */
+        }
+        workerRef.current = null;
+        if (!cancelled) attachWorker(spawnZxingWorker());
+      }, 2000);
+    };
 
-    nativeRef.current = createNativeDetector();
-    if (nativeRef.current) {
-      setEngine("🚀 Native GPU");
-    } else {
-      setEngine(workerRef.current ? "⚡ ZXing Worker" : "⚙️ ZXing");
-    }
+    const waitFrame = (video: HTMLVideoElement) =>
+      new Promise<void>((resolve) => {
+        resolveFrame = resolve;
+        const finish = () => {
+          frameWait = null;
+          resolveFrame = null;
+          resolve();
+        };
+        if (cancelled) {
+          finish();
+          return;
+        }
+        const v = video as RVFCVideo;
+        if (typeof v.requestVideoFrameCallback === "function") {
+          frameWait = v.requestVideoFrameCallback(finish);
+        } else {
+          frameWait = requestAnimationFrame(finish);
+        }
+      });
 
-    const loop = () => {
-      rafRef.current = requestAnimationFrame(loop);
-      if (pausedRef.current || video.readyState < 2) return;
-
-      const vw = video.videoWidth, vh = video.videoHeight;
-      if (!vw || !vh) return;
-
-      // Crop to (live, user-adjustable) scan zone
-      const c = cropRef.current;
-      const sx = vw * c.x, sy = vh * c.y;
-      const sw = vw * c.w, sh = vh * c.h;
-      const now = performance.now();
-      const minInterval = nativeRef.current
-        ? (DEVICE_TIER === "low" ? 400 : 240)
-        : workerRef.current
-          ? (DEVICE_TIER === "low" ? 180 : 90)
-          : (DEVICE_TIER === "low" ? 350 : 200);
-      const zxingDue = now - lastZxingAt.current >= minInterval;
-
-      // پیش‌نمایش از تگ video است؛ کانواس فقط برای ZXing لازم است.
-      // با Native، هر فریم کانواس نکش تا گوشی روان بماند.
-      if (!nativeRef.current || zxingDue) {
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, DW, DH);
+    const grabBitmap = async (video: HTMLVideoElement): Promise<ImageBitmap | null> => {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return null;
+      const src = cropSourceRect(vw, vh, cropRef.current);
+      const fit = fitDecodeSize(src.sw, src.sh, BUDGET.maxW, BUDGET.maxH);
+      try {
+        return await createImageBitmap(video, src.sx, src.sy, src.sw, src.sh, {
+          resizeWidth: fit.dw,
+          resizeHeight: fit.dh,
+          resizeQuality: DEVICE_TIER === "low" ? "medium" : "high",
+        });
+      } catch {
+        try {
+          return await createImageBitmap(video, src.sx, src.sy, src.sw, src.sh);
+        } catch {
+          return null;
+        }
       }
+    };
+
+    const scanFrame = async (video: HTMLVideoElement) => {
+      if (pausedRef.current || video.readyState < 2) return;
       fpsCountRef.current++;
 
-      // ── Path A: Native BarcodeDetector روی خود ویدیو (سریع‌تر از کانواس) ─
+      const bitmap = await grabBitmap(video);
+      if (!bitmap || cancelled || pausedRef.current) {
+        bitmap?.close();
+        return;
+      }
+
       if (nativeRef.current) {
-        if (!nativeInflight.current) {
-          const gen = ++nativeGenRef.current;
-          nativeInflight.current = true;
-          nativeRef.current
-            .detect(video)
-            .then((codes) => {
-              nativeInflight.current = false;
-              if (gen < nativeRunRef.current) return;
-              nativeRunRef.current = gen;
-              if (codes.length) emit(codes[0].rawValue, codes[0].format);
-            })
-            .catch(() => { nativeInflight.current = false; });
+        try {
+          let codes: NativeBarcode[] = [];
+          if (nativeBitmapOk.current) {
+            try {
+              codes = await nativeRef.current.detect(bitmap);
+            } catch {
+              nativeBitmapOk.current = false;
+            }
+          }
+          if (!codes.length) {
+            try {
+              codes = await nativeRef.current.detect(video);
+            } catch {
+              /* ZXing fallback */
+            }
+          }
+          if (cancelled) {
+            bitmap.close();
+            return;
+          }
+          if (codes.length) {
+            emitRef.current(codes[0].rawValue, codes[0].format);
+            bitmap.close();
+            return;
+          }
+        } catch {
+          /* fall through to ZXing */
         }
       }
 
-      // ── Path B: ZXing (Worker preferred, sync fallback) ────────────────
-      if (zxingDue) {
-        if (workerRef.current) {
-          if (!workerBusy.current) {
-            lastZxingAt.current = now;
-            const imageData = ctx.getImageData(0, 0, DW, DH);
-            const lum = extractLuminance(imageData.data, DW * DH);
-            // Blank / unfocused frames hang MultiFormatReader (no postMessage).
-            if (luminanceVariance(lum) < 70) return;
-            thoroughToggle.current = DEVICE_TIER === "low" ? false : !thoroughToggle.current;
-            // Thorough (Data Matrix / PDF417 / TRY_HARDER) only every other ZXing tick.
-            const thorough = DEVICE_TIER !== "low" && thoroughToggle.current;
-            workerBusy.current = true;
-            armWatchdog();
-            workerRef.current.postMessage(
-              { id: nativeGenRef.current, width: DW, height: DH, lum, thorough },
-              [lum.buffer as ArrayBuffer],
-            );
-          }
-        } else if (nativeRef.current) {
-          lastZxingAt.current = now;
-          // Native is live and worker is gone — do not run sync ZXing (can freeze UI).
-        } else {
-          lastZxingAt.current = now;
-          const imageData = ctx.getImageData(0, 0, DW, DH);
-          const lum = extractLuminance(imageData.data, DW * DH);
-          if (luminanceVariance(lum) < 70) return;
-          thoroughToggle.current = false; // never TRY_HARDER on the main thread
-          const result = zxingDecode(imageData, fr);
-          if (result) emit(result, "ZXing-F");
+      const worker = workerRef.current;
+      if (worker && !workerBusy.current) {
+        extraTick.current += 1;
+        workerBusy.current = true;
+        armWatchdog();
+        try {
+          worker.postMessage(
+            { id: extraTick.current, bitmap, extra: extraTick.current % 10 === 0 },
+            [bitmap],
+          );
+          return;
+        } catch {
+          clearWatchdog();
+          workerBusy.current = false;
         }
       }
+      bitmap.close();
     };
 
-    loop();
-  }, [emit]);
+    const startCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error("دوربین در این مرورگر پشتیبانی نمی‌شود");
+      }
 
-  // ── camera init ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
+      const isLow = DEVICE_TIER === "low";
+      const tries: MediaStreamConstraints[] = [
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: isLow ? 640 : 1280 },
+            height: { ideal: isLow ? 480 : 720 },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        },
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        },
+        { video: { facingMode: { ideal: "environment" } }, audio: false },
+        { video: true, audio: false },
+      ];
 
-    fpsTimerRef.current = setInterval(() => {
-      setFps(fpsCountRef.current);
-      fpsCountRef.current = 0;
-    }, 1000);
+      let stream: MediaStream | null = null;
+      for (const c of tries) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(c);
+          break;
+        } catch {
+          /* try next */
+        }
+      }
+      if (!stream) throw new Error("دسترسی به دوربین امکان‌پذیر نیست");
+      if (cancelled) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
 
-    const start = async () => {
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (!video) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+
+      await new Promise<void>((res) => {
+        if (video.readyState >= 1) {
+          res();
+          return;
+        }
+        video.onloadedmetadata = () => res();
+        setTimeout(res, 2500);
+      });
+      await video.play().catch(() => {});
+      if (cancelled) return;
+
+      const track = stream.getVideoTracks()[0];
       try {
-        if (!navigator.mediaDevices?.getUserMedia)
-          throw new Error("دوربین در این مرورگر پشتیبانی نمی‌شود");
-
-        let stream: MediaStream | null = null;
-
-        // Try high-fps first — more frames = more decode chances per second
-        // Low-end devices get lower resolution to reduce GPU/CPU pressure
-        const isLow = DEVICE_TIER === "low";
-        const tries = isLow
-          ? [
-              { video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, min: 15 } }, audio: false },
-              { video: { facingMode: "environment" }, audio: false },
-            ]
-          : [
-              {
-                video: {
-                  facingMode: { ideal: "environment" },
-                  width:  { ideal: 1280, min: 640 },
-                  height: { ideal: 720,  min: 480 },
-                  frameRate: { ideal: 60, min: 30 },
-                },
-                audio: false,
-              },
-              {
-                video: {
-                  facingMode: { ideal: "environment" },
-                  width:  { ideal: 1280, min: 640 },
-                  height: { ideal: 720,  min: 480 },
-                  frameRate: { ideal: 30, min: 20 },
-                },
-                audio: false,
-              },
-              { video: { facingMode: "environment", width: { ideal: 1280 } }, audio: false },
-              { video: { facingMode: "environment" }, audio: false },
-            ];
-
-        for (const c of tries) {
-          try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
-          catch { /* try next */ }
+        (track as MediaStreamTrack & { contentHint?: string }).contentHint = "detail";
+      } catch {
+        /* ignore */
+      }
+      if (track.getCapabilities) {
+        const caps = track.getCapabilities() as Record<string, unknown>;
+        setTorchSupported(!!caps.torch);
+        const zc = caps.zoom as { min?: number; max?: number } | undefined;
+        if (zc) {
+          zoomMinRef.current = zc.min ?? 1;
+          zoomMaxRef.current = zc.max ?? 10;
         }
-        if (!stream) throw new Error("دسترسی به دوربین امکان‌پذیر نیست");
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        setZoomSupported(!!caps.zoom);
 
-        streamRef.current = stream;
-        const video = videoRef.current!;
-        video.srcObject = stream;
-        video.muted = true;
-        video.playsInline = true;
-
-        await new Promise<void>((res) => {
-          video.onloadedmetadata = () => res();
-          setTimeout(res, 2500);
-        });
-        await video.play().catch(() => {});
-        if (cancelled) return;
-
-        // Apply camera optimisations
-        const track = stream.getVideoTracks()[0];
-        if (track.getCapabilities) {
-          const caps = track.getCapabilities() as Record<string, unknown>;
-          setTorchSupported(!!(caps.torch));
-          const zc = caps.zoom as { min?: number; max?: number } | undefined;
-          if (zc) {
-            zoomMinRef.current = zc.min ?? 1;
-            zoomMaxRef.current = zc.max ?? 10;
-          }
-          setZoomSupported(!!(caps.zoom));
-
-          const adv: Record<string, unknown>[] = [];
-
-          // Continuous AF — most critical for fast focus on barcodes
-          if (Array.isArray(caps.focusMode) && (caps.focusMode as string[]).includes("continuous"))
-            adv.push({ focusMode: "continuous" });
-          // Continuous AE — prevents dark frames during scan
-          if (Array.isArray(caps.exposureMode) && (caps.exposureMode as string[]).includes("continuous"))
-            adv.push({ exposureMode: "continuous" });
-          // Continuous WB — consistent colors improve binarization
-          if (Array.isArray(caps.whiteBalanceMode) && (caps.whiteBalanceMode as string[]).includes("continuous"))
-            adv.push({ whiteBalanceMode: "continuous" });
-
-          if (adv.length)
-            await track.applyConstraints({ advanced: adv } as MediaTrackConstraints).catch(() => {});
+        const adv: Record<string, unknown>[] = [];
+        if (Array.isArray(caps.focusMode) && (caps.focusMode as string[]).includes("continuous")) {
+          adv.push({ focusMode: "continuous" });
         }
+        if (
+          Array.isArray(caps.exposureMode) &&
+          (caps.exposureMode as string[]).includes("continuous")
+        ) {
+          adv.push({ exposureMode: "continuous" });
+        }
+        if (
+          Array.isArray(caps.whiteBalanceMode) &&
+          (caps.whiteBalanceMode as string[]).includes("continuous")
+        ) {
+          adv.push({ whiteBalanceMode: "continuous" });
+        }
+        if (adv.length) {
+          await track.applyConstraints({ advanced: adv } as MediaTrackConstraints).catch(() => {});
+        }
+      }
 
-        startLoop(video);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "خطای دوربین");
+      attachWorker(spawnZxingWorker());
+      nativeRef.current = createNativeDetector();
+      if (nativeRef.current) {
+        setEngine(workerRef.current ? "Native + ZXing" : "Native");
+      } else {
+        setEngine(workerRef.current ? "ZXing Worker" : "دوربین");
+      }
+
+      while (!cancelled) {
+        await waitFrame(video);
+        if (cancelled) break;
+        try {
+          await scanFrame(video);
+        } catch {
+          /* keep preview alive */
+        }
       }
     };
 
-    start();
+    startCamera().catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : "خطای دوربین");
+    });
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(rafRef.current);
-      streamRef.current?.getTracks().forEach(t => t.stop());
-      fastReader.current?.reset();
-      thoroughReader.current?.reset();
-      if (workerWatchdog.current) clearTimeout(workerWatchdog.current);
-      workerWatchdog.current = null;
-      workerRef.current?.terminate();
+      const video = videoEl as RVFCVideo | null;
+      if (frameWait != null) {
+        if (video && typeof video.cancelVideoFrameCallback === "function") {
+          try {
+            video.cancelVideoFrameCallback(frameWait);
+          } catch {
+            /* ignore */
+          }
+        } else {
+          cancelAnimationFrame(frameWait);
+        }
+      }
+      try {
+        resolveFrame?.();
+      } catch {
+        /* ignore */
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      clearWatchdog();
+      try {
+        workerRef.current?.terminate();
+      } catch {
+        /* ignore */
+      }
       workerRef.current = null;
       workerBusy.current = false;
       if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     };
-  }, [startLoop]);
+  }, []);
 
-  // ── camera controls ────────────────────────────────────────────────────────
   const track = () => streamRef.current?.getVideoTracks()[0] ?? null;
 
+  const applyAdvanced = (t: MediaStreamTrack, advanced: Record<string, unknown>) =>
+    t.applyConstraints({ advanced: [advanced] } as MediaTrackConstraints);
+
   const toggleTorch = async () => {
-    const t = track(); if (!t) return;
+    const t = track();
+    if (!t) return;
     try {
-      await t.applyConstraints({ advanced: [{ torch: !torchOn } as any] });
-      setTorchOn(v => !v);
-    } catch { setTorchSupported(false); }
+      await applyAdvanced(t, { torch: !torchOn });
+      setTorchOn((v) => !v);
+    } catch {
+      setTorchSupported(false);
+    }
   };
 
   const applyZoom = async (nz: number) => {
-    const t = track(); if (!t) return;
+    const t = track();
+    if (!t) return;
     const clamped = Math.min(zoomMaxRef.current, Math.max(zoomMinRef.current, nz));
     try {
-      await t.applyConstraints({ advanced: [{ zoom: clamped } as any] });
+      await applyAdvanced(t, { zoom: clamped });
       setZoom(clamped);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
-
-  // Pinch-to-zoom gesture state
-  const pinchStartRef = useRef<number | null>(null);
-  const pinchZoomStartRef = useRef(1);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -571,42 +538,47 @@ export function Scanner({ onDetected, paused }: Props) {
     }
   };
 
-  const handleTouchEnd = () => { pinchStartRef.current = null; };
-
-  // Single-shot → continuous AF: clears hunting blur quickly
-  const refocus = async () => {
-    const t = track(); if (!t) return;
-    try {
-      await t.applyConstraints({ advanced: [{ focusMode: "single-shot" } as any] });
-      await new Promise(r => setTimeout(r, 80));
-      await t.applyConstraints({ advanced: [{ focusMode: "continuous" } as any] });
-    } catch { /* ignore */ }
+  const handleTouchEnd = () => {
+    pinchStartRef.current = null;
   };
 
-  // Tap-to-focus on the video — drives PTZ pointsOfInterest where supported,
-  // then re-enables continuous AF.
+  const refocus = async () => {
+    const t = track();
+    if (!t) return;
+    try {
+      await applyAdvanced(t, { focusMode: "single-shot" });
+      await new Promise((r) => setTimeout(r, 80));
+      await applyAdvanced(t, { focusMode: "continuous" });
+    } catch {
+      /* ignore */
+    }
+  };
+
   const tapFocus = async (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.isPrimary) return; // ignore secondary fingers (pinch)
-    const t = track(); if (!t) return;
+    if (!e.isPrimary) return;
+    const t = track();
+    if (!t) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const py = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
     try {
-      await t.applyConstraints({
-        advanced: [{
-          pointsOfInterest: [{ x: px, y: py }],
-          focusMode: "single-shot",
-          exposureMode: "single-shot",
-        }] as any,
+      await applyAdvanced(t, {
+        pointsOfInterest: [{ x: px, y: py }],
+        focusMode: "single-shot",
+        exposureMode: "single-shot",
       });
       setTimeout(() => {
-        t.applyConstraints({ advanced: [{ focusMode: "continuous", exposureMode: "continuous" } as any] })
-          .catch(() => {});
+        applyAdvanced(t, { focusMode: "continuous", exposureMode: "continuous" }).catch(() => {});
       }, 260);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
-  // ── render ─────────────────────────────────────────────────────────────────
+  const stopFocus = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-black shadow-card">
       <div
@@ -616,34 +588,23 @@ export function Scanner({ onDetected, paused }: Props) {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        <video
-          ref={videoRef}
-          className="h-full w-full object-cover"
-          muted playsInline autoPlay
-        />
+        <video ref={videoRef} className="h-full w-full object-cover" muted playsInline autoPlay />
 
-        {/* Scan zone overlay */}
         <div className="pointer-events-none absolute inset-0">
-          {/* Dark vignette */}
           <div className="absolute inset-0 bg-black/30" />
-
-          {/* Guide box — driven by live crop state (user resizable) */}
           <div
             className="absolute"
             style={{
-              left:   `${crop.x * 100}%`,
-              right:  `${crop.x * 100}%`,
-              top:    `${crop.y * 100}%`,
+              left: `${crop.x * 100}%`,
+              right: `${crop.x * 100}%`,
+              top: `${crop.y * 100}%`,
               bottom: `${crop.y * 100}%`,
             }}
           >
-            {/* Clear inside scan zone */}
             <div
               className="absolute inset-0 bg-transparent"
               style={{ boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)" }}
             />
-
-            {/* Corner brackets */}
             {[
               "top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-lg",
               "top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-lg",
@@ -652,25 +613,22 @@ export function Scanner({ onDetected, paused }: Props) {
             ].map((cls, i) => (
               <span key={i} className={`absolute h-8 w-8 border-primary ${cls}`} />
             ))}
-
-            {/* Animated scan line */}
             <div
               className="absolute inset-x-2 top-1/2 h-[2px] -translate-y-1/2 bg-primary/80 animate-pulse"
               style={{ boxShadow: "0 0 10px 3px rgba(99,102,241,0.6)" }}
             />
-
-            {/* Label */}
             <div className="absolute -bottom-6 inset-x-0 text-center text-[11px] text-white/70">
               بارکد یا QR را داخل کادر قرار دهید
             </div>
           </div>
         </div>
 
-        {/* Success flash */}
         {flash && <div className="pointer-events-none absolute inset-0 bg-green-400/40" />}
 
-        {/* Scan-box size slider — اندازه کادر اسکن */}
-        <div className="pointer-events-auto absolute top-2 left-2 right-2 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+        <div
+          className="pointer-events-auto absolute top-2 left-2 right-2 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5"
+          onPointerDown={stopFocus}
+        >
           <span className="text-[10px] text-white/70 shrink-0">اندازه کادر</span>
           <input
             type="range"
@@ -684,14 +642,20 @@ export function Scanner({ onDetected, paused }: Props) {
               background: `linear-gradient(to right, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.9) ${((boxScale - 0.4) / 1.0) * 100}%, rgba(255,255,255,0.25) ${((boxScale - 0.4) / 1.0) * 100}%, rgba(255,255,255,0.25) 100%)`,
             }}
           />
-          <span className="text-[10px] text-white/70 w-8 text-center">{Math.round(boxScale * 100)}%</span>
+          <span className="text-[10px] text-white/70 w-8 text-center">
+            {Math.round(boxScale * 100)}%
+          </span>
         </div>
 
-        {/* Zoom slider — only shown if hardware zoom is available */}
         {zoomSupported && (
-          <div className="absolute bottom-16 left-4 right-4 flex flex-col items-center gap-1">
+          <div
+            className="absolute bottom-16 left-4 right-4 flex flex-col items-center gap-1"
+            onPointerDown={stopFocus}
+          >
             <div className="flex w-full items-center gap-2">
-              <span className="text-[10px] text-white/60 w-6 text-center">{zoomMinRef.current.toFixed(0)}×</span>
+              <span className="text-[10px] text-white/60 w-6 text-center">
+                {zoomMinRef.current.toFixed(0)}×
+              </span>
               <input
                 type="range"
                 min={zoomMinRef.current}
@@ -701,10 +665,12 @@ export function Scanner({ onDetected, paused }: Props) {
                 onChange={(e) => applyZoom(parseFloat(e.target.value))}
                 className="zoom-slider flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.9) ${((zoom - zoomMinRef.current) / (zoomMaxRef.current - zoomMinRef.current)) * 100}%, rgba(255,255,255,0.25) ${((zoom - zoomMinRef.current) / (zoomMaxRef.current - zoomMinRef.current)) * 100}%, rgba(255,255,255,0.25) 100%)`
+                  background: `linear-gradient(to right, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.9) ${((zoom - zoomMinRef.current) / (zoomMaxRef.current - zoomMinRef.current)) * 100}%, rgba(255,255,255,0.25) ${((zoom - zoomMinRef.current) / (zoomMaxRef.current - zoomMinRef.current)) * 100}%, rgba(255,255,255,0.25) 100%)`,
                 }}
               />
-              <span className="text-[10px] text-white/60 w-6 text-center">{zoomMaxRef.current.toFixed(0)}×</span>
+              <span className="text-[10px] text-white/60 w-6 text-center">
+                {zoomMaxRef.current.toFixed(0)}×
+              </span>
             </div>
             <span className="rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white/80">
               {zoom.toFixed(1)}×
@@ -712,9 +678,10 @@ export function Scanner({ onDetected, paused }: Props) {
           </div>
         )}
 
-        {/* Controls overlay */}
-        <div className="absolute bottom-2 left-2 right-2 flex items-end justify-between gap-2">
-          {/* Stats */}
+        <div
+          className="absolute bottom-2 left-2 right-2 flex items-end justify-between gap-2"
+          onPointerDown={stopFocus}
+        >
           <div className="flex flex-col gap-0.5">
             <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/80">
               {engine}
@@ -723,30 +690,41 @@ export function Scanner({ onDetected, paused }: Props) {
               {fps} fps
             </div>
           </div>
-
-          {/* Buttons */}
           <div className="flex items-center gap-1.5">
-            <button type="button" onClick={refocus} aria-label="فوکوس"
-              className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white active:bg-black/80">
+            <button
+              type="button"
+              onClick={refocus}
+              aria-label="فوکوس"
+              className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white active:bg-black/80"
+            >
               <RefreshCw className="h-4 w-4" />
             </button>
             {torchSupported && (
-              <button type="button" onClick={toggleTorch} aria-label="چراغ"
-                className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white active:bg-black/80">
-                {torchOn ? <FlashlightOff className="h-4 w-4" /> : <Flashlight className="h-4 w-4" />}
+              <button
+                type="button"
+                onClick={toggleTorch}
+                aria-label="چراغ"
+                className="grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white active:bg-black/80"
+              >
+                {torchOn ? (
+                  <FlashlightOff className="h-4 w-4" />
+                ) : (
+                  <Flashlight className="h-4 w-4" />
+                )}
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Error state */}
       {error && (
         <div className="bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <div className="font-semibold">دسترسی به دوربین ممکن نشد</div>
           <div className="mt-1 text-xs opacity-75">{error}</div>
           <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-            <li>• صفحه باید روی <strong>HTTPS</strong> باز شود</li>
+            <li>
+              • صفحه باید روی <strong>HTTPS</strong> باز شود
+            </li>
             <li>• اجازه دوربین را در مرورگر فعال کنید</li>
             <li>• از حالت ناشناس خارج شوید و ریفرش کنید</li>
           </ul>

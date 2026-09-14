@@ -6,7 +6,8 @@
  *   1. facingMode به‌صورت { ideal } یا رزولوشن ۱۹۲۰ Overconstrained می‌شود
  *   2. دوربین پشت با label انتخاب می‌شود نه facingMode (سامسونگ/شیائومی)
  *   3. createImageBitmap(HTMLVideoElement) وجود ندارد یا کراپ را throw می‌کند
- *   4. getCapabilities() بعد از روشن‌شدن استریم throw می‌کند و کل حلقه اسکن می‌میرد
+ *   5. BarcodeDetector روی کروم جدید گاهی detect را resolve نمی‌کند و حلقه یخ می‌زند
+ *      (گوشی جدید که قبلاً کار می‌کرد). تایم‌اوت کوتاه Native را قطع می‌کند و ZXing ادامه می‌دهد.
  *
  * این فایل فقط استریم و برش فریم است؛ دیکود در Worker / decodeRgba می‌ماند.
  */
@@ -31,6 +32,39 @@ export function pickRearCameraId(
   }
   // در بسیاری از اندرویدها آخرین videoinput دوربین پشت است.
   return videos.length > 1 ? videos[videos.length - 1].deviceId : videos[0].deviceId;
+}
+
+/** اگر promise تا ms برنگردد، fallback می‌دهد — برای detect بومیِ آویزان روی کروم جدید. */
+export function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<{ value: T; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(
+      () => {
+        if (done) return;
+        done = true;
+        resolve({ value: fallback, timedOut: true });
+      },
+      Math.max(1, ms | 0),
+    );
+    promise.then(
+      (value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ value, timedOut: false });
+      },
+      () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ value: fallback, timedOut: false });
+      },
+    );
+  });
 }
 
 export function cameraConstraintTries(isLow: boolean): MediaStreamConstraints[] {

@@ -22,7 +22,9 @@
  *   BarcodeDetector در WebView غالباً نیست؛ Worker ماژول و OffscreenCanvas و
  *   createImageBitmap(video) روی WebView قدیمی throw می‌شوند و قبلاً کل فریم
  *   بدون دیکود رد می‌شد. مسیر canvas + بافر RGBA + دیکود اصلی به‌عنوان پشتیبان
- *   است؛ روی کروم جدید همان Worker+ImageBitmap می‌ماند.
+ *   است؛ روی کروم جدید همان Worker+ImageBitmap می‌ماند. اگر BarcodeDetector روی
+ *   گوشی جدید آویزان شود (قبلاً کار می‌کرد، الان هیچی)، بعد از دو تایم‌اوت خاموش
+ *   می‌شود تا ZXing ادامه دهد.
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
@@ -35,6 +37,7 @@ import {
   canUseOffscreenCanvas,
   grabFrameViaCanvas,
   openCameraStream,
+  raceTimeout,
 } from "@/lib/scanner-capture";
 import { normalizeScannedCode, scannedCodesMatch } from "@/lib/barcode-match";
 
@@ -119,6 +122,10 @@ const NATIVE_FULL_FRAME_EVERY = 6;
 const ZOOM_CROP_SCALE = 0.62;
 /** extra ZXing (invert / CODE-39) هر N فریم Worker. */
 const ZXING_EXTRA_EVERY = 5;
+/** BarcodeDetector آویزان روی بعضی کروم‌های جدید؛ بعد از این ZXing باید راه بیفتد. */
+const NATIVE_DETECT_MS = 320;
+/** دو تایم‌اوت پیاپی → Native را خاموش کن تا حلقه دیگر منتظر نماند. */
+const NATIVE_HANG_LIMIT = 2;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -139,6 +146,7 @@ export function Scanner({ onDetected, paused }: Props) {
   const offscreenOk = useRef(true);
   const preferCanvasGrab = useRef(false);
   const mainDecodeBusy = useRef(false);
+  const nativeHangCount = useRef(0);
   const perfAcc = useRef({ n: 0, grab: 0, native: 0, nativeFull: 0 });
   const pinchStartRef = useRef<number | null>(null);
   const pinchZoomStartRef = useRef(1);
@@ -324,6 +332,31 @@ export function Scanner({ onDetected, paused }: Props) {
       }
     };
 
+    const disableNative = () => {
+      nativeRef.current = null;
+      nativeHangCount.current = 0;
+      setEngine(workerRef.current ? "ZXing Worker" : "ZXing");
+    };
+
+    const detectNative = async (
+      src: ImageBitmap | HTMLVideoElement,
+    ): Promise<{ codes: NativeBarcode[]; timedOut: boolean }> => {
+      const det = nativeRef.current;
+      if (!det) return { codes: [], timedOut: false };
+      const { value, timedOut } = await raceTimeout(
+        det.detect(src),
+        NATIVE_DETECT_MS,
+        [] as NativeBarcode[],
+      );
+      if (timedOut) {
+        nativeHangCount.current += 1;
+        if (nativeHangCount.current >= NATIVE_HANG_LIMIT) disableNative();
+      } else {
+        nativeHangCount.current = 0;
+      }
+      return { codes: value, timedOut };
+    };
+
     const scanFrame = async (video: HTMLVideoElement) => {
       if (pausedRef.current || video.readyState < 2) return;
       fpsCountRef.current++;
@@ -346,25 +379,33 @@ export function Scanner({ onDetected, paused }: Props) {
         nativeInFlight.current = true;
         try {
           let codes: NativeBarcode[] = [];
+          let nativeTimedOut = false;
           const tNative = DEBUG_PERF ? performance.now() : 0;
           if (bitmap && nativeBitmapOk.current) {
             try {
-              codes = await nativeRef.current.detect(bitmap);
+              const r = await detectNative(bitmap);
+              codes = r.codes;
+              if (r.timedOut) {
+                nativeBitmapOk.current = false;
+                nativeTimedOut = true;
+              }
             } catch {
               nativeBitmapOk.current = false;
             }
           }
           if (DEBUG_PERF) perfAcc.current.native += performance.now() - tNative;
-          // بدون ImageBitmap هر فریم روی video؛ وگرنه همان تrottle کل‌فریم.
           if (
+            !nativeTimedOut &&
             !codes.length &&
+            nativeRef.current &&
             (!bitmap ||
               !nativeBitmapOk.current ||
               ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0)
           ) {
             const tFull = DEBUG_PERF ? performance.now() : 0;
             try {
-              codes = await nativeRef.current.detect(video);
+              const r = await detectNative(video);
+              codes = r.codes;
             } catch {
               /* ZXing fallback */
             }

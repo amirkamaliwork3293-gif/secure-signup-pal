@@ -10,7 +10,11 @@ import {
   findProductByCode,
 } from "../src/lib/barcode-match.ts";
 import { cropSourceRect, fitDecodeSize, insetScanCrop } from "../src/lib/scanner-engine.ts";
-import { cameraConstraintTries, pickRearCameraId } from "../src/lib/scanner-capture.ts";
+import {
+  cameraConstraintTries,
+  pickRearCameraId,
+  raceTimeout,
+} from "../src/lib/scanner-capture.ts";
 import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/device-tier.ts";
 
 {
@@ -122,6 +126,15 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
   const tries = cameraConstraintTries(false);
   assert.equal(tries.length >= 4, true);
   assert.equal("audio" in tries[0] && tries[0].audio === false, true);
+}
+
+{
+  const fast = await raceTimeout(Promise.resolve("ok"), 200, "fallback");
+  assert.equal(fast.value, "ok");
+  assert.equal(fast.timedOut, false);
+  const hung = await raceTimeout(new Promise<string>(() => {}), 30, "fallback");
+  assert.equal(hung.value, "fallback");
+  assert.equal(hung.timedOut, true);
 }
 
 console.log("scanner-engine: ok");

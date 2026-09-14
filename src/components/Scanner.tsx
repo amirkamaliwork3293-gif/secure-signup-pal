@@ -229,6 +229,9 @@ export function Scanner({ onDetected, paused }: Props) {
 
     const armWatchdog = () => {
       clearWatchdog();
+      // ۱۰۰۰ms: فریم خالی extra روی CPU سرور ~۶۰ms بود؛ ضریب ~۸ برای میان‌رده
+      // با بودجهٔ high (۹۶۰×۴۰۰) هنوز زیر یک ثانیه می‌ماند. ۲۰۰۰ms قبلی بعد از
+      // هنگ، اسکنر را دو ثانیه یخ می‌زد. دیکود عادی ۱۱–۶۰ms است و این سقف را نمی‌زند.
       workerWatchdog.current = setTimeout(() => {
         workerWatchdog.current = null;
         workerBusy.current = false;
@@ -240,7 +243,7 @@ export function Scanner({ onDetected, paused }: Props) {
         }
         workerRef.current = null;
         if (!cancelled) attachWorker(spawnZxingWorker());
-      }, 2000);
+      }, 1000);
     };
 
     const waitFrame = (video: HTMLVideoElement) =>

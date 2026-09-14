@@ -52,4 +52,12 @@ assert.equal(
 assert.equal(decodeBudget("low").maxW > decodeBudget("low").maxH, true);
 assert.equal(decodeBudget("high").maxW, 1280);
 
+assert.equal(
+  classifyDeviceTier({}),
+  "mid",
+  "بدون mem و cores باید mid باشد نه low (Safari خصوصی / fingerprinting)",
+);
+assert.equal(classifyDeviceTier({ deviceMemory: 0, hardwareConcurrency: 0 }), "mid");
+assert.equal(classifyDeviceTier({ hardwareConcurrency: 2 }), "low");
+
 console.log("device-tier: ok");

@@ -36,6 +36,8 @@ import {
   bitmapToRgba,
   canUseOffscreenCanvas,
   grabFrameViaCanvas,
+  NATIVE_HANG_LIMIT,
+  nextNativeHangState,
   openCameraStream,
   raceTimeout,
 } from "@/lib/scanner-capture";
@@ -124,8 +126,6 @@ const ZOOM_CROP_SCALE = 0.62;
 const ZXING_EXTRA_EVERY = 5;
 /** BarcodeDetector آویزان روی بعضی کروم‌های جدید؛ بعد از این ZXing باید راه بیفتد. */
 const NATIVE_DETECT_MS = 320;
-/** دو تایم‌اوت پیاپی → Native را خاموش کن تا حلقه دیگر منتظر نماند. */
-const NATIVE_HANG_LIMIT = 2;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -348,12 +348,9 @@ export function Scanner({ onDetected, paused }: Props) {
         NATIVE_DETECT_MS,
         [] as NativeBarcode[],
       );
-      if (timedOut) {
-        nativeHangCount.current += 1;
-        if (nativeHangCount.current >= NATIVE_HANG_LIMIT) disableNative();
-      } else {
-        nativeHangCount.current = 0;
-      }
+      const hang = nextNativeHangState(timedOut, nativeHangCount.current, NATIVE_HANG_LIMIT);
+      nativeHangCount.current = hang.hangCount;
+      if (hang.disable) disableNative();
       return { codes: value, timedOut };
     };
 

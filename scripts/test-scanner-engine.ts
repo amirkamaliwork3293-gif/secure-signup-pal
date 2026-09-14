@@ -9,9 +9,17 @@ import {
   scannedCodesMatch,
   findProductByCode,
 } from "../src/lib/barcode-match.ts";
-import { cropSourceRect, fitDecodeSize, insetScanCrop } from "../src/lib/scanner-engine.ts";
+import {
+  cropSourceRect,
+  fitDecodeSize,
+  insetScanCrop,
+  sampledLuminanceVariance,
+} from "../src/lib/scanner-engine.ts";
 import {
   cameraConstraintTries,
+  grabFrameViaCanvas,
+  NATIVE_HANG_LIMIT,
+  nextNativeHangState,
   pickRearCameraId,
   raceTimeout,
 } from "../src/lib/scanner-capture.ts";
@@ -118,14 +126,70 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
     { deviceId: "r", label: "دوربین پشت", kind: "videoinput" },
   ]);
   assert.equal(persian, "r");
+  const khalfi = pickRearCameraId([
+    { deviceId: "f", label: "دوربین سلفی", kind: "videoinput" },
+    { deviceId: "r", label: "دوربین خلفی", kind: "videoinput" },
+  ]);
+  assert.equal(khalfi, "r");
+  const androidHal = pickRearCameraId([
+    { deviceId: "cam1", label: "camera2 1, facing front", kind: "videoinput" },
+    { deviceId: "cam0", label: "camera2 0, facing back", kind: "videoinput" },
+  ]);
+  assert.equal(androidHal, "cam0", "لیبل HAL اندروید camera2 0 باید پشت باشد");
+  const xiaomi = pickRearCameraId([
+    { deviceId: "u", label: "Front Camera", kind: "videoinput" },
+    { deviceId: "w", label: "camera2 0, world facing", kind: "videoinput" },
+  ]);
+  assert.equal(xiaomi, "w");
   const unlabeled = pickRearCameraId([
     { deviceId: "1", label: "", kind: "videoinput" },
     { deviceId: "2", label: "", kind: "videoinput" },
   ]);
   assert.equal(unlabeled, "2", "بدون لیبل، آخرین videoinput معمولاً پشت است");
-  const tries = cameraConstraintTries(false);
-  assert.equal(tries.length >= 4, true);
-  assert.equal("audio" in tries[0] && tries[0].audio === false, true);
+  const skipFront = pickRearCameraId([
+    { deviceId: "f", label: "Front Camera", kind: "videoinput" },
+    { deviceId: "u", label: "", kind: "videoinput" },
+  ]);
+  assert.equal(skipFront, "u", "اگر فقط جلو لیبل دارد، دوربین دیگر پشت فرض می‌شود");
+  const mixedKinds = pickRearCameraId([
+    { deviceId: "mic", label: "Microphone", kind: "audioinput" },
+    { deviceId: "front", label: "Front Camera", kind: "videoinput" },
+    { deviceId: "rear", label: "Rear Camera", kind: "videoinput" },
+  ]);
+  assert.equal(mixedKinds, "rear");
+  const onlyFront = pickRearCameraId([
+    { deviceId: "only", label: "Front Camera", kind: "videoinput" },
+  ]);
+  assert.equal(onlyFront, "only", "اگر فقط جلو باشد همان را برمی‌گرداند تا اسکن صفر نشود");
+  const none = pickRearCameraId([{ deviceId: "mic", label: "Mic", kind: "audioinput" }]);
+  assert.equal(none, undefined);
+  const empty = pickRearCameraId([]);
+  assert.equal(empty, undefined);
+}
+
+{
+  const high = cameraConstraintTries(false);
+  const low = cameraConstraintTries(true);
+  assert.equal(high.length, 5);
+  assert.equal(low.length, 5);
+  assert.equal(high[0].audio, false);
+  const first = high[0].video;
+  assert.equal(typeof first, "object");
+  assert.ok(first && typeof first === "object" && "width" in first);
+  const firstVideo = first as MediaTrackConstraints;
+  assert.equal(
+    (firstVideo.width as { ideal?: number }).ideal,
+    1280,
+    "اول قید ساده ۱۲۸۰ تا Overconstrained نشود",
+  );
+  assert.equal((firstVideo.height as { ideal?: number }).ideal, 720);
+  assert.equal(firstVideo.facingMode, "environment");
+  const last = high[high.length - 1];
+  assert.equal(last.video, true);
+  const fhdHigh = high[3].video as MediaTrackConstraints;
+  const fhdLow = low[3].video as MediaTrackConstraints;
+  assert.equal((fhdHigh.width as { ideal?: number }).ideal, 1920);
+  assert.equal((fhdLow.width as { ideal?: number }).ideal, 1280);
 }
 
 {
@@ -135,6 +199,55 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
   const hung = await raceTimeout(new Promise<string>(() => {}), 30, "fallback");
   assert.equal(hung.value, "fallback");
   assert.equal(hung.timedOut, true);
+  const rejected = await raceTimeout(Promise.reject(new Error("gum")), 200, "fallback");
+  assert.equal(rejected.value, "fallback");
+  assert.equal(rejected.timedOut, false, "reject نباید به‌عنوان تایم‌اوت Native شمرده شود");
+  const late = new Promise<string>((resolve) => setTimeout(() => resolve("late"), 80));
+  const raced = await raceTimeout(late, 20, "fallback");
+  assert.equal(raced.value, "fallback");
+  assert.equal(raced.timedOut, true);
+}
+
+{
+  assert.equal(NATIVE_HANG_LIMIT, 2);
+  const miss = nextNativeHangState(true, 0);
+  assert.deepEqual(miss, { hangCount: 1, disable: false });
+  const kill = nextNativeHangState(true, 1);
+  assert.deepEqual(kill, { hangCount: 2, disable: true });
+  const reset = nextNativeHangState(false, 1);
+  assert.deepEqual(reset, { hangCount: 0, disable: false });
+}
+
+{
+  const flat = sampledLuminanceVariance(new Uint8ClampedArray(32).fill(128));
+  assert.equal(flat, 0);
+  const tiny = sampledLuminanceVariance(new Uint8ClampedArray(4).fill(10));
+  assert.equal(tiny, 0, "نمونهٔ خیلی کم نباید واریانس بدهد");
+  const noisy = new Uint8ClampedArray(256);
+  for (let i = 0; i < noisy.length; i++) noisy[i] = i % 2 === 0 ? 0 : 255;
+  assert.ok(sampledLuminanceVariance(noisy) > 18);
+}
+
+{
+  const blank = grabFrameViaCanvas(
+    { videoWidth: 0, videoHeight: 0 } as HTMLVideoElement,
+    { x: 0.11, y: 0.27, w: 0.78, h: 0.46 },
+    720,
+    320,
+  );
+  assert.equal(blank, null, "ویدیوی بدون فریم نباید کراپ بدهد");
+  const noDom = grabFrameViaCanvas(
+    { videoWidth: 1280, videoHeight: 720 } as HTMLVideoElement,
+    { x: 0.11, y: 0.27, w: 0.78, h: 0.46 },
+    720,
+    320,
+  );
+  assert.equal(noDom, null, "بدون document (Node/WebWorker) canvas fallback باید null بماند");
+}
+
+{
+  assert.equal(classifyDeviceTier({}), "mid", "بدون سیگنال نباید low شود");
+  assert.equal(classifyDeviceTier({ hardwareConcurrency: 0 }), "mid");
 }
 
 console.log("scanner-engine: ok");

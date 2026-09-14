@@ -34,6 +34,20 @@ export function pickRearCameraId(
   return videos.length > 1 ? videos[videos.length - 1].deviceId : videos[0].deviceId;
 }
 
+/** دو تایم‌اوت پیاپی → Native را خاموش کن تا حلقه دیگر منتظر نماند. */
+export const NATIVE_HANG_LIMIT = 2;
+
+/** شمارش آویزان شدن BarcodeDetector؛ موفقیت شمارنده را صفر می‌کند. */
+export function nextNativeHangState(
+  timedOut: boolean,
+  hangCount: number,
+  limit = NATIVE_HANG_LIMIT,
+): { hangCount: number; disable: boolean } {
+  if (!timedOut) return { hangCount: 0, disable: false };
+  const next = hangCount + 1;
+  return { hangCount: next, disable: next >= Math.max(1, limit | 0) };
+}
+
 /** اگر promise تا ms برنگردد، fallback می‌دهد — برای detect بومیِ آویزان روی کروم جدید. */
 export function raceTimeout<T>(
   promise: Promise<T>,

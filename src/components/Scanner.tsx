@@ -491,6 +491,9 @@ export function Scanner({ onDetected, paused }: Props) {
         setEngine(workerRef.current ? "ZXing Worker" : "دوربین");
       }
 
+      // یک فریم در هر لحظه: waitFrame با requestVideoFrameCallback به فریم
+      // واقعی دوربین قفل می‌شود (نه setInterval / rAF آزاد) و await scanFrame
+      // جلوی پردازش هم‌زمان چند فریم را می‌گیرد — حتی اگر Native یا Worker طول بکشد.
       while (!cancelled) {
         await waitFrame(video);
         if (cancelled) break;

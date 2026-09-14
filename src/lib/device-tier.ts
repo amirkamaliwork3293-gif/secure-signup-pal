@@ -55,11 +55,15 @@ export function detectDeviceTier(): DeviceTier {
 /**
  * سقف پیکسل دیکود (عرض × ارتفاع) — نسبت کادر اسکن جداگانه حفظ می‌شود.
  * ارتفاع کم برای بارکد ۱بعدی کافی است؛ عرض بالا میله‌های باریک را نگه می‌دارد.
+ *
+ * بودجهٔ قبلی (۵۱۲/۷۲۰/۹۶۰) کل کادر ۱۲۸۰ را downsample می‌کرد و بارکد کوچک
+ * داخل کادر بزرگ خوانده نمی‌شد. عرض را بالا بردیم تا ماژول EAN (~۲px حداقل)
+ * surviving بماند؛ زوم مرکز در Scanner جلوی downsample سنگین را می‌گیرد.
  */
 export function decodeBudget(tier: DeviceTier): { maxW: number; maxH: number } {
-  if (tier === "low") return { maxW: 512, maxH: 240 };
-  if (tier === "mid") return { maxW: 720, maxH: 320 };
-  return { maxW: 960, maxH: 400 };
+  if (tier === "low") return { maxW: 720, maxH: 320 };
+  if (tier === "mid") return { maxW: 1024, maxH: 400 };
+  return { maxW: 1280, maxH: 480 };
 }
 
 /** سازگاری با کد قبلی؛ دیگر کانواس را به ۴:۳ نکش. */

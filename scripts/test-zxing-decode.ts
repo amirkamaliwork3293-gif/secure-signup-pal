@@ -87,4 +87,43 @@ function downscale(
   assert.equal(product?.id, "u");
 }
 
+{
+  // بارکد کوچک وسط کادر عریض دوربین — زوم مرکز قبل از downsample باید بخواند.
+  const img = await render("ean13", "5901234123457");
+  const fieldW = 998;
+  const fieldH = 331;
+  const field = new Uint8ClampedArray(fieldW * fieldH * 4);
+  field.fill(255);
+  const ox = Math.floor((fieldW - img.width) / 2);
+  const oy = Math.floor((fieldH - img.height) / 2);
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const si = (y * img.width + x) * 4;
+      const di = ((oy + y) * fieldW + (ox + x)) * 4;
+      field[di] = img.data[si];
+      field[di + 1] = img.data[si + 1];
+      field[di + 2] = img.data[si + 2];
+      field[di + 3] = 255;
+    }
+  }
+  const scale = 0.62;
+  const zw = Math.round(fieldW * scale);
+  const zh = Math.round(fieldH * scale);
+  const zx = Math.floor((fieldW - zw) / 2);
+  const zy = Math.floor((fieldH - zh) / 2);
+  const zoom = new Uint8ClampedArray(zw * zh * 4);
+  for (let y = 0; y < zh; y++) {
+    for (let x = 0; x < zw; x++) {
+      const si = ((zy + y) * fieldW + (zx + x)) * 4;
+      const di = (y * zw + x) * 4;
+      zoom[di] = field[si];
+      zoom[di + 1] = field[si + 1];
+      zoom[di + 2] = field[si + 2];
+      zoom[di + 3] = 255;
+    }
+  }
+  const text = decodeRgba(zoom, zw, zh);
+  assert.equal(text, "5901234123457", `small EAN in wide crop via center zoom got ${text}`);
+}
+
 console.log("zxing-decode round-trip: ok");

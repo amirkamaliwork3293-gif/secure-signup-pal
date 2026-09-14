@@ -3,8 +3,8 @@
  *
  * ImageBitmap از ترد اصلی منتقل می‌شود (بدون getImageData روی UI).
  * ورودی:  { id, bitmap: ImageBitmap, extra?: boolean }
- *   extra=false → فقط GlobalHistogram / فرمت‌های fast
- *   extra=true  → Hybrid + invert + CODE-39 (هر ۱۰ فریم)
+ *   extra=false → GlobalHistogram سپس Hybrid / فرمت‌های fast
+ *   extra=true  → همان + invert + CODE-39 (هر چند فریم)
  * خروجی: { id, text: string | null }
  */
 import { decodeRgba } from "./zxing-decode";

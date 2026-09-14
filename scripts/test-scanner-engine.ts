@@ -9,7 +9,7 @@ import {
   scannedCodesMatch,
   findProductByCode,
 } from "../src/lib/barcode-match.ts";
-import { cropSourceRect, fitDecodeSize } from "../src/lib/scanner-engine.ts";
+import { cropSourceRect, fitDecodeSize, insetScanCrop } from "../src/lib/scanner-engine.ts";
 import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/device-tier.ts";
 
 {
@@ -79,13 +79,24 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
 }
 
 {
+  const parent = { x: 0.11, y: 0.27, w: 0.78, h: 0.46 };
+  const inner = insetScanCrop(parent, 0.62);
+  assert.ok(inner.w < parent.w && inner.h < parent.h);
+  assert.ok(Math.abs(inner.x + inner.w / 2 - (parent.x + parent.w / 2)) < 1e-9);
+  assert.ok(inner.x >= parent.x - 1e-9);
+  assert.ok(inner.x + inner.w <= parent.x + parent.w + 1e-9);
+  const clamped = insetScanCrop(parent, 0.1);
+  assert.ok(clamped.w / parent.w >= 0.3 - 1e-9);
+}
+
+{
   const overflow = cropSourceRect(100, 100, { x: 0.9, y: 0.9, w: 0.5, h: 0.5 });
   assert.equal(overflow.sx + overflow.sw <= 100, true);
   assert.equal(overflow.sy + overflow.sh <= 100, true);
 }
 
 {
-  assert.deepEqual(decodeBudget("low"), { maxW: 512, maxH: 240 });
+  assert.deepEqual(decodeBudget("low"), { maxW: 720, maxH: 320 });
   const sized = decodeCanvasSize("mid");
   assert.equal(sized.dw / sized.dh > 1.5, true, "budget is wide, not 4:3");
   assert.equal(classifyDeviceTier({ deviceMemory: 2, hardwareConcurrency: 8 }), "mid");

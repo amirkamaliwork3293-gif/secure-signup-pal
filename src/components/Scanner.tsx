@@ -1,5 +1,5 @@
 /**
- * Scanner.tsx — اسکن بارکد/QR موبایل (v5)
+ * Scanner.tsx — اسکن بارکد/QR موبایل (v6)
  *
  * علت لگ و نخواندن در نسخهٔ قبل:
  *   1. onDetected هر اسکن والد را رندر می‌کرد → useEffect دوربین را قطع و از نو می‌ساخت
@@ -13,6 +13,11 @@
  *   ترد اصلی، که حلقهٔ RVFC را بند می‌آورد. حالا کل‌فریم فقط هر ۶ تیک یک‌بار
  *   است (همان الگوی extra در ZXing)، مگر این‌که ImageBitmap اصلاً پشتیبانی نشود.
  *
+ * بارکد کوچک (گزارش کاربر بعد از v5):
+ *   downsample کل کادر به ۷۲۰px میله‌های EAN کوچک را نابود می‌کرد. فریم‌های فرد
+ *   کادر مرکز ۰.۶۲ را بدون کوچک‌کردن اضافه می‌گیرند (زوم دیجیتال)، فریم‌های زوج
+ *   کادر کامل را برای بارکد عریض. دوربین mid/high ideal ۱۹۲۰×۱۰۸۰.
+ *
  * مسیر:
  *   - دوربین فقط یک‌بار روی mount روشن می‌شود (onDetected از طریق ref)
  *   - Native BarcodeDetector روی ImageBitmap بریده‌شده (GPU)
@@ -23,7 +28,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Flashlight, FlashlightOff, RefreshCw } from "lucide-react";
 import { decodeBudget, detectDeviceTier } from "@/lib/device-tier";
-import { cropSourceRect, fitDecodeSize } from "@/lib/scanner-engine";
+import { cropSourceRect, fitDecodeSize, insetScanCrop } from "@/lib/scanner-engine";
 import { normalizeScannedCode, scannedCodesMatch } from "@/lib/barcode-match";
 
 type Props = {
@@ -95,6 +100,10 @@ const BASE_H = 0.46;
 const DEBUG_PERF = false;
 /** کل‌فریم Native فقط هر N فریمِ بدون‌hit روی کراپ — تعادل سرعت و بارکد لبِ کادر. */
 const NATIVE_FULL_FRAME_EVERY = 6;
+/** زوم دیجیتال مرکز کادر — بارکد کوچک را قبل از downsample می‌خواند. */
+const ZOOM_CROP_SCALE = 0.62;
+/** extra ZXing (invert / CODE-39) هر N فریم Worker. */
+const ZXING_EXTRA_EVERY = 5;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -110,6 +119,7 @@ export function Scanner({ onDetected, paused }: Props) {
   const nativeBitmapOk = useRef(true);
   const nativeInFlight = useRef(false);
   const nativeFullTick = useRef(0);
+  const roiTick = useRef(0);
   const perfAcc = useRef({ n: 0, grab: 0, native: 0, nativeFull: 0 });
   const pinchStartRef = useRef<number | null>(null);
   const pinchZoomStartRef = useRef(1);
@@ -266,13 +276,21 @@ export function Scanner({ onDetected, paused }: Props) {
         }
       });
 
-    const grabBitmap = async (video: HTMLVideoElement): Promise<ImageBitmap | null> => {
+    const grabBitmap = async (
+      video: HTMLVideoElement,
+      crop: { x: number; y: number; w: number; h: number },
+    ): Promise<ImageBitmap | null> => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       if (!vw || !vh) return null;
-      const src = cropSourceRect(vw, vh, cropRef.current);
+      const src = cropSourceRect(vw, vh, crop);
       const fit = fitDecodeSize(src.sw, src.sh, BUDGET.maxW, BUDGET.maxH);
+      const needResize = fit.dw !== src.sw || fit.dh !== src.sh;
       try {
+        if (!needResize) {
+          // resample روی بارکد کوچک میله‌ها را خراب می‌کند — اگر جا می‌شود همان پیکسل خام.
+          return await createImageBitmap(video, src.sx, src.sy, src.sw, src.sh);
+        }
         return await createImageBitmap(video, src.sx, src.sy, src.sw, src.sh, {
           resizeWidth: fit.dw,
           resizeHeight: fit.dh,
@@ -292,7 +310,14 @@ export function Scanner({ onDetected, paused }: Props) {
       fpsCountRef.current++;
       const tFrame = DEBUG_PERF ? performance.now() : 0;
 
-      const bitmap = await grabBitmap(video);
+      // زوج: کادر کامل (بارکد عریض). فرد: زوم مرکز (بارکد کوچک / لیبل دور).
+      roiTick.current += 1;
+      const viewCrop =
+        roiTick.current % 2 === 1
+          ? insetScanCrop(cropRef.current, ZOOM_CROP_SCALE)
+          : cropRef.current;
+
+      const bitmap = await grabBitmap(video, viewCrop);
       if (!bitmap || cancelled || pausedRef.current) {
         bitmap?.close();
         return;
@@ -368,7 +393,7 @@ export function Scanner({ onDetected, paused }: Props) {
         armWatchdog();
         try {
           worker.postMessage(
-            { id: extraTick.current, bitmap, extra: extraTick.current % 10 === 0 },
+            { id: extraTick.current, bitmap, extra: extraTick.current % ZXING_EXTRA_EVERY === 0 },
             [bitmap],
           );
           return;
@@ -390,8 +415,8 @@ export function Scanner({ onDetected, paused }: Props) {
         {
           video: {
             facingMode: { ideal: "environment" },
-            width: { ideal: isLow ? 640 : 1280 },
-            height: { ideal: isLow ? 480 : 720 },
+            width: { ideal: isLow ? 1280 : 1920 },
+            height: { ideal: isLow ? 720 : 1080 },
             frameRate: { ideal: 30 },
           },
           audio: false,

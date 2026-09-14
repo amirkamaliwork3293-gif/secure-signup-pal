@@ -3,6 +3,11 @@
  *
  * باگ قبلی: کادر عریض بارکد روی کانواس ۴:۳ کش می‌آمد و میله‌های EAN/Code128
  * باریک می‌شدند. اندازه باید نسبت تصویر کادر را حفظ کند.
+ *
+ * بارکد کوچک: اگر کل کادر (~۹۹۸px) به بودجهٔ ۷۲۰px downsample شود، میله‌های
+ * EAN/CODE128 از بین می‌روند. زوم دیجیتال روی مرکز کادر (قبل از کوچک‌کردن)
+ * همان لیبل را بدون از دست دادن ماژول‌ها می‌خواند — مثل نشانه‌گیر دستگاه
+ * بارکدخوان.
  */
 
 export type ScanCrop = { x: number; y: number; w: number; h: number };
@@ -25,6 +30,23 @@ export function cropSourceRect(
   if (sx + sw > vw) sw = vw - sx;
   if (sy + sh > vh) sh = vh - sy;
   return { sx, sy, sw: Math.max(1, sw), sh: Math.max(1, sh) };
+}
+
+/**
+ * کادر داخلی هم‌مرکز — scale بین ۰.۳ و ۱.
+ * ۰.۶۲ تعادل بارکد کوچک (پیکسل بیشتر روی لیبل) و بارکد عریض (قطع‌نشدن دو سر EAN) است؛
+ * فریم‌های زوج/فرد بین این کادر و کادر کامل جابه‌جا می‌شوند.
+ */
+export function insetScanCrop(crop: ScanCrop, scale: number): ScanCrop {
+  const s = Math.min(1, Math.max(0.3, scale));
+  const w = crop.w * s;
+  const h = crop.h * s;
+  return {
+    x: crop.x + (crop.w - w) / 2,
+    y: crop.y + (crop.h - h) / 2,
+    w,
+    h,
+  };
 }
 
 /** کوچک‌کردن بدون اعوجاج تا داخل بودجه جا شود (هرگز بزرگ‌نمایی نمی‌کند). */

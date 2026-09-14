@@ -14,9 +14,9 @@
  *   «موجود» می‌بیند (`undefined !== hints.get(TRY_HARDER)`) و خواننده‌های ۱بعدی
  *   را به انتهای صف می‌برد.
  *
- *   روی مسیر fast فقط GlobalHistogram + نور عادی. Hybrid و invert روی extra
- *   (هر ۱۰ فریم Worker). روی لیبل‌های bwip سیاه‌روی‌سفید، Global همیشه اول
- *   می‌خواند؛ invert برای QR/EAN معکوس لازم است و همان extra پوشش می‌دهد.
+ *   روی مسیر fast بعد از تأیید hints: GlobalHistogram سپس Hybrid (بارکد کوچک
+ *   وسط کادر بزرگ با آستانهٔ سراسری غالباً از دست می‌رود؛ Hybrid بلوکی است).
+ *   invert و CODE-39 روی extra می‌مانند تا فریم خالی ۴× نشود.
  */
 import {
   BarcodeFormat,
@@ -103,11 +103,10 @@ function decodeLum(
   width: number,
   height: number,
   hints: Map<DecodeHintType, unknown>,
-  extra: boolean,
 ): string | null {
-  const hit = decodeWith(lum, width, height, hints, false);
-  if (hit || !extra) return hit;
-  return decodeWith(lum, width, height, hints, true);
+  return (
+    decodeWith(lum, width, height, hints, false) || decodeWith(lum, width, height, hints, true)
+  );
 }
 
 /** دیکود RGBA مثل فریم دوربین. واریانس خیلی پایین = فریم خالی. */
@@ -121,8 +120,8 @@ export function decodeRgba(
   const lum = rgbaToLuminance(data, width * height);
   if (sampledLumaVariance(lum) < 18) return null;
   const hints = extra ? EXTRA_HINTS : FAST_HINTS;
-  const hit = decodeLum(lum, width, height, hints, extra);
+  const hit = decodeLum(lum, width, height, hints);
   if (hit) return hit;
   if (!extra) return null;
-  return decodeLum(invertLuminance(lum), width, height, hints, true);
+  return decodeLum(invertLuminance(lum), width, height, hints);
 }

@@ -403,69 +403,56 @@ export function Scanner({ onDetected, paused }: Props) {
           ? insetScanCrop(cropRef.current, ZOOM_CROP_SCALE)
           : cropRef.current;
 
-      let bitmap: ImageBitmap | null = null;
-      if (!preferCanvasGrab.current) {
-        bitmap = await grabBitmap(video, viewCrop);
-        if (!bitmap) preferCanvasGrab.current = true;
-      }
-      if (DEBUG_PERF) perfAcc.current.grab += performance.now() - tFrame;
+      const grabCrop = async (): Promise<ImageBitmap | null> => {
+        if (preferCanvasGrab.current) return null;
+        const b = await grabBitmap(video, viewCrop);
+        if (!b) preferCanvasGrab.current = true;
+        return b;
+      };
 
+      // Native هم‌زمان و غیرمسدودکننده: ZXing هیچ‌وقت پشت detect بومی (کند یا آویزان)
+      // منتظر نمی‌ماند؛ هر موتوری زودتر خواند برنده است و emit تکراری را رد می‌کند.
+      // nativeInFlight فقط یک detect را در هر لحظه مجاز می‌کند.
       if (nativeRef.current && !nativeInFlight.current) {
         nativeInFlight.current = true;
-        try {
-          let codes: NativeBarcode[] = [];
-          let nativeTimedOut = false;
-          const tNative = DEBUG_PERF ? performance.now() : 0;
-          if (bitmap && nativeBitmapOk.current) {
-            try {
-              const r = await detectNative(bitmap);
-              codes = r.codes;
-              if (r.timedOut) {
-                // detect هنوز ممکن است این bitmap را بخواند؛ برای ZXing فریم تازه بگیر.
-                nativeTimedOut = true;
-                bitmap = await grabBitmap(video, viewCrop);
-              }
-            } catch {
-              // throw یعنی ImageBitmap به‌عنوان ورودی پشتیبانی نمی‌شود، نه کندی.
-              nativeBitmapOk.current = false;
+        const tNative = DEBUG_PERF ? performance.now() : 0;
+        const nativeBitmap = nativeBitmapOk.current ? await grabCrop() : null;
+        // کل فریم هر N نوبت — بارکد لبِ کادر — یا همیشه اگر ImageBitmap ورودی معتبر نیست.
+        const useFull = !nativeBitmap || ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0;
+        const src: ImageBitmap | HTMLVideoElement = useFull ? video : nativeBitmap;
+        void (async () => {
+          try {
+            const r = await detectNative(src);
+            if (!cancelled && !pausedRef.current && r.codes.length) {
+              emitRef.current(r.codes[0].rawValue, r.codes[0].format);
             }
-          }
-          if (DEBUG_PERF) perfAcc.current.native += performance.now() - tNative;
-          if (
-            !nativeTimedOut &&
-            !codes.length &&
-            nativeRef.current &&
-            (!bitmap ||
-              !nativeBitmapOk.current ||
-              ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0)
-          ) {
-            const tFull = DEBUG_PERF ? performance.now() : 0;
-            try {
-              const r = await detectNative(video);
-              codes = r.codes;
-            } catch {
-              /* ZXing fallback */
+          } catch {
+            // throw روی ImageBitmap یعنی این ورودی پشتیبانی نمی‌شود، نه کندی.
+            if (src !== video) nativeBitmapOk.current = false;
+          } finally {
+            if (DEBUG_PERF) {
+              const dt = performance.now() - tNative;
+              if (useFull) perfAcc.current.nativeFull += dt;
+              else perfAcc.current.native += dt;
             }
-            if (DEBUG_PERF) perfAcc.current.nativeFull += performance.now() - tFull;
+            try {
+              nativeBitmap?.close();
+            } catch {
+              /* ignore */
+            }
+            nativeInFlight.current = false;
           }
-          if (cancelled) {
-            bitmap?.close();
-            return;
-          }
-          if (codes.length) {
-            emitRef.current(codes[0].rawValue, codes[0].format);
-            bitmap?.close();
-            return;
-          }
-        } catch {
-          /* fall through to ZXing */
-        } finally {
-          nativeInFlight.current = false;
-        }
+        })();
       }
 
+      const worker = workerRef.current;
+      if (worker && workerBusy.current) return;
+      if (!worker && mainDecodeBusy.current) return;
+
+      let bitmap = await grabCrop();
       if (DEBUG_PERF) {
         const p = perfAcc.current;
+        p.grab += performance.now() - tFrame;
         p.n += 1;
         if (p.n >= 30) {
           console.debug(
@@ -477,9 +464,7 @@ export function Scanner({ onDetected, paused }: Props) {
           p.nativeFull = 0;
         }
       }
-
-      const worker = workerRef.current;
-      if (worker && workerBusy.current) {
+      if (cancelled || pausedRef.current) {
         bitmap?.close();
         return;
       }

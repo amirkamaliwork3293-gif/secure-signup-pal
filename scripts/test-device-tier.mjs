@@ -50,6 +50,6 @@ assert.equal(
 );
 
 assert.equal(decodeBudget("low").maxW > decodeBudget("low").maxH, true);
-assert.equal(decodeBudget("high").maxW, 960);
+assert.equal(decodeBudget("high").maxW, 1280);
 
 console.log("device-tier: ok");

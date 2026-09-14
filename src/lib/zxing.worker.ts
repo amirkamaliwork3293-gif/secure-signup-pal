@@ -1,10 +1,9 @@
 /**
  * zxing.worker.ts — دیکود بارکد خارج از ترد اصلی
  *
- * ImageBitmap از ترد اصلی منتقل می‌شود (بدون getImageData روی UI).
- * ورودی:  { id, bitmap: ImageBitmap, extra?: boolean }
- *   extra=false → GlobalHistogram سپس Hybrid / فرمت‌های fast
- *   extra=true  → همان + invert + CODE-39 (هر چند فریم)
+ * دو ورودی سازگار:
+ *   1) ImageBitmap transferable + OffscreenCanvas (کروم جدید)
+ *   2) RGBA ArrayBuffer از canvas ترد اصلی — WebView قدیمی بدون OffscreenCanvas
  * خروجی: { id, text: string | null }
  */
 import { decodeRgba } from "./zxing-decode";
@@ -23,8 +22,11 @@ function ensureCanvas(w: number, h: number): OffscreenCanvasRenderingContext2D {
 
 type DecodeRequest = {
   id: number;
-  bitmap: ImageBitmap;
   extra?: boolean;
+  bitmap?: ImageBitmap;
+  width?: number;
+  height?: number;
+  buffer?: ArrayBuffer;
 };
 
 function decodeBitmap(bitmap: ImageBitmap, extra: boolean): string | null {
@@ -38,17 +40,23 @@ function decodeBitmap(bitmap: ImageBitmap, extra: boolean): string | null {
 }
 
 self.onmessage = (e: MessageEvent<DecodeRequest>) => {
-  const { id, bitmap, extra } = e.data;
+  const { id, bitmap, extra, width, height, buffer } = e.data;
   let text: string | null = null;
   try {
-    text = decodeBitmap(bitmap, !!extra);
+    if (buffer && width && height) {
+      text = decodeRgba(new Uint8ClampedArray(buffer), width, height, !!extra);
+    } else if (bitmap) {
+      text = decodeBitmap(bitmap, !!extra);
+    }
   } catch {
     text = null;
   } finally {
-    try {
-      bitmap.close();
-    } catch {
-      /* already transferred / closed */
+    if (bitmap) {
+      try {
+        bitmap.close();
+      } catch {
+        /* already transferred / closed */
+      }
     }
     (self as unknown as Worker).postMessage({ id, text });
   }

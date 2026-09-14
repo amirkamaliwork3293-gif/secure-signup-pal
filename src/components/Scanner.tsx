@@ -1,5 +1,5 @@
 /**
- * Scanner.tsx — اسکن بارکد/QR موبایل (v6)
+ * Scanner.tsx — اسکن بارکد/QR موبایل (v7)
  *
  * علت لگ و نخواندن در نسخهٔ قبل:
  *   1. onDetected هر اسکن والد را رندر می‌کرد → useEffect دوربین را قطع و از نو می‌ساخت
@@ -18,17 +18,24 @@
  *   کادر مرکز ۰.۶۲ را بدون کوچک‌کردن اضافه می‌گیرند (زوم دیجیتال)، فریم‌های زوج
  *   کادر کامل را برای بارکد عریض. دوربین mid/high ideal ۱۹۲۰×۱۰۸۰.
  *
- * مسیر:
- *   - دوربین فقط یک‌بار روی mount روشن می‌شود (onDetected از طریق ref)
- *   - Native BarcodeDetector روی ImageBitmap بریده‌شده (GPU)
- *   - ZXing فقط اگر Native نبود یا چیزی نخواند؛ داخل Worker
- *   - نسبت تصویر کادر حفظ می‌شود
+ * سازگاری اندروید / WebView (گزارش «روی گوشی من کار می‌کند روی گوشی برادر نه»):
+ *   BarcodeDetector در WebView غالباً نیست؛ Worker ماژول و OffscreenCanvas و
+ *   createImageBitmap(video) روی WebView قدیمی throw می‌شوند و قبلاً کل فریم
+ *   بدون دیکود رد می‌شد. مسیر canvas + بافر RGBA + دیکود اصلی به‌عنوان پشتیبان
+ *   است؛ روی کروم جدید همان Worker+ImageBitmap می‌ماند.
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Flashlight, FlashlightOff, RefreshCw } from "lucide-react";
 import { decodeBudget, detectDeviceTier } from "@/lib/device-tier";
 import { cropSourceRect, fitDecodeSize, insetScanCrop } from "@/lib/scanner-engine";
+import {
+  attachVideoStream,
+  bitmapToRgba,
+  canUseOffscreenCanvas,
+  grabFrameViaCanvas,
+  openCameraStream,
+} from "@/lib/scanner-capture";
 import { normalizeScannedCode, scannedCodesMatch } from "@/lib/barcode-match";
 
 type Props = {
@@ -63,7 +70,10 @@ const NATIVE_FORMATS = [
 const CORE_NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "qr_code", "code_39"];
 
 function createNativeDetector(): NativeDetector | null {
-  if (!window.BarcodeDetector) return null;
+  const BD =
+    window.BarcodeDetector ||
+    (globalThis as unknown as { BarcodeDetector?: typeof window.BarcodeDetector }).BarcodeDetector;
+  if (!BD) return null;
   const attempts: Array<{ formats?: string[] } | undefined> = [
     { formats: NATIVE_FORMATS },
     { formats: CORE_NATIVE_FORMATS },
@@ -71,7 +81,7 @@ function createNativeDetector(): NativeDetector | null {
   ];
   for (const opts of attempts) {
     try {
-      return opts ? new window.BarcodeDetector!(opts) : new window.BarcodeDetector!();
+      return opts ? new BD(opts) : new BD();
     } catch {
       /* some engines throw if any listed format is unsupported */
     }
@@ -80,10 +90,15 @@ function createNativeDetector(): NativeDetector | null {
 }
 
 function spawnZxingWorker(): Worker | null {
+  const url = new URL("../lib/zxing.worker.ts", import.meta.url);
   try {
-    return new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
+    return new Worker(url, { type: "module" });
   } catch {
-    return null;
+    try {
+      return new Worker(url);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -120,6 +135,10 @@ export function Scanner({ onDetected, paused }: Props) {
   const nativeInFlight = useRef(false);
   const nativeFullTick = useRef(0);
   const roiTick = useRef(0);
+  const bitmapTransferOk = useRef(true);
+  const offscreenOk = useRef(true);
+  const preferCanvasGrab = useRef(false);
+  const mainDecodeBusy = useRef(false);
   const perfAcc = useRef({ n: 0, grab: 0, native: 0, nativeFull: 0 });
   const pinchStartRef = useRef<number | null>(null);
   const pinchZoomStartRef = useRef(1);
@@ -310,32 +329,25 @@ export function Scanner({ onDetected, paused }: Props) {
       fpsCountRef.current++;
       const tFrame = DEBUG_PERF ? performance.now() : 0;
 
-      // زوج: کادر کامل (بارکد عریض). فرد: زوم مرکز (بارکد کوچک / لیبل دور).
       roiTick.current += 1;
       const viewCrop =
         roiTick.current % 2 === 1
           ? insetScanCrop(cropRef.current, ZOOM_CROP_SCALE)
           : cropRef.current;
 
-      const bitmap = await grabBitmap(video, viewCrop);
-      if (!bitmap || cancelled || pausedRef.current) {
-        bitmap?.close();
-        return;
+      let bitmap: ImageBitmap | null = null;
+      if (!preferCanvasGrab.current) {
+        bitmap = await grabBitmap(video, viewCrop);
+        if (!bitmap) preferCanvasGrab.current = true;
       }
       if (DEBUG_PERF) perfAcc.current.grab += performance.now() - tFrame;
 
-      if (nativeRef.current) {
-        // await در حلقهٔ while سریال است؛ nativeInFlight جلوی detect هم‌پوشان را می‌گیرد
-        // اگر کسی بعداً await را بردارد (مثلاً fire-and-forget).
-        if (nativeInFlight.current) {
-          bitmap.close();
-          return;
-        }
+      if (nativeRef.current && !nativeInFlight.current) {
         nativeInFlight.current = true;
         try {
           let codes: NativeBarcode[] = [];
           const tNative = DEBUG_PERF ? performance.now() : 0;
-          if (nativeBitmapOk.current) {
+          if (bitmap && nativeBitmapOk.current) {
             try {
               codes = await nativeRef.current.detect(bitmap);
             } catch {
@@ -343,10 +355,12 @@ export function Scanner({ onDetected, paused }: Props) {
             }
           }
           if (DEBUG_PERF) perfAcc.current.native += performance.now() - tNative;
-          // کل فریم فقط هر N تیک؛ اگر ImageBitmap پشتیبانی نشود تنها مسیر Native همین video است.
+          // بدون ImageBitmap هر فریم روی video؛ وگرنه همان تrottle کل‌فریم.
           if (
             !codes.length &&
-            (!nativeBitmapOk.current || ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0)
+            (!bitmap ||
+              !nativeBitmapOk.current ||
+              ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0)
           ) {
             const tFull = DEBUG_PERF ? performance.now() : 0;
             try {
@@ -357,12 +371,12 @@ export function Scanner({ onDetected, paused }: Props) {
             if (DEBUG_PERF) perfAcc.current.nativeFull += performance.now() - tFull;
           }
           if (cancelled) {
-            bitmap.close();
+            bitmap?.close();
             return;
           }
           if (codes.length) {
             emitRef.current(codes[0].rawValue, codes[0].format);
-            bitmap.close();
+            bitmap?.close();
             return;
           }
         } catch {
@@ -387,62 +401,81 @@ export function Scanner({ onDetected, paused }: Props) {
       }
 
       const worker = workerRef.current;
-      if (worker && !workerBusy.current) {
-        extraTick.current += 1;
+      if (worker && workerBusy.current) {
+        bitmap?.close();
+        return;
+      }
+
+      extraTick.current += 1;
+      const extra = extraTick.current % ZXING_EXTRA_EVERY === 0;
+
+      const postWorker = (payload: object, transfer: Transferable[]): boolean => {
+        if (!worker || workerBusy.current) return false;
         workerBusy.current = true;
         armWatchdog();
         try {
-          worker.postMessage(
-            { id: extraTick.current, bitmap, extra: extraTick.current % ZXING_EXTRA_EVERY === 0 },
-            [bitmap],
-          );
-          return;
+          worker.postMessage(payload, transfer);
+          return true;
         } catch {
           clearWatchdog();
           workerBusy.current = false;
+          return false;
         }
+      };
+
+      if (bitmap && worker && bitmapTransferOk.current && offscreenOk.current) {
+        if (postWorker({ id: extraTick.current, bitmap, extra }, [bitmap])) return;
+        bitmapTransferOk.current = false;
       }
-      bitmap.close();
+
+      let rgba: { data: Uint8ClampedArray; width: number; height: number } | null = null;
+      if (bitmap) {
+        const conv = bitmapToRgba(bitmap);
+        try {
+          bitmap.close();
+        } catch {
+          /* ignore */
+        }
+        bitmap = null;
+        if (conv?.data) rgba = { data: conv.data, width: conv.width, height: conv.height };
+      }
+      if (!rgba) {
+        const grabbed = grabFrameViaCanvas(video, viewCrop, BUDGET.maxW, BUDGET.maxH);
+        if (grabbed?.data)
+          rgba = { data: grabbed.data, width: grabbed.width, height: grabbed.height };
+      }
+      if (!rgba) return;
+
+      const bytes = rgba.data;
+      const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      if (
+        postWorker(
+          { id: extraTick.current, buffer: buf, width: rgba.width, height: rgba.height, extra },
+          [buf],
+        )
+      ) {
+        return;
+      }
+
+      if (mainDecodeBusy.current) return;
+      mainDecodeBusy.current = true;
+      try {
+        const { decodeRgba } = await import("@/lib/zxing-decode");
+        if (cancelled || pausedRef.current) return;
+        const text = decodeRgba(rgba.data, rgba.width, rgba.height, extra);
+        if (text) emitRef.current(text, "ZXing");
+      } catch {
+        /* keep preview */
+      } finally {
+        mainDecodeBusy.current = false;
+      }
     };
 
     const startCamera = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("دوربین در این مرورگر پشتیبانی نمی‌شود");
-      }
-
       const isLow = DEVICE_TIER === "low";
-      const tries: MediaStreamConstraints[] = [
-        {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: isLow ? 1280 : 1920 },
-            height: { ideal: isLow ? 720 : 1080 },
-            frameRate: { ideal: 30 },
-          },
-          audio: false,
-        },
-        {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        },
-        { video: { facingMode: { ideal: "environment" } }, audio: false },
-        { video: true, audio: false },
-      ];
+      offscreenOk.current = canUseOffscreenCanvas();
 
-      let stream: MediaStream | null = null;
-      for (const c of tries) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia(c);
-          break;
-        } catch {
-          /* try next */
-        }
-      }
-      if (!stream) throw new Error("دسترسی به دوربین امکان‌پذیر نیست");
+      const stream = await openCameraStream(isLow);
       if (cancelled) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -454,21 +487,7 @@ export function Scanner({ onDetected, paused }: Props) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      video.setAttribute("playsinline", "true");
-      video.setAttribute("webkit-playsinline", "true");
-      video.muted = true;
-      video.playsInline = true;
-      video.srcObject = stream;
-
-      await new Promise<void>((res) => {
-        if (video.readyState >= 1) {
-          res();
-          return;
-        }
-        video.onloadedmetadata = () => res();
-        setTimeout(res, 2500);
-      });
-      await video.play().catch(() => {});
+      await attachVideoStream(video, stream);
       if (cancelled) return;
 
       const track = stream.getVideoTracks()[0];
@@ -477,44 +496,60 @@ export function Scanner({ onDetected, paused }: Props) {
       } catch {
         /* ignore */
       }
-      if (track.getCapabilities) {
-        const caps = track.getCapabilities() as Record<string, unknown>;
-        setTorchSupported(!!caps.torch);
-        const zc = caps.zoom as { min?: number; max?: number } | undefined;
-        if (zc) {
-          zoomMinRef.current = zc.min ?? 1;
-          zoomMaxRef.current = zc.max ?? 10;
-        }
-        setZoomSupported(!!caps.zoom);
+      try {
+        if (typeof track.getCapabilities === "function") {
+          const caps = track.getCapabilities() as Record<string, unknown>;
+          setTorchSupported(!!caps.torch);
+          const zc = caps.zoom as { min?: number; max?: number } | undefined;
+          if (zc) {
+            zoomMinRef.current = zc.min ?? 1;
+            zoomMaxRef.current = zc.max ?? 10;
+          }
+          setZoomSupported(!!caps.zoom);
 
-        const adv: Record<string, unknown>[] = [];
-        if (Array.isArray(caps.focusMode) && (caps.focusMode as string[]).includes("continuous")) {
-          adv.push({ focusMode: "continuous" });
+          const adv: Record<string, unknown>[] = [];
+          if (
+            Array.isArray(caps.focusMode) &&
+            (caps.focusMode as string[]).includes("continuous")
+          ) {
+            adv.push({ focusMode: "continuous" });
+          }
+          if (
+            Array.isArray(caps.exposureMode) &&
+            (caps.exposureMode as string[]).includes("continuous")
+          ) {
+            adv.push({ exposureMode: "continuous" });
+          }
+          if (
+            Array.isArray(caps.whiteBalanceMode) &&
+            (caps.whiteBalanceMode as string[]).includes("continuous")
+          ) {
+            adv.push({ whiteBalanceMode: "continuous" });
+          }
+          if (adv.length) {
+            await track
+              .applyConstraints({ advanced: adv } as MediaTrackConstraints)
+              .catch(() => {});
+          }
+          const wcap = caps.width as { max?: number } | undefined;
+          if (!isLow && (wcap?.max ?? 0) >= 1600) {
+            await track
+              .applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1080 } })
+              .catch(() => {});
+          }
         }
-        if (
-          Array.isArray(caps.exposureMode) &&
-          (caps.exposureMode as string[]).includes("continuous")
-        ) {
-          adv.push({ exposureMode: "continuous" });
-        }
-        if (
-          Array.isArray(caps.whiteBalanceMode) &&
-          (caps.whiteBalanceMode as string[]).includes("continuous")
-        ) {
-          adv.push({ whiteBalanceMode: "continuous" });
-        }
-        if (adv.length) {
-          await track.applyConstraints({ advanced: adv } as MediaTrackConstraints).catch(() => {});
-        }
+      } catch {
+        setTorchSupported(false);
+        setZoomSupported(false);
       }
 
       attachWorker(spawnZxingWorker());
       nativeRef.current = createNativeDetector();
-      if (nativeRef.current) {
-        setEngine(workerRef.current ? "Native + ZXing" : "Native");
-      } else {
-        setEngine(workerRef.current ? "ZXing Worker" : "دوربین");
-      }
+      const parts: string[] = [];
+      if (nativeRef.current) parts.push("Native");
+      if (workerRef.current) parts.push("ZXing Worker");
+      else parts.push("ZXing");
+      setEngine(parts.join(" + "));
 
       // یک فریم در هر لحظه: waitFrame با requestVideoFrameCallback به فریم
       // واقعی دوربین قفل می‌شود (نه setInterval / rAF آزاد) و await scanFrame
@@ -564,6 +599,7 @@ export function Scanner({ onDetected, paused }: Props) {
       workerRef.current = null;
       workerBusy.current = false;
       nativeInFlight.current = false;
+      mainDecodeBusy.current = false;
       if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
       const audio = audioCtxRef.current;
       audioCtxRef.current = null;

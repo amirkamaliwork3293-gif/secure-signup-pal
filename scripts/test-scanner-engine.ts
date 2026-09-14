@@ -10,6 +10,7 @@ import {
   findProductByCode,
 } from "../src/lib/barcode-match.ts";
 import { cropSourceRect, fitDecodeSize, insetScanCrop } from "../src/lib/scanner-engine.ts";
+import { cameraConstraintTries, pickRearCameraId } from "../src/lib/scanner-capture.ts";
 import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/device-tier.ts";
 
 {
@@ -100,6 +101,27 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
   const sized = decodeCanvasSize("mid");
   assert.equal(sized.dw / sized.dh > 1.5, true, "budget is wide, not 4:3");
   assert.equal(classifyDeviceTier({ deviceMemory: 2, hardwareConcurrency: 8 }), "mid");
+}
+
+{
+  const rear = pickRearCameraId([
+    { deviceId: "a", label: "Front Camera", kind: "videoinput" },
+    { deviceId: "b", label: "Back Camera", kind: "videoinput" },
+  ]);
+  assert.equal(rear, "b");
+  const persian = pickRearCameraId([
+    { deviceId: "f", label: "دوربین جلو", kind: "videoinput" },
+    { deviceId: "r", label: "دوربین پشت", kind: "videoinput" },
+  ]);
+  assert.equal(persian, "r");
+  const unlabeled = pickRearCameraId([
+    { deviceId: "1", label: "", kind: "videoinput" },
+    { deviceId: "2", label: "", kind: "videoinput" },
+  ]);
+  assert.equal(unlabeled, "2", "بدون لیبل، آخرین videoinput معمولاً پشت است");
+  const tries = cameraConstraintTries(false);
+  assert.equal(tries.length >= 4, true);
+  assert.equal("audio" in tries[0] && tries[0].audio === false, true);
 }
 
 console.log("scanner-engine: ok");

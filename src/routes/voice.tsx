@@ -33,6 +33,7 @@ import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import { parseVoiceInvoiceLLM } from "@/lib/api/voice.functions";
 import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
+import { VoiceProductChoices } from "@/components/VoiceProductChoices";
 import {
   Mic,
   MicOff,
@@ -692,26 +693,19 @@ function ChooseRow({
           </span>
         )}
       </div>
-      <div className="flex flex-wrap gap-2">
-        {item.candidates.map((c) => (
+      <VoiceProductChoices
+        candidates={item.candidates}
+        onPick={onPick}
+        trailing={
           <button
-            key={c.product.id}
-            onClick={() => onPick(c.product)}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-sm hover:bg-accent"
+            type="button"
+            onClick={onDiscard}
+            className="rounded-xl border border-dashed border-border px-3 py-2 text-sm text-muted-foreground"
           >
-            {c.product.name}
-            <span className="mr-1 text-xs text-muted-foreground">
-              {formatToman(c.product.price)}
-            </span>
+            نادیده بگیر
           </button>
-        ))}
-        <button
-          onClick={onDiscard}
-          className="rounded-xl border border-dashed border-border px-3 py-2 text-sm text-muted-foreground"
-        >
-          نادیده بگیر
-        </button>
-      </div>
+        }
+      />
     </div>
   );
 }

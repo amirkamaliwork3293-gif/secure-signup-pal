@@ -72,6 +72,7 @@ import {
 import { jalaliDayKey } from "@/lib/reminder-week";
 import { createRecognizer, type Recognizer, type SpeechEngine } from "@/lib/voice/speech";
 import type { ParsedCandidate, ParsedItem } from "@/lib/voice/persian-nlu";
+import { VoiceProductChoices } from "@/components/VoiceProductChoices";
 import type { ParsedProductItem } from "@/lib/voice/product-nlu";
 
 /** صفحه‌هایی که خودشان میکروفون اختصاصی دارند — دکمه‌ی شناور در آن‌ها پنهان است */
@@ -1334,41 +1335,30 @@ export function SmartAssistant() {
                             </button>
                           ))}
 
-                        {card.choose.type === "product-price" &&
-                          card.choose.options.map((o) => (
-                            <button
-                              key={o.product.id}
-                              onClick={() => pickProductPrice(card, o.product)}
-                              className="rounded-xl border border-border bg-background px-3 py-2 text-sm hover:bg-accent"
-                            >
-                              {o.product.name}
-                              <span className="mr-1 text-xs text-muted-foreground">
-                                {formatToman(o.product.price)}
-                              </span>
-                            </button>
-                          ))}
-                        {card.choose.type === "product-price" && card.choose.options.length > 1 && (
-                          <button
-                            onClick={() => applyPriceToAll(card)}
-                            className="rounded-xl border border-dashed border-primary/50 px-3 py-2 text-sm text-primary"
-                          >
-                            اعمال روی همه‌ی موارد مشابه
-                          </button>
+                        {card.choose.type === "product-price" && (
+                          <VoiceProductChoices
+                            candidates={card.choose.options}
+                            onPick={(p) => pickProductPrice(card, p)}
+                            trailing={
+                              card.choose.options.length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => applyPriceToAll(card)}
+                                  className="rounded-xl border border-dashed border-primary/50 px-3 py-2 text-sm text-primary"
+                                >
+                                  اعمال روی همه‌ی موارد مشابه
+                                </button>
+                              ) : null
+                            }
+                          />
                         )}
 
-                        {card.choose.type === "invoice-item" &&
-                          card.choose.options.map((o) => (
-                            <button
-                              key={o.product.id}
-                              onClick={() => pickInvoiceProduct(card, o.product)}
-                              className="rounded-xl border border-border bg-background px-3 py-2 text-sm hover:bg-accent"
-                            >
-                              {o.product.name}
-                              <span className="mr-1 text-xs text-muted-foreground">
-                                {formatToman(o.product.price)}
-                              </span>
-                            </button>
-                          ))}
+                        {card.choose.type === "invoice-item" && (
+                          <VoiceProductChoices
+                            candidates={card.choose.options}
+                            onPick={(p) => pickInvoiceProduct(card, p)}
+                          />
+                        )}
 
                         <button
                           onClick={() => discard(card.key)}

@@ -29,7 +29,11 @@ export type ParsedItem = {
   quantity: number;
   /** واحد نهایی (عدد / کیلوگرم / گرم) */
   unit: string;
-  /** بهترین تطبیق‌ها در انبار، مرتب‌شده بر اساس امتیاز */
+  /**
+   * بهترین تطبیق‌ها در انبار، مرتب‌شده بر اساس امتیاز.
+   * اولویت اول همیشه نزدیک‌ترین تطبیق کلمه‌به‌کلمه‌ی گفته‌ی کاربر است.
+   * رابط کاربری حداکثر ۵ مورد را نشان می‌دهد و بقیه پشت «محصولات بیشتر» می‌مانند.
+   */
   candidates: ParsedCandidate[];
   /**
    * سطح اطمینان:
@@ -473,9 +477,68 @@ function parseClause(clause: string): ClauseParse {
 
 // ─── تطبیق محصول با انبار ─────────────────────────────────────────────────────
 
+/**
+ * حداکثر گزینه‌ای که در کارت انتخاب صوتی دیده می‌شود.
+ * بقیه‌ی نام‌های مشابه پشت دکمه‌ی «محصولات بیشتر» می‌مانند.
+ */
+export const VOICE_PRODUCT_CHOICE_LIMIT = 5;
+/** سقف داخلی فهرست تطبیق — برای «محصولات بیشتر»، نه برای ثبت خودکار */
+export const VOICE_PRODUCT_MATCH_CAP = 40;
+const MATCH_MIN_SCORE = 0.25;
+
 /** استخراج توالی ارقام از یک متن نرمال‌شده (برای مقایسه‌ی شماره/سایز/کد) */
 function extractNumbers(s: string): string[] {
   return s.match(/\d+/g) || [];
+}
+
+function nameTokens(s: string): string[] {
+  return s.split(" ").filter(Boolean);
+}
+
+/** آیا کلمه‌های گفته‌شده دقیقاً پیشوند کلمه‌به‌کلمه‌ی نام محصول‌اند؟ */
+function isWholeTokenPrefix(spoken: string[], product: string[]): boolean {
+  if (spoken.length === 0 || spoken.length > product.length) return false;
+  return spoken.every((tok, i) => tok === product[i]);
+}
+
+/** همه‌ی کلمه‌های گفته‌شده به‌صورت کلمهٔ کامل و به همان ترتیب در نام محصول هستند */
+function spokenTokensInOrder(spoken: string[], product: string[]): boolean {
+  let pos = 0;
+  for (const tok of spoken) {
+    const i = product.findIndex((x, idx) => idx >= pos && x === tok);
+    if (i < 0) return false;
+    pos = i + 1;
+  }
+  return true;
+}
+
+/**
+ * تطبیق نرم برای یادآوری/ریشه: «گوجه»/«گوجهه»، نه «شیر»/«شیرینی» و نه «گل»/«گلدان».
+ * برای رتبه‌بندی اسم کامل از این استفاده نمی‌شود — فقط برای باقی‌ماندن در فهرست مشابه.
+ */
+function tokensLooselyMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter.length < 3) return false;
+  return longer.startsWith(shorter) && longer.length - shorter.length <= 2;
+}
+
+/**
+ * برنده‌ی واضح کالا: یا اسم کامل گفته شده، یا فاصله‌ی امتیاز با نفر دوم کافی است.
+ * فاصله‌ی ۰.۲ جلوی ثبت خودکار «تیشرت مشکی لارج» وقتی کاربر «تیشرت مشکی» گفته را می‌گیرد.
+ */
+export function isClearProductWinner(candidates: Array<{ score: number }>): boolean {
+  const best = candidates[0]?.score;
+  const second = candidates[1]?.score;
+  if (best === undefined) return false;
+  return best >= 0.6 && (second === undefined || best - second >= 0.2);
+}
+
+export function splitVoiceProductChoices<T>(
+  items: T[],
+  limit = VOICE_PRODUCT_CHOICE_LIMIT,
+): { visible: T[]; more: T[] } {
+  return { visible: items.slice(0, limit), more: items.slice(limit) };
 }
 
 export function scoreProduct(phrase: string, productName: string): number {
@@ -483,27 +546,37 @@ export function scoreProduct(phrase: string, productName: string): number {
   const b = normalizeFa(productName);
   if (!a || !b) return 0;
 
-  const at = a.split(" ").filter(Boolean);
-  const bt = b.split(" ").filter(Boolean);
+  const at = nameTokens(a);
+  const bt = nameTokens(b);
+  if (at.length === 0 || bt.length === 0) return 0;
 
   let score: number;
   if (a === b) {
-    // کل عبارت دقیقاً همان نام محصول است
+    // کل عبارت دقیقاً همان نام محصول است — بالاترین اولویت کلمه‌به‌کلمه
     score = 1;
-  } else if (b.startsWith(a)) {
-    // نام محصول با کل عبارت گفته‌شده شروع می‌شود (مثلاً «گلس آیفون ۱۳»)
-    score = 0.96;
-  } else if (b.includes(a)) {
-    // کل عبارت به‌صورت پیوسته در نام محصول هست — حتی اگر کلمه‌ی دوم/سوم باشد
-    score = 0.9;
+  } else if (isWholeTokenPrefix(at, bt)) {
+    // کاربر پیشوند کامل نام را گفته: «تیشرت مشکی» روی «تیشرت مشکی لارج».
+    // امتیاز باید آن‌قدر از ۱ فاصله داشته باشد که اسم دقیقِ کوتاه‌تر برنده‌ی واضح بماند.
+    const extra = bt.length - at.length;
+    score = Math.max(0.7, 0.79 - Math.min(Math.max(extra - 1, 0), 10) * 0.006);
+  } else if (spokenTokensInOrder(at, bt) && at.length > 1) {
+    // همه‌ی کلمه‌های گفته‌شده به همان ترتیب در نام هستند، ولی پیشوند نیستند
+    // (مثلاً «تیشرت لارج» داخل «تیشرت مشکی لارج»)
+    const extra = Math.max(0, bt.length - at.length);
+    score = Math.max(0.64, 0.72 - Math.min(extra, 8) * 0.006);
+  } else if (at.every((tok) => bt.includes(tok))) {
+    if (at.length > 1) {
+      // همه‌ی کلمه‌ها هستند ولی ترتیب فرق دارد («مشکی تیشرت» → «تیشرت مشکی»)
+      score = 0.66;
+    } else {
+      // یک کلمه‌ی کامل در وسط/انتهای نام («مشکی» داخل «تیشرت مشکی»)
+      score = bt[0] === at[0] ? 0.79 : 0.58;
+    }
   } else {
-    if (at.length === 0 || bt.length === 0) return 0;
-    const tokenHit = (tok: string) =>
-      bt.some((x) => x === tok || x.includes(tok) || tok.includes(x));
     let hits = 0;
     let laterHits = 0;
     at.forEach((tok, i) => {
-      if (tokenHit(tok)) {
+      if (bt.some((x) => tokensLooselyMatch(tok, x))) {
         hits++;
         if (i > 0) laterHits++;
       }
@@ -511,20 +584,10 @@ export function scoreProduct(phrase: string, productName: string): number {
     if (hits === 0) return 0;
 
     const allPresent = hits === at.length;
-    const inOrder = (() => {
-      let pos = 0;
-      for (const tok of at) {
-        const i = bt.findIndex((x, idx) => idx >= pos && (x === tok || x.includes(tok) || tok.includes(x)));
-        if (i < 0) return false;
-        pos = i + 1;
-      }
-      return true;
-    })();
-
     if (allPresent && at.length > 1) {
-      score = inOrder ? 0.82 : 0.72;
+      score = 0.62;
     } else if (allPresent) {
-      score = 0.7;
+      score = 0.55;
     } else {
       const overlap = hits / Math.max(at.length, bt.length);
       // تطبیق فقط کلمه‌ی اول در عبارت چندکلمه‌ای نباید برنده‌ی جستجو باشد
@@ -548,11 +611,18 @@ export function scoreProduct(phrase: string, productName: string): number {
 }
 
 export function matchProducts(phrase: string, products: Product[]): ParsedCandidate[] {
+  const spoken = nameTokens(normalizeFa(phrase));
   const scored = products
-    .map((product) => ({ product, score: scoreProduct(phrase, product.name) }))
-    .filter((c) => c.score > 0.25)
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, 4);
+    .map((product, index) => ({ product, score: scoreProduct(phrase, product.name), index }))
+    .filter((c) => c.score > MATCH_MIN_SCORE)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const extraA = Math.max(0, nameTokens(normalizeFa(a.product.name)).length - spoken.length);
+      const extraB = Math.max(0, nameTokens(normalizeFa(b.product.name)).length - spoken.length);
+      if (extraA !== extraB) return extraA - extraB;
+      return a.index - b.index;
+    });
+  return scored.slice(0, VOICE_PRODUCT_MATCH_CAP).map(({ product, score }) => ({ product, score }));
 }
 
 // ─── جمع‌بندی واحد و مقدار بر اساس محصول منتخب ────────────────────────────────
@@ -761,8 +831,7 @@ export function parseVoiceText(rawTranscript: string, products: Product[]): Pars
     const best = candidates[0];
     const rec = reconcile(parsed, best.product);
 
-    const second = candidates[1];
-    const clearWinner = best.score >= 0.6 && (!second || best.score - second.score >= 0.2);
+    const clearWinner = isClearProductWinner(candidates);
     const confidence: ParsedItem["confidence"] =
       clearWinner && !rec.needsUnitConfirm ? "high" : "low";
 

@@ -38,10 +38,10 @@ import {
 } from "@/lib/store";
 import {
   extractSpokenMobile,
+  isClearProductWinner,
   matchProducts,
   normalizeFa,
   parseVoiceText,
-  scoreProduct,
   stripSpokenMobile,
   type ParseResult,
   type ParsedCandidate,
@@ -237,13 +237,6 @@ function joinClean(tokens: string[], isNoise: (t: string) => boolean): string {
 
 function matchCustomers(phrase: string, list: Customer[]): CustomerCandidate[] {
   return matchPersons(phrase, list).map((c) => ({ customer: c.customer, score: c.score }));
-}
-
-/** برنده‌ی واضح برای کالا — برای شخص از isClearPersonWinner استفاده می‌شود */
-function isClearWinner(scores: number[]): boolean {
-  const [best, second] = scores;
-  if (best === undefined) return false;
-  return best >= 0.6 && (second === undefined || best - second >= 0.2);
 }
 
 // ─── الگوهای تشخیص نیت ────────────────────────────────────────────────────────
@@ -1193,7 +1186,7 @@ function parseProductPriceEdit(raw: string, norm: string, ctx: AssistantContext)
     productPhrase: phrase,
     price: amount,
     candidates,
-    clearWinner: isClearWinner(candidates.map((c) => c.score)),
+    clearWinner: isClearProductWinner(candidates),
     applyAllHint: RE_APPLY_ALL.test(norm),
   };
 }

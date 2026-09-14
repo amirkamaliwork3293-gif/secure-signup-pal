@@ -6,6 +6,11 @@
  * الگوریتم dc14f20 (`mem <= 2` → low، `mem <= 4` → mid) گوشی‌های معمولی
  * بازار را اشتباه «ضعیف» می‌کرد و رزولوشن را تا ۴۱۶×۳۱۲ / ۴۸۰p پایین
  * می‌آورد — کندی حس‌شده بعد از آن commit از همین‌جا بود.
+ *
+ * پروفایل v5 (فرضیهٔ ۳):
+ *   `hardwareConcurrency ?? 2` وقتی سیگنال غایب بود (Safari خصوصی، Fingerprinting)
+ *   هسته را ۲ فرض می‌کرد و فوراً low می‌شد. بدون mem و بدون cores باید mid باشد
+ *   تا بودجهٔ دیکود بی‌جهت به ۵۱۲×۲۴۰ سقوط نکند. گوشی ۲هسته‌ایِ واقعی هنوز low است.
  */
 
 export type DeviceTier = "low" | "mid" | "high";
@@ -17,18 +22,25 @@ export type DeviceSignals = {
 
 export function classifyDeviceTier(signals: DeviceSignals): DeviceTier {
   const mem = Number(signals.deviceMemory || 0);
-  const cores = signals.hardwareConcurrency ?? 2;
+  const hasMem = mem > 0;
+  const coresRaw = signals.hardwareConcurrency;
+  const hasCores = typeof coresRaw === "number" && coresRaw > 0;
+
+  // بدون هیچ سیگنالی mid امن‌تر از low است — عرض EAN/CODE128 را خراب نمی‌کند.
+  if (!hasMem && !hasCores) return "mid";
+
+  const cores = hasCores ? coresRaw : 4;
 
   if (cores <= 2) return "low";
-  if (mem > 0 && mem <= 1) return "low";
+  if (hasMem && mem <= 1) return "low";
   // ۲ یعنی حدود ۲–۳.۹ گیگ. چهار هسته یا کمتر → واقعاً ضعیف؛ هشت‌هسته‌ایِ ۳ گیگ → mid.
   if (mem === 2 && cores < 6) return "low";
 
   // ۴ یعنی حدود ۴–۷.۹ گیگ — رایج‌ترین گزارش اندروید. هشت هسته = high.
-  if (cores >= 8 && (mem === 0 || mem >= 4)) return "high";
+  if (cores >= 8 && (!hasMem || mem >= 4)) return "high";
   if (cores >= 6 && mem >= 8) return "high";
   if (cores >= 4) return "mid";
-  return "low";
+  return "mid";
 }
 
 export function detectDeviceTier(): DeviceTier {

@@ -1,5 +1,5 @@
 /**
- * Scanner.tsx — اسکن بارکد/QR موبایل (v4)
+ * Scanner.tsx — اسکن بارکد/QR موبایل (v5)
  *
  * علت لگ و نخواندن در نسخهٔ قبل:
  *   1. onDetected هر اسکن والد را رندر می‌کرد → useEffect دوربین را قطع و از نو می‌ساخت
@@ -7,7 +7,13 @@
  *   3. getImageData + استخراج روشنایی روی ترد اصلی هر فریم
  *   4. Native و ZXing همزمان + TRY_HARDER/ITF که Worker را قفل و watchdog را آتش می‌کرد
  *
- * مسیر جدید:
+ * پروفایل v5 (فرضیهٔ ۱ تأیید شد):
+ *   وقتی Native روی کراپ چیزی پیدا نمی‌کرد، همان فریم detect(video) روی کل
+ *   ۱۲۸۰×۷۲۰ هم اجرا می‌شد. اکثر فریم‌ها خالی‌اند → دو تشخیص بومی سریال در
+ *   ترد اصلی، که حلقهٔ RVFC را بند می‌آورد. حالا کل‌فریم فقط هر ۶ تیک یک‌بار
+ *   است (همان الگوی extra در ZXing)، مگر این‌که ImageBitmap اصلاً پشتیبانی نشود.
+ *
+ * مسیر:
  *   - دوربین فقط یک‌بار روی mount روشن می‌شود (onDetected از طریق ref)
  *   - Native BarcodeDetector روی ImageBitmap بریده‌شده (GPU)
  *   - ZXing فقط اگر Native نبود یا چیزی نخواند؛ داخل Worker
@@ -85,6 +91,10 @@ const DEVICE_TIER = detectDeviceTier();
 const BUDGET = decodeBudget(DEVICE_TIER);
 const BASE_W = 0.78;
 const BASE_H = 0.46;
+/** پشت این فلگ تایمر مرحله‌ای روشن می‌شود؛ در پروداکشن باید false بماند. */
+const DEBUG_PERF = false;
+/** کل‌فریم Native فقط هر N فریمِ بدون‌hit روی کراپ — تعادل سرعت و بارکد لبِ کادر. */
+const NATIVE_FULL_FRAME_EVERY = 6;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -98,6 +108,9 @@ export function Scanner({ onDetected, paused }: Props) {
   const workerWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extraTick = useRef(0);
   const nativeBitmapOk = useRef(true);
+  const nativeInFlight = useRef(false);
+  const nativeFullTick = useRef(0);
+  const perfAcc = useRef({ n: 0, grab: 0, native: 0, nativeFull: 0 });
   const pinchStartRef = useRef<number | null>(null);
   const pinchZoomStartRef = useRef(1);
   const zoomMinRef = useRef(1);
@@ -274,16 +287,26 @@ export function Scanner({ onDetected, paused }: Props) {
     const scanFrame = async (video: HTMLVideoElement) => {
       if (pausedRef.current || video.readyState < 2) return;
       fpsCountRef.current++;
+      const tFrame = DEBUG_PERF ? performance.now() : 0;
 
       const bitmap = await grabBitmap(video);
       if (!bitmap || cancelled || pausedRef.current) {
         bitmap?.close();
         return;
       }
+      if (DEBUG_PERF) perfAcc.current.grab += performance.now() - tFrame;
 
       if (nativeRef.current) {
+        // await در حلقهٔ while سریال است؛ nativeInFlight جلوی detect هم‌پوشان را می‌گیرد
+        // اگر کسی بعداً await را بردارد (مثلاً fire-and-forget).
+        if (nativeInFlight.current) {
+          bitmap.close();
+          return;
+        }
+        nativeInFlight.current = true;
         try {
           let codes: NativeBarcode[] = [];
+          const tNative = DEBUG_PERF ? performance.now() : 0;
           if (nativeBitmapOk.current) {
             try {
               codes = await nativeRef.current.detect(bitmap);
@@ -291,12 +314,19 @@ export function Scanner({ onDetected, paused }: Props) {
               nativeBitmapOk.current = false;
             }
           }
-          if (!codes.length) {
+          if (DEBUG_PERF) perfAcc.current.native += performance.now() - tNative;
+          // کل فریم فقط هر N تیک؛ اگر ImageBitmap پشتیبانی نشود تنها مسیر Native همین video است.
+          if (
+            !codes.length &&
+            (!nativeBitmapOk.current || ++nativeFullTick.current % NATIVE_FULL_FRAME_EVERY === 0)
+          ) {
+            const tFull = DEBUG_PERF ? performance.now() : 0;
             try {
               codes = await nativeRef.current.detect(video);
             } catch {
               /* ZXing fallback */
             }
+            if (DEBUG_PERF) perfAcc.current.nativeFull += performance.now() - tFull;
           }
           if (cancelled) {
             bitmap.close();
@@ -309,6 +339,22 @@ export function Scanner({ onDetected, paused }: Props) {
           }
         } catch {
           /* fall through to ZXing */
+        } finally {
+          nativeInFlight.current = false;
+        }
+      }
+
+      if (DEBUG_PERF) {
+        const p = perfAcc.current;
+        p.n += 1;
+        if (p.n >= 30) {
+          console.debug(
+            `[scanner-perf] n=${p.n} grab=${(p.grab / p.n).toFixed(1)}ms nativeCrop=${(p.native / p.n).toFixed(1)}ms nativeFull=${(p.nativeFull / p.n).toFixed(1)}ms`,
+          );
+          p.n = 0;
+          p.grab = 0;
+          p.native = 0;
+          p.nativeFull = 0;
         }
       }
 
@@ -486,7 +532,13 @@ export function Scanner({ onDetected, paused }: Props) {
       }
       workerRef.current = null;
       workerBusy.current = false;
+      nativeInFlight.current = false;
       if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
+      const audio = audioCtxRef.current;
+      audioCtxRef.current = null;
+      if (audio) {
+        audio.close().catch(() => {});
+      }
     };
   }, []);
 

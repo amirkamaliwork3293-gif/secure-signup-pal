@@ -25,6 +25,15 @@
  *   است؛ روی کروم جدید همان Worker+ImageBitmap می‌ماند. اگر BarcodeDetector روی
  *   گوشی جدید آویزان شود (قبلاً کار می‌کرد، الان هیچی)، بعد از دو تایم‌اوت خاموش
  *   می‌شود تا ZXing ادامه دهد.
+ *
+ * رگرسیون v7 («اسکن روی همهٔ گوشی‌ها کاملاً خراب شد»):
+ *   1. URL Worker به متغیر جدا شد → Vite آن را باندل نکرد و سورس خام .ts به‌صورت
+ *      data: URL داخل باندل رفت؛ Worker با SyntaxError می‌مرد و بی‌نهایت ساخته می‌شد.
+ *   2. تایم‌اوت ۳۲۰ms Native، اولین detect (لود مدل ML Kit، چند ثانیه) را می‌کشت و
+ *      بعد از دو بار Native خاموش می‌شد. با (۱) هیچ موتوری نمی‌ماند.
+ *   حالا: الگوی Worker همان یک عبارتی که Vite می‌شناسد، بودجهٔ گرم‌شدن ۴s برای سه
+ *   detect اول، نتیجهٔ دیررسِ detect دور ریخته نمی‌شود، و Worker مرده بعد از سه
+ *   شکست به دیکود ترد اصلی می‌سپارد.
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
@@ -37,6 +46,7 @@ import {
   canUseOffscreenCanvas,
   grabFrameViaCanvas,
   NATIVE_HANG_LIMIT,
+  nativeDetectBudgetMs,
   nextNativeHangState,
   openCameraStream,
   raceTimeout,
@@ -94,13 +104,18 @@ function createNativeDetector(): NativeDetector | null {
   return null;
 }
 
+/**
+ * `new Worker(new URL(..., import.meta.url))` باید دقیقاً همین شکل و در یک عبارت باشد.
+ * Vite فقط این الگو را به‌عنوان Worker باندل می‌کند؛ اگر URL در متغیر جدا شود،
+ * فایل .ts خام به‌صورت data: URL داخل باندل می‌رود و Worker با SyntaxError می‌میرد
+ * (رگرسیون v7: ZXing در پروداکشن هیچ‌وقت دیکود نمی‌کرد).
+ */
 function spawnZxingWorker(): Worker | null {
-  const url = new URL("../lib/zxing.worker.ts", import.meta.url);
   try {
-    return new Worker(url, { type: "module" });
+    return new Worker(new URL("../lib/zxing.worker.ts", import.meta.url), { type: "module" });
   } catch {
     try {
-      return new Worker(url);
+      return new Worker(new URL("../lib/zxing.worker.ts", import.meta.url));
     } catch {
       return null;
     }
@@ -124,8 +139,8 @@ const NATIVE_FULL_FRAME_EVERY = 6;
 const ZOOM_CROP_SCALE = 0.62;
 /** extra ZXing (invert / CODE-39) هر N فریم Worker. */
 const ZXING_EXTRA_EVERY = 5;
-/** BarcodeDetector آویزان روی بعضی کروم‌های جدید؛ بعد از این ZXing باید راه بیفتد. */
-const NATIVE_DETECT_MS = 320;
+/** Worker که پشت‌سرهم می‌میرد (باندل خراب / WebView قدیمی) → دیکود روی ترد اصلی. */
+const WORKER_FAIL_LIMIT = 3;
 
 export function Scanner({ onDetected, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -147,6 +162,8 @@ export function Scanner({ onDetected, paused }: Props) {
   const preferCanvasGrab = useRef(false);
   const mainDecodeBusy = useRef(false);
   const nativeHangCount = useRef(0);
+  const nativeCalls = useRef(0);
+  const workerFailures = useRef(0);
   const perfAcc = useRef({ n: 0, grab: 0, native: 0, nativeFull: 0 });
   const pinchStartRef = useRef<number | null>(null);
   const pinchZoomStartRef = useRef(1);
@@ -239,6 +256,34 @@ export function Scanner({ onDetected, paused }: Props) {
       }
     };
 
+    const engineLabel = () => {
+      const parts: string[] = [];
+      if (nativeRef.current) parts.push("Native");
+      parts.push(workerRef.current ? "ZXing Worker" : "ZXing");
+      return parts.join(" + ");
+    };
+
+    /** Worker مرده را دور بینداز؛ بعد از چند شکست پیاپی دیگر نساز و روی ترد اصلی دیکود کن. */
+    const recycleWorker = (reason: string) => {
+      clearWatchdog();
+      workerBusy.current = false;
+      try {
+        workerRef.current?.terminate();
+      } catch {
+        /* ignore */
+      }
+      workerRef.current = null;
+      if (cancelled) return;
+      workerFailures.current += 1;
+      if (workerFailures.current >= WORKER_FAIL_LIMIT) {
+        console.warn(`[scanner] ZXing worker gave up (${reason}) — decoding on main thread`);
+        setEngine(engineLabel());
+        return;
+      }
+      console.warn(`[scanner] ZXing worker ${reason} — recycling`);
+      attachWorker(spawnZxingWorker());
+    };
+
     const attachWorker = (w: Worker | null) => {
       if (!w) {
         workerRef.current = null;
@@ -247,19 +292,12 @@ export function Scanner({ onDetected, paused }: Props) {
       w.onmessage = (e: MessageEvent<{ id: number; text: string | null }>) => {
         clearWatchdog();
         workerBusy.current = false;
+        workerFailures.current = 0;
         if (e.data.text) emitRef.current(e.data.text, "ZXing");
       };
       w.onerror = (ev) => {
-        console.warn("[scanner] ZXing worker error", ev.message);
-        clearWatchdog();
-        workerBusy.current = false;
-        try {
-          w.terminate();
-        } catch {
-          /* ignore */
-        }
-        workerRef.current = null;
-        if (!cancelled) attachWorker(spawnZxingWorker());
+        if (workerRef.current !== w) return;
+        recycleWorker(`error: ${ev.message || "load failed"}`);
       };
       workerRef.current = w;
     };
@@ -271,15 +309,7 @@ export function Scanner({ onDetected, paused }: Props) {
       // هنگ، اسکنر را دو ثانیه یخ می‌زد. دیکود عادی ۱۱–۶۰ms است و این سقف را نمی‌زند.
       workerWatchdog.current = setTimeout(() => {
         workerWatchdog.current = null;
-        workerBusy.current = false;
-        console.warn("[scanner] ZXing worker decode timed out — recycling");
-        try {
-          workerRef.current?.terminate();
-        } catch {
-          /* ignore */
-        }
-        workerRef.current = null;
-        if (!cancelled) attachWorker(spawnZxingWorker());
+        recycleWorker("decode timed out");
       }, 1000);
     };
 
@@ -335,7 +365,7 @@ export function Scanner({ onDetected, paused }: Props) {
     const disableNative = () => {
       nativeRef.current = null;
       nativeHangCount.current = 0;
-      setEngine(workerRef.current ? "ZXing Worker" : "ZXing");
+      setEngine(engineLabel());
     };
 
     const detectNative = async (
@@ -343,11 +373,19 @@ export function Scanner({ onDetected, paused }: Props) {
     ): Promise<{ codes: NativeBarcode[]; timedOut: boolean }> => {
       const det = nativeRef.current;
       if (!det) return { codes: [], timedOut: false };
-      const { value, timedOut } = await raceTimeout(
-        det.detect(src),
-        NATIVE_DETECT_MS,
-        [] as NativeBarcode[],
-      );
+      const budget = nativeDetectBudgetMs(nativeCalls.current);
+      nativeCalls.current += 1;
+      const raw = det.detect(src);
+      const { value, timedOut } = await raceTimeout(raw, budget, [] as NativeBarcode[]);
+      if (timedOut) {
+        // اگر دیرتر جواب داد، نتیجه را دور نریز — کاربر هنوز بارکد را جلوی دوربین دارد.
+        raw.then(
+          (codes) => {
+            if (!cancelled && codes.length) emitRef.current(codes[0].rawValue, codes[0].format);
+          },
+          () => {},
+        );
+      }
       const hang = nextNativeHangState(timedOut, nativeHangCount.current, NATIVE_HANG_LIMIT);
       nativeHangCount.current = hang.hangCount;
       if (hang.disable) disableNative();
@@ -383,10 +421,12 @@ export function Scanner({ onDetected, paused }: Props) {
               const r = await detectNative(bitmap);
               codes = r.codes;
               if (r.timedOut) {
-                nativeBitmapOk.current = false;
+                // detect هنوز ممکن است این bitmap را بخواند؛ برای ZXing فریم تازه بگیر.
                 nativeTimedOut = true;
+                bitmap = await grabBitmap(video, viewCrop);
               }
             } catch {
+              // throw یعنی ImageBitmap به‌عنوان ورودی پشتیبانی نمی‌شود، نه کندی.
               nativeBitmapOk.current = false;
             }
           }
@@ -583,11 +623,7 @@ export function Scanner({ onDetected, paused }: Props) {
 
       attachWorker(spawnZxingWorker());
       nativeRef.current = createNativeDetector();
-      const parts: string[] = [];
-      if (nativeRef.current) parts.push("Native");
-      if (workerRef.current) parts.push("ZXing Worker");
-      else parts.push("ZXing");
-      setEngine(parts.join(" + "));
+      setEngine(engineLabel());
 
       // یک فریم در هر لحظه: waitFrame با requestVideoFrameCallback به فریم
       // واقعی دوربین قفل می‌شود (نه setInterval / rAF آزاد) و await scanFrame

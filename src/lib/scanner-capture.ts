@@ -37,6 +37,21 @@ export function pickRearCameraId(
 /** دو تایم‌اوت پیاپی → Native را خاموش کن تا حلقه دیگر منتظر نماند. */
 export const NATIVE_HANG_LIMIT = 2;
 
+/** چند detect اول ML Kit مدل را لود می‌کند و ثانیه‌ها طول می‌کشد — تایم‌اوت کوتاه آن را می‌کشت. */
+export const NATIVE_WARMUP_CALLS = 3;
+export const NATIVE_WARMUP_MS = 4000;
+/** بعد از گرم شدن: detect عادی ۲۰–۱۵۰ms است؛ یک ثانیه یعنی واقعاً آویزان. */
+export const NATIVE_DETECT_MS = 1000;
+
+/**
+ * بودجهٔ زمانی detect بومی بر اساس شمارهٔ فراخوانی.
+ * رگرسیون v7: ۳۲۰ms ثابت، اولین detect (لود مدل) را تایم‌اوت می‌کرد و بعد از دو بار
+ * Native روی گوشی‌هایی که همیشه کار می‌کردند خاموش می‌شد.
+ */
+export function nativeDetectBudgetMs(callIndex: number): number {
+  return callIndex < NATIVE_WARMUP_CALLS ? NATIVE_WARMUP_MS : NATIVE_DETECT_MS;
+}
+
 /** شمارش آویزان شدن BarcodeDetector؛ موفقیت شمارنده را صفر می‌کند. */
 export function nextNativeHangState(
   timedOut: boolean,

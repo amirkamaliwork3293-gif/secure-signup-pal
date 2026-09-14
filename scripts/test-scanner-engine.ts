@@ -15,10 +15,15 @@ import {
   insetScanCrop,
   sampledLuminanceVariance,
 } from "../src/lib/scanner-engine.ts";
+import { readFileSync } from "node:fs";
 import {
   cameraConstraintTries,
   grabFrameViaCanvas,
+  NATIVE_DETECT_MS,
   NATIVE_HANG_LIMIT,
+  NATIVE_WARMUP_CALLS,
+  NATIVE_WARMUP_MS,
+  nativeDetectBudgetMs,
   nextNativeHangState,
   pickRearCameraId,
   raceTimeout,
@@ -206,6 +211,41 @@ import { classifyDeviceTier, decodeBudget, decodeCanvasSize } from "../src/lib/d
   const raced = await raceTimeout(late, 20, "fallback");
   assert.equal(raced.value, "fallback");
   assert.equal(raced.timedOut, true);
+}
+
+{
+  // رگرسیون v7: Vite فقط `new Worker(new URL("...", import.meta.url))` را در یک
+  // عبارت باندل می‌کند. اگر URL به متغیر جدا شود، سورس خام .ts داخل data: URL می‌رود
+  // و Worker در پروداکشن با SyntaxError می‌میرد — ZXing هیچ‌وقت دیکود نمی‌کند.
+  const scannerSrc = readFileSync(
+    new URL("../src/components/Scanner.tsx", import.meta.url),
+    "utf8",
+  );
+  const inline = scannerSrc.match(
+    /new Worker\(\s*new URL\(\s*["']\.\.\/lib\/zxing\.worker\.ts["']\s*,\s*import\.meta\.url\s*\)/g,
+  );
+  assert.ok(
+    inline && inline.length >= 1,
+    "Worker باید با new URL(..., import.meta.url) درجا ساخته شود",
+  );
+  const detached = scannerSrc.match(/new Worker\(\s*[A-Za-z_$][\w$]*\s*[,)]/g);
+  assert.equal(detached, null, "new Worker(url) با متغیر، باندل Vite را می‌شکند");
+}
+
+{
+  // اولین detect های ML Kit مدل را لود می‌کنند؛ تایم‌اوت کوتاه آن‌ها Native را می‌کشت.
+  assert.equal(NATIVE_WARMUP_CALLS, 3);
+  assert.equal(NATIVE_WARMUP_MS, 4000);
+  assert.equal(NATIVE_DETECT_MS, 1000);
+  assert.ok(nativeDetectBudgetMs(0) >= 3000, "اولین detect باید زمان لود مدل را داشته باشد");
+  assert.equal(nativeDetectBudgetMs(0), NATIVE_WARMUP_MS);
+  assert.equal(nativeDetectBudgetMs(NATIVE_WARMUP_CALLS - 1), NATIVE_WARMUP_MS);
+  assert.equal(nativeDetectBudgetMs(NATIVE_WARMUP_CALLS), NATIVE_DETECT_MS);
+  assert.equal(nativeDetectBudgetMs(500), NATIVE_DETECT_MS);
+  assert.ok(
+    nativeDetectBudgetMs(500) > 320,
+    "۳۲۰ms قدیمی detect عادی روی میان‌رده را هم تایم‌اوت می‌کرد",
+  );
 }
 
 {

@@ -1,0 +1,30 @@
+# پایان خط همه‌جا LF است.
+#
+# چرا لازم شد: محتوای مخزن از قبل LF است، ولی چک‌اوت ویندوزی با
+# core.autocrlf=true فایل‌ها را CRLF می‌نویسد و prettier (با endOfLine پیش‌فرض
+# "lf") هر خط را خطا می‌گیرد — `npm run lint` بیش از ۶۰٬۰۰۰ خطای قلابی نشان
+# می‌داد که هیچ ربطی به کد نداشت و خطاهای واقعی را زیر خودش پنهان می‌کرد.
+#
+# `eol=lf` بر core.autocrlf مقدم است، پس این تنظیم روی هر سیستمی یکسان عمل
+# می‌کند و کسی لازم نیست git خودش را دستی تنظیم کند.
+* text=auto eol=lf
+
+# باینری‌ها هرگز نباید تبدیل پایان خط بخورند.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.wasm  binary
+*.apk   binary
+*.zip   binary
+*.tgz   binary
+*.jks      binary
+*.keystore binary

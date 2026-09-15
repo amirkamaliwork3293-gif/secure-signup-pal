@@ -27,7 +27,10 @@ const MIN_SIDE = 16;
 export async function decodePixels(px: Pixels): Promise<DecodedBarcode | null> {
   if (px.width < MIN_SIDE || px.height < MIN_SIDE) return null;
 
-  const results = await readBarcodes(px, READER_OPTIONS);
+  // امضای کتابخانه `ImageData` می‌خواهد، ولی در عمل فقط `data`/`width`/`height`
+  // را می‌خواند (مسیر pixmap). `colorSpace` هرگز خوانده نمی‌شود، پس ساختن یک
+  // ImageData واقعی فقط یک کپی اضافهٔ بی‌فایده در هر فریم بود.
+  const results = await readBarcodes(px as unknown as ImageData, READER_OPTIONS);
   for (const r of results) {
     if (r.isValid && r.text) return { text: r.text, format: r.format };
   }

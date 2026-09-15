@@ -29,6 +29,12 @@ import {
 } from "../src/features/scanner/accept.ts";
 import { looksLikeFrontCamera, rankRearCameras } from "../src/features/scanner/camera-select.ts";
 import { decodePixels, type Pixels } from "../src/features/scanner/decoder/zxing.ts";
+import {
+  findProductByCode,
+  normalizeScannedCode,
+  scannedCodeCandidates,
+  scannedCodesMatch,
+} from "../src/lib/barcode-match.ts";
 
 // wasm را از فایل محلی می‌دهیم تا تست به شبکه/CDN وابسته نباشد.
 prepareZXingModule({
@@ -137,6 +143,51 @@ prepareZXingModule({
   console.log("  ok - فرمت‌ها و دروازهٔ پذیرش");
 }
 
+/* ------------------------------------------------ تطبیق کد با محصول ذخیره‌شده */
+
+// `barcode-match.ts` با `store.ts` مشترک است و در این بازنویسی **تغییر نکرده**.
+// این پوشش از `scripts/test-scanner-engine.ts` حذف‌شده منتقل شده تا با رفتن آن
+// فایل، لایهٔ جست‌وجوی محصول بی‌تست نماند.
+{
+  assert.equal(normalizeScannedCode("  6261234567890  "), "6261234567890");
+  assert.equal(normalizeScannedCode("]C1626123"), "626123", "پیشوند AIM باید حذف شود");
+  assert.equal(
+    normalizeScannedCode("A" + String.fromCharCode(29) + "B"),
+    "AB",
+    "کاراکتر کنترلی باید حذف شود",
+  );
+
+  const upc = scannedCodeCandidates("123456789012");
+  assert.ok(upc.includes("123456789012"));
+  assert.ok(upc.includes("0123456789012"), "UPC-A باید معادل EAN-13 با صفر پیشوند باشد");
+  assert.ok(
+    scannedCodeCandidates("0123456789012").includes("123456789012"),
+    "EAN-13 با صفر باید UPC-A را هم پیدا کند",
+  );
+
+  assert.equal(scannedCodesMatch("0123456789012", "123456789012"), true);
+  assert.equal(scannedCodesMatch("PABC123", "PABC123"), true);
+  assert.equal(scannedCodesMatch("PABC123", "PABC124"), false);
+
+  const list = [
+    { id: "1", code: "PXYZ23456" },
+    { id: "2", code: "6261234567890" },
+    { id: "3", code: "123456789012" },
+  ];
+  assert.equal(findProductByCode(list, "PXYZ23456")?.id, "1");
+  assert.equal(findProductByCode(list, "6261234567890")?.id, "2");
+  assert.equal(
+    findProductByCode(list, "0123456789012")?.id,
+    "3",
+    "EAN-13 با صفر → UPC-A ذخیره‌شده",
+  );
+  assert.equal(findProductByCode(list, "  626-1234567890")?.id, "2");
+  assert.equal(findProductByCode(list, ""), undefined);
+  assert.equal(findProductByCode(list, "no-such"), undefined);
+
+  console.log("  ok - تطبیق کد با محصول ذخیره‌شده");
+}
+
 /* ----------------------------------------------------- رتبه‌بندی لنز عقب */
 
 {
@@ -173,6 +224,11 @@ prepareZXingModule({
 
   // لیبل خالی (WebView بدون مجوز): ترتیب شمارش حفظ می‌شود، ایندکس ۰ اول.
   assert.deepEqual(rankRearCameras([vi("a", ""), vi("b", ""), vi("c", "")]), ["a", "b", "c"]);
+
+  // لیبل فارسی — گوشی‌های عرضه‌شده در بازار ایران (پوشش منتقل‌شده از تست قبلی).
+  assert.equal(rankRearCameras([vi("f", "دوربین جلو"), vi("r", "دوربین پشت")])[0], "r");
+  assert.equal(rankRearCameras([vi("f", "دوربین سلفی"), vi("r", "دوربین خلفی")])[0], "r");
+  assert.equal(rankRearCameras([vi("f", "دوربین جلو"), vi("r", "دوربین عقب")])[0], "r");
 
   // فهرست خالی نباید بترکاند.
   assert.deepEqual(rankRearCameras([]), []);

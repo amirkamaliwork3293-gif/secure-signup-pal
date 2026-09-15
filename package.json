@@ -45,8 +45,6 @@
     "@tanstack/react-router": "^1.168.25",
     "@tanstack/react-start": "^1.167.50",
     "@tanstack/router-plugin": "^1.167.28",
-    "@zxing/browser": "^0.2.0",
-    "@zxing/library": "^0.23.0",
     "bwip-js": "^4.11.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

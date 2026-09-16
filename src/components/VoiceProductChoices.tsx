@@ -1,5 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { formatNumber, formatToman, type Product } from "@/lib/store";
+import {
+  formatNumber,
+  formatToman,
+  invoice,
+  evaluateInvoiceStockAdd,
+  type Product,
+} from "@/lib/store";
 import { VOICE_PRODUCT_CHOICE_LIMIT, type ParsedCandidate } from "@/lib/voice/persian-nlu";
 
 /**
@@ -29,23 +35,27 @@ export function VoiceProductChoices({
       }
     >
       <div className="flex flex-wrap gap-2">
-        {visible.map((c, i) => (
-          <button
-            key={c.product.id}
-            type="button"
-            onClick={() => onPick(c.product)}
-            className={`rounded-xl border bg-background px-3 py-2 text-sm hover:bg-accent ${
-              i === 0 && candidates.length > 1
-                ? "border-primary font-medium shadow-sm"
-                : "border-border"
-            }`}
-          >
-            {c.product.name}
-            <span className="mr-1 text-xs font-normal text-muted-foreground">
-              {formatToman(c.product.price)}
-            </span>
-          </button>
-        ))}
+        {visible.map((c, i) => {
+          const blocked = !evaluateInvoiceStockAdd(c.product, invoice.getCurrent(), 1).ok;
+          return (
+            <button
+              key={c.product.id}
+              type="button"
+              onClick={() => !blocked && onPick(c.product)}
+              disabled={blocked}
+              className={`rounded-xl border bg-background px-3 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 ${
+                i === 0 && candidates.length > 1
+                  ? "border-primary font-medium shadow-sm"
+                  : "border-border"
+              }`}
+            >
+              {c.product.name}
+              <span className="mr-1 text-xs font-normal text-muted-foreground">
+                {blocked ? "اتمام موجودی" : formatToman(c.product.price)}
+              </span>
+            </button>
+          );
+        })}
         {hiddenCount > 0 && (
           <button
             type="button"

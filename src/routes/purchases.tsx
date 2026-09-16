@@ -26,6 +26,7 @@ import {
   getUnitDefs,
   COUNT_UNIT,
   isWeightUnit,
+  purchaseCreditRemaining,
   type Product,
   type PurchaseItem,
   type Purchase,
@@ -36,9 +37,21 @@ import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import {
-  ShoppingBag, Plus, Trash2, Search, X, Package, Check,
-  ChevronDown, ChevronUp, Truck, History as HistoryIcon,
-  Pencil, Calendar, PlusCircle, Users,
+  ShoppingBag,
+  Plus,
+  Trash2,
+  Search,
+  X,
+  Package,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Truck,
+  History as HistoryIcon,
+  Pencil,
+  Calendar,
+  PlusCircle,
+  Users,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -49,7 +62,10 @@ export const Route = createFileRoute("/purchases")({
   head: () => ({
     meta: [
       { title: "فاکتور خرید | KAMIX" },
-      { name: "description", content: "ثبت خرید کالا از تامین‌کننده و به‌روزرسانی خودکار انبار و قیمت خرید." },
+      {
+        name: "description",
+        content: "ثبت خرید کالا از تامین‌کننده و به‌روزرسانی خودکار انبار و قیمت خرید.",
+      },
     ],
   }),
   component: PurchasesPage,
@@ -82,7 +98,9 @@ function EditablePurchaseItem({
               className="w-full rounded-lg border border-input bg-card px-2 py-1 text-sm outline-none focus:border-primary"
             />
           )}
-          <div className="text-[11px] text-muted-foreground">جمع: {formatToman(purchaseLineTotal(item))}</div>
+          <div className="text-[11px] text-muted-foreground">
+            جمع: {formatToman(purchaseLineTotal(item))}
+          </div>
         </div>
         <QuantityStepper
           value={item.quantity}
@@ -105,7 +123,9 @@ function EditablePurchaseItem({
         <input
           inputMode="numeric"
           value={item.buyPrice.toLocaleString("fa-IR")}
-          onChange={(e) => onChange({ ...item, buyPrice: Math.max(0, parseNumberInput(e.target.value)) })}
+          onChange={(e) =>
+            onChange({ ...item, buyPrice: Math.max(0, parseNumberInput(e.target.value)) })
+          }
           className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
         />
         <span className="text-[11px] text-muted-foreground">تومان</span>
@@ -119,7 +139,9 @@ function EditablePurchaseItem({
             className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
           >
             {unitDefs.map((u) => (
-              <option key={u.name} value={u.name}>{u.name}</option>
+              <option key={u.name} value={u.name}>
+                {u.name}
+              </option>
             ))}
           </select>
         </div>
@@ -169,10 +191,15 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const saveEdit = () => {
     const total = purchaseTotals(draft).total;
     const jd = parseJalaliInput(dateStr);
-    if (!jd) { setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲"); return; }
+    if (!jd) {
+      setDateErr("تاریخ نامعتبر است. فرمت: ۱۴۰۳/۰۵/۱۲");
+      return;
+    }
     // اگر ساعت وارد‌شده قابل تشخیص نبود، به‌جای صفر کردن ساعت، همان ساعت قبلی فاکتور حفظ می‌شود
     const prevTime = toJalali(saved.createdAt);
-    const tm = parseTimeInput(timeStr) ?? (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
+    const tm =
+      parseTimeInput(timeStr) ??
+      (prevTime ? { h: prevTime.h, min: prevTime.min } : { h: 0, min: 0 });
     const newCreatedAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
     const updated = { ...draft, total, createdAt: newCreatedAt };
     purchases.updateHistory(updated);
@@ -202,8 +229,20 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
     setDraft((d) => {
       const already = d.items.find((it) => it.productId === prod.id);
       const items = already
-        ? d.items.map((it) => (it.productId === prod.id ? { ...it, quantity: it.quantity + 1 } : it))
-        : [...d.items, { productId: prod.id, name: prod.name, quantity: 1, buyPrice: prod.buyPrice ?? 0, unit: prod.unit, category: prod.category }];
+        ? d.items.map((it) =>
+            it.productId === prod.id ? { ...it, quantity: it.quantity + 1 } : it,
+          )
+        : [
+            ...d.items,
+            {
+              productId: prod.id,
+              name: prod.name,
+              quantity: 1,
+              buyPrice: prod.buyPrice ?? 0,
+              unit: prod.unit,
+              category: prod.category,
+            },
+          ];
       return { ...d, items };
     });
     setAddQuery("");
@@ -212,7 +251,18 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
   const addManualItem = () => {
     setDraft((d) => ({
       ...d,
-      items: [...d.items, { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: COUNT_UNIT, category: catList[0]?.name || "" }],
+      items: [
+        ...d.items,
+        {
+          productId: "",
+          name: "",
+          quantity: 1,
+          buyPrice: 0,
+          sellPrice: 0,
+          unit: COUNT_UNIT,
+          category: catList[0]?.name || "",
+        },
+      ],
     }));
   };
 
@@ -237,7 +287,9 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
         >
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="break-words text-sm font-semibold text-primary">{formatToman(saved.total)}</span>
+              <span className="break-words text-sm font-semibold text-primary">
+                {formatToman(saved.total)}
+              </span>
               <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                 <Truck className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{saved.supplierName || "بدون نام تامین‌کننده"}</span>
@@ -249,13 +301,21 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
               )}
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
-              {formatJalaliDateTime(saved.createdAt)} · {saved.items.length.toLocaleString("fa-IR")} قلم
+              {formatJalaliDateTime(saved.createdAt)} · {saved.items.length.toLocaleString("fa-IR")}{" "}
+              قلم
             </div>
           </div>
-          {isOpen ? <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+          {isOpen ? (
+            <ChevronUp className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
         </button>
 
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="mt-2 flex flex-wrap items-center justify-end gap-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           <PurchaseActions p={printP} size="sm" />
           <button
             type="button"
@@ -281,8 +341,13 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
           {!editing && (
             <>
               {saved.supplierPhone && (
-                <div className="rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground" dir="ltr">
-                  <span className="font-medium text-foreground" dir="rtl">تلفن تامین‌کننده: </span>
+                <div
+                  className="rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground"
+                  dir="ltr"
+                >
+                  <span className="font-medium text-foreground" dir="rtl">
+                    تلفن تامین‌کننده:{" "}
+                  </span>
                   {saved.supplierPhone}
                 </div>
               )}
@@ -295,7 +360,9 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
               <ul className="space-y-1">
                 {saved.items.map((it, i) => (
                   <li key={i} className="flex justify-between text-xs text-muted-foreground">
-                    <span>{it.name} × {formatNumber(it.quantity)}</span>
+                    <span>
+                      {it.name} × {formatNumber(it.quantity)}
+                    </span>
                     <span>{formatToman(purchaseLineTotal(it))}</span>
                   </li>
                 ))}
@@ -313,7 +380,10 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                 <div className="flex gap-2" dir="ltr">
                   <input
                     value={dateStr}
-                    onChange={(e) => { setDateStr(e.target.value); setDateErr(null); }}
+                    onChange={(e) => {
+                      setDateStr(e.target.value);
+                      setDateErr(null);
+                    }}
                     placeholder="1403/05/12"
                     inputMode="numeric"
                     className="flex-1 rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
@@ -411,7 +481,9 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                           className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
                         >
                           <span className="truncate">{pr.name}</span>
-                          <span className="shrink-0 text-muted-foreground">موجودی: {formatNumber(pr.stock)}</span>
+                          <span className="shrink-0 text-muted-foreground">
+                            موجودی: {formatNumber(pr.stock)}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -439,9 +511,12 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                   <div className="space-y-0.5 text-left text-sm">
                     {t.discount > 0 && (
                       <>
-                        <div className="text-xs text-muted-foreground">جمع اقلام: {formatToman(t.subtotal)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          جمع اقلام: {formatToman(t.subtotal)}
+                        </div>
                         <div className="text-xs text-primary">
-                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}: {formatToman(t.discount)}
+                          تخفیف{t.discountPercent ? ` (٪${formatNumber(t.discountPercent)})` : ""}:{" "}
+                          {formatToman(t.discount)}
                         </div>
                       </>
                     )}
@@ -538,10 +613,12 @@ export function PurchasesPageInner() {
   const [draft, setDraft] = useState<Purchase>(emptyPurchase());
   const [supplierName, setSupplierName] = useState("");
   const [supplierPhone, setSupplierPhone] = useState("");
+  const [supplierCustomerId, setSupplierCustomerId] = useState<string | undefined>(undefined);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [customerQuery, setCustomerQuery] = useState("");
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paidAmount, setPaidAmount] = useState(0);
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(Date.now()));
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(Date.now()));
   const [dateErr, setDateErr] = useState<string | null>(null);
@@ -573,7 +650,10 @@ export function PurchasesPageInner() {
   const matchingCustomers = useMemo(() => {
     const q = customerQuery.trim();
     if (!q) return customerList.slice(0, 8);
-    return filterAndRankSearch(customerList, q, (c) => [...personNameSearchFields(c), c.phone ?? ""]).slice(0, 8);
+    return filterAndRankSearch(customerList, q, (c) => [
+      ...personNameSearchFields(c),
+      c.phone ?? "",
+    ]).slice(0, 8);
   }, [customerList, customerQuery]);
 
   const totals = purchaseTotals(draft);
@@ -583,10 +663,19 @@ export function PurchasesPageInner() {
     setDraft((prev) => {
       const already = prev.items.find((it) => it.productId === p.id);
       const items = already
-        ? prev.items.map((it) => (it.productId === p.id ? { ...it, quantity: it.quantity + 1 } : it))
+        ? prev.items.map((it) =>
+            it.productId === p.id ? { ...it, quantity: it.quantity + 1 } : it,
+          )
         : [
             ...prev.items,
-            { productId: p.id, name: p.name, quantity: 1, buyPrice: p.buyPrice ?? 0, unit: p.unit, category: p.category } as PurchaseItem,
+            {
+              productId: p.id,
+              name: p.name,
+              quantity: 1,
+              buyPrice: p.buyPrice ?? 0,
+              unit: p.unit,
+              category: p.category,
+            } as PurchaseItem,
           ];
       return recalcPurchase({ ...prev, items });
     });
@@ -599,7 +688,15 @@ export function PurchasesPageInner() {
         ...prev,
         items: [
           ...prev.items,
-          { productId: "", name: "", quantity: 1, buyPrice: 0, sellPrice: 0, unit: COUNT_UNIT, category: catList[0]?.name || "" } as PurchaseItem,
+          {
+            productId: "",
+            name: "",
+            quantity: 1,
+            buyPrice: 0,
+            sellPrice: 0,
+            unit: COUNT_UNIT,
+            category: catList[0]?.name || "",
+          } as PurchaseItem,
         ],
       }),
     );
@@ -607,7 +704,10 @@ export function PurchasesPageInner() {
 
   const updateItem = (idx: number, patch: Partial<PurchaseItem>) => {
     setDraft((prev) =>
-      recalcPurchase({ ...prev, items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) }),
+      recalcPurchase({
+        ...prev,
+        items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
+      }),
     );
   };
 
@@ -615,7 +715,8 @@ export function PurchasesPageInner() {
     setDraft((prev) => recalcPurchase({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
   };
 
-  const canSubmit = draft.items.length > 0 && draft.items.every((it) => it.quantity > 0 && it.name.trim());
+  const canSubmit =
+    draft.items.length > 0 && draft.items.every((it) => it.quantity > 0 && it.name.trim());
 
   const submit = () => {
     if (!canSubmit) {
@@ -629,14 +730,26 @@ export function PurchasesPageInner() {
       return;
     }
     const createdAt = jalaliToTimestamp(jd.jy, jd.jm, jd.jd, tm.h, tm.min);
+    if (paymentMethod === "credit" && !supplierName.trim() && !supplierPhone.trim()) {
+      alert(
+        "برای فاکتور خرید نسیه، نام یا تلفن تامین‌کننده را وارد کنید تا در بخش «مشتریان» به‌عنوان طلبکار ثبت شود.",
+      );
+      return;
+    }
+    const paid =
+      paymentMethod === "credit"
+        ? Math.min(total, Math.max(0, Math.round(paidAmount || 0)))
+        : undefined;
     purchases.archive(
       {
         ...draft,
         createdAt,
         supplierName: supplierName.trim() || undefined,
         supplierPhone: supplierPhone.trim() || undefined,
+        supplierCustomerId,
         note: note.trim() || undefined,
         paymentMethod,
+        paidAmount: paid,
         total,
         shopName: appSettings.shopName,
         shopLogoUrl: appSettings.logoUrl || undefined,
@@ -646,12 +759,18 @@ export function PurchasesPageInner() {
     setDraft(emptyPurchase());
     setSupplierName("");
     setSupplierPhone("");
+    setSupplierCustomerId(undefined);
     setNote("");
     setPaymentMethod("cash");
+    setPaidAmount(0);
     setDateStr(toJalaliInputDate(Date.now()));
     setTimeStr(toJalaliInputTime(Date.now()));
     setDateErr(null);
-    alert("فاکتور خرید ثبت شد و موجودی/قیمت خرید انبار به‌روزرسانی شد.");
+    alert(
+      paymentMethod === "credit"
+        ? "فاکتور خرید نسیه ثبت شد؛ تامین‌کننده در بخش مشتریان به طلبکاران اضافه شد و موجودی انبار به‌روز شد."
+        : "فاکتور خرید ثبت شد و موجودی/قیمت خرید انبار به‌روزرسانی شد.",
+    );
   };
 
   return (
@@ -670,9 +789,9 @@ export function PurchasesPageInner() {
       </div>
 
       <p className="mb-4 text-xs leading-6 text-muted-foreground">
-        کالاهایی که از تامین‌کننده می‌خرید اینجا ثبت کنید — موجودی و قیمت خرید کالاهای موجود
-        به‌طور خودکار به‌روزرسانی می‌شود، و کالای جدید هم مستقیماً به انبار اضافه می‌شود تا سود هر
-        فروش بعدی درست محاسبه شود.
+        کالاهایی که از تامین‌کننده می‌خرید اینجا ثبت کنید — موجودی و قیمت خرید کالاهای موجود به‌طور
+        خودکار به‌روزرسانی می‌شود، و کالای جدید هم مستقیماً به انبار اضافه می‌شود تا سود هر فروش
+        بعدی درست محاسبه شود.
       </p>
 
       <div className="mb-3 rounded-2xl border border-border bg-card p-3">
@@ -688,7 +807,10 @@ export function PurchasesPageInner() {
             className="w-full rounded-xl border border-input bg-background py-2.5 pr-9 pl-3 text-sm outline-none focus:border-primary"
           />
           {query && (
-            <button onClick={() => setQuery("")} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+            <button
+              onClick={() => setQuery("")}
+              className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            >
               <X className="h-4 w-4" />
             </button>
           )}
@@ -746,7 +868,9 @@ export function PurchasesPageInner() {
                   <input
                     inputMode="decimal"
                     value={formatNumber(it.quantity)}
-                    onChange={(e) => updateItem(idx, { quantity: parseNumberInput(e.target.value) })}
+                    onChange={(e) =>
+                      updateItem(idx, { quantity: parseNumberInput(e.target.value) })
+                    }
                     className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                   />
                 </MiniField>
@@ -754,7 +878,9 @@ export function PurchasesPageInner() {
                   <input
                     inputMode="decimal"
                     value={formatNumber(it.buyPrice)}
-                    onChange={(e) => updateItem(idx, { buyPrice: parseNumberInput(e.target.value) })}
+                    onChange={(e) =>
+                      updateItem(idx, { buyPrice: parseNumberInput(e.target.value) })
+                    }
                     className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                   />
                 </MiniField>
@@ -764,7 +890,9 @@ export function PurchasesPageInner() {
                       <input
                         inputMode="decimal"
                         value={formatNumber(it.sellPrice || 0)}
-                        onChange={(e) => updateItem(idx, { sellPrice: parseNumberInput(e.target.value) })}
+                        onChange={(e) =>
+                          updateItem(idx, { sellPrice: parseNumberInput(e.target.value) })
+                        }
                         className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                       />
                     </MiniField>
@@ -775,7 +903,9 @@ export function PurchasesPageInner() {
                         className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                       >
                         {unitDefs.map((u) => (
-                          <option key={u.name} value={u.name}>{u.name}</option>
+                          <option key={u.name} value={u.name}>
+                            {u.name}
+                          </option>
                         ))}
                       </select>
                     </MiniField>
@@ -794,14 +924,20 @@ export function PurchasesPageInner() {
         <MiniField label="نام تامین‌کننده (اختیاری)">
           <input
             value={supplierName}
-            onChange={(e) => setSupplierName(e.target.value)}
+            onChange={(e) => {
+              setSupplierName(e.target.value);
+              setSupplierCustomerId(undefined);
+            }}
             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
         </MiniField>
         <MiniField label="تلفن تامین‌کننده (اختیاری)">
           <input
             value={supplierPhone}
-            onChange={(e) => setSupplierPhone(e.target.value)}
+            onChange={(e) => {
+              setSupplierPhone(e.target.value);
+              setSupplierCustomerId(undefined);
+            }}
             dir="ltr"
             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
           />
@@ -819,7 +955,11 @@ export function PurchasesPageInner() {
             <Users className="h-3.5 w-3.5 text-primary" />
             انتخاب از مشتریان ثبت‌شده
           </span>
-          {showCustomerPicker ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {showCustomerPicker ? (
+            <ChevronUp className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5" />
+          )}
         </button>
         {showCustomerPicker && (
           <div className="mt-2">
@@ -830,7 +970,9 @@ export function PurchasesPageInner() {
               className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
             />
             {matchingCustomers.length === 0 ? (
-              <div className="mt-2 text-center text-[11px] text-muted-foreground">مشتری‌ای پیدا نشد.</div>
+              <div className="mt-2 text-center text-[11px] text-muted-foreground">
+                مشتری‌ای پیدا نشد.
+              </div>
             ) : (
               <ul className="mt-1.5 max-h-44 space-y-1 overflow-y-auto">
                 {matchingCustomers.map((c) => (
@@ -840,13 +982,18 @@ export function PurchasesPageInner() {
                       onClick={() => {
                         setSupplierName(customerFullName(c));
                         setSupplierPhone(c.phone ?? "");
+                        setSupplierCustomerId(c.id);
                         setShowCustomerPicker(false);
                         setCustomerQuery("");
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
                     >
                       <span className="truncate">{customerFullName(c)}</span>
-                      {c.phone && <span dir="ltr" className="shrink-0 text-muted-foreground">{c.phone}</span>}
+                      {c.phone && (
+                        <span dir="ltr" className="shrink-0 text-muted-foreground">
+                          {c.phone}
+                        </span>
+                      )}
                     </button>
                   </li>
                 ))}
@@ -881,7 +1028,10 @@ export function PurchasesPageInner() {
         <div className="flex gap-2" dir="ltr">
           <input
             value={dateStr}
-            onChange={(e) => { setDateStr(e.target.value); setDateErr(null); }}
+            onChange={(e) => {
+              setDateStr(e.target.value);
+              setDateErr(null);
+            }}
             placeholder="1403/05/12"
             inputMode="numeric"
             className="flex-1 rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
@@ -905,7 +1055,9 @@ export function PurchasesPageInner() {
               key={m}
               onClick={() => setPaymentMethod(m)}
               className={`rounded-xl border py-2 text-xs font-medium ${
-                paymentMethod === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                paymentMethod === m
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground"
               }`}
             >
               {PAYMENT_LABEL[m]}
@@ -913,6 +1065,40 @@ export function PurchasesPageInner() {
           ))}
         </div>
       </div>
+
+      {paymentMethod === "credit" && draft.items.length > 0 && (
+        <div className="mb-3 space-y-1.5 rounded-2xl border border-dashed border-border bg-card p-3">
+          <label className="block text-[11px] font-medium text-muted-foreground">
+            مبلغ پرداخت‌شده نقد (اختیاری) — بقیه به‌عنوان طلب تامین‌کننده ثبت می‌شود
+          </label>
+          <input
+            value={paidAmount ? formatNumber(paidAmount) : ""}
+            onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
+            placeholder="۰"
+            inputMode="numeric"
+            dir="ltr"
+            className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+          />
+          <div className="flex justify-between text-[11px] text-muted-foreground">
+            <span>
+              جمع کل: <b className="text-foreground">{formatToman(total)}</b>
+            </span>
+            <span>
+              باقی‌مانده (طلبکار):{" "}
+              <b className="text-sky-700 dark:text-sky-400">
+                {formatToman(
+                  purchaseCreditRemaining({
+                    ...draft,
+                    paymentMethod: "credit",
+                    paidAmount,
+                    total,
+                  }),
+                )}
+              </b>
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="mb-3">
         <PurchaseDiscountBox
@@ -930,7 +1116,9 @@ export function PurchasesPageInner() {
               <span>{formatToman(totals.subtotal)}</span>
             </div>
             <div className="flex items-center justify-between text-xs text-primary">
-              <span>تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}</span>
+              <span>
+                تخفیف{totals.discountPercent ? ` (٪${formatNumber(totals.discountPercent)})` : ""}
+              </span>
               <span>{formatToman(totals.discount)}</span>
             </div>
           </>
@@ -951,12 +1139,19 @@ export function PurchasesPageInner() {
       </button>
 
       <div className="rounded-2xl border border-border bg-card p-4">
-        <button onClick={() => setShowHistory((v) => !v)} className="flex w-full items-center justify-between gap-2">
+        <button
+          onClick={() => setShowHistory((v) => !v)}
+          className="flex w-full items-center justify-between gap-2"
+        >
           <span className="flex items-center gap-2 text-sm font-bold">
             <HistoryIcon className="h-4 w-4 text-primary" />
             تاریخچه فاکتورهای خرید ({formatNumber(history.length)})
           </span>
-          {showHistory ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          {showHistory ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
         </button>
         {showHistory && (
           <div className="mt-3 space-y-3">
@@ -970,7 +1165,10 @@ export function PurchasesPageInner() {
                   className="w-full rounded-xl border border-input bg-background py-2 pr-9 pl-3 text-sm outline-none focus:border-primary"
                 />
                 {searchQ && (
-                  <button onClick={() => setSearchQ("")} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                  <button
+                    onClick={() => setSearchQ("")}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  >
                     <X className="h-4 w-4" />
                   </button>
                 )}
@@ -978,15 +1176,21 @@ export function PurchasesPageInner() {
             )}
 
             {history.length === 0 && (
-              <p className="py-4 text-center text-xs text-muted-foreground">هنوز فاکتور خریدی ثبت نشده.</p>
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                هنوز فاکتور خریدی ثبت نشده.
+              </p>
             )}
             {history.length > 0 && filteredHistory.length === 0 && (
-              <p className="py-4 text-center text-xs text-muted-foreground">فاکتوری با این مشخصات یافت نشد.</p>
+              <p className="py-4 text-center text-xs text-muted-foreground">
+                فاکتوری با این مشخصات یافت نشد.
+              </p>
             )}
             {filteredHistory.length > 0 && (
               <>
                 {searchQ.trim() && (
-                  <p className="text-xs text-muted-foreground">{formatNumber(filteredHistory.length)} فاکتور یافت شد</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatNumber(filteredHistory.length)} فاکتور یافت شد
+                  </p>
                 )}
                 <ul className="space-y-2">
                   {filteredHistory.map((p) => (

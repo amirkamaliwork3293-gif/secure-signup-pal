@@ -47,7 +47,10 @@ function norm(s: string | undefined | null): string {
 export function normalizePhoneDigits(input: string | null | undefined): string {
   const n = normalizeSearchText(input);
   if (!n) return "";
-  let d = n.replace(/[^\d+]/g, "").replace(/^\+/, "").replace(/^00/, "");
+  let d = n
+    .replace(/[^\d+]/g, "")
+    .replace(/^\+/, "")
+    .replace(/^00/, "");
   if (d.startsWith("98") && d.length >= 12) d = `0${d.slice(2)}`;
   if (d.length === 10 && d.startsWith("9")) d = `0${d}`;
   return d;
@@ -122,7 +125,12 @@ export function identitySearchFields(
   const first = person.first_name ?? person.firstName ?? "";
   const last = person.last_name ?? person.lastName ?? "";
   const tel = phone ?? person.phone ?? null;
-  return [person.username ?? "", ...personNameSearchFields({ firstName: first, lastName: last }), tel ?? "", ...phoneSearchKeys(tel)];
+  return [
+    person.username ?? "",
+    ...personNameSearchFields({ firstName: first, lastName: last }),
+    tel ?? "",
+    ...phoneSearchKeys(tel),
+  ];
 }
 
 function tokensInOrder(field: string, tokens: string[]): boolean {
@@ -264,8 +272,10 @@ export function rankBySearchMatch<T>(
 
 /**
  * آیا دو نام (روی فاکتور / در فهرست مشتریان) به یک نفر اشاره می‌کنند؟
- * نام و نام‌خانوادگی جدا یا چسبیده، و جستجوی فقط‌فامیل یا فقط‌اسم، هر دو قبول است.
- * دو نفر با فامیل یکسان و نام متفاوت یکی گرفته نمی‌شوند.
+ *
+ * فقط هویت کامل قبول است: نام کامل یکسان، یا نام و فامیل هر دو موجود و برابر
+ * (یا جابه‌جا). اشتراک فقط فامیل («طاهری») یا فقط اسم کوچک («علی») کافی نیست؛
+ * وگرنه فاکتور چند نفر با فامیل مشابه قاطی می‌شود.
  */
 export function namesReferToSamePerson(
   a?: { firstName?: string; lastName?: string } | null,
@@ -276,21 +286,14 @@ export function namesReferToSamePerson(
     const first = normalizeSearchText(p.firstName);
     const last = normalizeSearchText(p.lastName);
     const full = [first, last].filter(Boolean).join(" ");
-    const words = new Set(
-      [...first.split(" "), ...last.split(" ")].map((w) => w.trim()).filter((w) => w.length >= 2),
-    );
-    return { first, last, full, words };
+    return { first, last, full };
   };
   const A = pack(a);
   const B = pack(b);
   if (!A.full || !B.full) return false;
   if (A.full === B.full) return true;
-  if (A.full.includes(B.full) || B.full.includes(A.full)) return true;
   if (A.first && A.last && B.first && B.last) {
     return (A.first === B.first && A.last === B.last) || (A.first === B.last && A.last === B.first);
-  }
-  for (const w of A.words) {
-    if (B.words.has(w) || B.first === w || B.last === w || B.full.includes(w)) return true;
   }
   return false;
 }

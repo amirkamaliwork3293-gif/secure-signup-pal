@@ -24,6 +24,11 @@ import {
   jalaliToTimestamp,
   toJalali,
   formatChequeDue,
+  tryAddProductToInvoice,
+  evaluateInvoiceStockSet,
+  evaluateInvoiceStockAdd,
+  invoiceProductQty,
+  isManualInvoiceItem,
   type Invoice,
   type InvoiceItem,
   type Product,
@@ -103,10 +108,12 @@ function EditableItem({
   item,
   onChange,
   onRemove,
+  maxQty,
 }: {
   item: InvoiceItem;
   onChange: (updated: InvoiceItem) => void;
   onRemove: () => void;
+  maxQty?: number;
 }) {
   return (
     <li className="space-y-2 rounded-xl border border-border bg-background px-3 py-2">
@@ -122,7 +129,14 @@ function EditableItem({
           min={0.001}
           step={isWeightUnit(item.unit) ? 0.1 : 1}
           allowDecimal={isWeightUnit(item.unit)}
-          onChange={(quantity) => onChange({ ...item, quantity: Math.max(0.001, quantity) })}
+          onChange={(quantity) => {
+            const next = Math.max(0.001, quantity);
+            if (maxQty != null && next > maxQty + 1e-9) {
+              alert(`موجودی کافی نیست. حداکثر ${maxQty} قابل ثبت است.`);
+              return;
+            }
+            onChange({ ...item, quantity: next });
+          }}
         />
         <button
           type="button"
@@ -265,32 +279,14 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   };
 
   const addProduct = (p: Product) => {
-    setDraft((d) => {
-      const exists = d.items.find((i) => i.productId === p.id);
-      const effective = applyProductDiscount(p);
-      if (exists) {
-        return {
-          ...d,
-          items: d.items.map((i) =>
-            i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i,
-          ),
-        };
-      }
-      return {
-        ...d,
-        items: [
-          ...d.items,
-          {
-            productId: p.id,
-            name: p.name,
-            price: effective,
-            quantity: 1,
-            buyPrice: p.buyPrice,
-            unit: p.unit,
-          },
-        ],
-      };
-    });
+    const committed = invoiceProductQty(saved, p.id);
+    const { invoice: next, result } = tryAddProductToInvoice(draft, p, { committedQty: committed });
+    if (!result.ok) {
+      alert(result.message);
+      return;
+    }
+    if (result.message) alert(result.message);
+    setDraft(next);
     setAddQuery("");
   };
 
@@ -574,6 +570,23 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                     item={item}
                     onChange={(u) => updateItem(idx, u)}
                     onRemove={() => removeItem(idx)}
+                    maxQty={(() => {
+                      if (isManualInvoiceItem(item)) return undefined;
+                      const p = allProducts.find((x) => x.id === item.productId);
+                      if (!p) return undefined;
+                      const committed = invoiceProductQty(saved, item.productId);
+                      const others = draft.items.reduce(
+                        (s, it, i) =>
+                          i !== idx && it.productId === item.productId ? s + it.quantity : s,
+                        0,
+                      );
+                      const result = evaluateInvoiceStockSet(p, others, {
+                        committedQty: committed,
+                      });
+                      return Number.isFinite(result.available)
+                        ? Math.max(0, result.available - others)
+                        : undefined;
+                    })()}
                   />
                 ))}
               </ul>
@@ -591,20 +604,32 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                 />
                 {matchingProducts.length > 0 && (
                   <ul className="mt-1.5 max-h-44 space-y-1 overflow-y-auto">
-                    {matchingProducts.map((p) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onClick={() => addProduct(p)}
-                          className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent"
-                        >
-                          <span className="truncate">{p.name}</span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {formatToman(applyProductDiscount(p))}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                    {matchingProducts.map((p) => {
+                      const committed = invoiceProductQty(saved, p.id);
+                      const can = evaluateInvoiceStockAdd(p, draft, 1, { committedQty: committed });
+                      return (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onClick={() => addProduct(p)}
+                            disabled={!can.ok}
+                            className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className="truncate">
+                              {p.name}
+                              {!can.ok && (
+                                <span className="mr-1 block text-[10px] text-destructive">
+                                  اتمام موجودی
+                                </span>
+                              )}
+                            </span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {formatToman(applyProductDiscount(p))}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
 

@@ -6,12 +6,10 @@ import { Layout } from "@/components/Layout";
 import {
   products,
   invoice,
-  addProductToInvoiceQty,
+  tryAddProductToInvoiceQty,
   addCustomInvoiceLine,
   formatToman,
   formatNumber,
-  stockStatus,
-  inventoryTrackingEnabled,
   isWeightUnit,
   customers,
   customerFullName,
@@ -20,6 +18,7 @@ import {
   type Invoice,
   type Customer,
   type CustomerInfo,
+  type StockAddResult,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
 import { parseVoiceText, type ParsedItem, type ParsedCandidate } from "@/lib/voice/persian-nlu";
@@ -72,6 +71,7 @@ type ResolvedItem = {
   status: "added" | "choose" | "unknown" | "out";
   needsUnitConfirm?: boolean;
   unitPrice?: number;
+  stockMessage?: string;
 };
 
 function vibrate(ms: number) {
@@ -135,13 +135,16 @@ function VoicePageInner() {
   }, []);
 
   // افزودن یک آیتم مشخص به فاکتور جاری (با بررسی موجودی)
-  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): "ok" | "out" => {
-    if (inventoryTrackingEnabled() && stockStatus(product) === "out") return "out";
+  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): StockAddResult => {
     const current = invoice.getCurrent();
-    const next = addProductToInvoiceQty(current, product, quantity, { unitPrice });
-    invoice.save(next);
-    vibrate(40);
-    return "ok";
+    const { invoice: next, result } = tryAddProductToInvoiceQty(current, product, quantity, {
+      unitPrice,
+    });
+    if (result.ok) {
+      invoice.save(next);
+      vibrate(40);
+    }
+    return result;
   };
 
   const addCustomLine = (item: ParsedItem) => {
@@ -231,7 +234,9 @@ function VoicePageInner() {
   };
 
   const removeDraftLine = (productId: string) => {
-    setInv((prev) => recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }));
+    setInv((prev) =>
+      recalc({ ...prev, items: prev.items.filter((i) => i.productId !== productId) }),
+    );
   };
 
   const saveDraftCustomer = (next: CustomerInfo) => {
@@ -264,7 +269,11 @@ function VoicePageInner() {
     }
     if (item.confidence === "high") {
       const res = addToInvoice(item.candidates[0].product, item.quantity, item.unitPrice);
-      return { ...base, status: res === "out" ? "out" : "added" };
+      return {
+        ...base,
+        status: res.ok ? "added" : "out",
+        stockMessage: res.message || undefined,
+      };
     }
     return { ...base, status: "choose" };
   };
@@ -320,15 +329,17 @@ function VoicePageInner() {
       // اگر بعد از تلاش محلی و LLM چیزی استخراج نشد، یک سطر «پیدا نشد» نشان بده
       // (مگر این‌که فقط نام/تلفن مشتری گفته شده باشد)
       if (resolved.length === 0 && !(parsed.customerName || parsed.customerPhone)) {
-        resolved = [{
-          key: Math.random().toString(36).slice(2),
-          rawClause: trimmed,
-          productPhrase: trimmed,
-          quantity: 1,
-          unit: "عدد",
-          candidates: [],
-          status: "unknown",
-        }];
+        resolved = [
+          {
+            key: Math.random().toString(36).slice(2),
+            rawClause: trimmed,
+            productPhrase: trimmed,
+            quantity: 1,
+            unit: "عدد",
+            candidates: [],
+            status: "unknown",
+          },
+        ];
       }
 
       setResults(resolved);
@@ -383,9 +394,10 @@ function VoicePageInner() {
         x.key === item.key
           ? {
               ...x,
-              status: res === "out" ? "out" : "added",
+              status: res.ok ? "added" : "out",
               quantity: qty,
               unit: product.unit ?? item.unit,
+              stockMessage: res.message || undefined,
             }
           : x,
       ),
@@ -412,8 +424,8 @@ function VoicePageInner() {
         ثبت صوتی فاکتور
       </h1>
       <p className="mb-4 text-sm text-muted-foreground">
-        کالا را بگویید — مثلاً «دو تا تیشرت و سه تا شلوار». اگر کالا در فهرست نباشد هم می‌توانید
-        با قیمت ثبت کنید. ثبت نهایی در بخش فاکتور است.
+        کالا را بگویید — مثلاً «دو تا تیشرت و سه تا شلوار». اگر کالا در فهرست نباشد هم می‌توانید با
+        قیمت ثبت کنید. ثبت نهایی در بخش فاکتور است.
       </p>
 
       {/* دکمه میکروفون */}
@@ -530,7 +542,8 @@ function VoicePageInner() {
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                 <div className="flex-1">
                   <div className="font-semibold">
-                    اتمام موجودی: {item.candidates[0]?.product.name ?? item.productPhrase}
+                    {item.stockMessage ||
+                      `اتمام موجودی: ${item.candidates[0]?.product.name ?? item.productPhrase}`}
                   </div>
                   <button
                     onClick={() => discardItem(item.key)}
@@ -668,6 +681,9 @@ function AddedRow({ item }: { item: ResolvedItem }) {
           {unitLabel(item, p)}
           {(item.unitPrice || p) && <> · {formatToman(item.unitPrice ?? p!.price)}</>}
         </div>
+        {item.stockMessage && (
+          <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{item.stockMessage}</div>
+        )}
       </div>
     </div>
   );
@@ -765,10 +781,10 @@ function VoiceDraftPreview({
   const cust = inv.customer ?? {};
   const matches =
     q.trim().length > 0
-      ? filterAndRankSearch(customerList, q, (c) => [...personNameSearchFields(c), c.phone ?? ""]).slice(
-          0,
-          6,
-        )
+      ? filterAndRankSearch(customerList, q, (c) => [
+          ...personNameSearchFields(c),
+          c.phone ?? "",
+        ]).slice(0, 6)
       : [];
 
   return (
@@ -971,7 +987,9 @@ function VoiceDraftPreview({
             )}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">مشتری گفته نشده — می‌توانید دستی وارد کنید.</p>
+          <p className="text-xs text-muted-foreground">
+            مشتری گفته نشده — می‌توانید دستی وارد کنید.
+          </p>
         )}
       </div>
 

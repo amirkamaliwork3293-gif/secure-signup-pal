@@ -36,7 +36,7 @@ import {
   X,
 } from "lucide-react";
 import {
-  addProductToInvoiceQty,
+  tryAddProductToInvoiceQty,
   addCustomInvoiceLine,
   customerBalance,
   customerFullName,
@@ -51,15 +51,14 @@ import {
   formatJalaliDateTime,
   formatNumber,
   formatToman,
-  inventoryTrackingEnabled,
   invoice,
   manualLedger as ledgerStore,
   products as productsStore,
   reminders as remindersStore,
   settings,
-  stockStatus,
   type Customer,
   type Product,
+  type StockAddResult,
 } from "@/lib/store";
 import { markAssistantOpened } from "@/lib/onboarding";
 import { generateUniqueCode } from "@/lib/barcode-code";
@@ -501,14 +500,7 @@ export function SmartAssistant() {
           title: `مشتری‌ای با نام «${name}» پیدا نشد؛ برای تسویه باید از قبل در فهرست باشد.`,
         };
       }
-      target = createCustomerWithTx(
-        name,
-        resolved.amount,
-        resolved.type,
-        resolved.note,
-        at,
-        extra,
-      );
+      target = createCustomerWithTx(name, resolved.amount, resolved.type, resolved.note, at, extra);
       createdNew = true;
     } else {
       addCustomerTx(target, resolved.amount, resolved.type, resolved.note, at);
@@ -584,12 +576,16 @@ export function SmartAssistant() {
     navigate({ to: "/reminders", search: { day: jalaliDayKey(at) } });
   };
 
-  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): "ok" | "out" => {
-    if (inventoryTrackingEnabled() && stockStatus(product) === "out") return "out";
+  const addToInvoice = (product: Product, quantity: number, unitPrice?: number): StockAddResult => {
     const current = invoice.getCurrent();
-    invoice.save(addProductToInvoiceQty(current, product, quantity, { unitPrice }));
-    vibrate(40);
-    return "ok";
+    const { invoice: next, result } = tryAddProductToInvoiceQty(current, product, quantity, {
+      unitPrice,
+    });
+    if (result.ok) {
+      invoice.save(next);
+      vibrate(40);
+    }
+    return result;
   };
 
   const addCustomInvoiceItem = (item: ParsedItem) => {
@@ -633,12 +629,13 @@ export function SmartAssistant() {
       }
       if (item.confidence === "high") {
         const res = addToInvoice(best.product, item.quantity, item.unitPrice);
-        if (res === "out") {
+        if (!res.ok) {
           return {
             key: newKey(),
             heard,
             status: "unknown" as const,
             title: `موجودی «${best.product.name}» تمام شده است`,
+            detail: res.message,
           };
         }
         return {
@@ -646,7 +643,7 @@ export function SmartAssistant() {
           heard,
           status: "done" as const,
           title: "به فاکتور اضافه شد",
-          detail: `${best.product.name} — ${formatNumber(item.quantity)} ${item.unit} · ${formatToman(item.unitPrice ?? best.product.price)}`,
+          detail: `${best.product.name} — ${formatNumber(item.quantity)} ${item.unit} · ${formatToman(item.unitPrice ?? best.product.price)}${res.message ? ` · ${res.message}` : ""}`,
         };
       }
       return {
@@ -1098,12 +1095,11 @@ export function SmartAssistant() {
     const { item } = card.choose;
     const res = addToInvoice(product, item.quantity, item.unitPrice);
     replaceCard(card.key, {
-      status: res === "out" ? "unknown" : "done",
-      title: res === "out" ? `موجودی «${product.name}» تمام شده است` : "به فاکتور اضافه شد",
-      detail:
-        res === "out"
-          ? undefined
-          : `${product.name} — ${formatNumber(item.quantity)} ${product.unit ?? item.unit} · ${formatToman(item.unitPrice ?? product.price)}`,
+      status: res.ok ? "done" : "unknown",
+      title: res.ok ? "به فاکتور اضافه شد" : `موجودی «${product.name}» تمام شده است`,
+      detail: res.ok
+        ? `${product.name} — ${formatNumber(item.quantity)} ${product.unit ?? item.unit} · ${formatToman(item.unitPrice ?? product.price)}${res.message ? ` · ${res.message}` : ""}`
+        : res.message,
     });
   };
 

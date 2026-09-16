@@ -291,10 +291,10 @@ export function buildBackupSheets(
       rows: custs.flatMap((c) =>
         (c.txs ?? []).map((t) => ({
           مشتری: customerFullName(c),
-          نوع: t.type === "debt" ? "بدهی" : "پرداخت",
+          نوع: t.purchaseId ? "طلبکاری خرید نسیه" : t.type === "debt" ? "بدهی" : "پرداخت",
           مبلغ: t.amount,
           تاریخ: d(t.at),
-          "شماره فاکتور": t.invoiceId ?? "",
+          "شماره فاکتور": t.invoiceId ?? t.purchaseId ?? "",
           یادداشت: t.note ?? "",
         })),
       ),

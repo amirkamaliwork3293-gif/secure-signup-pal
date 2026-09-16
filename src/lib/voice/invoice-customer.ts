@@ -39,6 +39,7 @@ export function customerInfoFromVoice(
       firstName: c.firstName,
       lastName: c.lastName,
       phone: phone || c.phone,
+      customerId: c.id,
     };
   } else if (name) {
     const split = splitPersonName(name);

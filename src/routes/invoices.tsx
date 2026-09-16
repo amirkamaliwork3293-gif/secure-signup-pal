@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseActions } from "@/components/PurchaseActions";
-import { filterAndRankSearch, namesReferToSamePerson, personNameSearchFields } from "@/lib/search";
+import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import {
   invoice,
   purchases,
@@ -15,6 +15,7 @@ import {
   formatNumber,
   formatJalaliDateTime,
   PAYMENT_LABEL,
+  invoiceBelongsToCustomer,
   type Invoice,
   type Customer,
 } from "@/lib/store";
@@ -50,14 +51,9 @@ type Tab = "sales" | "purchases";
 
 function invoiceCustomerSearchFields(inv: Invoice, allCustomers: Customer[]): string[] {
   const onInvoice = personNameSearchFields(inv.customer);
-  const phone = inv.customer?.phone?.trim();
   const extra: string[] = [];
   for (const c of allCustomers) {
-    if (phone && c.phone?.trim() === phone) {
-      extra.push(...personNameSearchFields(c), customerFullName(c));
-      continue;
-    }
-    if (inv.customer && namesReferToSamePerson(inv.customer, c)) {
+    if (invoiceBelongsToCustomer(inv, c)) {
       extra.push(...personNameSearchFields(c), customerFullName(c));
     }
   }
@@ -154,11 +150,18 @@ function InvoicesPageInner() {
         <input
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
-          placeholder={tab === "sales" ? "جستجو: نام یا تلفن مشتری، کالا..." : "جستجو: نام یا تلفن تامین‌کننده، کالا..."}
+          placeholder={
+            tab === "sales"
+              ? "جستجو: نام یا تلفن مشتری، کالا..."
+              : "جستجو: نام یا تلفن تامین‌کننده، کالا..."
+          }
           className="w-full rounded-xl border border-input bg-background py-2.5 pr-9 pl-3 text-sm outline-none focus:border-primary"
         />
         {searchQ && (
-          <button onClick={() => setSearchQ("")} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+          <button
+            onClick={() => setSearchQ("")}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
         )}
@@ -194,7 +197,10 @@ function InvoicesPageInner() {
 
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-muted-foreground">فاکتورهای اخیر</h2>
-            <Link to="/history" className="flex items-center gap-1 text-xs font-medium text-primary">
+            <Link
+              to="/history"
+              className="flex items-center gap-1 text-xs font-medium text-primary"
+            >
               مشاهده همه در تاریخچه
               <ArrowLeft className="h-3 w-3" />
             </Link>
@@ -204,7 +210,9 @@ function InvoicesPageInner() {
             <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
               <Receipt className="mx-auto h-10 w-10 text-muted-foreground" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {searchQ.trim() ? "فاکتوری با این مشخصات یافت نشد." : "هنوز فاکتور فروشی ثبت نشده است."}
+                {searchQ.trim()
+                  ? "فاکتوری با این مشخصات یافت نشد."
+                  : "هنوز فاکتور فروشی ثبت نشده است."}
               </p>
             </div>
           ) : (
@@ -236,7 +244,8 @@ function InvoicesPageInner() {
                         )}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {formatJalaliDateTime(inv.createdAt)} · {inv.items.length.toLocaleString("fa-IR")} قلم
+                        {formatJalaliDateTime(inv.createdAt)} ·{" "}
+                        {inv.items.length.toLocaleString("fa-IR")} قلم
                       </div>
                     </div>
                     <InvoiceActions
@@ -279,7 +288,10 @@ function InvoicesPageInner() {
 
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-muted-foreground">فاکتورهای اخیر</h2>
-            <Link to="/purchases" className="flex items-center gap-1 text-xs font-medium text-primary">
+            <Link
+              to="/purchases"
+              className="flex items-center gap-1 text-xs font-medium text-primary"
+            >
               مشاهده همه
               <ArrowLeft className="h-3 w-3" />
             </Link>
@@ -289,13 +301,18 @@ function InvoicesPageInner() {
             <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
               <ShoppingBag className="mx-auto h-10 w-10 text-muted-foreground" />
               <p className="mt-3 text-sm text-muted-foreground">
-                {searchQ.trim() ? "فاکتوری با این مشخصات یافت نشد." : "هنوز فاکتور خریدی ثبت نشده است."}
+                {searchQ.trim()
+                  ? "فاکتوری با این مشخصات یافت نشد."
+                  : "هنوز فاکتور خریدی ثبت نشده است."}
               </p>
             </div>
           ) : (
             <ul className="space-y-2">
               {recentPurchases.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card">
+                <li
+                  key={p.id}
+                  className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 shadow-card"
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="flex items-center gap-1.5 text-sm font-semibold">
@@ -309,12 +326,19 @@ function InvoicesPageInner() {
                       )}
                     </div>
                     <div className="mt-0.5 text-xs text-muted-foreground">
-                      {formatJalaliDateTime(p.createdAt)} · {p.items.length.toLocaleString("fa-IR")} قلم
+                      {formatJalaliDateTime(p.createdAt)} · {p.items.length.toLocaleString("fa-IR")}{" "}
+                      قلم
                     </div>
-                    <div className="mt-0.5 text-sm font-bold text-primary">{formatToman(p.total)}</div>
+                    <div className="mt-0.5 text-sm font-bold text-primary">
+                      {formatToman(p.total)}
+                    </div>
                   </div>
                   <PurchaseActions
-                    p={{ ...p, shopName: p.shopName || appSettings.shopName, shopLogoUrl: p.shopLogoUrl || appSettings.logoUrl }}
+                    p={{
+                      ...p,
+                      shopName: p.shopName || appSettings.shopName,
+                      shopLogoUrl: p.shopLogoUrl || appSettings.logoUrl,
+                    }}
                     size="sm"
                   />
                 </li>

@@ -7,11 +7,10 @@ import { Scanner } from "@/components/Scanner";
 import {
   products,
   invoice,
-  addProductToInvoice,
+  tryAddProductToInvoice,
   formatToman,
-  stockStatus,
-  inventoryTrackingEnabled,
-  productTracksStock,
+  evaluateInvoiceStockAdd,
+  productStockHint,
 } from "@/lib/store";
 import { requireOnlineWrite } from "@/lib/online-status";
 import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
@@ -27,7 +26,17 @@ export const Route = createFileRoute("/scan")({
 });
 
 type LastScan =
-  | { kind: "found"; name: string; price: number; code: string; stock: number; warnLow?: boolean }
+  | {
+      kind: "found";
+      name: string;
+      price: number;
+      code: string;
+      stock: number;
+      warnLow?: boolean;
+      warnLast?: boolean;
+      message?: string;
+    }
+  | { kind: "out"; name: string; message: string }
   | { kind: "unknown"; code: string }
   | null;
 
@@ -44,24 +53,25 @@ function ScanPageInner() {
     if (product) {
       const now = Date.now();
       if (lastAddRef.current?.id === product.id && now - lastAddRef.current.at < 800) return;
-      const status = stockStatus(product);
-      if (inventoryTrackingEnabled() && status === "out") {
-        setLast({ kind: "unknown", code: `اتمام موجودی: ${product.name}` });
+      const current = invoice.getCurrent();
+      const { invoice: next, result } = tryAddProductToInvoice(current, product);
+      if (!result.ok) {
+        setLast({ kind: "out", name: product.name, message: result.message });
         setPaused(true);
         return;
       }
       if (!requireOnlineWrite()) return;
       lastAddRef.current = { id: product.id, at: now };
-      const current = invoice.getCurrent();
-      const next = addProductToInvoice(current, product);
       invoice.save(next);
       setLast({
         kind: "found",
         name: product.name,
         price: product.price,
         code,
-        stock: product.stock,
-        warnLow: productTracksStock(product) && stockStatus(product) === "low",
+        stock: result.after,
+        warnLow: result.kind === "low",
+        warnLast: result.kind === "last",
+        message: result.message || undefined,
       });
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(40);
     } else {
@@ -74,21 +84,22 @@ function ScanPageInner() {
     if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
-    const status = stockStatus(p);
-    if (inventoryTrackingEnabled() && status === "out") {
-      alert(`محصول "${p.name}" موجودی ندارد.`);
+    const current = invoice.getCurrent();
+    const { invoice: next, result } = tryAddProductToInvoice(current, p);
+    if (!result.ok) {
+      setLast({ kind: "out", name: p.name, message: result.message });
       return;
     }
-    const current = invoice.getCurrent();
-    const next = addProductToInvoice(current, p);
     invoice.save(next);
     setLast({
       kind: "found",
       name: p.name,
       price: p.price,
       code: p.code,
-      stock: p.stock,
-      warnLow: productTracksStock(p) && stockStatus(p) === "low",
+      stock: result.after,
+      warnLow: result.kind === "low",
+      warnLast: result.kind === "last",
+      message: result.message || undefined,
     });
     setSearchQ("");
   };
@@ -139,12 +150,15 @@ function ScanPageInner() {
         {filtered.length > 0 && (
           <ul className="mt-2 space-y-1.5">
             {filtered.slice(0, 6).map((p) => {
-              const s = stockStatus(p);
+              const current = invoice.getCurrent();
+              const addResult = evaluateInvoiceStockAdd(p, current, 1);
+              const hint = productStockHint(p);
+              const cannotAdd = !addResult.ok;
               return (
                 <li key={p.id}>
                   <button
                     onClick={() => addFromSearch(p.id)}
-                    disabled={s === "out"}
+                    disabled={cannotAdd}
                     className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm hover:bg-accent disabled:opacity-50"
                   >
                     <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -152,9 +166,9 @@ function ScanPageInner() {
                       <div className="truncate font-medium">{p.name}</div>
                       <div className="text-xs text-muted-foreground">
                         {formatToman(p.price)}
-                        {s === "out" && <span className="mr-2 text-destructive">اتمام موجودی</span>}
-                        {s === "low" && (
-                          <span className="mr-2 text-amber-600">موجودی کم: {p.stock}</span>
+                        {cannotAdd && <span className="mr-2 text-destructive">اتمام موجودی</span>}
+                        {!cannotAdd && hint.tone === "low" && (
+                          <span className="mr-2 text-amber-600">{hint.label}</span>
                         )}
                       </div>
                     </div>
@@ -180,14 +194,35 @@ function ScanPageInner() {
               <div className="text-sm text-foreground/80">
                 {last.name} — {formatToman(last.price)}
               </div>
-              {last.warnLow && (
+              {last.warnLast && (
+                <div className="mt-0.5 text-xs text-destructive">⚠ {last.message}</div>
+              )}
+              {last.warnLow && !last.warnLast && (
                 <div className="mt-0.5 text-xs text-amber-600">
-                  ⚠ موجودی کم: {last.stock.toLocaleString("fa-IR")} عدد
+                  ⚠ {last.message || `موجودی کم: ${last.stock.toLocaleString("fa-IR")}`}
                 </div>
               )}
               <div className="mt-0.5 text-xs text-muted-foreground" dir="ltr">
                 {last.code}
               </div>
+            </div>
+          </div>
+        )}
+        {last?.kind === "out" && (
+          <div className="flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div className="flex-1">
+              <div className="font-semibold">موجودی تمام شده</div>
+              <div className="mt-0.5 text-sm text-foreground/80">{last.message}</div>
+              <button
+                onClick={() => {
+                  setLast(null);
+                  setPaused(false);
+                }}
+                className="mt-3 rounded-lg border border-border px-3 py-1.5 text-xs"
+              >
+                ادامه اسکن
+              </button>
             </div>
           </div>
         )}

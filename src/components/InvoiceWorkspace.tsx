@@ -13,18 +13,24 @@ import {
   customerFullName,
   customerBalance,
   cryptoId,
-  addProductToInvoice,
   addCustomInvoiceLine,
   isWeightUnit,
   applyProductDiscount,
   PAYMENT_LABEL,
   reminders,
   chequeDueTimestamp,
+  tryAddProductToInvoice,
+  evaluateInvoiceStockAdd,
+  evaluateInvoiceStockSet,
+  invoiceProductQty,
+  isManualInvoiceItem,
+  productStockHint,
   type Customer,
   type CustomerInfo,
   type PaymentMethod,
   type InvoiceCheque,
   type Invoice,
+  type StockAddResult,
 } from "@/lib/store";
 import {
   lineTotal,
@@ -58,6 +64,7 @@ import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { requireOnlineWrite } from "@/lib/online-status";
+import { StockNoticeBanner } from "@/components/StockGuardUi";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 function scheduleChequeReminders(
@@ -128,6 +135,7 @@ export function InvoiceWorkspace() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
   const [doneInv, setDoneInv] = useState<Invoice | null>(null);
+  const [stockNotice, setStockNotice] = useState<StockAddResult | null>(null);
 
   // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
   // مبالغ نقد/چک تا لحظه‌ی «ثبت فاکتور» فقط در state محلی بودند؛ به همین دلیل
@@ -225,6 +233,16 @@ export function InvoiceWorkspace() {
 
   const update = (productId: string, delta: number) => {
     setInv((prev) => {
+      const item = prev.items.find((i) => i.productId === productId);
+      if (!item) return prev;
+      if (delta > 0 && !isManualInvoiceItem(item)) {
+        const p = allProducts.find((x) => x.id === productId);
+        if (p) {
+          const result = evaluateInvoiceStockAdd(p, prev, delta);
+          if (result.message) queueMicrotask(() => setStockNotice(result));
+          if (!result.ok) return prev;
+        }
+      }
       const items = prev.items
         .map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + delta } : i))
         .filter((i) => i.quantity > 0);
@@ -253,6 +271,16 @@ export function InvoiceWorkspace() {
   // تنظیم مستقیم مقدار (برای محصولات وزنی — کیلوگرم/گرم)
   const setQuantity = (productId: string, quantity: number) => {
     setInv((prev) => {
+      const item = prev.items.find((i) => i.productId === productId);
+      if (item && !isManualInvoiceItem(item) && quantity > item.quantity) {
+        const p = allProducts.find((x) => x.id === productId);
+        if (p) {
+          const others = invoiceProductQty(prev, productId) - item.quantity;
+          const result = evaluateInvoiceStockSet(p, others + quantity);
+          if (result.message) queueMicrotask(() => setStockNotice(result));
+          if (!result.ok) return prev;
+        }
+      }
       const items = prev.items
         .map((i) => (i.productId === productId ? { ...i, quantity } : i))
         .filter((i) => i.quantity > 0);
@@ -316,19 +344,29 @@ export function InvoiceWorkspace() {
     const saved = invoice.archive(finalInv);
     if (!invoice.getHistory().some((h) => h.id === saved.id)) return;
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
+    let linked = null as ReturnType<typeof customers.findOrCreate>;
     if (paymentMethod === "credit") {
       const debt = Math.max(0, baseTotal - paid);
       if (debt > 0)
-        customers.recordInvoiceDebt(customer, saved, { amount: debt, note: "فاکتور نسیه" });
-      else if (hasCustomer) customers.findOrCreate(customer);
+        linked = customers.recordInvoiceDebt(customer, saved, {
+          amount: debt,
+          note: "فاکتور نسیه",
+        });
+      else if (hasCustomer) linked = customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
       if (chk > 0)
-        customers.recordInvoiceDebt(customer, saved, { amount: chk, note: "چک دریافتی" });
-      else if (hasCustomer) customers.findOrCreate(customer);
+        linked = customers.recordInvoiceDebt(customer, saved, { amount: chk, note: "چک دریافتی" });
+      else if (hasCustomer) linked = customers.findOrCreate(customer);
       scheduleChequeReminders(saved, customerLabel);
     } else if (hasCustomer) {
       // نقد/کارت با مشتری مشخص: هیچ بدهی‌ای ثبت نمی‌شود، اما مشتری در «مشتریان» ذخیره/به‌روز می‌شود
-      customers.findOrCreate(customer);
+      linked = customers.findOrCreate(customer);
+    }
+    if (linked && saved.customer && saved.customer.customerId !== linked.id) {
+      invoice.updateHistory({
+        ...saved,
+        customer: { ...saved.customer, customerId: linked.id },
+      });
     }
     setCustomer({});
     setPaymentMethod("cash");
@@ -351,13 +389,21 @@ export function InvoiceWorkspace() {
     if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
-    setInv((prev) => addProductToInvoice(prev, p));
+    const { invoice: next, result } = tryAddProductToInvoice(inv, p);
+    if (result.message) setStockNotice(result);
+    if (!result.ok) return;
+    setInv(next);
     setSearchQ("");
   };
 
   // انتخاب یکی از مشتریان ذخیره‌شده برای این فاکتور
   const selectCustomer = (c: Customer) => {
-    setCustomer({ firstName: c.firstName, lastName: c.lastName, phone: c.phone });
+    setCustomer({
+      firstName: c.firstName,
+      lastName: c.lastName,
+      phone: c.phone,
+      customerId: c.id,
+    });
     setCustomerQ("");
   };
 
@@ -400,6 +446,7 @@ export function InvoiceWorkspace() {
   return (
     <Layout>
       <GettingStartedChecklist />
+      <StockNoticeBanner notice={stockNotice} onClose={() => setStockNotice(null)} />
 
       {/* Invoice tabs */}
       <div className="mb-3 flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-1.5 shadow-card">
@@ -552,18 +599,38 @@ export function InvoiceWorkspace() {
             )}
             {filtered.length > 0 && (
               <div className="absolute inset-x-0 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-                {filtered.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => addFromSearch(p.id)}
-                    className="flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent border-b border-border last:border-0"
-                  >
-                    <span className="font-medium text-foreground">{p.name}</span>
-                    <span className="text-xs text-primary font-semibold">
-                      {formatToman(p.price)}
-                    </span>
-                  </button>
-                ))}
+                {filtered.map((p) => {
+                  const hint = productStockHint(p);
+                  const addResult = evaluateInvoiceStockAdd(p, inv, 1);
+                  const cannotAdd = !addResult.ok;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => addFromSearch(p.id)}
+                      disabled={cannotAdd}
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent border-b border-border last:border-0 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="min-w-0 flex-1 text-right">
+                        <span className="block truncate font-medium text-foreground">{p.name}</span>
+                        {(cannotAdd || hint.tone) && (
+                          <span
+                            className={`block text-[11px] ${
+                              cannotAdd || hint.tone === "out"
+                                ? "text-destructive"
+                                : "text-amber-600"
+                            }`}
+                          >
+                            {cannotAdd ? addResult.message : hint.label}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-xs text-primary font-semibold">
+                        {formatToman(p.price)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
             {searchQ.trim() && filtered.length === 0 && (
@@ -760,20 +827,26 @@ export function InvoiceWorkspace() {
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input
               value={customer.firstName ?? ""}
-              onChange={(e) => setCustomer((c) => ({ ...c, firstName: e.target.value }))}
+              onChange={(e) =>
+                setCustomer((c) => ({ ...c, firstName: e.target.value, customerId: undefined }))
+              }
               placeholder="نام"
               className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <input
               value={customer.lastName ?? ""}
-              onChange={(e) => setCustomer((c) => ({ ...c, lastName: e.target.value }))}
+              onChange={(e) =>
+                setCustomer((c) => ({ ...c, lastName: e.target.value, customerId: undefined }))
+              }
               placeholder="نام خانوادگی"
               className="rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
             />
           </div>
           <input
             value={customer.phone ?? ""}
-            onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
+            onChange={(e) =>
+              setCustomer((c) => ({ ...c, phone: e.target.value, customerId: undefined }))
+            }
             placeholder="شماره تلفن"
             inputMode="tel"
             dir="ltr"

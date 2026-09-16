@@ -7,6 +7,7 @@ import {
   customerBalance,
   customerFullName,
   invoicesOfCustomer,
+  purchasesOfCustomer,
   formatToman,
   formatNumber,
   parseNumberInput,
@@ -15,10 +16,15 @@ import {
   storePublicUrl,
   formatJalaliDateTime,
   invoice,
+  purchases,
   products,
   recalc,
   emptyInvoice,
-  addProductToInvoice,
+  tryAddProductToInvoice,
+  evaluateInvoiceStockAdd,
+  evaluateInvoiceStockSet,
+  invoiceProductQty,
+  isManualInvoiceItem,
   applyProductDiscount,
   PAYMENT_LABEL,
   isWeightUnit,
@@ -26,10 +32,12 @@ import {
   formatJalaliYmd,
   jalaliDaysFromToday,
   settlementAlertKind,
+  productStockHint,
   type Customer,
   type CustomerTx,
   type Product,
   type PaymentMethod,
+  type StockAddResult,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
 import { authUserId } from "@/lib/subscription-access";
@@ -42,7 +50,9 @@ import { isWebView } from "@/lib/isWebView";
 import { JalaliDateSelect } from "@/components/JalaliPickers";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { PurchaseActions } from "@/components/PurchaseActions";
 import { QuantityStepper } from "@/components/QuantityStepper";
+import { StockNoticeBanner } from "@/components/StockGuardUi";
 import {
   Users,
   Plus,
@@ -68,6 +78,7 @@ import {
   FileUp,
   ShoppingCart,
   CalendarClock,
+  ShoppingBag,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -873,20 +884,30 @@ function CustomerCard({
 
 function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
   const isDebt = tx.type === "debt";
+  const isPurchaseCredit = !!tx.purchaseId;
   const removeTx = () => {
     if (!confirm("این تراکنش حذف شود؟")) return;
     customers.update({ ...customer, txs: customer.txs.filter((t) => t.id !== tx.id) });
   };
+  const kindLabel = isPurchaseCredit ? "طلبکاری (خرید نسیه)" : isDebt ? "بدهی" : "پرداخت";
   return (
     <li className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs">
       {isDebt ? (
         <ArrowUpCircle className="h-4 w-4 shrink-0 text-destructive" />
       ) : (
-        <ArrowDownCircle className="h-4 w-4 shrink-0 text-green-600" />
+        <ArrowDownCircle className="h-4 w-4 shrink-0 text-sky-600" />
       )}
       <div className="min-w-0 flex-1">
-        <div className={`font-semibold ${isDebt ? "text-destructive" : "text-green-600"}`}>
-          {isDebt ? "بدهی" : "پرداخت"} — {formatToman(tx.amount)}
+        <div
+          className={`font-semibold ${
+            isPurchaseCredit
+              ? "text-sky-700 dark:text-sky-400"
+              : isDebt
+                ? "text-destructive"
+                : "text-green-600"
+          }`}
+        >
+          {kindLabel} — {formatToman(tx.amount)}
         </div>
         <div className="text-[10px] text-muted-foreground">
           {formatJalaliDateTime(tx.at)}
@@ -1946,12 +1967,17 @@ function CustomerDetailModal({
   onNewInvoice: () => void;
 }) {
   const [salesHistory] = invoice.useHistory();
+  const [purchaseHistory] = purchases.useHistory();
   const [appSettings] = settings.useAll();
   const balance = customerBalance(customer);
   const dueKind = settlementAlertKind(customer);
   const myInvoices = useMemo(
     () => invoicesOfCustomer(customer, salesHistory),
     [customer, salesHistory],
+  );
+  const myPurchases = useMemo(
+    () => purchasesOfCustomer(customer, purchaseHistory),
+    [customer, purchaseHistory],
   );
 
   return (
@@ -2103,6 +2129,37 @@ function CustomerDetailModal({
             </ul>
           )}
 
+          {/* فاکتورهای خرید این مشتری (تامین‌کننده) */}
+          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+            <ShoppingBag className="h-3.5 w-3.5" />
+            فاکتورهای خرید ({formatNumber(myPurchases.length)})
+          </h4>
+          {myPurchases.length === 0 ? (
+            <p className="mb-4 py-2 text-center text-xs text-muted-foreground">
+              هنوز فاکتور خریدی برای این طرف حساب ثبت نشده است.
+            </p>
+          ) : (
+            <ul className="mb-4 space-y-1.5 max-h-52 overflow-y-auto">
+              {myPurchases.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sky-700 dark:text-sky-400">
+                      {formatToman(p.total)}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {formatJalaliDateTime(p.createdAt)}
+                      {p.paymentMethod && ` · ${PAYMENT_LABEL[p.paymentMethod]}`}
+                    </div>
+                  </div>
+                  <PurchaseActions p={p} size="sm" showLabels={false} />
+                </li>
+              ))}
+            </ul>
+          )}
+
           {/* تراکنش‌های بدهی/پرداخت */}
           <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
             <Wallet className="h-3.5 w-3.5" />
@@ -2227,18 +2284,32 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   const [manualQty, setManualQty] = useState("1");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paidAmount, setPaidAmount] = useState("");
+  const [stockNotice, setStockNotice] = useState<StockAddResult | null>(null);
 
   const matches = searchQ.trim()
     ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code]).slice(0, 8)
     : [];
 
   const addFromSearch = (p: Product) => {
-    setCartInv((prev) => addProductToInvoice(prev, p));
+    const { invoice: next, result } = tryAddProductToInvoice(cartInv, p);
+    if (result.message) setStockNotice(result);
+    if (!result.ok) return;
+    setCartInv(next);
     setSearchQ("");
   };
 
   const setQty = (productId: string, quantity: number) => {
     setCartInv((prev) => {
+      const item = prev.items.find((i) => i.productId === productId);
+      if (item && !isManualInvoiceItem(item) && quantity > item.quantity) {
+        const p = allProducts.find((x) => x.id === productId);
+        if (p) {
+          const others = invoiceProductQty(prev, productId) - item.quantity;
+          const result = evaluateInvoiceStockSet(p, others + quantity);
+          if (result.message) queueMicrotask(() => setStockNotice(result));
+          if (!result.ok) return prev;
+        }
+      }
       const items = prev.items
         .map((i) => (i.productId === productId ? { ...i, quantity } : i))
         .filter((i) => i.quantity > 0);
@@ -2300,6 +2371,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
       firstName: customer.firstName,
       lastName: customer.lastName,
       phone: customer.phone,
+      customerId: customer.id,
     };
     const finalInv = recalc({
       ...cartInv,
@@ -2311,10 +2383,20 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
     });
     invoice.archive(finalInv);
     if (!invoice.getHistory().some((h) => h.id === finalInv.id)) return;
+    let linked = null as ReturnType<typeof customers.findOrCreate>;
     if (paymentMethod === "credit" && debt > 0) {
-      customers.recordInvoiceDebt(customerInfo, finalInv, { amount: debt, note: "فاکتور نسیه" });
+      linked = customers.recordInvoiceDebt(customerInfo, finalInv, {
+        amount: debt,
+        note: "فاکتور نسیه",
+      });
     } else {
-      customers.findOrCreate(customerInfo);
+      linked = customers.findOrCreate(customerInfo);
+    }
+    if (linked && finalInv.customer && finalInv.customer.customerId !== linked.id) {
+      invoice.updateHistory({
+        ...finalInv,
+        customer: { ...finalInv.customer, customerId: linked.id },
+      });
     }
     onClose();
   };
@@ -2341,6 +2423,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          <StockNoticeBanner notice={stockNotice} onClose={() => setStockNotice(null)} />
           {/* جستجوی کالا */}
           <div className="relative mb-2">
             <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -2352,19 +2435,38 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
             />
             {matches.length > 0 && (
               <div className="absolute inset-x-0 top-full z-40 mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-                {matches.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => addFromSearch(p)}
-                    className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent"
-                  >
-                    <span className="truncate font-medium">{p.name}</span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {formatToman(applyProductDiscount(p))}
-                    </span>
-                  </button>
-                ))}
+                {matches.map((p) => {
+                  const addResult = evaluateInvoiceStockAdd(p, cartInv, 1);
+                  const hint = productStockHint(p);
+                  const cannotAdd = !addResult.ok;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => addFromSearch(p)}
+                      disabled={cannotAdd}
+                      className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-right text-xs last:border-0 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span className="min-w-0 truncate font-medium">
+                        {p.name}
+                        {(cannotAdd || hint.tone) && (
+                          <span
+                            className={`mr-1 block text-[10px] ${
+                              cannotAdd || hint.tone === "out"
+                                ? "text-destructive"
+                                : "text-amber-600"
+                            }`}
+                          >
+                            {cannotAdd ? "اتمام موجودی" : hint.label}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatToman(applyProductDiscount(p))}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
             {searchQ.trim() && matches.length === 0 && (

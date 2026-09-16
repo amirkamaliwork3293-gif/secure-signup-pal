@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
-import { namesReferToSamePerson } from "@/lib/search";
+import { namesReferToSamePerson, phonesLikelySame } from "@/lib/search";
 import { mergeOpenInvoiceBoard, historyIds, extractOpenInvoices } from "@/lib/store-merge";
 import {
   catalogArraysDiffer,
@@ -162,6 +162,11 @@ export type CustomerInfo = {
   firstName?: string;
   lastName?: string;
   phone?: string;
+  /**
+   * شناسه مشتری ذخیره‌شده. اگر باشد، فاکتور فقط به همان مشتری وصل می‌ماند
+   * و با هم‌نام‌ها قاطی نمی‌شود. فاکتورهای قدیمی این فیلد را ندارند.
+   */
+  customerId?: string;
 };
 
 export type PaymentMethod = "cash" | "card" | "credit" | "check";
@@ -273,6 +278,8 @@ export type Purchase = {
   total: number;
   supplierName?: string;
   supplierPhone?: string;
+  /** شناسه مشتری/تامین‌کننده در دفتر مشتریان — برای وصل ماندن فاکتور خرید نسیه */
+  supplierCustomerId?: string;
   note?: string;
   paymentMethod?: PaymentMethod;
   /** مبلغ نقد پرداخت‌شده از این فاکتور خرید (اگر نسیه/چک بود، باقی بدهی به تامین‌کننده است) */
@@ -299,13 +306,15 @@ export function recalcPurchase(p: Purchase): Purchase {
 
 export type CustomerTx = {
   id: string;
-  /** debt = بدهی جدید، payment = پرداخت/تسویه */
+  /** debt = بدهی جدید، payment = پرداخت/تسویه (مانده منفی = طلبکار) */
   type: "debt" | "payment";
   amount: number;
   note?: string;
   at: number;
-  /** اگر بدهی از ثبت فاکتور نسیه ایجاد شده باشد */
+  /** اگر بدهی از ثبت فاکتور فروش نسیه ایجاد شده باشد */
   invoiceId?: string;
+  /** اگر طلبکاری از ثبت فاکتور خرید نسیه ایجاد شده باشد */
+  purchaseId?: string;
 };
 
 export type Customer = {
@@ -388,15 +397,53 @@ export function customerFullName(c: Customer): string {
   return [c.firstName, c.lastName].filter(Boolean).join(" ").trim();
 }
 
-/** فاکتورهای فروشی که مشتری در آن‌ها (بر اساس تلفن یا نام/فامیل) طرف حساب بوده */
+/** نام تامین‌کننده فاکتور خرید را به فیلدهای مشتری تبدیل می‌کند */
+export function supplierToCustomerInfo(
+  name?: string,
+  phone?: string,
+  customerId?: string,
+): CustomerInfo {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || undefined,
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : undefined,
+    phone: phone?.trim() || undefined,
+    customerId: customerId || undefined,
+  };
+}
+
+/**
+ * آیا این فاکتور فروش متعلق به همین مشتری است؟
+ * اولویت: شناسه ذخیره‌شده → شماره تلفن (اگر روی فاکتور باشد) → نام کامل یکسان.
+ * اشتراک فامیل یا اسم کوچک به‌تنهایی کافی نیست تا فاکتورها قاطی نشوند.
+ */
+export function invoiceBelongsToCustomer(inv: Invoice, customer: Customer): boolean {
+  const c = inv.customer;
+  if (!c) return false;
+  if (c.customerId) return c.customerId === customer.id;
+  const invPhone = c.phone?.trim();
+  if (invPhone) return phonesLikelySame(invPhone, customer.phone);
+  return namesReferToSamePerson(customer, c);
+}
+
+/** فاکتورهای فروشی که مشتری در آن‌ها طرف حساب بوده */
 export function invoicesOfCustomer(customer: Customer, allInvoices: Invoice[]): Invoice[] {
-  const phone = customer.phone?.trim();
-  return allInvoices.filter((inv) => {
-    const c = inv.customer;
-    if (!c) return false;
-    if (phone && c.phone?.trim() === phone) return true;
-    return namesReferToSamePerson(customer, c);
-  });
+  return allInvoices.filter((inv) => invoiceBelongsToCustomer(inv, customer));
+}
+
+/** آیا این فاکتور خرید متعلق به همین مشتری/تامین‌کننده است؟ */
+export function purchaseBelongsToCustomer(p: Purchase, customer: Customer): boolean {
+  if (p.supplierCustomerId) return p.supplierCustomerId === customer.id;
+  const phone = p.supplierPhone?.trim();
+  if (phone) return phonesLikelySame(phone, customer.phone);
+  const info = supplierToCustomerInfo(p.supplierName, p.supplierPhone);
+  if (!info.firstName && !info.lastName) return false;
+  return namesReferToSamePerson(customer, info);
+}
+
+/** فاکتورهای خریدی که این شخص تامین‌کننده/طرف حساب بوده */
+export function purchasesOfCustomer(customer: Customer, allPurchases: Purchase[]): Purchase[] {
+  return allPurchases.filter((p) => purchaseBelongsToCustomer(p, customer));
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -862,7 +909,9 @@ function readIdSet(key: string): Set<string> {
   try {
     const raw = localStorage.getItem(scopedKey(key));
     const arr = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(Array.isArray(arr) ? arr.filter((id): id is string => typeof id === "string") : []);
+    return new Set(
+      Array.isArray(arr) ? arr.filter((id): id is string => typeof id === "string") : [],
+    );
   } catch {
     return new Set();
   }
@@ -1068,9 +1117,11 @@ function isCloudPermissionError(
 }
 
 async function flushCloudPush() {
-  flushChain = flushChain.then(() => runFlushCloudPush()).catch((err) => {
-    console.error("[store] flush chain", err);
-  });
+  flushChain = flushChain
+    .then(() => runFlushCloudPush())
+    .catch((err) => {
+      console.error("[store] flush chain", err);
+    });
   return flushChain;
 }
 
@@ -1297,7 +1348,10 @@ function applyCloudRow(data: Record<string, unknown>) {
   applyMerged("manual_ledger", MANUAL_LEDGER_KEY, data.manual_ledger);
 }
 
-async function pullUserData(userId: string, opts?: { refresh?: boolean; epoch?: number }): Promise<void> {
+async function pullUserData(
+  userId: string,
+  opts?: { refresh?: boolean; epoch?: number },
+): Promise<void> {
   const epoch = opts?.epoch ?? hydrateEpoch;
   beginUserScope(userId);
   if (!opts?.refresh) cloudHydrated = false;
@@ -1906,8 +1960,14 @@ export const purchases = {
     }
 
     products.save(nextProducts);
+    let saved: Purchase = { ...stamped, items: resolvedItems };
+    const supplierId = customers.syncPurchaseCredit(saved);
+    if (supplierId && saved.supplierCustomerId !== supplierId) {
+      saved = { ...saved, supplierCustomerId: supplierId };
+    }
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
-    write(PURCHASES_KEY, [{ ...stamped, items: resolvedItems }, ...hist]);
+    write(PURCHASES_KEY, [saved, ...hist]);
+    return saved;
   },
   useHistory: () => useStore<Purchase[]>(PURCHASES_KEY, []),
   getHistory: () => read<Purchase[]>(PURCHASES_KEY, []),
@@ -1919,12 +1979,18 @@ export const purchases = {
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
     const prev = hist.find((p) => p.id === updated.id);
     if (prev) reconcileStockForPurchaseEdit(prev.items, updated.items);
+    const supplierId = customers.syncPurchaseCredit(updated);
+    const saved =
+      supplierId && updated.supplierCustomerId !== supplierId
+        ? { ...updated, supplierCustomerId: supplierId }
+        : updated;
     write(
       PURCHASES_KEY,
-      hist.map((p) => (p.id === updated.id ? updated : p)),
+      hist.map((p) => (p.id === updated.id ? saved : p)),
     );
   },
   deleteFromHistory: (id: string) => {
+    customers.clearPurchaseCredit(id);
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
     write(
       PURCHASES_KEY,
@@ -2551,7 +2617,7 @@ export const customers = {
   },
 
   /**
-   * یافتن مشتری بر اساس تلفن یا نام کامل؛ اگر پیدا نشد، مشتری جدید ساخته می‌شود
+   * یافتن مشتری بر اساس شناسه، تلفن یا نام کامل؛ اگر پیدا نشد، مشتری جدید ساخته می‌شود
    * (بدون ثبت هیچ تراکنش بدهی/پرداختی). برای این‌که هر فاکتوری — حتی نقدی —
    * که اطلاعات مشتری دارد، مشتری را در «مشتریان» ثبت/به‌روز کند.
    * اگر نه نام و نه تلفنی وجود نداشته باشد، null برمی‌گرداند.
@@ -2559,11 +2625,9 @@ export const customers = {
   findOrCreate: (info: CustomerInfo): Customer | null => {
     const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
     const phone = info.phone?.trim();
-    if (!name && !phone) return null;
+    if (!name && !phone && !info.customerId) return null;
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
-    const found = list.find(
-      (c) => (phone && c.phone === phone) || (name && customerFullName(c) === name),
-    );
+    const found = matchCustomerRecord(list, info);
     if (found) {
       // اگر مشتری قبلاً بدون شماره تلفن ثبت شده و الان شماره داده شده، تکمیلش می‌کنیم
       if (phone && !found.phone) {
@@ -2576,6 +2640,7 @@ export const customers = {
       }
       return found;
     }
+    if (!name && !phone) return null;
     const created: Customer = {
       id: cryptoId(),
       firstName: info.firstName?.trim() || name || "مشتری",
@@ -2596,28 +2661,12 @@ export const customers = {
     info: CustomerInfo,
     inv: Invoice,
     opts?: { amount?: number; note?: string },
-  ) => {
-    const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
-    if (!name && !info.phone?.trim()) return;
+  ): Customer | null => {
     const debtAmount = Math.max(0, Math.round(opts?.amount ?? inv.total));
-    if (debtAmount <= 0) return;
+    if (debtAmount <= 0) return customers.findOrCreate(info);
+    const target = customers.findOrCreate(info);
+    if (!target) return null;
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
-    let target = list.find(
-      (c) =>
-        (info.phone?.trim() && c.phone === info.phone.trim()) ||
-        (name && customerFullName(c) === name),
-    );
-    if (!target) {
-      target = {
-        id: cryptoId(),
-        firstName: info.firstName?.trim() || name || "مشتری",
-        lastName: info.lastName?.trim() || undefined,
-        phone: info.phone?.trim() || undefined,
-        createdAt: Date.now(),
-        txs: [],
-      };
-      list.unshift(target);
-    }
     const tx: CustomerTx = {
       id: cryptoId(),
       type: "debt",
@@ -2628,10 +2677,102 @@ export const customers = {
     };
     write(
       CUSTOMERS_KEY,
-      list.map((c) => (c.id === target!.id ? { ...c, txs: [tx, ...c.txs] } : c)),
+      list.map((c) => (c.id === target.id ? { ...c, txs: [tx, ...c.txs] } : c)),
     );
+    return { ...target, txs: [tx, ...target.txs] };
+  },
+
+  /**
+   * طلبکاری تامین‌کننده برای فاکتور خرید نسیه (مانده منفی = طلبکار از ما).
+   * تراکنش قبلی همین فاکتور خرید جایگزین می‌شود تا ویرایش/حذف دوبل حساب نسازد.
+   */
+  recordPurchaseCredit: (
+    info: CustomerInfo,
+    purchase: Purchase,
+    opts?: { amount?: number; note?: string },
+  ): Customer | null => {
+    const amount = Math.max(0, Math.round(opts?.amount ?? 0));
+    if (amount <= 0) {
+      customers.clearPurchaseCredit(purchase.id);
+      return customers.findOrCreate(info);
+    }
+    const target = customers.findOrCreate(info);
+    if (!target) return null;
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    const tx: CustomerTx = {
+      id: cryptoId(),
+      type: "payment",
+      amount,
+      note: opts?.note ?? "فاکتور خرید نسیه",
+      at: purchase.createdAt || Date.now(),
+      purchaseId: purchase.id,
+    };
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) => {
+        const without = c.txs.filter((t) => t.purchaseId !== purchase.id);
+        if (c.id === target.id) return { ...c, txs: [tx, ...without] };
+        if (without.length !== c.txs.length) return { ...c, txs: without };
+        return c;
+      }),
+    );
+    return { ...target, txs: [tx, ...target.txs.filter((t) => t.purchaseId !== purchase.id)] };
+  },
+
+  clearPurchaseCredit: (purchaseId: string) => {
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    let changed = false;
+    const next = list.map((c) => {
+      const txs = c.txs.filter((t) => t.purchaseId !== purchaseId);
+      if (txs.length === c.txs.length) return c;
+      changed = true;
+      return { ...c, txs };
+    });
+    if (changed) write(CUSTOMERS_KEY, next);
+  },
+
+  /** همگام‌سازی طلب فاکتور خرید نسیه با دفتر مشتریان */
+  syncPurchaseCredit: (purchase: Purchase): string | undefined => {
+    const remaining = purchaseCreditRemaining(purchase);
+    const info = supplierToCustomerInfo(
+      purchase.supplierName,
+      purchase.supplierPhone,
+      purchase.supplierCustomerId,
+    );
+    if (remaining <= 0 || (!info.firstName && !info.phone)) {
+      customers.clearPurchaseCredit(purchase.id);
+      return purchase.supplierCustomerId;
+    }
+    const cust = customers.recordPurchaseCredit(info, purchase, {
+      amount: remaining,
+      note: "فاکتور خرید نسیه",
+    });
+    return cust?.id ?? purchase.supplierCustomerId;
   },
 };
+
+function matchCustomerRecord(list: Customer[], info: CustomerInfo): Customer | undefined {
+  if (info.customerId) {
+    const byId = list.find((c) => c.id === info.customerId);
+    if (byId) return byId;
+  }
+  const phone = info.phone?.trim();
+  if (phone) {
+    const byPhone = list.find((c) => phonesLikelySame(c.phone, phone));
+    if (byPhone) return byPhone;
+  }
+  const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
+  if (!name) return undefined;
+  return list.find((c) => customerFullName(c) === name);
+}
+
+/** مانده نسیه فاکتور خرید — فقط وقتی روش پرداخت نسیه است */
+export function purchaseCreditRemaining(p: Purchase): number {
+  if (p.paymentMethod !== "credit") return 0;
+  const total = purchaseTotals(p).total;
+  const paid = Math.min(total, Math.max(0, Math.round(Number(p.paidAmount) || 0)));
+  return Math.max(0, total - paid);
+}
 
 // ─── Students (کلاس‌ها، باشگاه، هنرجوها) ────────────────────────────────────
 
@@ -2912,48 +3053,57 @@ export function cryptoId() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-export function addProductToInvoice(inv: Invoice, p: Product): Invoice {
-  const existing = inv.items.find((i) => i.productId === p.id);
-  let items;
-  if (existing) {
-    items = inv.items.map((i) =>
-      i.productId === p.id ? applyAutoWholesale({ ...i, quantity: i.quantity + 1 }, p) : i,
-    );
-  } else {
-    const effectivePrice = applyProductDiscount(p);
-    const hasDiscount = effectivePrice < p.price;
-    items = [
-      ...inv.items,
-      {
-        productId: p.id,
-        name: p.name,
-        price: effectivePrice,
-        quantity: 1,
-        buyPrice: p.buyPrice,
-        unit: p.unit,
-        discountPercent: hasDiscount
-          ? Math.max(0, Math.min(100, Number(p.discountPercent) || 0))
-          : undefined,
-        originalPrice: hasDiscount ? p.price : undefined,
-      },
-    ];
-  }
-  return recalc({ ...inv, items });
+export function addProductToInvoice(
+  inv: Invoice,
+  p: Product,
+  opts?: { committedQty?: number },
+): Invoice {
+  return tryAddProductToInvoice(inv, p, opts).invoice;
+}
+
+export function tryAddProductToInvoice(
+  inv: Invoice,
+  p: Product,
+  opts?: { committedQty?: number },
+): { invoice: Invoice; result: StockAddResult } {
+  const result = evaluateInvoiceStockAdd(p, inv, 1, opts);
+  if (!result.ok) return { invoice: inv, result };
+  return { invoice: applyAddProductToInvoice(inv, p, 1), result };
 }
 
 /**
  * افزودن محصول به فاکتور با مقدار و واحد مشخص (برای ثبت صوتی استفاده می‌شود).
- * تابع موجود `addProductToInvoice` دست‌نخورده می‌ماند؛ این نسخه مقدار دلخواه را
- * می‌گیرد: برای محصول وزنی مقدار را جمع می‌کند و برای محصول عددی هم همین‌طور.
+ * اگر پیگیری موجودی این کالا فعال باشد و موجودی تمام / ناکافی باشد، فاکتور عوض نمی‌شود.
  */
 export function addProductToInvoiceQty(
   inv: Invoice,
   p: Product,
   quantity: number,
-  opts?: { unitPrice?: number },
+  opts?: { unitPrice?: number; committedQty?: number },
+): Invoice {
+  return tryAddProductToInvoiceQty(inv, p, quantity, opts).invoice;
+}
+
+export function tryAddProductToInvoiceQty(
+  inv: Invoice,
+  p: Product,
+  quantity: number,
+  opts?: { unitPrice?: number; committedQty?: number },
+): { invoice: Invoice; result: StockAddResult } {
+  const qty = quantity > 0 ? quantity : 1;
+  const result = evaluateInvoiceStockAdd(p, inv, qty, { committedQty: opts?.committedQty });
+  if (!result.ok) return { invoice: inv, result };
+  return { invoice: applyAddProductToInvoice(inv, p, qty, opts?.unitPrice), result };
+}
+
+function applyAddProductToInvoice(
+  inv: Invoice,
+  p: Product,
+  quantity: number,
+  unitPrice?: number,
 ): Invoice {
   const qty = quantity > 0 ? quantity : 1;
-  const customPrice = opts?.unitPrice != null && opts.unitPrice > 0 ? opts.unitPrice : undefined;
+  const customPrice = unitPrice != null && unitPrice > 0 ? unitPrice : undefined;
   const existing = inv.items.find(
     (i) => i.productId === p.id && (customPrice == null || i.price === customPrice),
   );
@@ -3532,6 +3682,123 @@ export function stockStatus(p: Product): "ok" | "low" | "out" {
   const threshold = p.lowStockThreshold ?? 5;
   if (p.stock <= threshold) return "low";
   return "ok";
+}
+
+/** برچسب کوتاه موجودی برای فهرست جستجو — فقط وقتی پیگیری موجودی فعال است */
+export function productStockHint(p: Product): { label: string; tone: "out" | "low" | null } {
+  if (!productTracksStock(p)) return { label: "", tone: null };
+  const s = stockStatus(p);
+  if (s === "out") return { label: "اتمام موجودی", tone: "out" };
+  if (s === "low") return { label: `موجودی کم: ${formatNumber(p.stock)}`, tone: "low" };
+  return { label: "", tone: null };
+}
+
+export type StockAddKind = "untracked" | "ok" | "low" | "last" | "out" | "insufficient";
+
+export type StockAddResult = {
+  /** اگر false باشد کالا به فاکتور اضافه / زیاد نمی‌شود */
+  ok: boolean;
+  kind: StockAddKind;
+  /** سقف تعداد قابل ثبت روی فاکتور (موجودی آزاد + مقدار قبلاً کسرشده) */
+  available: number;
+  /** موجودی انبار پس از این تغییر */
+  after: number;
+  message: string;
+};
+
+/** جمع تعداد همین کالا روی فاکتور (ردیف‌های تکراری هم حساب می‌شوند) */
+export function invoiceProductQty(
+  inv: { items: { productId: string; quantity: number }[] },
+  productId: string,
+): number {
+  return inv.items.reduce((s, i) => (i.productId === productId ? s + i.quantity : s), 0);
+}
+
+/**
+ * آیا می‌توان تعداد این کالا روی فاکتور را به newQty رساند؟
+ * فقط برای محصولاتی که پیگیری موجودی‌شان فعال است محدودیت دارد.
+ * committedQty: تعدادی که از قبل از انبار کم شده (ویرایش فاکتور ثبت‌شده).
+ */
+export function evaluateInvoiceStockSet(
+  p: Product,
+  newQty: number,
+  opts?: { committedQty?: number },
+): StockAddResult {
+  if (!productTracksStock(p)) {
+    return {
+      ok: true,
+      kind: "untracked",
+      available: Number.POSITIVE_INFINITY,
+      after: p.stock || 0,
+      message: "",
+    };
+  }
+  const stock = Math.max(0, Number(p.stock) || 0);
+  const committed = Math.max(0, opts?.committedQty ?? 0);
+  const maxQty = stock + committed;
+  const qty = Math.max(0, newQty);
+  const unit = p.unit || "عدد";
+  if (maxQty <= 0 && qty > 0) {
+    return {
+      ok: false,
+      kind: "out",
+      available: 0,
+      after: 0,
+      message: `موجودی «${p.name}» تمام شده است و نمی‌توان آن را به فاکتور اضافه کرد.`,
+    };
+  }
+  if (qty > maxQty + 1e-9) {
+    return {
+      ok: false,
+      kind: "insufficient",
+      available: maxQty,
+      after: maxQty,
+      message: `موجودی «${p.name}» کافی نیست. فقط ${formatNumber(maxQty)} ${unit} قابل ثبت است.`,
+    };
+  }
+  const after = Math.max(0, maxQty - qty);
+  const threshold = p.lowStockThreshold ?? 5;
+  if (after <= 0) {
+    return {
+      ok: true,
+      kind: "last",
+      available: maxQty,
+      after: 0,
+      message: `آخرین موجودی «${p.name}» استفاده شد. این کالا تمام شد.`,
+    };
+  }
+  if (after <= threshold) {
+    return {
+      ok: true,
+      kind: "low",
+      available: maxQty,
+      after,
+      message: `هشدار: موجودی «${p.name}» کم است — ${formatNumber(after)} ${unit} باقی می‌ماند.`,
+    };
+  }
+  return { ok: true, kind: "ok", available: maxQty, after, message: "" };
+}
+
+/** بررسی افزودن addQty عدد دیگر از این کالا به فاکتور جاری */
+export function evaluateInvoiceStockAdd(
+  p: Product,
+  inv: { items: { productId: string; quantity: number }[] },
+  addQty = 1,
+  opts?: { committedQty?: number },
+): StockAddResult {
+  const already = invoiceProductQty(inv, p.id);
+  const result = evaluateInvoiceStockSet(p, already + addQty, opts);
+  if (result.ok) return result;
+  const remaining = Math.max(0, result.available - already);
+  if (remaining <= 0) {
+    return {
+      ...result,
+      kind: "out",
+      after: 0,
+      message: `موجودی «${p.name}» تمام شده است و نمی‌توان آن را به فاکتور اضافه کرد.`,
+    };
+  }
+  return result;
 }
 
 /** روزهای باقیمانده تا انقضا (منفی یعنی منقضی‌شده). اگر تاریخ انقضا ثبت نشده باشد null. */

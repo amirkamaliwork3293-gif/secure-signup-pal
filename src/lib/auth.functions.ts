@@ -38,6 +38,16 @@ import {
 } from "@/lib/catalog-integrity";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 import { settleQuery } from "@/lib/settle-query";
+import {
+  mergeAdminUsers,
+  phoneFromAuthUser,
+  sanitizeAdminSearch,
+  syntheticProfileFromAuth,
+  upsertListedUser,
+  usernameFromAuthUser,
+  type AdminListedUser,
+  type AuthListUser,
+} from "@/lib/admin-users";
 
 const PLAN_DURATION_MS = {
   trial: 60 * 60 * 1000,
@@ -200,22 +210,93 @@ async function findAdminAuthUser(supabaseAdmin: any, expectedUser: string) {
   return null;
 }
 
+async function getAuthUserByEmailSafe(supabaseAdmin: any, email: string): Promise<AuthListUser | null> {
+  const fn = supabaseAdmin?.auth?.admin?.getUserByEmail;
+  if (typeof fn !== "function") return null;
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.getUserByEmail(email);
+    if (error || !data?.user) return null;
+    return data.user as AuthListUser;
+  } catch {
+    return null;
+  }
+}
+
+async function listAllAuthUsers(supabaseAdmin: any): Promise<AuthListUser[]> {
+  const out: AuthListUser[] = [];
+  const perPage = 1000;
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) throw new Error(error.message);
+    const users = (data?.users ?? []) as AuthListUser[];
+    out.push(...users);
+    if (users.length < perPage) break;
+  }
+  return out;
+}
+
+const PROFILE_LIST_COLS =
+  "id, username, first_name, last_name, plan, status, start_date, end_date, created_at";
+
+async function listAllProfiles(supabaseAdmin: any): Promise<AdminListedUser[]> {
+  const out: AdminListedUser[] = [];
+  const pageSize = 1000;
+  for (let from = 0; from < pageSize * 50; from += pageSize) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select(PROFILE_LIST_COLS)
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as AdminListedUser[];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+async function listAllUserDataIds(supabaseAdmin: any): Promise<string[]> {
+  const out: string[] = [];
+  const pageSize = 1000;
+  for (let from = 0; from < pageSize * 50; from += pageSize) {
+    const { data, error } = await supabaseAdmin
+      .from("user_data")
+      .select("user_id")
+      .range(from, from + pageSize - 1);
+    if (error) break;
+    const rows = (data ?? []) as { user_id?: string | null }[];
+    for (const r of rows) if (r.user_id) out.push(r.user_id);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+function phonesFromAuthUsers(users: AuthListUser[]): Record<string, string | null> {
+  const map: Record<string, string | null> = {};
+  for (const u of users) {
+    const uname = usernameFromAuthUser(u);
+    const phone = phoneFromAuthUser(u);
+    if (uname) map[uname] = phone;
+  }
+  return map;
+}
+
 /** کاربر auth با این یوزرنیم — فقط برای ادامهٔ ثبت‌نام ناقص؛ رمز را دست نمی‌زند. */
 async function findAuthUserByUsername(supabaseAdmin: any, username: string) {
   const email = toEmail(username);
   const want = username.toLowerCase();
-  for (let page = 1; page <= 20; page++) {
-    const { data } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
-    const users = data?.users ?? [];
-    const hit = users.find((u: { email?: string | null; user_metadata?: Record<string, unknown> }) => {
+  const direct = await getAuthUserByEmailSafe(supabaseAdmin, email);
+  if (direct) return direct;
+  // اگر API مستقیم موجود است و پیدا نکرد، پیمایش هزاران کاربر لازم نیست.
+  if (typeof supabaseAdmin?.auth?.admin?.getUserByEmail === "function") return null;
+  const users = await listAllAuthUsers(supabaseAdmin);
+  return (
+    users.find((u) => {
       const md = String(u.user_metadata?.username ?? "").toLowerCase();
       const em = String(u.email ?? "").toLowerCase();
       return md === want || em === email.toLowerCase();
-    });
-    if (hit) return hit;
-    if (users.length < 200) break;
-  }
-  return null;
+    }) ?? null
+  );
 }
 
 // یوزرنیم مبنای ایمیل داخلی ورود کاربر است (username@kamali.local)، بنابراین
@@ -911,16 +992,37 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
     const plansCfg = await loadPlansConfig(supabaseAdmin);
     const start = new Date();
     const end = new Date(start.getTime() + planDurationMs(plansCfg, data.plan));
-    const { error } = await supabaseAdmin
+    const patch = {
+      plan: data.plan,
+      status: "active" as const,
+      start_date: start.toISOString(),
+      end_date: end.toISOString(),
+    };
+    const { data: existing } = await supabaseAdmin
       .from("profiles")
-      .update({
-        plan: data.plan,
-        status: "active",
-        start_date: start.toISOString(),
-        end_date: end.toISOString(),
-      })
-      .eq("id", data.user_id);
-    if (error) throw new Error(error.message);
+      .select("id")
+      .eq("id", data.user_id)
+      .maybeSingle();
+    if (!existing) {
+      const { data: authData } = await supabaseAdmin.auth.admin.getUserById(data.user_id);
+      const authUser = authData?.user as AuthListUser | undefined;
+      if (!authUser?.id) throw new Error("کاربر یافت نشد.");
+      const { error: insErr } = await supabaseAdmin.from("profiles").insert({
+        id: authUser.id,
+        username: usernameFromAuthUser(authUser),
+        first_name: typeof authUser.user_metadata?.first_name === "string"
+          ? authUser.user_metadata.first_name
+          : null,
+        last_name: typeof authUser.user_metadata?.last_name === "string"
+          ? authUser.user_metadata.last_name
+          : null,
+        ...patch,
+      });
+      if (insErr) throw new Error(insErr.message);
+    } else {
+      const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", data.user_id);
+      if (error) throw new Error(error.message);
+    }
     await auditLog(supabaseAdmin, {
       actor_id: context.userId, action: "subscription_extended", target: data.user_id,
       detail: { plan: data.plan },
@@ -1206,23 +1308,15 @@ export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const [{ data: requests, error: reqErr }, { data: { users } }] = await Promise.all([
-      supabaseAdmin.from("signup_requests").select("*").order("created_at", { ascending: false }),
-      supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    ]);
+    const { data: requests, error: reqErr } = await supabaseAdmin
+      .from("signup_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
     if (reqErr) throw new Error(reqErr.message);
-
-    // Build username → phone map from auth user_metadata (always present)
-    const phoneMap: Record<string, string | null> = {};
-    for (const u of users ?? []) {
-      const uname = (u.user_metadata?.username as string | undefined)?.toLowerCase();
-      if (uname && u.user_metadata?.phone) phoneMap[uname] = u.user_metadata.phone as string;
-    }
 
     return (requests ?? []).map((r: Record<string, unknown>) => ({
       ...r,
-      // Prefer DB phone column (after migration) over metadata
-      phone: (r.phone as string | null) || phoneMap[(r.username as string)?.toLowerCase()] || null,
+      phone: (r.phone as string | null) || null,
     }));
   });
 
@@ -1275,14 +1369,115 @@ export const adminGetUserPhones = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const map: Record<string, string | null> = {};
-    for (const u of users ?? []) {
-      const uname = (u.user_metadata?.username as string | undefined)?.toLowerCase();
-      const phone = (u.user_metadata?.phone as string | undefined) || null;
-      if (uname) map[uname] = phone;
+    return phonesFromAuthUsers(await listAllAuthUsers(supabaseAdmin));
+  });
+
+// ─── Admin: full user list (all profile pages + auth-only accounts) ──────────
+export const adminListAllUsers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const supabaseAdmin = await admin();
+    const [profiles, authUsers, dataIds] = await Promise.all([
+      listAllProfiles(supabaseAdmin),
+      listAllAuthUsers(supabaseAdmin),
+      listAllUserDataIds(supabaseAdmin),
+    ]);
+    return mergeAdminUsers(profiles, authUsers, dataIds);
+  });
+
+// اگر فهرست کامل به‌هر دلیل ناقص بود، جستجوی مستقیم یوزرنیم/نام حساب را پیدا می‌کند.
+export const adminLookupUser = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { query: string }) => {
+    const query = sanitizeAdminSearch(String(d?.query ?? ""));
+    if (!query) throw new Error("عبارت جستجو خالی است.");
+    if (query.length > 80) throw new Error("عبارت جستجو بیش از حد طولانی است.");
+    return { query };
+  })
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const supabaseAdmin = await admin();
+    const q = data.query;
+    const uname = q.replace(/^@/, "").trim().toLowerCase();
+    const looksLikeUsername = /^[a-z0-9][a-z0-9_.-]*$/i.test(uname);
+    let listed = mergeAdminUsers([], [], []);
+
+    if (looksLikeUsername) {
+      const { data: byUsername } = await supabaseAdmin
+        .from("profiles")
+        .select(PROFILE_LIST_COLS)
+        .eq("username", uname)
+        .maybeSingle();
+      if (byUsername) {
+        listed = upsertListedUser(listed, { ...(byUsername as AdminListedUser), missing_profile: false });
+      }
+
+      const authHit = await findAuthUserByUsername(supabaseAdmin, uname);
+      if (authHit?.id) {
+        const { data: prof } = await supabaseAdmin
+          .from("profiles")
+          .select(PROFILE_LIST_COLS)
+          .eq("id", authHit.id)
+          .maybeSingle();
+        listed = upsertListedUser(
+          listed,
+          prof
+            ? { ...(prof as AdminListedUser), missing_profile: false }
+            : syntheticProfileFromAuth(authHit),
+          phoneFromAuthUser(authHit),
+        );
+      }
     }
-    return map;
+
+    const tokens = q.split(" ").filter(Boolean);
+    const like = (s: string) => s.replace(/\s+/g, "%");
+    let nameFilter = `username.ilike.%${like(uname)}%,first_name.ilike.%${like(tokens[0] || q)}%,last_name.ilike.%${like(tokens[tokens.length - 1] || q)}%`;
+    if (tokens.length >= 2) {
+      const a = tokens[0]!;
+      const b = tokens[tokens.length - 1]!;
+      nameFilter += `,and(first_name.ilike.%${a}%,last_name.ilike.%${b}%),and(first_name.ilike.%${b}%,last_name.ilike.%${a}%)`;
+    }
+    const { data: nameRows } = await supabaseAdmin
+      .from("profiles")
+      .select(PROFILE_LIST_COLS)
+      .or(nameFilter)
+      .limit(40);
+    for (const row of (nameRows ?? []) as AdminListedUser[]) {
+      listed = upsertListedUser(listed, { ...row, missing_profile: false });
+    }
+
+    const reqFilter = `username.ilike.%${like(uname)}%,first_name.ilike.%${like(tokens[0] || q)}%,last_name.ilike.%${like(tokens[tokens.length - 1] || q)}%,phone.ilike.%${like(q)}%`;
+    const { data: reqRows } = await supabaseAdmin
+      .from("signup_requests")
+      .select("username, first_name, last_name, phone")
+      .or(reqFilter)
+      .limit(20);
+    for (const r of reqRows ?? []) {
+      const ru = String((r as { username?: string }).username ?? "").toLowerCase();
+      if (!ru) continue;
+      if (!listed.users.some((u) => u.username?.toLowerCase() === ru)) {
+        const leftover = await findAuthUserByUsername(supabaseAdmin, ru);
+        if (leftover?.id) {
+          const { data: prof } = await supabaseAdmin
+            .from("profiles")
+            .select(PROFILE_LIST_COLS)
+            .eq("id", leftover.id)
+            .maybeSingle();
+          listed = upsertListedUser(
+            listed,
+            prof
+              ? { ...(prof as AdminListedUser), missing_profile: false }
+              : syntheticProfileFromAuth(leftover),
+            (r as { phone?: string | null }).phone || phoneFromAuthUser(leftover),
+          );
+        }
+      }
+      const phone = (r as { phone?: string | null }).phone;
+      if (phone && !listed.phones[ru]) listed.phones[ru] = phone;
+    }
+
+    return listed;
   });
 
 // ─── Admin: update full per-plan configuration (enabled/price/duration/discount) ──

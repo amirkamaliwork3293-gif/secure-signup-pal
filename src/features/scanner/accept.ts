@@ -12,7 +12,8 @@
  * یکی شمرده شوند (منطق مشترک با جست‌وجوی محصول در `store.ts`).
  */
 import { normalizeScannedCode, scannedCodesMatch } from "@/lib/barcode-match";
-import { needsConfirmation } from "./formats";
+import { needsConfirmation, normalizeOutputFormat } from "./formats";
+
 
 /** تا این مدت بعد از یک پذیرش، همان کد دوباره emit نمی‌شود. */
 export const REPEAT_SUPPRESS_MS = 900;
@@ -40,6 +41,7 @@ export function acceptScan(
 ): AcceptDecision {
   const code = normalizeScannedCode(raw);
   if (!code) return { state, emit: null };
+  const format = normalizeOutputFormat(outputFormat);
 
   const { accepted } = state;
   if (
@@ -50,7 +52,7 @@ export function acceptScan(
     return { state, emit: null };
   }
 
-  if (needsConfirmation(outputFormat)) {
+  if (needsConfirmation(format)) {
     const pending = state.pending;
     const fresh = pending && now - pending.at <= CONFIRM_WINDOW_MS;
     if (!fresh || !scannedCodesMatch(pending.code, code)) {

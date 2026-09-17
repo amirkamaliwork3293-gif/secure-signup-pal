@@ -56,3 +56,27 @@ export function looksLikeFrontCamera(facingMode: string | undefined, label: stri
   if (facingMode === "environment") return false;
   return FRONT.test(label || "");
 }
+
+/**
+ * استریم اولیهٔ `facingMode: environment` روی سامسونگ اغلب ultra-wide است.
+ * فقط وقتی همان لنز، کاندیدای اول رتبه‌بندی باشد نگهش می‌داریم؛ وگرنه باید
+ * بسته شود و لنز اصلی باز شود. بدون enumerate (فهرست خالی) همان استریم می‌ماند.
+ */
+export function shouldReusePrimedCamera(
+  primedDeviceId: string | undefined,
+  rankedIds: readonly string[],
+): boolean {
+  if (rankedIds.length === 0) return true;
+  if (!primedDeviceId) return false;
+  return rankedIds[0] === primedDeviceId;
+}
+
+/**
+ * زوم شروع برای بارکد. `min` روی خیلی از سامسونگ‌ها ۰.۶ (ultra-wide منطقی) است؛
+ * اگر UI همان را نشان بدهد و اعمال کند، فوکوس در فاصلهٔ بارکد از بین می‌رود.
+ */
+export function preferredInitialZoom(min: number, max: number): number {
+  if (!(max > min)) return Number.isFinite(min) ? min : 1;
+  const target = 1.6;
+  return Math.min(max, Math.max(min, target));
+}

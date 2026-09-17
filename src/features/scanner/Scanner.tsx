@@ -144,7 +144,7 @@ export function Scanner({ onDetected, paused }: ScannerProps) {
         >
           <div className="flex flex-col gap-0.5">
             <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/80">
-              {engineLabel(status.engine, status.phase)}
+              {engineLabel(status.engine, status.phase, status.native)}
             </div>
             <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/50">
               {status.fps} fps
@@ -228,10 +228,12 @@ function sliderTrack(ratio: number): string {
   return `linear-gradient(to right, rgba(139,92,246,0.9) 0%, rgba(139,92,246,0.9) ${pct}%, rgba(255,255,255,0.25) ${pct}%, rgba(255,255,255,0.25) 100%)`;
 }
 
-function engineLabel(engine: ScannerEngine, phase: string): string {
+function engineLabel(engine: ScannerEngine, phase: string, native: boolean): string {
   if (phase === "starting") return "در حال آماده‌سازی…";
-  if (engine === "worker") return "ZXing (Worker)";
-  if (engine === "main") return "ZXing";
+  const zxing = engine === "worker" ? "ZXing (Worker)" : engine === "main" ? "ZXing" : null;
+  if (native && zxing) return `Native + ${zxing}`;
+  if (native) return "Native";
+  if (zxing) return zxing;
   return "—";
 }
 

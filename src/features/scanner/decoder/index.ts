@@ -15,7 +15,7 @@ import type { FrameGrab } from "../frame-source";
 import type { DecodeRequest, WorkerResponse } from "./protocol";
 
 /** Worker باید تا این مدت سلامتش را اعلام کند. شامل دانلود و کامپایل wasm است. */
-const HANDSHAKE_TIMEOUT_MS = 3000;
+const HANDSHAKE_TIMEOUT_MS = 8000;
 /** دیکود سالم ۱ تا ۷ میلی‌ثانیه است؛ این سقف یعنی Worker واقعاً مرده. */
 const DECODE_TIMEOUT_MS = 2500;
 

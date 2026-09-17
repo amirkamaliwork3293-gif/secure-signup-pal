@@ -14,6 +14,7 @@ const INITIAL_STATUS: ScannerStatus = {
   phase: "starting",
   error: null,
   engine: null,
+  native: false,
   torchSupported: false,
   torchOn: false,
   zoom: null,

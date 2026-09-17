@@ -16,18 +16,38 @@ import { prepareZXingModule } from "zxing-wasm/reader";
 import {
   BASE_RETICLE,
   MAX_DECODE_PIXELS,
+  coverMappedRect,
   cropSourceRect,
   fitDecodeSize,
+  insetScanCrop,
+  objectFitCoverVisible,
   reticleRect,
 } from "../src/features/scanner/geometry.ts";
-import { needsConfirmation, READER_FORMATS } from "../src/features/scanner/formats.ts";
+import {
+  needsConfirmation,
+  normalizeOutputFormat,
+  READER_FORMATS,
+} from "../src/features/scanner/formats.ts";
 import {
   CONFIRM_WINDOW_MS,
   REPEAT_SUPPRESS_MS,
   acceptScan,
   initialAcceptState,
 } from "../src/features/scanner/accept.ts";
-import { looksLikeFrontCamera, rankRearCameras } from "../src/features/scanner/camera-select.ts";
+import {
+  looksLikeFrontCamera,
+  preferredInitialZoom,
+  rankRearCameras,
+  shouldReusePrimedCamera,
+} from "../src/features/scanner/camera-select.ts";
+import {
+  NATIVE_HANG_LIMIT,
+  nativeDetectBudgetMs,
+  nativeHitFromCodes,
+  nextNativeHangState,
+  raceTimeout,
+} from "../src/features/scanner/native.ts";
+import { isBlankRgba, sampledRgbaVariance } from "../src/features/scanner/pixels.ts";
 import { decodePixels, type Pixels } from "../src/features/scanner/decoder/zxing.ts";
 import {
   findProductByCode,
@@ -81,6 +101,30 @@ prepareZXingModule({
   const small = fitDecodeSize(320, 120);
   assert.deepEqual(small, { dw: 320, dh: 120 });
 
+  const parent = reticleRect(1);
+  const inner = insetScanCrop(parent, 0.62);
+  assert.ok(inner.w < parent.w && inner.h < parent.h);
+  assert.ok(Math.abs(inner.x + inner.w / 2 - (parent.x + parent.w / 2)) < 1e-9);
+  const clamped = insetScanCrop(parent, 0.1);
+  assert.ok(clamped.w / parent.w >= 0.3 - 1e-9);
+
+  // ۱۶:۹ داخل ظرف ۴:۳ با object-fit:cover از دو طرف بریده می‌شود.
+  const vis = objectFitCoverVisible(1920, 1080, 400, 300);
+  assert.ok(Math.abs(vis.sh - 1080) < 1e-6, "ارتفاع کامل دیده می‌شود");
+  assert.ok(vis.sw < 1920 && vis.sx > 0, "عرض بریده می‌شود");
+  const mapped = coverMappedRect(1920, 1080, 400, 300, reticleRect(1));
+  const naive = cropSourceRect(1920, 1080, reticleRect(1));
+  assert.ok(mapped.sw < naive.sw, "کادر cover نباید کل عرض خام را بگیرد");
+  assert.ok(mapped.sx > naive.sx);
+  assert.equal(mapped.sx + mapped.sw <= 1920, true);
+  assert.equal(mapped.sy + mapped.sh <= 1080, true);
+
+  // بدون اندازهٔ نمایش، همان کراپ خام.
+  assert.deepEqual(
+    coverMappedRect(1280, 720, 0, 0, reticleRect(1)),
+    cropSourceRect(1280, 720, reticleRect(1)),
+  );
+
   console.log("  ok - هندسهٔ کادر");
 }
 
@@ -98,9 +142,20 @@ prepareZXingModule({
     assert.equal(needsConfirmation(f), true, `${f} باید تأیید دوم بخواهد`);
   }
 
+  // نام BarcodeDetector بومی باید به خروجی zxing نگاشته شود.
+  assert.equal(normalizeOutputFormat("ean_13"), "EAN13");
+  assert.equal(normalizeOutputFormat("code_128"), "Code128");
+  assert.equal(normalizeOutputFormat("qr_code"), "QRCode");
+  assert.equal(needsConfirmation("ean_13"), false, "EAN بومی نباید تأیید دوم بخواهد");
+  assert.equal(needsConfirmation("code_39"), true);
+
   // فرمت خودتأییدشونده: یک خوانش کافی است.
   const a = acceptScan(initialAcceptState, "6260001234567", "EAN13", 1000);
   assert.equal(a.emit, "6260001234567");
+
+  // نام بومی هم فوری پذیرفته شود — وگرنه روی A55 «هیچ واکنشی» دیده می‌شد.
+  const nativeFmt = acceptScan(initialAcceptState, "6260001234567", "ean_13", 1000);
+  assert.equal(nativeFmt.emit, "6260001234567");
 
   // همان کد بلافاصله بعدش emit نمی‌شود...
   const b = acceptScan(a.state, "6260001234567", "EAN13", 1000 + REPEAT_SUPPRESS_MS - 1);
@@ -239,7 +294,63 @@ prepareZXingModule({
   assert.equal(looksLikeFrontCamera(undefined, "Front Camera"), true);
   assert.equal(looksLikeFrontCamera(undefined, "camera2 0, facing back"), false);
 
+  // facingMode:environment روی سامسونگ اغلب ultra-wide را باز می‌کند — نباید نگه داشته شود.
+  assert.equal(shouldReusePrimedCamera("uw", ["main", "uw", "front"]), false);
+  assert.equal(shouldReusePrimedCamera("main", ["main", "uw"]), true);
+  assert.equal(shouldReusePrimedCamera("x", []), true, "بدون enumerate همان استریم بماند");
+  assert.equal(shouldReusePrimedCamera(undefined, ["main"]), false);
+
+  assert.equal(preferredInitialZoom(0.6, 8), 1.6, "زوم شروع نباید ultra-wide باشد");
+  assert.equal(preferredInitialZoom(1, 1), 1);
+  assert.equal(preferredInitialZoom(2, 8), 2);
+  assert.ok(preferredInitialZoom(1, 1.3) <= 1.3);
+
   console.log("  ok - رتبه‌بندی لنز عقب");
+}
+
+/* ------------------------------------- فریم سیاه و آویزان شدن Native */
+
+{
+  const black = new Uint8ClampedArray(64 * 64 * 4);
+  assert.equal(isBlankRgba(black), true, "فریم سیاه باید مرده شمرده شود");
+  assert.equal(sampledRgbaVariance(black), 0);
+
+  const white = new Uint8ClampedArray(64 * 64 * 4).fill(255);
+  assert.equal(isBlankRgba(white), false, "فریم سفید یک صحنه است نه فریم مردهٔ GPU");
+
+  const barcodeLike = new Uint8ClampedArray(64 * 64 * 4).fill(255);
+  for (let x = 0; x < 64; x += 2) {
+    for (let y = 0; y < 64; y++) {
+      const o = (y * 64 + x) * 4;
+      barcodeLike[o] = barcodeLike[o + 1] = barcodeLike[o + 2] = 0;
+    }
+  }
+  assert.equal(isBlankRgba(barcodeLike), false, "میله‌های بارکد نباید مرده شمرده شوند");
+
+  assert.equal(nativeDetectBudgetMs(0), 4000);
+  assert.equal(nativeDetectBudgetMs(2), 4000);
+  assert.equal(nativeDetectBudgetMs(3), 1000);
+  assert.equal(NATIVE_HANG_LIMIT, 2);
+  assert.deepEqual(nextNativeHangState(true, 0), { hangCount: 1, disable: false });
+  assert.deepEqual(nextNativeHangState(true, 1), { hangCount: 2, disable: true });
+  assert.deepEqual(nextNativeHangState(false, 1), { hangCount: 0, disable: false });
+
+  const hit = nativeHitFromCodes([{ rawValue: "6260001234567", format: "ean_13" }]);
+  assert.equal(hit?.text, "6260001234567");
+  assert.equal(hit?.format, "EAN13");
+  assert.equal(nativeHitFromCodes([{ rawValue: "  ", format: "qr_code" }]), null);
+
+  const fast = await raceTimeout(Promise.resolve("ok"), 200, "fallback");
+  assert.equal(fast.value, "ok");
+  assert.equal(fast.timedOut, false);
+  const hung = await raceTimeout(new Promise<string>(() => {}), 30, "fallback");
+  assert.equal(hung.value, "fallback");
+  assert.equal(hung.timedOut, true);
+  const rejected = await raceTimeout(Promise.reject(new Error("gum")), 200, "fallback");
+  assert.equal(rejected.value, "fallback");
+  assert.equal(rejected.timedOut, false, "reject نباید به‌عنوان تایم‌اوت Native شمرده شود");
+
+  console.log("  ok - فریم سیاه و سیاست آویزان شدن Native");
 }
 
 /* ----------------------------------------------- دیکود واقعی، رفت‌وبرگشت */

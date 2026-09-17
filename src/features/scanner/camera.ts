@@ -9,7 +9,7 @@
  *
  * این فایل فقط استریم و قابلیت‌های تراک است؛ نه دیکود، نه UI.
  */
-import { looksLikeFrontCamera, rankRearCameras } from "./camera-select";
+import { looksLikeFrontCamera, preferredInitialZoom, rankRearCameras } from "./camera-select";
 
 /** تا این مدت منتظر اولین فریم واقعی می‌مانیم، بعد کاندیدا را رد می‌کنیم. */
 const FIRST_FRAME_TIMEOUT_MS = 2500;
@@ -44,13 +44,13 @@ export function stopStream(stream: MediaStream | null): void {
 }
 
 /** ویدیو با رزولوشن مطلوب؛ همه با `ideal` تا هیچ‌وقت OverconstrainedError نگیریم. */
-function videoConstraints(deviceId?: string): MediaStreamConstraints {
+function videoConstraints(deviceId?: string, exactId = false): MediaStreamConstraints {
   const video: MediaTrackConstraints = {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
     frameRate: { ideal: 30 },
   };
-  if (deviceId) video.deviceId = { ideal: deviceId };
+  if (deviceId) video.deviceId = exactId ? { exact: deviceId } : { ideal: deviceId };
   else video.facingMode = { ideal: "environment" };
   return { video, audio: false };
 }
@@ -62,6 +62,7 @@ function videoConstraints(deviceId?: string): MediaStreamConstraints {
 export async function primeCameraPermission(): Promise<MediaStream> {
   const stream =
     (await tryGum(videoConstraints())) ||
+    (await tryGum({ video: { facingMode: "environment" }, audio: false })) ||
     (await tryGum({ video: { facingMode: { ideal: "environment" } }, audio: false })) ||
     (await tryGum({ video: true, audio: false }));
   if (!stream) throw new Error("دسترسی به دوربین ممکن نشد");
@@ -84,8 +85,13 @@ export async function listRearCameras(): Promise<string[]> {
   }
 }
 
-export function openByDeviceId(deviceId: string): Promise<MediaStream | null> {
-  return tryGum(videoConstraints(deviceId));
+export async function openByDeviceId(deviceId: string): Promise<MediaStream | null> {
+  return (
+    (await tryGum(videoConstraints(deviceId, true))) ||
+    (await tryGum(videoConstraints(deviceId, false))) ||
+    (await tryGum({ video: { deviceId: { exact: deviceId } }, audio: false })) ||
+    (await tryGum({ video: { deviceId: { ideal: deviceId } }, audio: false }))
+  );
 }
 
 /**
@@ -100,6 +106,7 @@ export async function attachAndVerify(
   // این چهار خط روی iOS و WebView قدیمی لازم است، وگرنه ویدیو تمام‌صفحه می‌شود.
   video.setAttribute("playsinline", "true");
   video.setAttribute("webkit-playsinline", "true");
+  video.setAttribute("muted", "true");
   video.muted = true;
   video.playsInline = true;
 
@@ -133,10 +140,10 @@ export function isFrontStream(stream: MediaStream): boolean {
 }
 
 /**
- * فوکوس/نوردهی/تعادل رنگِ پیوسته. بدون این، خیلی از گوشی‌های میان‌رده فوکوس
- * ثابت می‌مانند و بارکد هیچ‌وقت واضح نمی‌شود.
+ * فوکوس/نوردهی پیوسته و زوم نزدیک به ۱.۶× — جداگانه، چون `advanced` دسته‌ای
+ * روی بعضی سامسونگ‌ها پیش‌نمایش را زنده می‌گذارد ولی کپی فریم را می‌کشد.
  */
-export async function applyPreferredSettings(track: MediaStreamTrack): Promise<void> {
+export async function applyPreferredSettings(track: MediaStreamTrack): Promise<number | null> {
   try {
     (track as MediaStreamTrack & { contentHint?: string }).contentHint = "detail";
   } catch {
@@ -144,22 +151,22 @@ export async function applyPreferredSettings(track: MediaStreamTrack): Promise<v
   }
 
   const caps = readRawCapabilities(track);
-  if (!caps) return;
+  if (!caps) return null;
 
-  const advanced: Record<string, unknown>[] = [];
-  for (const mode of ["focusMode", "exposureMode", "whiteBalanceMode"] as const) {
+  for (const mode of ["focusMode", "exposureMode"] as const) {
     const values = caps[mode];
     if (Array.isArray(values) && values.includes("continuous")) {
-      advanced.push({ [mode]: "continuous" });
+      await applyAdvanced(track, { [mode]: "continuous" });
     }
   }
-  if (advanced.length === 0) return;
 
-  try {
-    await track.applyConstraints({ advanced } as MediaTrackConstraints);
-  } catch {
-    /* اختیاری است؛ نبودنش اسکن را متوقف نمی‌کند */
-  }
+  const zoom = caps.zoom as { min?: number; max?: number } | undefined;
+  if (!zoom) return null;
+  const min = zoom.min ?? 1;
+  const max = zoom.max ?? min;
+  const value = preferredInitialZoom(min, max);
+  if (await applyAdvanced(track, { zoom: value })) return value;
+  return null;
 }
 
 function readRawCapabilities(track: MediaStreamTrack): Record<string, unknown> | null {

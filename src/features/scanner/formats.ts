@@ -45,5 +45,64 @@ const SELF_VERIFYING_OUTPUT_FORMATS = new Set([
  * برش ناقص یا انعکاس نور باشد. فرمت ناشناس هم محتاطانه تأیید دوم می‌خواهد.
  */
 export function needsConfirmation(outputFormat: string): boolean {
-  return !SELF_VERIFYING_OUTPUT_FORMATS.has(outputFormat);
+  return !SELF_VERIFYING_OUTPUT_FORMATS.has(normalizeOutputFormat(outputFormat));
 }
+
+/**
+ * نام فرمت BarcodeDetector بومی (`ean_13`) با خروجی zxing (`EAN13`) یکی نیست.
+ * بدون این نگاشت، EAN/CODE-128 بومی اشتباهاً «نیاز به تأیید دوم» می‌گرفت.
+ */
+const FORMAT_ALIASES: Record<string, string> = {
+  ean_13: "EAN13",
+  ean13: "EAN13",
+  ean_8: "EAN8",
+  ean8: "EAN8",
+  upc_a: "UPCA",
+  upca: "UPCA",
+  upc_e: "UPCE",
+  upce: "UPCE",
+  code_128: "Code128",
+  code128: "Code128",
+  code_39: "Code39",
+  code39: "Code39",
+  itf: "ITF",
+  interleaved2of5: "ITF",
+  qr_code: "QRCode",
+  qrcode: "QRCode",
+  data_matrix: "DataMatrix",
+  datamatrix: "DataMatrix",
+  pdf_417: "PDF417",
+  pdf417: "PDF417",
+  aztec: "Aztec",
+  codabar: "Codabar",
+};
+
+export function normalizeOutputFormat(raw: string): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const key = s.toLowerCase().replace(/-/g, "_");
+  return FORMAT_ALIASES[key] ?? s;
+}
+
+/** فرمت‌هایی که به سازندهٔ BarcodeDetector بومی می‌دهیم (نام استاندارد وب). */
+export const NATIVE_FORMATS = [
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "code_128",
+  "qr_code",
+  "code_39",
+  "itf",
+  "data_matrix",
+] as const;
+
+export const CORE_NATIVE_FORMATS = [
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "code_128",
+  "qr_code",
+  "code_39",
+] as const;

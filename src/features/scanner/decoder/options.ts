@@ -28,8 +28,11 @@ export const READER_OPTIONS: ReaderOptions = {
    */
   validateOptionalChecksum: false,
 
-  /** هر بارکد خطی باید در دو خط اسکن یکسان خوانده شود — سد اول برابر خوانش غلط. */
-  minLineCount: 2,
+  /**
+   * ۱ خط برای میان‌رده‌های تار (A55 و مشابه) کافی است.
+   * فرمت‌های بدون رقم کنترلی هنوز با دو خوانش در `accept.ts` تأیید می‌شوند.
+   */
+  minLineCount: 1,
 
   eanAddOnSymbol: "Ignore",
   binarizer: "LocalAverage",

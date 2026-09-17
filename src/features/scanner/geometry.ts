@@ -40,6 +40,65 @@ export function cropSourceRect(
 }
 
 /**
+ * ناحیهٔ واقعی تصویر که با `object-fit: cover` روی صفحه دیده می‌شود.
+ * کادر اسکن روی این ناحیه است، نه روی کل فریم خام دوربین.
+ */
+export function objectFitCoverVisible(
+  videoW: number,
+  videoH: number,
+  displayW: number,
+  displayH: number,
+): { sx: number; sy: number; sw: number; sh: number } {
+  const vw = Math.max(1, videoW);
+  const vh = Math.max(1, videoH);
+  const dw = Math.max(1, displayW);
+  const dh = Math.max(1, displayH);
+  const videoAspect = vw / vh;
+  const displayAspect = dw / dh;
+  if (videoAspect > displayAspect) {
+    const sw = vh * displayAspect;
+    return { sx: (vw - sw) / 2, sy: 0, sw, sh: vh };
+  }
+  const sh = vw / displayAspect;
+  return { sx: 0, sy: (vh - sh) / 2, sw: vw, sh };
+}
+
+/**
+ * کادر روی صفحه را به پیکسل‌های فریم خام نگاشت می‌کند.
+ * اگر اندازهٔ نمایش صفر باشد (هنوز layout نشده)، همان `cropSourceRect` است.
+ */
+export function coverMappedRect(
+  videoW: number,
+  videoH: number,
+  displayW: number,
+  displayH: number,
+  rect: ScanRect,
+): { sx: number; sy: number; sw: number; sh: number } {
+  if (!(displayW > 0) || !(displayH > 0)) return cropSourceRect(videoW, videoH, rect);
+  const vis = objectFitCoverVisible(videoW, videoH, displayW, displayH);
+  const mapped: ScanRect = {
+    x: vis.sx / Math.max(1, videoW) + rect.x * (vis.sw / Math.max(1, videoW)),
+    y: vis.sy / Math.max(1, videoH) + rect.y * (vis.sh / Math.max(1, videoH)),
+    w: rect.w * (vis.sw / Math.max(1, videoW)),
+    h: rect.h * (vis.sh / Math.max(1, videoH)),
+  };
+  return cropSourceRect(videoW, videoH, mapped);
+}
+
+/** کادر کوچک‌تر هم‌مرکز — زوم دیجیتال برای بارکد ریز، بدون عوض کردن لنز. */
+export function insetScanCrop(rect: ScanRect, scale: number): ScanRect {
+  const s = clamp(scale, 0.3, 1);
+  const w = rect.w * s;
+  const h = rect.h * s;
+  return {
+    x: rect.x + (rect.w - w) / 2,
+    y: rect.y + (rect.h - h) / 2,
+    w,
+    h,
+  };
+}
+
+/**
  * کوچک‌کردن متناسب تا زیر سقف پیکسل جا شود. هرگز بزرگ‌نمایی نمی‌کند —
  * بزرگ‌نمایی فقط پیکسل جعلی می‌سازد و دیکود را کند می‌کند.
  */

@@ -21,14 +21,17 @@ import {
   readCapabilities,
   stopStream,
 } from "./camera";
+import { shouldReusePrimedCamera } from "./camera-select";
 import { Decoder } from "./decoder";
 import { FrameSource, closeGrab } from "./frame-source";
-import type { ScanRect } from "./geometry";
+import { insetScanCrop, type ScanRect } from "./geometry";
+import { NativeScanner } from "./native";
 
 export type ScannerStatus = {
   phase: "starting" | "running" | "error";
   error: string | null;
   engine: "worker" | "main" | null;
+  native: boolean;
   torchSupported: boolean;
   torchOn: boolean;
   zoom: { min: number; max: number; value: number } | null;
@@ -59,8 +62,10 @@ const FRAME_STALL_MS = 4000;
 export class ScannerSession {
   private opts: SessionOptions;
   private decoder = new Decoder();
+  private native = new NativeScanner();
   private frames = new FrameSource();
   private accept: AcceptState = initialAcceptState;
+  private roiTick = 0;
 
   private stream: MediaStream | null = null;
   private candidates: string[] = [];
@@ -78,6 +83,7 @@ export class ScannerSession {
     phase: "starting",
     error: null,
     engine: null,
+    native: false,
     torchSupported: false,
     torchOn: false,
     zoom: null,
@@ -94,7 +100,8 @@ export class ScannerSession {
     try {
       await this.decoder.start();
       if (this.disposed) return;
-      this.patch({ engine: this.decoder.mode });
+      this.native.start();
+      this.patch({ engine: this.decoder.mode, native: this.native.active });
 
       await this.openBestCamera();
       if (this.disposed) return;
@@ -131,12 +138,12 @@ export class ScannerSession {
     this.candidates = await listRearCameras();
     this.patch({ cameraCount: this.candidates.length });
 
-    // اگر استریم اولیه از قبل دوربین عقب است، همان را امتحان کن تا یک
-    // getUserMedia اضافه (و پرش تصویر) نداشته باشیم.
-    if (!isFrontStream(primed)) {
-      const activeId = primed.getVideoTracks()[0]?.getSettings?.().deviceId;
-      const index = activeId ? this.candidates.indexOf(activeId) : -1;
-      if (await this.adopt(primed, index >= 0 ? index : 0)) return;
+    const primedId = primed.getVideoTracks()[0]?.getSettings?.().deviceId;
+    const reuse =
+      !isFrontStream(primed) && shouldReusePrimedCamera(primedId, this.candidates);
+
+    if (reuse) {
+      if (await this.adopt(primed, 0)) return;
     } else {
       stopStream(primed);
     }
@@ -173,7 +180,7 @@ export class ScannerSession {
     this.lastFrameAt = Date.now();
 
     const track = stream.getVideoTracks()[0];
-    await applyPreferredSettings(track);
+    const appliedZoom = await applyPreferredSettings(track);
     if (this.disposed) return true;
 
     const caps = readCapabilities(track);
@@ -181,7 +188,7 @@ export class ScannerSession {
       cameraIndex: index,
       torchSupported: caps.torch,
       torchOn: false,
-      zoom: caps.zoom ? { ...caps.zoom, value: caps.zoom.min } : null,
+      zoom: zoomStatus(caps.zoom, appliedZoom),
     });
     return true;
   }
@@ -244,23 +251,40 @@ export class ScannerSession {
     this.lastFrameAt = Date.now();
     this.frameCount++;
 
-    const grab = await this.frames.grab(video, this.opts.getRect(), this.decoder.acceptsBitmap);
+    // Native روی خودِ ویدیو؛ منتظرش نمی‌مانیم تا آویزان شدنش ZXing را نکشد.
+    if (this.native.active) {
+      this.native.kick(video, (hit) => this.handleHit(hit.text, hit.format));
+    }
+
+    if (this.status.native !== this.native.active) {
+      this.patch({ native: this.native.active });
+    }
+
+    this.roiTick += 1;
+    const rect =
+      this.roiTick % 2 === 1
+        ? insetScanCrop(this.opts.getRect(), 0.62)
+        : this.opts.getRect();
+
+    const grab = await this.frames.grab(video, rect, this.decoder.acceptsBitmap);
     if (!grab) return;
     if (this.disposed || this.opts.isPaused()) {
       closeGrab(grab);
       return;
     }
 
-    // مالکیت grab از اینجا به دیکودر منتقل می‌شود (bitmap را خودش می‌بندد).
     const hit = await this.decoder.decode(grab);
     if (!hit || this.disposed || this.opts.isPaused()) return;
+    this.handleHit(hit.text, hit.format);
+  }
 
-    const decision = acceptScan(this.accept, hit.text, hit.format, Date.now());
+  private handleHit(text: string, format: string): void {
+    if (this.disposed || this.opts.isPaused()) return;
+    const decision = acceptScan(this.accept, text, format, Date.now());
     this.accept = decision.state;
     if (!decision.emit) return;
-
     this.signalSuccess();
-    this.opts.onCode(decision.emit, hit.format);
+    this.opts.onCode(decision.emit, format);
   }
 
   /** فریم نمی‌آید: دوربین را دیگری گرفته یا این لنز مرده. لنز بعدی را امتحان کن. */
@@ -390,6 +414,7 @@ export class ScannerSession {
     }
 
     this.decoder.dispose();
+    this.native.dispose();
     this.frames.dispose();
 
     stopStream(this.stream);
@@ -404,4 +429,14 @@ export class ScannerSession {
     this.audio = null;
     if (audio) void audio.close().catch(() => {});
   }
+}
+
+function zoomStatus(
+  zoom: { min: number; max: number } | null,
+  applied: number | null,
+): { min: number; max: number; value: number } | null {
+  if (!zoom) return null;
+  const value =
+    applied ?? Math.min(zoom.max, Math.max(zoom.min, 1));
+  return { ...zoom, value };
 }

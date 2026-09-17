@@ -227,10 +227,32 @@ async function getAuthUserByEmailSafe(supabaseAdmin: any, email: string): Promis
   }
 }
 
+/** فقط خواندن صفحه‌به‌صفحه — هیچ UPDATE/DELETEای اینجا نیست. */
+async function listAllPaged(
+  supabaseAdmin: any,
+  table: string,
+  columns: string,
+  orderBy?: string,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  const pageSize = 1000;
+  for (let page = 0; page < 100; page++) {
+    const from = page * pageSize;
+    let q = supabaseAdmin.from(table).select(columns).range(from, from + pageSize - 1);
+    if (orderBy) q = q.order(orderBy, { ascending: false });
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
 async function listAllAuthUsers(supabaseAdmin: any): Promise<AuthListUser[]> {
   const out: AuthListUser[] = [];
   const perPage = 1000;
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; page <= 100; page++) {
     const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
     if (error) throw new Error(error.message);
     const users = (data?.users ?? []) as AuthListUser[];
@@ -244,36 +266,20 @@ const PROFILE_LIST_COLS =
   "id, username, first_name, last_name, plan, status, start_date, end_date, created_at";
 
 async function listAllProfiles(supabaseAdmin: any): Promise<AdminListedUser[]> {
-  const out: AdminListedUser[] = [];
-  const pageSize = 1000;
-  for (let from = 0; from < pageSize * 50; from += pageSize) {
-    const { data, error } = await supabaseAdmin
-      .from("profiles")
-      .select(PROFILE_LIST_COLS)
-      .order("created_at", { ascending: false })
-      .range(from, from + pageSize - 1);
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as AdminListedUser[];
-    out.push(...rows);
-    if (rows.length < pageSize) break;
-  }
-  return out;
+  return (await listAllPaged(supabaseAdmin, "profiles", PROFILE_LIST_COLS, "created_at")) as AdminListedUser[];
 }
 
 async function listAllUserDataIds(supabaseAdmin: any): Promise<string[]> {
-  const out: string[] = [];
-  const pageSize = 1000;
-  for (let from = 0; from < pageSize * 50; from += pageSize) {
-    const { data, error } = await supabaseAdmin
-      .from("user_data")
-      .select("user_id")
-      .range(from, from + pageSize - 1);
-    if (error) break;
-    const rows = (data ?? []) as { user_id?: string | null }[];
-    for (const r of rows) if (r.user_id) out.push(r.user_id);
-    if (rows.length < pageSize) break;
+  try {
+    const rows = await listAllPaged(supabaseAdmin, "user_data", "user_id");
+    return rows.map((r) => String(r.user_id ?? "")).filter(Boolean);
+  } catch {
+    return [];
   }
-  return out;
+}
+
+async function listAllSignupRequests(supabaseAdmin: any): Promise<Record<string, unknown>[]> {
+  return listAllPaged(supabaseAdmin, "signup_requests", "*", "created_at");
 }
 
 function phonesFromAuthUsers(users: AuthListUser[]): Record<string, string | null> {
@@ -1316,13 +1322,9 @@ export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: requests, error: reqErr } = await supabaseAdmin
-      .from("signup_requests")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (reqErr) throw new Error(reqErr.message);
+    const requests = await listAllSignupRequests(supabaseAdmin);
 
-    return (requests ?? []).map((r: Record<string, unknown>) => ({
+    return requests.map((r: Record<string, unknown>) => ({
       ...r,
       phone: (r.phone as string | null) || null,
     }));
@@ -1525,6 +1527,7 @@ async function collectAccountTraces(
 }
 
 // ─── Admin: full user list (all profile pages + auth-only accounts) ──────────
+// فقط SELECT. وضعیت اشتراک، دادهٔ کاربر و حساب ورود را تغییر/حذف نمی‌کند.
 export const adminListAllUsers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

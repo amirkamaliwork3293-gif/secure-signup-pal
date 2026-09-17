@@ -135,6 +135,10 @@ function fillNamesFromAuth(profile: AdminListedUser, auth: AuthListUser): void {
   if (!profile.last_name && names.last_name) profile.last_name = names.last_name;
 }
 
+/**
+ * ادغام فقط برای نمایش است: وضعیت/تاریخ اشتراک پروفایل موجود را عوض نمی‌کند
+ * و هیچ ردیفی را به‌خاطر منقضی/فعال/در انتظار بودن حذف نمی‌کند.
+ */
 export function mergeAdminUsers(
   profiles: AdminListedUser[],
   authUsers: AuthListUser[],
@@ -171,6 +175,18 @@ export function mergeAdminUsers(
     return tb - ta;
   });
   return { users, phones };
+}
+
+export type AdminStatusFilter = "all" | "active" | "expired" | "pending" | "rejected";
+
+/** فیلتر نمایش پنل — پیش‌فرض «همه» است و کسی را از دیتابیس پاک نمی‌کند. */
+export function filterListedUsersByStatus<T extends { status?: string | null; end_date?: string | null }>(
+  users: T[],
+  filter: AdminStatusFilter,
+  kindOf: (u: T) => "pending" | "rejected" | "expired" | "active",
+): T[] {
+  if (filter === "all") return users;
+  return users.filter((u) => kindOf(u) === filter);
 }
 
 /** اگر جستجو یوزرنیم دقیق را پیدا نکرد، این کاربر را به فهرست اضافه می‌کند. */

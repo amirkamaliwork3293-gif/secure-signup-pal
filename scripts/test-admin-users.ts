@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import {
   dataOnlyStubUser,
+  filterListedUsersByStatus,
   mergeAdminUsers,
   persianSearchVariants,
   postgrestQuotedIlike,
@@ -16,6 +17,7 @@ import {
   upsertListedUser,
 } from "../src/lib/admin-users.ts";
 import { filterAndRankSearch, identitySearchFields } from "../src/lib/search.ts";
+import { profileAccessKind } from "../src/lib/subscription-access.ts";
 
 const older = {
   id: "p-old",
@@ -131,5 +133,47 @@ assert.ok(persianSearchVariants("مصطفی").includes("مصطفي") || persianS
 assert.equal(traceMatchesQuery("m.soleimani", ["m.soleimani", "مصطفی سلیمانی"]), true);
 assert.equal(traceMatchesQuery("مصطفی سلیمانی", ["مصطفی", "سلیمانی"]), true);
 assert.equal(traceMatchesQuery("سلیمانی", ["علی رضایی"]), false);
+
+{
+  const expired = {
+    id: "exp-1",
+    username: "oldshop",
+    first_name: "رضا",
+    last_name: "محمدی",
+    plan: "1month",
+    status: "expired",
+    start_date: "2025-01-01T00:00:00.000Z",
+    end_date: "2025-02-01T00:00:00.000Z",
+    created_at: "2025-01-01T00:00:00.000Z",
+  };
+  const pending = { ...expired, id: "pen-1", username: "waiting", status: "pending", end_date: null };
+  const rejected = { ...expired, id: "rej-1", username: "nope", status: "rejected", end_date: null };
+  const mixed = mergeAdminUsers(
+    [expired, pending, rejected, newer],
+    [
+      { id: expired.id, email: "oldshop@kamali.local", user_metadata: { username: "oldshop" } },
+    ],
+  );
+  assert.equal(mixed.users.length, 4, "منقضی/در انتظار/ردشده حذف نمی‌شوند");
+  const keptExp = mixed.users.find((u) => u.id === "exp-1");
+  assert.equal(keptExp?.status, "expired");
+  assert.equal(keptExp?.end_date, expired.end_date);
+  assert.equal(keptExp?.missing_profile, false);
+  assert.ok(mixed.users.some((u) => u.status === "pending"));
+  assert.ok(mixed.users.some((u) => u.status === "rejected"));
+  assert.ok(mixed.users.some((u) => u.username === "newuser"));
+}
+
+{
+  const rows = [
+    { status: "active", end_date: "2099-01-01T00:00:00.000Z" },
+    { status: "expired", end_date: "2020-01-01T00:00:00.000Z" },
+    { status: "pending", end_date: null },
+    { status: "rejected", end_date: null },
+  ];
+  assert.equal(filterListedUsersByStatus(rows, "all", profileAccessKind).length, 4);
+  assert.equal(filterListedUsersByStatus(rows, "expired", profileAccessKind).length, 1);
+  assert.equal(filterListedUsersByStatus(rows, "active", profileAccessKind)[0]?.status, "active");
+}
 
 console.log("admin-users tests passed");

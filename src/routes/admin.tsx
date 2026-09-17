@@ -14,6 +14,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { LandingEditor } from "@/components/admin/LandingEditor";
 import { useAuth } from "@/lib/AuthContext";
 import { profileAccessKind } from "@/lib/subscription-access";
+import { filterListedUsersByStatus, type AccountTrace, type AdminStatusFilter } from "@/lib/admin-users";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
@@ -24,7 +25,6 @@ import {
   adminListAllUsers, adminLookupUser,
   type PasswordResetRequestRow, type UserDataBackupPreview, type AdminLookupResult,
 } from "@/lib/auth.functions";
-import type { AccountTrace } from "@/lib/admin-users";
 import {
   DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
 } from "@/lib/plans";
@@ -593,6 +593,7 @@ function UsersTab({
   const [extraPhones, setExtraPhones] = useState<Record<string, string | null>>({});
   const [traces, setTraces] = useState<AccountTrace[]>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<AdminStatusFilter>("all");
 
   const phoneOf = (u: UserProfile) =>
     extraPhones[u.username?.toLowerCase()] || phones[u.username?.toLowerCase()] || null;
@@ -602,12 +603,22 @@ function UsersTab({
     return [...users, ...extraUsers.filter((u) => !seen.has(u.id))];
   })();
 
-  const filtered = filterAndRankSearch(pool, searchQ, (u) =>
+  const scoped = filterListedUsersByStatus(pool, statusFilter, (u) => profileAccessKind(u));
+
+  const filtered = filterAndRankSearch(scoped, searchQ, (u) =>
     identitySearchFields(
       { username: u.username, first_name: u.first_name, last_name: u.last_name },
       phoneOf(u),
     ),
   );
+
+  const statusCounts: { id: AdminStatusFilter; label: string; n: number }[] = [
+    { id: "all", label: "همه", n: pool.length },
+    { id: "active", label: "فعال", n: pool.filter((u) => profileAccessKind(u) === "active").length },
+    { id: "expired", label: "منقضی", n: pool.filter((u) => profileAccessKind(u) === "expired").length },
+    { id: "pending", label: "در انتظار", n: pool.filter((u) => profileAccessKind(u) === "pending").length },
+    { id: "rejected", label: "رد شده", n: pool.filter((u) => profileAccessKind(u) === "rejected").length },
+  ];
 
   useEffect(() => {
     const q = searchQ.trim();
@@ -674,11 +685,27 @@ function UsersTab({
       <AdminSearchBox
         value={searchQ}
         onChange={setSearchQ}
-        placeholder="مثلاً m.soleimani یا مصطفی سلیمانی..."
+        placeholder="جستجوی نام، یوزرنیم یا شماره — همه حساب‌ها بدون سقف"
       />
+      <div className="flex gap-1 overflow-x-auto">
+        {statusCounts.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setStatusFilter(s.id)}
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+              statusFilter === s.id
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {s.label} ({s.n.toLocaleString("fa-IR")})
+          </button>
+        ))}
+      </div>
       <div className="text-[11px] text-muted-foreground">
-        {users.length.toLocaleString("fa-IR")} حساب بارگذاری شده
-        {searchQ.trim() ? ` · ${filtered.length.toLocaleString("fa-IR")} نتیجه` : ""}
+        {users.length.toLocaleString("fa-IR")} حساب بارگذاری‌شده — فعال، منقضی، در انتظار و ردشده همه اینجاست
+        {searchQ.trim() || statusFilter !== "all" ? ` · ${filtered.length.toLocaleString("fa-IR")} نتیجه` : ""}
         {lookupLoading ? " · در حال جستجو در سوپابیس..." : ""}
       </div>
 

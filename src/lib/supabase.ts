@@ -20,6 +20,8 @@ export type UserProfile = {
   start_date: string | null;
   end_date: string | null;
   created_at: string;
+  /** حساب auth هست ولی ردیف profiles نیست — فقط در پنل ادمین برای پیدا کردن داده */
+  missing_profile?: boolean;
 };
 
 export type SignupRequest = {

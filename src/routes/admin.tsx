@@ -17,12 +17,14 @@ import { profileAccessKind } from "@/lib/subscription-access";
 import {
   approveSignupRequest, rejectSignupRequest, updateCardSettings,
   extendUserSubscription, deleteUserAccount, updatePlanPrices, getReceiptSignedUrl,
-  updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone, adminGetUserPhones,
+  updatePlanConfigs, adminResetUserPassword, adminGetRequestsWithPhone,
   adminClearSignupTempPassword,
   adminListPasswordResetRequests, adminAckPasswordReset,
   adminListUserDataBackups, adminRestoreUserDataBackup, adminMergeAllUserDataBackups,
-  type PasswordResetRequestRow, type UserDataBackupPreview,
+  adminListAllUsers, adminLookupUser,
+  type PasswordResetRequestRow, type UserDataBackupPreview, type AdminLookupResult,
 } from "@/lib/auth.functions";
+import type { AccountTrace } from "@/lib/admin-users";
 import {
   DEFAULT_PLANS, normalizePlans, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig,
 } from "@/lib/plans";
@@ -96,7 +98,7 @@ function AdminPage() {
   const delUser = useServerFn(deleteUserAccount);
   const resetPwd = useServerFn(adminResetUserPassword);
   const getRequests = useServerFn(adminGetRequestsWithPhone);
-  const getPhones = useServerFn(adminGetUserPhones);
+  const getAllUsers = useServerFn(adminListAllUsers);
   const getResetReqs = useServerFn(adminListPasswordResetRequests);
 
   const fetchAll = async () => {
@@ -108,19 +110,18 @@ function AdminPage() {
     }
 
     setLoading(true);
-    const [requestsData, u, phoneMap, resets] = await Promise.all([
+    const [requestsData, listed, resets] = await Promise.all([
       getRequests(),
-      supabase.from("profiles").select("*").order("created_at", { ascending: false }),
-      getPhones().catch(() => ({} as Record<string, string | null>)),
+      getAllUsers(),
       getResetReqs().catch(() => [] as PasswordResetRequestRow[]),
     ]);
 
-    if (u.error) throw new Error(u.error.message);
-
     const reqs = (requestsData as unknown as SignupRequest[]) || [];
+    const listedUsers = ((listed as { users?: UserProfile[] } | null)?.users ?? []) as UserProfile[];
+    const listedPhones = ((listed as { phones?: Record<string, string | null> } | null)?.phones ?? {}) as Record<string, string | null>;
     setRequests(reqs);
-    setUsers((u.data as UserProfile[]) || []);
-    setPhones(mergeAdminPhones((phoneMap as Record<string, string | null>) || {}, reqs));
+    setUsers(listedUsers);
+    setPhones(mergeAdminPhones(listedPhones, reqs));
     setResetRequests((resets as PasswordResetRequestRow[]) || []);
     setLoading(false);
   };
@@ -236,7 +237,7 @@ function AdminPage() {
             { id: "resets" as Tab, label: `بازیابی رمز (${pendingResets.length})`, icon: KeyRound },
             { id: "renewals" as Tab, label: "تمدید‌ها", icon: BellRing },
             { id: "customers" as Tab, label: "مشتریان", icon: CalendarClock },
-            { id: "users" as Tab, label: "کاربران", icon: Users },
+            { id: "users" as Tab, label: `کاربران (${users.length})`, icon: Users },
             { id: "plans" as Tab, label: "پلن‌ها", icon: Package },
             { id: "settings" as Tab, label: "تنظیمات", icon: CreditCard },
             { id: "landing" as Tab, label: "معرفی", icon: ImageIcon },
@@ -587,13 +588,55 @@ function UsersTab({
   const [deleteAdminPwd, setDeleteAdminPwd] = useState("");
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [backupTarget, setBackupTarget] = useState<UserProfile | null>(null);
+  const lookupFn = useServerFn(adminLookupUser);
+  const [extraUsers, setExtraUsers] = useState<UserProfile[]>([]);
+  const [extraPhones, setExtraPhones] = useState<Record<string, string | null>>({});
+  const [traces, setTraces] = useState<AccountTrace[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
 
-  const filtered = filterAndRankSearch(users, searchQ, (u) =>
+  const phoneOf = (u: UserProfile) =>
+    extraPhones[u.username?.toLowerCase()] || phones[u.username?.toLowerCase()] || null;
+
+  const pool = (() => {
+    const seen = new Set(users.map((u) => u.id));
+    return [...users, ...extraUsers.filter((u) => !seen.has(u.id))];
+  })();
+
+  const filtered = filterAndRankSearch(pool, searchQ, (u) =>
     identitySearchFields(
       { username: u.username, first_name: u.first_name, last_name: u.last_name },
-      phones[u.username?.toLowerCase()] || null,
+      phoneOf(u),
     ),
   );
+
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (q.length < 2) {
+      setExtraUsers([]);
+      setExtraPhones({});
+      setTraces([]);
+      setLookupLoading(false);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setLookupLoading(true);
+      void lookupFn({ data: { query: q } })
+        .then((res) => {
+          const found = res as AdminLookupResult;
+          setExtraUsers((found.users ?? []) as UserProfile[]);
+          setExtraPhones(found.phones ?? {});
+          setTraces(found.traces ?? []);
+        })
+        .catch(() => {
+          setExtraUsers([]);
+          setTraces([]);
+        })
+        .finally(() => setLookupLoading(false));
+    }, 350);
+    return () => window.clearTimeout(t);
+    // lookupFn از useServerFn پایدار است؛ وابستگی به آن حلقهٔ رندر می‌سازد.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQ]);
 
   const handlePwdReset = async () => {
     if (!resetTarget || newPwd.length < 8 || !adminPwd) return;
@@ -631,13 +674,41 @@ function UsersTab({
       <AdminSearchBox
         value={searchQ}
         onChange={setSearchQ}
-        placeholder="جستجوی نام، یوزرنیم یا شماره تلفن..."
+        placeholder="مثلاً m.soleimani یا مصطفی سلیمانی..."
       />
+      <div className="text-[11px] text-muted-foreground">
+        {users.length.toLocaleString("fa-IR")} حساب بارگذاری شده
+        {searchQ.trim() ? ` · ${filtered.length.toLocaleString("fa-IR")} نتیجه` : ""}
+        {lookupLoading ? " · در حال جستجو در سوپابیس..." : ""}
+      </div>
+
+      {traces.length > 0 && (
+        <div className="space-y-2 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3">
+          <div className="text-xs font-semibold text-amber-800 dark:text-amber-300">ردپا در سوپابیس</div>
+          <ul className="space-y-1.5">
+            {traces.map((t, i) => (
+              <li key={`${t.source}-${t.created_at ?? i}-${t.username ?? i}`} className="text-[11px] leading-5">
+                <span className="font-medium">{t.title}</span>
+                <span className="text-muted-foreground"> — {t.detail}</span>
+                {t.created_at ? (
+                  <span className="text-muted-foreground"> ({formatJalaliDateTime(t.created_at)})</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {filtered.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
           <Users className="mx-auto mb-2 h-8 w-8 opacity-30" />
-          {users.length === 0 ? "کاربری ثبت نشده" : "کاربری یافت نشد"}
+          {lookupLoading
+            ? "در حال جستجو در همه حساب‌ها..."
+            : users.length === 0
+              ? "کاربری ثبت نشده"
+              : traces.length > 0
+                ? "حساب ورود زنده پیدا نشد؛ ردپاهای بالا را ببینید."
+                : "کاربری یافت نشد"}
         </div>
       )}
 
@@ -656,9 +727,14 @@ function UsersTab({
                     {u.first_name || "—"} {u.last_name || ""}
                     <span dir="ltr" className="ml-2 text-xs text-muted-foreground">@{u.username}</span>
                   </div>
-                  {phones[u.username?.toLowerCase()] ? (
+                  {phoneOf(u) ? (
                     <div dir="ltr" className="mt-0.5 text-xs text-muted-foreground">
-                      {phones[u.username.toLowerCase()]}
+                      {phoneOf(u)}
+                    </div>
+                  ) : null}
+                  {u.missing_profile ? (
+                    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+                      پروفایل ناقص است — داده و تغییر رمز از همین‌جا ممکن است
                     </div>
                   ) : null}
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -847,7 +923,7 @@ function UsersTab({
       {messageTarget && (
         <MessageUserModal
           user={messageTarget}
-          phone={phones[messageTarget.username?.toLowerCase()] || null}
+          phone={phoneOf(messageTarget)}
           onClose={() => setMessageTarget(null)}
         />
       )}

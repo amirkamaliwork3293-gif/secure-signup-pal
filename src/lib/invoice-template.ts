@@ -420,7 +420,7 @@ export function buildTemplatedInvoiceHTML(
     )
     .join("");
 
-  const head = cols.map((c) => `<th>${esc(c.label)}</th>`).join("");
+  const head = cols.map((c) => `<th class="c-${c.key}">${esc(c.label)}</th>`).join("");
   const rows = inv.items
     .map(
       (item, i) =>
@@ -428,17 +428,17 @@ export function buildTemplatedInvoiceHTML(
     )
     .join("");
 
-  const sideBlocks = [
+  const closing = [
     inv.notes
-      ? `<div class="note-card"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>`
+      ? `<div class="note"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>`
       : "",
     t.footerNote
-      ? `<div class="note-card"><h3>${invoiceIcon("doc")}شرایط و یادداشت</h3><p>${esc(t.footerNote)}</p></div>`
+      ? `<div class="note"><h3>${invoiceIcon("doc")}شرایط و یادداشت</h3><p>${esc(t.footerNote)}</p></div>`
       : "",
     t.showSignatures
       ? `<div class="signs">
-          <div class="sign-box"><strong>${invoiceIcon("seal")}${esc(t.sellerSignLabel)}</strong></div>
-          <div class="sign-box"><strong>${invoiceIcon("pen")}${esc(t.buyerSignLabel)}</strong></div>
+          <div class="sign"><span class="ln"></span><span class="lbl">${invoiceIcon("seal")}${esc(t.sellerSignLabel)}</span></div>
+          <div class="sign"><span class="ln"></span><span class="lbl">${invoiceIcon("pen")}${esc(t.buyerSignLabel)}</span></div>
         </div>`
       : "",
   ]
@@ -453,21 +453,14 @@ export function buildTemplatedInvoiceHTML(
     note: `${inv.id.toUpperCase()} · ${date}`,
   })}
   ${blocksHtml}
-  <div class="items-wrap"><table class="tpl"><colgroup>${colGroup}</colgroup><thead><tr>${head}</tr></thead><tbody>${
+  <div class="ledger"><table class="tpl"><colgroup>${colGroup}</colgroup><thead><tr>${head}</tr></thead><tbody>${
     rows ||
     `<tr class="empty-row"><td colspan="${Math.max(1, cols.length)}">قلمی ثبت نشده است</td></tr>`
   }</tbody></table></div>
-  ${
-    t.showTotals || sideBlocks
-      ? `<div class="finale">
-    ${t.showTotals ? invoicePayCardHtml(inv) : ""}
-    ${sideBlocks ? `<div class="side">${sideBlocks}</div>` : ""}
-  </div>`
-      : ""
-  }
-  </div>
-  ${invoiceFooterHtml(inv, accent)}
-</div>`;
+  ${t.showTotals ? invoicePayCardHtml(inv) : ""}
+  ${closing ? `<div class="closing">${closing}</div>` : ""}
+  ${invoiceFooterHtml(inv)}
+  </div></div>`;
 
   return wrapInvoiceHtml({
     title: `${docTitle} ${inv.id.toUpperCase()}`,

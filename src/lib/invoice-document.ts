@@ -253,7 +253,7 @@ export function invoicePageAssets(
   #print-root { width: 100%; }
   thead { display: table-header-group; }
   tfoot { display: table-footer-group; }
-  tr, .party, .sign, .folio, .note, .block, .seal { break-inside: avoid; page-break-inside: avoid; }
+  tr, .party, .sign, .note, .block, .seal { break-inside: avoid; page-break-inside: avoid; }
   @media print {
     html, body { background: #fff !important; padding: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     #print-root, .sheet { box-shadow: none !important; border-radius: 0 !important; }
@@ -280,9 +280,9 @@ export function invoiceChromeCss(opts: {
   const fs = opts.fontSize;
   const p = invoicePalette(opts.accent);
   const c = !!opts.compact;
-  const pad = c ? 14 : 22;
-  const gap = c ? 12 : 18;
-  const rowPad = c ? "8px 6px" : "12px 8px";
+  const pad = c ? 12 : 22;
+  const gap = c ? 9 : 18;
+  const rowPad = c ? "6px 5px" : "12px 8px";
   const px = (mult: number) => `${Math.round(fs * mult)}px`;
   const gold = p.gold;
   const g = (t: number) => alphaColor(gold, t);
@@ -358,7 +358,7 @@ export function invoiceChromeCss(opts: {
   .kv .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
 
   /* ─── دفتر اقلام ────────────────────────────────────────────────────── */
-  .ledger{margin-top:${c ? 14 : 22}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .ledger{margin-top:${c ? 10 : 22}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   table.items, table.tpl{width:100%;border-collapse:collapse;table-layout:fixed}
   table.items thead th, table.tpl thead th{padding:${c ? "0 6px 7px" : "0 8px 9px"};font-size:${px(0.68)};font-weight:700;
     color:${p.bronze};text-align:center;white-space:nowrap;background:transparent;
@@ -377,7 +377,7 @@ export function invoiceChromeCss(opts: {
   .empty-row td{color:${p.muted};font-size:${px(0.85)};padding:${c ? 14 : 20}px 0}
 
   /* ─── مبلغ — بزرگ‌ترین عدد سند ──────────────────────────────────────── */
-  .folio{margin-top:${c ? 16 : 24}px;padding-top:${c ? 12 : 16}px;border-top:1px solid ${gold};box-shadow:0 -2px 0 ${wine(0.35)};
+  .folio{margin-top:${c ? 10 : 24}px;padding-top:${c ? 8 : 16}px;border-top:1px solid ${gold};box-shadow:0 -2px 0 ${wine(0.35)};
     display:flex;gap:${c ? 12 : 20}px;align-items:flex-end;flex-wrap:wrap}
   .pay-list{flex:1 1 ${c ? 180 : 220}px;min-width:0}
   .pay-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:${px(0.82)};padding:${c ? "1px 0" : "3px 0"}}
@@ -396,7 +396,7 @@ export function invoiceChromeCss(opts: {
   .pay-words b{color:${p.accent};font-weight:700}
 
   /* ─── توضیحات، امضا، پانویس ─────────────────────────────────────────── */
-  .closing{margin-top:${c ? 14 : 20}px;display:flex;gap:${c ? 14 : 22}px;align-items:flex-start;flex-wrap:wrap}
+  .closing{margin-top:${c ? 10 : 20}px;display:flex;gap:${c ? 10 : 22}px;align-items:flex-start;flex-wrap:wrap}
   .note{flex:1 1 ${c ? 200 : 250}px;min-width:0}
   .note h3{font-size:${px(0.68)};font-weight:700;color:${p.bronze};margin-bottom:3px}
   .note p{font-size:${px(0.84)};color:${p.ink};line-height:1.8;white-space:pre-line;word-break:break-word}

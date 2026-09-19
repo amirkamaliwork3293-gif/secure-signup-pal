@@ -415,7 +415,9 @@ export function buildTemplatedInvoiceHTML(
   };
   const weightSum = cols.reduce((s, c) => s + (COL_WEIGHT[c.key] || 10), 0) || 1;
   const colGroup = cols
-    .map((c) => `<col style="width:${(((COL_WEIGHT[c.key] || 10) / weightSum) * 100).toFixed(2)}%"/>`)
+    .map(
+      (c) => `<col style="width:${(((COL_WEIGHT[c.key] || 10) / weightSum) * 100).toFixed(2)}%"/>`,
+    )
     .join("");
 
   const head = cols.map((c) => `<th>${esc(c.label)}</th>`).join("");

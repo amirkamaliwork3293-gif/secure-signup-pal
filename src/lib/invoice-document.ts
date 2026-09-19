@@ -361,7 +361,7 @@ export function invoiceChromeCss(opts: {
   table.items td.sum{width:20%;font-variant-numeric:tabular-nums;font-weight:800;color:${p.accent}}
   .row-tag{display:inline-block;margin-right:6px;border-radius:999px;padding:1px 7px;font-size:${px(0.68)};font-weight:700;
     background:#eef8f2;color:${p.success};border:1px solid #cdeadb}
-  .was{display:block;color:${p.muted};font-size:.82em;line-height:1.35}
+  .was{display:block;color:${p.muted};font-size:${px(0.78)};line-height:1.45;font-variant-numeric:tabular-nums}
   .empty-row td{color:${p.muted};font-size:${px(0.85)}}
 
   /* جمع‌بندی، توضیحات و امضا */
@@ -394,9 +394,9 @@ export function invoiceChromeCss(opts: {
   .sign-box strong{display:flex;align-items:center;gap:6px;color:${p.accent};font-size:${px(0.78)};font-weight:700}
 
   /* پانویس */
-  .foot{position:relative;margin-top:${opts.compact ? 12 : 18}px}
-  .foot svg.wave{display:block;width:100%;height:${opts.compact ? 26 : 34}px}
-  .foot-in{background:${p.deep};color:rgba(255,255,255,.88);padding:${opts.compact ? "8px 16px" : "10px 20px"};
+  .foot{position:relative;margin-top:${opts.compact ? 10 : 14}px}
+  .foot svg.wave{display:block;width:100%;height:${opts.compact ? 22 : 28}px}
+  .foot-in{background:${p.deep};color:rgba(255,255,255,.88);padding:${opts.compact ? "7px 16px" : "9px 20px"};
     display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:${px(0.74)}}
   .foot-in .thanks{font-weight:700;color:#fff;display:inline-flex;align-items:center;gap:6px}
   .foot-in .ways{display:flex;flex-wrap:wrap;gap:4px 14px;justify-content:flex-start}

@@ -105,7 +105,7 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-[#edefec] p-2 sm:p-4">
+        <div className="min-h-0 flex-1 overflow-auto bg-[#e8dfd0] p-2 sm:p-4">
           <iframe
             title={title}
             srcDoc={screenHtml}

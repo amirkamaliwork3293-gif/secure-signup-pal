@@ -31,8 +31,6 @@ import { escapeHtml } from "@/lib/html-escape";
 export type InvoiceHtmlMode = "screen" | "print";
 
 export const DEFAULT_INVOICE_ACCENT = "#232c63";
-/** رنگ مکمل روشن — برای خط‌های تزئینی و درخشش ملایم پس‌زمینه */
-export const DEFAULT_INVOICE_GLOW = "#6f6cf0";
 
 const esc = escapeHtml;
 
@@ -557,12 +555,6 @@ export function invoicePayCardHtml(inv: Invoice): string {
   </section>`;
 }
 
-function shopMetaLine(inv: Invoice): string {
-  return [inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""]
-    .filter(Boolean)
-    .join("  ·  ");
-}
-
 /** خانه‌های کارت اطلاعات فاکتور — فقط داده‌ای که واقعاً روی فاکتور هست */
 function metaCardHtml(inv: Invoice): string {
   const t = invoiceTotals(inv);
@@ -652,7 +644,11 @@ export function buildDefaultInvoiceHTML(
     .join("");
 
   const inner = `<div class="sheet"><div class="doc">
-  ${invoiceHeroHtml(inv, { docTitle, subtitle: shopMetaLine(inv) ? undefined : `${docTitle} کالا و خدمات` })}
+  ${invoiceHeroHtml(inv, {
+    docTitle,
+    // وقتی تماس و نشانی فروشگاه ثبت نشده، زیرِ نام برند خالی نماند
+    subtitle: inv.shopPhone || inv.shopAddress ? undefined : `${docTitle} کالا و خدمات`,
+  })}
   ${metaCardHtml(inv)}
   <div class="parties">
     ${partyHtml("اطلاعات فروشنده", "store", [

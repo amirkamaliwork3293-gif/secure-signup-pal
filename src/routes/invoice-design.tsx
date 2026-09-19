@@ -492,7 +492,7 @@ function InvoiceDesignPage() {
             <iframe
               title="پیش‌نمایش فاکتور"
               srcDoc={previewHtml}
-              className="h-[78vh] w-full border-0 bg-[#d7e0ea]"
+              className="h-[78vh] w-full border-0 bg-[#e8ecf6]"
             />
           </div>
         </div>

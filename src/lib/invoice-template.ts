@@ -20,8 +20,11 @@ import { type PaperSize } from "@/lib/print";
 import { escapeHtml, safeCssColor } from "@/lib/html-escape";
 import {
   wrapInvoiceHtml,
-  invoiceAmountLines,
   invoiceBaseFontSize,
+  invoiceHeroHtml,
+  invoiceFooterHtml,
+  invoicePayCardHtml,
+  invoiceIcon,
   DEFAULT_INVOICE_ACCENT,
   buildDefaultInvoiceHTML,
   type InvoiceHtmlMode,
@@ -354,7 +357,7 @@ function cellValue(
       return item.quantity.toLocaleString("fa-IR");
     case "price":
       return item.originalPrice
-        ? `<s style="color:#999">${formatAmount(item.originalPrice)}</s> ${formatAmount(item.price)}`
+        ? `${formatAmount(item.price)}<s class="was">${formatAmount(item.originalPrice)}</s>`
         : formatAmount(item.price);
     case "discount":
       return item.discountPercent ? `٪${item.discountPercent.toLocaleString("fa-IR")}` : "—";
@@ -377,7 +380,6 @@ export function buildTemplatedInvoiceHTML(
   const t = normalizeTemplate(tpl);
   const accent = safeCssColor(t.accent, DEFAULT_INVOICE_ACCENT);
   const cols = t.columns.filter((c) => c.enabled);
-  const shopName = inv.shopName || "فروشگاه";
   const docTitle = inv.documentTitle?.trim() || t.title || invoiceDocumentTitle(inv);
   const fs = invoiceBaseFontSize(fontSize, mode);
   const compact = paper === "A5" && mode === "print";
@@ -401,6 +403,21 @@ export function buildTemplatedInvoiceHTML(
     })
     .join("");
 
+  // سهم عرض هر ستون — نام کالا بیشترین فضا را می‌گیرد تا خوانا بماند
+  const COL_WEIGHT: Record<TplColumnKey, number> = {
+    index: 6,
+    name: 32,
+    unit: 9,
+    qty: 10,
+    price: 15,
+    discount: 10,
+    total: 16,
+  };
+  const weightSum = cols.reduce((s, c) => s + (COL_WEIGHT[c.key] || 10), 0) || 1;
+  const colGroup = cols
+    .map((c) => `<col style="width:${(((COL_WEIGHT[c.key] || 10) / weightSum) * 100).toFixed(2)}%"/>`)
+    .join("");
+
   const head = cols.map((c) => `<th>${esc(c.label)}</th>`).join("");
   const rows = inv.items
     .map(
@@ -409,39 +426,46 @@ export function buildTemplatedInvoiceHTML(
     )
     .join("");
 
-  const totalsRows = invoiceAmountLines(inv)
-    .map((l) => `<tr class="${l.kind}"><td>${esc(l.label)}</td><td>${esc(l.value)}</td></tr>`)
+  const sideBlocks = [
+    inv.notes
+      ? `<div class="note-card"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>`
+      : "",
+    t.footerNote
+      ? `<div class="note-card"><h3>${invoiceIcon("doc")}شرایط و یادداشت</h3><p>${esc(t.footerNote)}</p></div>`
+      : "",
+    t.showSignatures
+      ? `<div class="signs">
+          <div class="sign-box"><strong>${invoiceIcon("seal")}${esc(t.sellerSignLabel)}</strong></div>
+          <div class="sign-box"><strong>${invoiceIcon("pen")}${esc(t.buyerSignLabel)}</strong></div>
+        </div>`
+      : "",
+  ]
+    .filter(Boolean)
     .join("");
 
-  const inner = `<div class="sheet"><div class="frame">
-  <div class="gold-rule"></div>
-  <header class="masthead">
-    <div class="brand">
-      ${t.showLogo && inv.shopLogoUrl ? `<img class="logo" src="${esc(inv.shopLogoUrl)}" alt="لوگو"/>` : ""}
-      <div class="who">
-        <h1>${esc(shopName)}</h1>
-        ${t.subtitle ? `<div class="sub">${esc(t.subtitle)}</div>` : ""}
-      </div>
-    </div>
-    <div class="doc-mark">
-      <div class="k">${esc(docTitle)}</div>
-      <div class="v">${esc(inv.id.toUpperCase())}</div>
-      <div class="d">${esc(date)}</div>
-    </div>
-  </header>
-  <div class="gold-rule"></div>
+  const inner = `<div class="sheet"><div class="doc">
+  ${invoiceHeroHtml(inv, {
+    docTitle,
+    subtitle: t.subtitle,
+    showLogo: t.showLogo,
+    note: `${inv.id.toUpperCase()} · ${date}`,
+  })}
   ${blocksHtml}
-  <div class="block"><div class="table-wrap"><table class="tpl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></div>
-  ${t.showTotals ? `<div class="tpl-totals"><table>${totalsRows}</table></div>` : ""}
-  ${inv.notes ? `<div class="tpl-note"><strong>توضیحات: </strong>${esc(inv.notes)}</div>` : ""}
-  ${t.footerNote ? `<div class="tpl-note">${esc(t.footerNote)}</div>` : ""}
+  <div class="items-wrap"><table class="tpl"><colgroup>${colGroup}</colgroup><thead><tr>${head}</tr></thead><tbody>${
+    rows ||
+    `<tr class="empty-row"><td colspan="${Math.max(1, cols.length)}">قلمی ثبت نشده است</td></tr>`
+  }</tbody></table></div>
   ${
-    t.showSignatures
-      ? `<div class="tpl-signs"><div>${esc(t.sellerSignLabel)}</div><div>${esc(t.buyerSignLabel)}</div></div>`
+    t.showTotals || sideBlocks
+      ? `<div class="finale">
+    ${t.showTotals ? invoicePayCardHtml(inv) : ""}
+    ${sideBlocks ? `<div class="side">${sideBlocks}</div>` : ""}
+  </div>`
       : ""
   }
-  <div class="colophon">با تشکر از خرید شما — ${esc(shopName)}</div>
-</div></div>`;
+  </div>
+  ${invoiceFooterHtml(inv, accent)}
+</div>`;
 
   return wrapInvoiceHtml({
     title: `${docTitle} ${inv.id.toUpperCase()}`,

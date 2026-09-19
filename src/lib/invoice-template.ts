@@ -391,9 +391,10 @@ export function buildTemplatedInvoiceHTML(
       const cells = b.fields
         .map((f) => {
           const v = resolveField(inv, f);
-          return `<div class="cell"><span class="lbl">${esc(f.label)}</span><span class="val">${
-            v ? esc(v) : "&nbsp;"
-          }</span></div>`;
+          // خانه‌ی بدون مقدار، جای دست‌نویس است؛ خط‌چین می‌ماند تا قابل پرکردن باشد
+          return `<div class="cell"><span class="lbl">${esc(f.label)}</span>${
+            v ? `<span class="val">${esc(v)}</span>` : `<span class="val blank"></span>`
+          }</div>`;
         })
         .join("");
       return `<section class="block">

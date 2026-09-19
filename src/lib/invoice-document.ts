@@ -414,6 +414,7 @@ export function invoiceChromeCss(opts: {
   .cell{display:flex;gap:7px;align-items:baseline;min-width:0;padding:${c ? "2px 0" : "3px 0"};padding-inline-end:12px;font-size:${px(0.8)};line-height:1.6}
   .cell .lbl{color:${p.muted};flex:0 0 auto}
   .cell .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
+  .cell .val.blank{flex:1 1 auto;min-width:${Math.round(fs * 3)}px;height:1em;border-bottom:1px dashed ${a(0.35)}}
   table.tpl tbody td.c-name{text-align:right;font-weight:700;color:${p.ink}}
   table.tpl tbody td.c-index{color:${a(0.55)};font-weight:800;font-size:${px(0.8)}}
   table.tpl tbody td.c-qty, table.tpl tbody td.c-unit{white-space:nowrap;color:${p.muted};font-weight:600}

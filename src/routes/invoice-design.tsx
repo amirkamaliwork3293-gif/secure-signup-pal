@@ -57,7 +57,15 @@ const SAMPLE: Invoice = {
   createdAt: Date.now(),
   items: [
     { productId: "1", name: "پنیر محلی", price: 185000, quantity: 2.5, unit: "کیلوگرم" },
-    { productId: "2", name: "روغن زیتون فرابکر", price: 420000, quantity: 3, unit: "بطری", discountPercent: 10, originalPrice: 466000 },
+    {
+      productId: "2",
+      name: "روغن زیتون فرابکر",
+      price: 420000,
+      quantity: 3,
+      unit: "بطری",
+      discountPercent: 10,
+      originalPrice: 466000,
+    },
     { productId: "3", name: "بسته هدیه", price: 950000, quantity: 1, unit: "بسته" },
   ],
   total: 2_872_500,
@@ -134,7 +142,13 @@ function InvoiceDesignPage() {
       ...t,
       blocks: t.blocks.map((b) =>
         b.id === blockId
-          ? { ...b, fields: [...b.fields, { id: tplId(), label: "عنوان فیلد", key: "blank" as TplFieldKey }] }
+          ? {
+              ...b,
+              fields: [
+                ...b.fields,
+                { id: tplId(), label: "عنوان فیلد", key: "blank" as TplFieldKey },
+              ],
+            }
           : b,
       ),
     }));
@@ -238,10 +252,16 @@ function InvoiceDesignPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">عنوان فاکتور</label>
-                <input className={input} value={tpl.title} onChange={(e) => patch({ title: e.target.value })} />
+                <input
+                  className={input}
+                  value={tpl.title}
+                  onChange={(e) => patch({ title: e.target.value })}
+                />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">زیرعنوان (اختیاری)</label>
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  زیرعنوان (اختیاری)
+                </label>
                 <input
                   className={input}
                   value={tpl.subtitle || ""}
@@ -296,16 +316,28 @@ function InvoiceDesignPage() {
                   <select
                     className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
                     value={b.columns}
-                    onChange={(e) => updBlock(b.id, { columns: Number(e.target.value) as 1 | 2 | 3 })}
+                    onChange={(e) =>
+                      updBlock(b.id, { columns: Number(e.target.value) as 1 | 2 | 3 })
+                    }
                   >
                     <option value={1}>۱ ستون</option>
                     <option value={2}>۲ ستون</option>
                     <option value={3}>۳ ستون</option>
                   </select>
-                  <button type="button" onClick={() => moveBlock(bi, -1)} className="rounded-lg border border-border p-1.5" title="بالا">
+                  <button
+                    type="button"
+                    onClick={() => moveBlock(bi, -1)}
+                    className="rounded-lg border border-border p-1.5"
+                    title="بالا"
+                  >
                     <ChevronUp className="h-3.5 w-3.5" />
                   </button>
-                  <button type="button" onClick={() => moveBlock(bi, 1)} className="rounded-lg border border-border p-1.5" title="پایین">
+                  <button
+                    type="button"
+                    onClick={() => moveBlock(bi, 1)}
+                    className="rounded-lg border border-border p-1.5"
+                    title="پایین"
+                  >
                     <ChevronDown className="h-3.5 w-3.5" />
                   </button>
                   <button
@@ -320,7 +352,10 @@ function InvoiceDesignPage() {
 
                 <div className="mt-2 space-y-2">
                   {b.fields.map((f, fi) => (
-                    <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-2">
+                    <div
+                      key={f.id}
+                      className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-2"
+                    >
                       <input
                         className={`${input} w-36 flex-1`}
                         value={f.label}
@@ -330,7 +365,9 @@ function InvoiceDesignPage() {
                       <select
                         className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
                         value={f.key}
-                        onChange={(e) => updField(b.id, f.id, { key: e.target.value as TplFieldKey })}
+                        onChange={(e) =>
+                          updField(b.id, f.id, { key: e.target.value as TplFieldKey })
+                        }
                       >
                         {["فروشنده", "خریدار", "فاکتور", "مبالغ", "دلخواه"].map((g) => (
                           <optgroup key={g} label={g}>
@@ -362,16 +399,26 @@ function InvoiceDesignPage() {
                           <input
                             type="checkbox"
                             checked={!!f.askAtCheckout}
-                            onChange={(e) => updField(b.id, f.id, { askAtCheckout: e.target.checked })}
+                            onChange={(e) =>
+                              updField(b.id, f.id, { askAtCheckout: e.target.checked })
+                            }
                             className="h-3.5 w-3.5 accent-[var(--primary)]"
                           />
                           هنگام ثبت فاکتور پر شود
                         </label>
                       )}
-                      <button type="button" onClick={() => moveField(b.id, fi, -1)} className="rounded-lg border border-border p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => moveField(b.id, fi, -1)}
+                        className="rounded-lg border border-border p-1.5"
+                      >
                         <ChevronUp className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" onClick={() => moveField(b.id, fi, 1)} className="rounded-lg border border-border p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => moveField(b.id, fi, 1)}
+                        className="rounded-lg border border-border p-1.5"
+                      >
                         <ChevronDown className="h-3.5 w-3.5" />
                       </button>
                       <button
@@ -419,7 +466,9 @@ function InvoiceDesignPage() {
                   value={c.label}
                   onChange={(e) =>
                     patch({
-                      columns: tpl.columns.map((x) => (x.key === c.key ? { ...x, label: e.target.value } : x)),
+                      columns: tpl.columns.map((x) =>
+                        x.key === c.key ? { ...x, label: e.target.value } : x,
+                      ),
                     })
                   }
                 />
@@ -463,7 +512,9 @@ function InvoiceDesignPage() {
               </div>
             )}
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">یادداشت پایین فاکتور (شرایط فروش…)</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                یادداشت پایین فاکتور (شرایط فروش…)
+              </label>
               <textarea
                 className={`${input} min-h-16`}
                 value={tpl.footerNote}
@@ -492,7 +543,7 @@ function InvoiceDesignPage() {
             <iframe
               title="پیش‌نمایش فاکتور"
               srcDoc={previewHtml}
-              className="h-[78vh] w-full border-0 bg-[#edefec]"
+              className="h-[78vh] w-full border-0 bg-[#e8dfd0]"
             />
           </div>
         </div>

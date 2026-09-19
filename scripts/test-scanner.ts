@@ -48,6 +48,26 @@ import {
   raceTimeout,
 } from "../src/features/scanner/native.ts";
 import { isBlankRgba, sampledRgbaVariance } from "../src/features/scanner/pixels.ts";
+import {
+  LEGACY_SCANNER_FLAGS,
+  SCANNER_FLAG_DEFAULTS,
+  SCANNER_STORAGE_KEY,
+  parseScannerOverride,
+  readExperimentalPreference,
+  resolveScannerFlags,
+  writeExperimentalPreference,
+  type ScannerStorage,
+} from "../src/features/scanner/flags.ts";
+import {
+  DIAG_TAP_COUNT,
+  DIAG_TAP_WINDOW_MS,
+  averageMs,
+  describeUserAgent,
+  formatDiagnosticsReport,
+  pushDecodeSample,
+  registerDiagnosticsTap,
+  type ScannerDiagnostics,
+} from "../src/features/scanner/diagnostics.ts";
 import { decodePixels, type Pixels } from "../src/features/scanner/decoder/zxing.ts";
 import {
   findProductByCode,
@@ -351,6 +371,220 @@ prepareZXingModule({
   assert.equal(rejected.timedOut, false, "reject نباید به‌عنوان تایم‌اوت Native شمرده شود");
 
   console.log("  ok - فریم سیاه و سیاست آویزان شدن Native");
+}
+
+/* ------------------------------------------------- فلگ‌ها و کلید خاموشی */
+
+{
+  // `?scanner=legacy` تنها راه برگشت فوری به پایپ‌لاین قبلی است.
+  assert.equal(parseScannerOverride("?scanner=legacy"), "legacy");
+  assert.equal(parseScannerOverride("scanner=legacy"), "legacy");
+  assert.equal(parseScannerOverride("?a=1&scanner=LEGACY&b=2"), "legacy");
+  assert.equal(parseScannerOverride("?scanner=%20legacy%20"), "legacy");
+
+  // هر چیز دیگری نباید چیزی را خاموش کند.
+  for (const s of ["", null, undefined, "?scanner=", "?scanner=new", "?legacy=1", "?x=y"]) {
+    assert.equal(parseScannerOverride(s), null, `نباید legacy شود: ${String(s)}`);
+  }
+
+  // حالت legacy همه‌چیز را خاموش می‌کند، حتی اگر کاربر حالت آزمایشی را ذخیره کرده باشد.
+  const legacy = resolveScannerFlags({ override: "legacy", experimentalPreference: true });
+  assert.deepEqual(legacy, LEGACY_SCANNER_FLAGS);
+  assert.equal(legacy.legacy, true);
+  assert.equal(legacy.diagnostics, false);
+  assert.equal(legacy.photoFallback, false);
+  assert.equal(legacy.rescueMode, false);
+  assert.equal(legacy.experimental, false);
+
+  // پیش‌فرض: حالت آزمایشی خاموش است — مرحلهٔ ۲ نباید خودبه‌خود روشن شود.
+  const plain = resolveScannerFlags({ override: null, experimentalPreference: false });
+  assert.equal(plain.legacy, false);
+  assert.equal(plain.experimental, false, "حالت آزمایشی باید پیش‌فرض خاموش باشد");
+  assert.equal(plain.diagnostics, SCANNER_FLAG_DEFAULTS.DIAGNOSTICS);
+
+  const opted = resolveScannerFlags({ override: null, experimentalPreference: true });
+  assert.equal(opted.experimental, true, "کلید کاربر باید حالت آزمایشی را روشن کند");
+
+  // ذخیره‌سازی: تنها یک کلید، و خاموش‌کردن آن را پاک می‌کند.
+  const store = new Map<string, string>();
+  const fake: ScannerStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => void store.set(k, v),
+    removeItem: (k) => void store.delete(k),
+  };
+  assert.equal(readExperimentalPreference(fake), false);
+  writeExperimentalPreference(true, fake);
+  assert.deepEqual([...store.keys()], [SCANNER_STORAGE_KEY], "فقط یک کلید مجاز است");
+  assert.equal(readExperimentalPreference(fake), true);
+  writeExperimentalPreference(false, fake);
+  assert.equal(store.size, 0, "خاموش‌کردن باید کلید را پاک کند");
+  assert.equal(readExperimentalPreference(fake), false);
+
+  // مقدار ناشناخته یعنی خاموش.
+  store.set(SCANNER_STORAGE_KEY, "yes");
+  assert.equal(readExperimentalPreference(fake), false);
+  store.clear();
+
+  // حالت ناشناس/کوکی مسدود: هر دو تابع باید بی‌صدا رد شوند، نه throw.
+  const hostile: ScannerStorage = {
+    getItem: () => {
+      throw new Error("blocked");
+    },
+    setItem: () => {
+      throw new Error("blocked");
+    },
+    removeItem: () => {
+      throw new Error("blocked");
+    },
+  };
+  assert.equal(readExperimentalPreference(hostile), false);
+  writeExperimentalPreference(true, hostile);
+  writeExperimentalPreference(false, hostile);
+  assert.equal(readExperimentalPreference(null), false, "بدون ذخیره‌سازی هم نباید بترکد");
+
+  console.log("  ok - فلگ‌ها و کلید خاموشی");
+}
+
+/* ------------------------------------------------------- پنل تشخیصی */
+
+{
+  // پنج ضربهٔ پشت سر هم باز می‌کند و شمارش را صفر می‌کند.
+  let taps: number[] = [];
+  let opened = false;
+  for (let i = 0; i < DIAG_TAP_COUNT; i++) {
+    const r = registerDiagnosticsTap(taps, 1000 + i * 100);
+    taps = r.taps;
+    opened = r.open;
+  }
+  assert.equal(opened, true, `${DIAG_TAP_COUNT} ضربهٔ سریع باید پنل را باز کند`);
+  assert.deepEqual(taps, [], "بعد از باز شدن، شمارش باید صفر شود");
+
+  // چهار ضربه کافی نیست.
+  let few: number[] = [];
+  for (let i = 0; i < DIAG_TAP_COUNT - 1; i++) {
+    few = registerDiagnosticsTap(few, 2000 + i * 100).taps;
+  }
+  assert.equal(few.length, DIAG_TAP_COUNT - 1);
+
+  // ضربه‌های پراکنده (بیرون از پنجره) نباید روی هم جمع شوند.
+  let slow: number[] = [];
+  let slowOpen = false;
+  for (let i = 0; i < 10; i++) {
+    const r = registerDiagnosticsTap(slow, i * (DIAG_TAP_WINDOW_MS + 500));
+    slow = r.taps;
+    slowOpen = slowOpen || r.open;
+  }
+  assert.equal(slowOpen, false, "لمس‌های پراکنده نباید پنل را باز کنند");
+  assert.equal(slow.length, 1);
+
+  // میانگین زمان دیکود روی پنجرهٔ لغزان.
+  assert.equal(averageMs([]), 0);
+  assert.equal(averageMs([10, 20, 30]), 20);
+  assert.equal(averageMs([1, 2]), 1.5);
+  let samples: number[] = [];
+  for (let i = 1; i <= 40; i++) samples = pushDecodeSample(samples, i, 5);
+  assert.deepEqual(samples, [36, 37, 38, 39, 40], "فقط نمونه‌های آخر باید بمانند");
+  assert.deepEqual(pushDecodeSample([1, 2], Number.NaN, 5), [1, 2], "NaN نباید ثبت شود");
+  assert.deepEqual(pushDecodeSample([1, 2], -3, 5), [1, 2], "زمان منفی نباید ثبت شود");
+
+  // شناسایی مرورگر/WebView — نسخهٔ WebView سیستمی مهم‌ترین عدد گزارش است.
+  const a55 = describeUserAgent(
+    "Mozilla/5.0 (Linux; Android 14; SM-A556E Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.81 Mobile Safari/537.36",
+  );
+  assert.equal(a55.webView, true, "WebView باید تشخیص داده شود");
+  assert.equal(a55.browser, "Android WebView");
+  assert.equal(a55.chromium, "131.0.6778.81");
+  assert.equal(a55.android, "14");
+
+  const samsungBrowser = describeUserAgent(
+    "Mozilla/5.0 (Linux; Android 14; SM-A556E) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36",
+  );
+  assert.equal(samsungBrowser.browser, "Samsung Internet", "سامسونگ اینترنت هم Chrome/ دارد");
+  assert.equal(samsungBrowser.version, "27.0");
+  assert.equal(samsungBrowser.chromium, "125.0.0.0");
+  assert.equal(samsungBrowser.webView, false);
+
+  const chrome = describeUserAgent(
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+  );
+  assert.equal(chrome.browser, "Chrome");
+  assert.equal(chrome.android, "13");
+
+  const safari = describeUserAgent(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+  );
+  assert.equal(safari.browser, "Safari");
+  assert.equal(safari.version, "17.4");
+
+  assert.deepEqual(describeUserAgent(""), {
+    browser: "",
+    version: "",
+    chromium: "",
+    android: "",
+    webView: false,
+  });
+  assert.equal(describeUserAgent(null).browser, "");
+
+  // گزارش: همهٔ عددهای لازم برای عیب‌یابی از راه دور باید داخلش باشند.
+  const snapshot: ScannerDiagnostics = {
+    phase: "running",
+    error: null,
+    engine: "worker",
+    nativeActive: true,
+    barcodeDetectorPresent: true,
+    videoWidth: 1280,
+    videoHeight: 720,
+    track: {
+      label: "camera2 0, facing back",
+      width: 1280,
+      height: 720,
+      frameRate: 30,
+      zoom: 1.6,
+      focusMode: "continuous",
+      facingMode: "environment",
+    },
+    framePath: "canvas",
+    blankFrames: 4,
+    decodeSamples: 30,
+    avgDecodeMs: 18.4,
+    fps: 24,
+    msSinceLastDecode: 6200,
+    lastDecodeFormat: "EAN13",
+    rescue: "off",
+    cameraCount: 3,
+    cameraIndex: 0,
+    flags: resolveScannerFlags({ override: null, experimentalPreference: false }),
+  };
+  const report = formatDiagnosticsReport(snapshot, {
+    userAgent: "Mozilla/5.0 (Linux; Android 14; SM-A556E; wv) Chrome/131.0.6778.81",
+    nowIso: "2026-01-01T00:00:00.000Z",
+  });
+  for (const needle of [
+    "1280x720",
+    "path=canvas",
+    "blank=4",
+    "avg=18.4ms",
+    "6.2s ago",
+    "EAN13",
+    "rescue: off",
+    "BarcodeDetector=yes",
+    "legacy=no",
+    "experimental=no",
+    "camera: 1/3",
+    "webview=yes",
+    "android=14",
+  ]) {
+    assert.ok(report.includes(needle), `گزارش باید «${needle}» را داشته باشد`);
+  }
+  assert.ok(
+    formatDiagnosticsReport(
+      { ...snapshot, msSinceLastDecode: null, lastDecodeFormat: null, track: null },
+      { userAgent: "", nowIso: "2026-01-01T00:00:00.000Z" },
+    ).includes("lastDecode: never"),
+    "نبودِ خوانش باید صریح گزارش شود",
+  );
+
+  console.log("  ok - پنل تشخیصی (ژست، میانگین دیکود، شناسایی مرورگر، گزارش)");
 }
 
 /* ----------------------------------------------- دیکود واقعی، رفت‌وبرگشت */

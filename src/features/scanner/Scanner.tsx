@@ -8,6 +8,8 @@
  */
 import { useCallback, useRef, useState } from "react";
 import { Flashlight, FlashlightOff, RefreshCw, SwitchCamera } from "lucide-react";
+import { registerDiagnosticsTap } from "./diagnostics";
+import { ScannerDiagnosticsPanel } from "./DiagnosticsPanel";
 import { reticleRect } from "./geometry";
 import { useScanner } from "./useScanner";
 
@@ -32,10 +34,32 @@ export function Scanner({ onDetected, paused }: ScannerProps) {
     [onDetected],
   );
 
-  const { videoRef, status, boxScale, setBoxScale, controls } = useScanner({
-    onDetected: handleDetected,
-    paused,
-  });
+  const {
+    videoRef,
+    status,
+    boxScale,
+    setBoxScale,
+    flags,
+    experimental,
+    setExperimentalPreference,
+    getDiagnostics,
+    controls,
+  } = useScanner({ onDetected: handleDetected, paused });
+
+  // پنل تشخیصی عمداً مخفی است: ۵ ضربهٔ پشت‌سرهم روی برچسب موتور. کاربر عادی
+  // اتفاقی بازش نمی‌کند و پشتیبانی تلفنی می‌تواند راهنمایی کند.
+  const [diagOpen, setDiagOpen] = useState(false);
+  const tapsRef = useRef<number[]>([]);
+  const onEngineTap = useCallback(() => {
+    try {
+      const next = registerDiagnosticsTap(tapsRef.current, Date.now());
+      tapsRef.current = next.taps;
+      if (next.open) setDiagOpen(true);
+    } catch {
+      /* ژست خراب نباید اسکن را بکشد */
+    }
+  }, []);
+  const closeDiagnostics = useCallback(() => setDiagOpen(false), []);
 
   const rect = reticleStyle(boxScale);
   const { zoom } = status;
@@ -143,9 +167,20 @@ export function Scanner({ onDetected, paused }: ScannerProps) {
           onPointerDown={stopFocus}
         >
           <div className="flex flex-col gap-0.5">
-            <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/80">
-              {engineLabel(status.engine, status.phase, status.native)}
-            </div>
+            {flags.diagnostics ? (
+              <button
+                type="button"
+                onClick={onEngineTap}
+                aria-label="وضعیت موتور اسکنر"
+                className="appearance-none rounded-full border-0 bg-black/60 px-2 py-0.5 text-right text-[9px] text-white/80"
+              >
+                {engineLabel(status.engine, status.phase, status.native)}
+              </button>
+            ) : (
+              <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/80">
+                {engineLabel(status.engine, status.phase, status.native)}
+              </div>
+            )}
             <div className="rounded-full bg-black/60 px-2 py-0.5 text-[9px] text-white/50">
               {status.fps} fps
             </div>
@@ -189,6 +224,15 @@ export function Scanner({ onDetected, paused }: ScannerProps) {
             )}
           </div>
         </div>
+
+        {diagOpen && flags.diagnostics && (
+          <ScannerDiagnosticsPanel
+            getDiagnostics={getDiagnostics}
+            experimental={experimental}
+            onExperimentalChange={setExperimentalPreference}
+            onClose={closeDiagnostics}
+          />
+        )}
       </div>
 
       {status.phase === "error" && (

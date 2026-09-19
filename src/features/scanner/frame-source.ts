@@ -10,6 +10,7 @@
  *
  * فریم یکنواخت (واریانس نزدیک صفر) مسیر را عوض می‌کند، نه throw.
  */
+import type { FrameGrabPath } from "./diagnostics";
 import { coverMappedRect, fitDecodeSize, type ScanRect } from "./geometry";
 import { isBlankRgba } from "./pixels";
 
@@ -22,6 +23,13 @@ type ImageCaptureCtor = new (track: MediaStreamTrack) => ImageCaptureLike;
 
 const BLANK_SWITCH_AFTER = 3;
 
+/** شمارنده‌های فقط-خواندنی برای پنل تشخیصی. هیچ تصمیمی به این‌ها وابسته نیست. */
+export type FrameSourceStats = {
+  path: FrameGrabPath;
+  blankFrames: number;
+  imageCaptureFailed: boolean;
+};
+
 export class FrameSource {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -30,6 +38,16 @@ export class FrameSource {
   private captureFailed = false;
   private preferCapture = false;
   private blankStreak = 0;
+  private blankTotal = 0;
+  private lastPath: FrameGrabPath = "none";
+
+  stats(): FrameSourceStats {
+    return {
+      path: this.lastPath,
+      blankFrames: this.blankTotal,
+      imageCaptureFailed: this.captureFailed,
+    };
+  }
 
   async grab(
     video: HTMLVideoElement,
@@ -47,6 +65,7 @@ export class FrameSource {
       const fromTrack = await this.grabViaImageCapture(video, src, fit);
       if (fromTrack && !isBlankGrab(fromTrack)) {
         this.blankStreak = 0;
+        this.lastPath = "image-capture";
         return fromTrack;
       }
       if (fromTrack) this.noteBlank();
@@ -55,6 +74,7 @@ export class FrameSource {
     const fromVideo = this.grabPixels(video, src, fit);
     if (fromVideo && !isBlankGrab(fromVideo)) {
       this.blankStreak = 0;
+      this.lastPath = "canvas";
       return fromVideo;
     }
     if (fromVideo) this.noteBlank();
@@ -64,14 +84,19 @@ export class FrameSource {
       if (fromTrack && !isBlankGrab(fromTrack)) {
         this.preferCapture = true;
         this.blankStreak = 0;
+        this.lastPath = "image-capture";
         return fromTrack;
       }
+      // فقط شمرده می‌شود: این شاخه از قبل هم سیاست تعویض مسیر را اجرا نمی‌کرد و
+      // نباید بکند — مسیر جایگزین هم همین حالا فریم سیاه داد.
+      if (fromTrack) this.blankTotal += 1;
     }
 
     return fromVideo;
   }
 
   private noteBlank(): void {
+    this.blankTotal += 1;
     this.blankStreak += 1;
     if (this.blankStreak >= BLANK_SWITCH_AFTER && !this.captureFailed) {
       this.preferCapture = true;

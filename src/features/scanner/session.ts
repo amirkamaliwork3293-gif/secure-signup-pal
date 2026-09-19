@@ -23,6 +23,13 @@ import {
 } from "./camera";
 import { shouldReusePrimedCamera } from "./camera-select";
 import { Decoder } from "./decoder";
+import {
+  averageMs,
+  pushDecodeSample,
+  type ScannerDiagnostics,
+  type TrackSnapshot,
+} from "./diagnostics";
+import { getScannerFlags, resolveScannerFlags, type ScannerFlags } from "./flags";
 import { FrameSource, closeGrab } from "./frame-source";
 import { insetScanCrop, type ScanRect } from "./geometry";
 import { NativeScanner } from "./native";
@@ -49,6 +56,8 @@ export type SessionOptions = {
   /** کادر فعلی — UI می‌تواند وسط کار عوضش کند. */
   getRect: () => ScanRect;
   isPaused: () => boolean;
+  /** فلگ‌های مؤثر. نبودنش یعنی پیش‌فرض‌های محیط (برای صداکنندهٔ قدیمی و تست). */
+  flags?: ScannerFlags;
 };
 
 type RVFCVideo = HTMLVideoElement & {
@@ -61,11 +70,18 @@ const FRAME_STALL_MS = 4000;
 
 export class ScannerSession {
   private opts: SessionOptions;
+  private flags: ScannerFlags;
   private decoder = new Decoder();
   private native = new NativeScanner();
   private frames = new FrameSource();
   private accept: AcceptState = initialAcceptState;
   private roiTick = 0;
+
+  // فقط گزارش. هیچ تصمیمی در پایپ‌لاین به این سه وابسته نیست، و در حالت legacy
+  // اصلاً پر نمی‌شوند تا مسیر دقیقاً همان قبل باشد.
+  private decodeSamples: number[] = [];
+  private lastDecodeAt: number | null = null;
+  private lastDecodeFormat: string | null = null;
 
   private stream: MediaStream | null = null;
   private candidates: string[] = [];
@@ -94,6 +110,11 @@ export class ScannerSession {
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
+    try {
+      this.flags = opts.flags ?? getScannerFlags();
+    } catch {
+      this.flags = resolveScannerFlags({ override: null, experimentalPreference: false });
+    }
   }
 
   async start(): Promise<void> {
@@ -139,8 +160,7 @@ export class ScannerSession {
     this.patch({ cameraCount: this.candidates.length });
 
     const primedId = primed.getVideoTracks()[0]?.getSettings?.().deviceId;
-    const reuse =
-      !isFrontStream(primed) && shouldReusePrimedCamera(primedId, this.candidates);
+    const reuse = !isFrontStream(primed) && shouldReusePrimedCamera(primedId, this.candidates);
 
     if (reuse) {
       if (await this.adopt(primed, 0)) return;
@@ -262,9 +282,7 @@ export class ScannerSession {
 
     this.roiTick += 1;
     const rect =
-      this.roiTick % 2 === 1
-        ? insetScanCrop(this.opts.getRect(), 0.62)
-        : this.opts.getRect();
+      this.roiTick % 2 === 1 ? insetScanCrop(this.opts.getRect(), 0.62) : this.opts.getRect();
 
     const grab = await this.frames.grab(video, rect, this.decoder.acceptsBitmap);
     if (!grab) return;
@@ -273,13 +291,31 @@ export class ScannerSession {
       return;
     }
 
+    const startedAt = this.flags.legacy ? 0 : Date.now();
     const hit = await this.decoder.decode(grab);
+    if (!this.flags.legacy) {
+      try {
+        this.decodeSamples = pushDecodeSample(this.decodeSamples, Date.now() - startedAt);
+      } catch {
+        /* گزارش نباید دیکود را بکشد */
+      }
+    }
     if (!hit || this.disposed || this.opts.isPaused()) return;
     this.handleHit(hit.text, hit.format);
   }
 
   private handleHit(text: string, format: string): void {
     if (this.disposed || this.opts.isPaused()) return;
+    if (!this.flags.legacy) {
+      try {
+        // «آخرین خوانش موفق» یعنی موتور چیزی دید، حتی اگر دروازهٔ پذیرش آن را
+        // به‌عنوان تکرار رد کند — برای عیب‌یابی همین عدد مهم است.
+        this.lastDecodeAt = Date.now();
+        this.lastDecodeFormat = format || null;
+      } catch {
+        /* گزارش نباید پذیرش را بکشد */
+      }
+    }
     const decision = acceptScan(this.accept, text, format, Date.now());
     this.accept = decision.state;
     if (!decision.emit) return;
@@ -342,6 +378,79 @@ export class ScannerSession {
     await new Promise((r) => setTimeout(r, 300));
     if (this.disposed) return;
     await applyAdvanced(track, { focusMode: "continuous", exposureMode: "continuous" });
+  }
+
+  /* ------------------------------------------------------------- تشخیص */
+
+  /**
+   * عکس لحظه‌ای برای پنل تشخیصی. هر خواندنی از تراک/ویدیو پشت try/catch است:
+   * این متد از UI صدا زده می‌شود و یک استثنا نباید صفحه را پایین بیاورد.
+   */
+  getDiagnostics(): ScannerDiagnostics {
+    try {
+      const frames = this.frameStats();
+      return {
+        phase: this.status.phase,
+        error: this.status.error,
+        engine: this.status.engine,
+        nativeActive: this.status.native,
+        barcodeDetectorPresent: barcodeDetectorPresent(),
+        videoWidth: safeNumber(() => this.opts.video.videoWidth),
+        videoHeight: safeNumber(() => this.opts.video.videoHeight),
+        track: this.trackSnapshot(),
+        framePath: frames.path,
+        blankFrames: frames.blankFrames,
+        decodeSamples: this.decodeSamples.length,
+        avgDecodeMs: averageMs(this.decodeSamples),
+        fps: this.status.fps,
+        msSinceLastDecode: this.lastDecodeAt == null ? null : Date.now() - this.lastDecodeAt,
+        lastDecodeFormat: this.lastDecodeFormat,
+        // مرحلهٔ ۰ حالت نجات ندارد؛ فیلد هست تا شکل گزارش بین مرحله‌ها عوض نشود.
+        rescue: "off",
+        cameraCount: this.status.cameraCount,
+        cameraIndex: this.status.cameraIndex,
+        flags: this.flags,
+      };
+    } catch {
+      return emptyDiagnostics(this.flags);
+    }
+  }
+
+  private frameStats(): { path: ScannerDiagnostics["framePath"]; blankFrames: number } {
+    try {
+      const s = this.frames.stats();
+      return { path: s.path, blankFrames: s.blankFrames };
+    } catch {
+      return { path: "none", blankFrames: 0 };
+    }
+  }
+
+  private trackSnapshot(): TrackSnapshot | null {
+    const track = this.track();
+    if (!track) return null;
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = (track.getSettings?.() ?? {}) as Record<string, unknown>;
+    } catch {
+      /* بعضی WebViewها getSettings را روی تراک بسته throw می‌کنند. */
+    }
+    const numberOf = (key: string): number | null => {
+      const v = settings[key];
+      return typeof v === "number" && Number.isFinite(v) ? v : null;
+    };
+    const stringOf = (key: string): string | null => {
+      const v = settings[key];
+      return typeof v === "string" && v ? v : null;
+    };
+    return {
+      label: safeString(() => track.label),
+      width: numberOf("width"),
+      height: numberOf("height"),
+      frameRate: numberOf("frameRate"),
+      zoom: numberOf("zoom"),
+      focusMode: stringOf("focusMode"),
+      facingMode: stringOf("facingMode"),
+    };
   }
 
   /* ------------------------------------------------------ بازخورد و پاک‌سازی */
@@ -431,12 +540,60 @@ export class ScannerSession {
   }
 }
 
+function emptyDiagnostics(flags: ScannerFlags): ScannerDiagnostics {
+  return {
+    phase: "error",
+    error: null,
+    engine: null,
+    nativeActive: false,
+    barcodeDetectorPresent: false,
+    videoWidth: 0,
+    videoHeight: 0,
+    track: null,
+    framePath: "none",
+    blankFrames: 0,
+    decodeSamples: 0,
+    avgDecodeMs: 0,
+    fps: 0,
+    msSinceLastDecode: null,
+    lastDecodeFormat: null,
+    rescue: "off",
+    cameraCount: 0,
+    cameraIndex: 0,
+    flags,
+  };
+}
+
+function barcodeDetectorPresent(): boolean {
+  try {
+    return typeof (globalThis as { BarcodeDetector?: unknown }).BarcodeDetector === "function";
+  } catch {
+    return false;
+  }
+}
+
+function safeNumber(read: () => number): number {
+  try {
+    const v = read();
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function safeString(read: () => string | undefined): string {
+  try {
+    return read() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function zoomStatus(
   zoom: { min: number; max: number } | null,
   applied: number | null,
 ): { min: number; max: number; value: number } | null {
   if (!zoom) return null;
-  const value =
-    applied ?? Math.min(zoom.max, Math.max(zoom.min, 1));
+  const value = applied ?? Math.min(zoom.max, Math.max(zoom.min, 1));
   return { ...zoom, value };
 }

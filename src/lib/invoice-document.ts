@@ -27,10 +27,12 @@ import {
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import { type PaperSize } from "@/lib/print";
 import { escapeHtml } from "@/lib/html-escape";
+import { amountToPersianWords } from "@/lib/amount-words";
 
 export type InvoiceHtmlMode = "screen" | "print";
 
-export const DEFAULT_INVOICE_ACCENT = "#232c63";
+/** سبز زمردی آرام — رنگ پایه‌ی سند؛ کاربر می‌تواند در «طراح فاکتور» عوضش کند */
+export const DEFAULT_INVOICE_ACCENT = "#0d7c6b";
 
 const esc = escapeHtml;
 
@@ -40,7 +42,7 @@ const esc = escapeHtml;
 
 type Rgb = [number, number, number];
 
-const FALLBACK_RGB: Rgb = [35, 44, 99];
+const FALLBACK_RGB: Rgb = [13, 124, 107];
 
 function hexToRgb(hex: string): Rgb {
   let h = String(hex || "")
@@ -76,7 +78,7 @@ function mixColor(hex: string, target: string, t: number): string {
 }
 
 const lighten = (hex: string, t: number) => mixColor(hex, "#ffffff", t);
-const darken = (hex: string, t: number) => mixColor(hex, "#070b1c", t);
+const darken = (hex: string, t: number) => mixColor(hex, "#08131a", t);
 
 /** همان رنگ با شفافیت — برای سایه و خطوط بسیار ظریف */
 function alphaColor(hex: string, a: number): string {
@@ -95,6 +97,7 @@ export type InvoicePalette = {
   hair: string;
   ink: string;
   muted: string;
+  paper: string;
   danger: string;
   dangerBg: string;
   success: string;
@@ -104,18 +107,20 @@ export function invoicePalette(accent: string): InvoicePalette {
   const base = accent || DEFAULT_INVOICE_ACCENT;
   return {
     accent: base,
-    deep: darken(base, 0.42),
-    soft: lighten(base, 0.3),
-    glow: lighten(base, 0.72),
-    wash: lighten(base, 0.955),
-    tint: lighten(base, 0.9),
-    line: lighten(base, 0.8),
-    hair: alphaColor(base, 0.1),
-    ink: darken(base, 0.55),
-    muted: mixColor(base, "#8b95ad", 0.72),
-    danger: "#b4232a",
-    dangerBg: "#fdf2f2",
-    success: "#0f7b4a",
+    deep: darken(base, 0.4),
+    soft: lighten(base, 0.34),
+    glow: lighten(base, 0.74),
+    wash: lighten(base, 0.96),
+    tint: lighten(base, 0.92),
+    line: lighten(base, 0.84),
+    hair: alphaColor(base, 0.12),
+    // متن سند تقریباً مشکیِ گرم است تا رنگ تم فقط برای «ساختار» بماند
+    ink: "#18211f",
+    muted: mixColor(base, "#7d8a92", 0.82),
+    paper: "#fdfdfb",
+    danger: "#b02a30",
+    dangerBg: "#fdf1f1",
+    success: "#10704f",
   };
 }
 
@@ -240,7 +245,7 @@ export function invoicePageAssets(
   #print-root { width: 100%; }
   thead { display: table-header-group; }
   tfoot { display: table-footer-group; }
-  tr, .party, .sign-box, .pay-card, .note-card, .meta-card { break-inside: avoid; page-break-inside: avoid; }
+  tr, .party, .sign, .stub, .note, .strip-i, .block { break-inside: avoid; page-break-inside: avoid; }
   @media print {
     html, body { background: #fff !important; padding: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     #print-root, .sheet { box-shadow: none !important; border-radius: 0 !important; }
@@ -249,10 +254,10 @@ export function invoicePageAssets(
   }
   ${
     mode === "screen"
-      ? `html, body { background: #e8ecf6; }
+      ? `html, body { background: #edefec; }
          body { padding: 18px 10px 30px; }
          #print-root { max-width: 940px; margin: 0 auto; }
-         .sheet { border-radius: 22px; box-shadow: 0 26px 60px rgba(17,25,56,.18), 0 2px 6px rgba(17,25,56,.06); }`
+         .sheet { border-radius: 20px; box-shadow: 0 24px 54px rgba(24,33,31,.14), 0 1px 3px rgba(24,33,31,.06); }`
       : `html, body { background: #fff; }
          body { padding: 0; }`
   }
@@ -267,169 +272,165 @@ export function invoiceChromeCss(opts: {
 }): string {
   const fs = opts.fontSize;
   const p = invoicePalette(opts.accent);
-  const pad = opts.compact ? 14 : 22;
-  const rowPad = opts.compact ? "8px 8px" : "11px 10px";
+  const c = !!opts.compact;
+  const pad = c ? 16 : 26;
+  const gap = c ? 11 : 17;
+  const rowPad = c ? "9px 7px" : "13px 9px";
   const px = (mult: number) => `${Math.round(fs * mult)}px`;
+  const a = (t: number) => alphaColor(p.accent, t);
 
   return `
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:${p.ink};direction:rtl;line-height:1.6;-webkit-font-smoothing:antialiased}
-  .ico{width:1.05em;height:1.05em;flex:0 0 auto;vertical-align:-.16em}
+  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:${p.ink};direction:rtl;
+    line-height:1.65;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .ico{width:1em;height:1em;flex:0 0 auto;vertical-align:-.14em}
 
-  /* ورق فاکتور — پس‌زمینه بخشی از طراحی است، نه فقط یک کادر سفید */
-  .sheet{position:relative;background:#fff;overflow:hidden;isolation:isolate}
-  .sheet::before{content:"";position:absolute;inset:0;background:
-      radial-gradient(130% 62% at 100% -8%, ${alphaColor(p.accent, 0.13)} 0%, ${alphaColor(p.accent, 0.04)} 42%, rgba(255,255,255,0) 72%),
-      radial-gradient(90% 46% at -10% 106%, ${alphaColor(p.glow, 0.5)} 0%, rgba(255,255,255,0) 68%),
-      linear-gradient(180deg, ${p.wash} 0%, #ffffff 34%, #ffffff 82%, ${p.wash} 100%);
-    z-index:0;pointer-events:none}
-  .sheet::after{content:"";position:absolute;top:-${fs * 9}px;left:-${fs * 10}px;width:${fs * 22}px;height:${fs * 22}px;border-radius:50%;
-    border:1px solid ${alphaColor(p.accent, 0.08)};box-shadow:0 0 0 ${fs}px ${alphaColor(p.accent, 0.03)};z-index:0;pointer-events:none}
-  .doc{position:relative;z-index:1;padding:${pad}px ${pad + 2}px ${opts.compact ? 10 : 14}px}
+  /* ─── کاغذ ───────────────────────────────────────────────────────────────
+     پس‌زمینه از چند لایه‌ی بسیار کم‌رنگ ساخته می‌شود: تابش نرم رنگ تم از بالا،
+     یک کمان موییِ بزرگ و شبکه‌ی نقطه‌ایِ محوشونده در پایین کادر. */
+  .sheet{position:relative;background:${p.paper};overflow:hidden;isolation:isolate}
+  .sheet::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:
+      radial-gradient(118% 60% at 97% -16%, ${a(0.11)} 0%, ${a(0.03)} 42%, rgba(255,255,255,0) 72%),
+      radial-gradient(64% 34% at -8% 102%, ${a(0.07)} 0%, rgba(255,255,255,0) 100%),
+      linear-gradient(180deg,#ffffff 0%, ${p.paper} 62%, ${p.wash} 100%)}
+  /* شیرازه‌ی رنگی لبه‌ی سند — نشانه‌ی بصری ثابت فاکتورهای این برنامه */
+  .sheet::after{content:"";position:absolute;z-index:2;pointer-events:none;top:0;bottom:0;inset-inline-start:0;width:${c ? 4 : 6}px;
+    background:linear-gradient(180deg, ${p.accent} 0%, ${a(0.6)} 36%, ${a(0.14)} 100%)}
+  .doc{position:relative;z-index:1;padding:${pad}px ${pad}px ${c ? 12 : 16}px;padding-inline-start:${pad + (c ? 6 : 10)}px}
 
-  /* سربرگ */
-  .hero{display:flex;align-items:flex-start;justify-content:space-between;gap:${pad}px;flex-wrap:wrap}
-  .hero-brand{display:flex;align-items:center;gap:${opts.compact ? 10 : 14}px;min-width:0;flex:1 1 52%}
-  .logo-wrap{width:${opts.compact ? 48 : 62}px;height:${opts.compact ? 48 : 62}px;border-radius:16px;background:#fff;padding:5px;flex:0 0 auto;
-    border:1px solid ${p.line};box-shadow:0 6px 16px ${alphaColor(p.accent, 0.12)}}
+  /* ─── سربرگ ───────────────────────────────────────────────────────────── */
+  .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:${gap}px;flex-wrap:wrap}
+  .hero-brand{display:flex;align-items:center;gap:${c ? 10 : 14}px;min-width:0;flex:1 1 48%}
+  .logo-wrap{width:${c ? 46 : 58}px;height:${c ? 46 : 58}px;border-radius:${c ? 15 : 19}px;background:#fff;padding:5px;flex:0 0 auto;
+    border:1px solid ${p.line};box-shadow:0 4px 14px ${a(0.08)}}
   .logo{width:100%;height:100%;object-fit:contain;display:block}
-  .brand-name{font-size:${px(1.42)};font-weight:800;letter-spacing:-.015em;line-height:1.3;color:${p.deep};word-break:break-word}
-  .brand-sub{margin-top:3px;font-size:${px(0.76)};color:${p.muted};display:flex;flex-wrap:wrap;gap:4px 12px;line-height:1.6}
+  .brand-name{font-size:${px(1.28)};font-weight:800;line-height:1.35;color:${p.ink};word-break:break-word}
+  .brand-sub{margin-top:2px;font-size:${px(0.72)};color:${p.muted};display:flex;flex-wrap:wrap;gap:1px 12px;line-height:1.7}
   .brand-sub span{display:inline-flex;align-items:center;gap:4px;min-width:0}
-  .hero-doc{text-align:left;flex:0 0 auto;min-width:0}
-  .doc-kicker{display:inline-flex;align-items:center;gap:6px;font-size:${px(0.7)};font-weight:700;letter-spacing:.14em;color:${p.soft};text-transform:uppercase}
-  .doc-title{font-size:${px(opts.compact ? 2.1 : 2.5)};font-weight:800;line-height:1.1;letter-spacing:-.03em;margin-top:2px;
-    color:${p.deep};background:linear-gradient(105deg, ${p.deep} 12%, ${p.accent} 56%, ${p.soft} 100%);
-    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  .doc-note{font-size:${px(0.76)};color:${p.muted};margin-top:4px}
-  .hair-rule{height:2px;margin:${opts.compact ? 10 : 14}px 0 0;border-radius:2px;
-    background:linear-gradient(90deg, ${p.accent} 0%, ${alphaColor(p.accent, 0.35)} 38%, ${alphaColor(p.glow, 0.5)} 70%, rgba(255,255,255,0) 100%)}
+  .brand-sub .ico{color:${p.accent};opacity:.7}
 
-  /* کارت اطلاعات فاکتور */
-  .meta-card{margin-top:${opts.compact ? 10 : 14}px;display:flex;flex-wrap:wrap;gap:0;
-    border:1px solid ${p.line};border-radius:16px;background:linear-gradient(180deg,#fff 0%, ${p.wash} 100%);
-    box-shadow:0 6px 18px ${alphaColor(p.accent, 0.06)};overflow:hidden}
-  .meta-item{flex:1 1 ${opts.compact ? 104 : 124}px;min-width:0;display:flex;align-items:center;gap:9px;padding:${opts.compact ? "8px 10px" : "11px 12px"};
-    border-inline-start:1px solid ${p.hair}}
-  .meta-item:first-child{border-inline-start:0}
-  .meta-badge{width:${Math.round(fs * 1.9)}px;height:${Math.round(fs * 1.9)}px;border-radius:11px;display:grid;place-items:center;flex:0 0 auto;
-    color:#fff;background:linear-gradient(140deg, ${p.deep}, ${p.accent} 62%, ${p.soft});box-shadow:0 4px 10px ${alphaColor(p.accent, 0.25)}}
-  .meta-badge .ico{width:1em;height:1em}
-  .meta-txt{min-width:0}
-  .meta-k{display:block;font-size:${px(0.7)};color:${p.muted};line-height:1.5}
-  .meta-v{display:block;font-size:${px(0.95)};font-weight:700;color:${p.deep};word-break:break-word;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
-  .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:${px(0.76)};font-weight:700;
-    background:${p.tint};color:${p.accent};border:1px solid ${p.hair}}
-  .chip.ok{background:#eef8f2;color:${p.success};border-color:#cdeadb}
-  .chip.due{background:${p.dangerBg};color:${p.danger};border-color:#f3d3d3}
+  .hero-doc{flex:0 1 auto;min-width:0;max-width:56%;text-align:left}
+  .doc-kicker{display:block;font-size:${px(0.64)};font-weight:700;color:${a(0.72)};margin-bottom:1px}
+  .doc-title{font-size:${px(c ? 1.95 : 2.4)};font-weight:300;line-height:1.16;color:${p.ink};word-break:break-word}
+  .doc-title b{font-weight:800;color:${p.deep}}
+  .swash{display:block;width:100%;height:${c ? 8 : 11}px;color:${p.accent};margin-top:1px}
+  .doc-id{display:inline-block;margin-top:6px;padding:1px 10px;border-radius:999px;background:${a(0.08)};
+    font-size:${px(0.8)};font-weight:700;color:${p.accent};letter-spacing:.05em}
+  .rule{height:1px;margin-top:${gap}px;background:linear-gradient(90deg, ${a(0.55)} 0%, ${a(0.2)} 42%, rgba(255,255,255,0) 100%)}
 
-  /* فروشنده و خریدار */
-  .parties{margin-top:${opts.compact ? 10 : 14}px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${opts.compact ? 10 : 14}px}
-  .party{position:relative;border:1px solid ${p.line};border-radius:16px;padding:${opts.compact ? "10px 12px 11px" : "13px 15px 14px"};
-    background:linear-gradient(170deg, #fff 0%, ${p.wash} 100%);box-shadow:0 5px 16px ${alphaColor(p.accent, 0.05)};min-width:0}
-  .party-head{display:flex;align-items:center;gap:8px;margin-bottom:${opts.compact ? 6 : 9}px}
-  .party-ico{width:${Math.round(fs * 1.75)}px;height:${Math.round(fs * 1.75)}px;border-radius:50%;display:grid;place-items:center;flex:0 0 auto;
-    color:#fff;background:linear-gradient(140deg, ${p.accent}, ${p.soft})}
-  .party-ico .ico{width:.95em;height:.95em}
-  .party-head h2{font-size:${px(0.82)};font-weight:700;color:${p.accent};letter-spacing:.01em}
-  .kv{display:flex;gap:10px;align-items:baseline;min-width:0;padding:${opts.compact ? "2px 0" : "3px 0"}}
-  .kv + .kv{border-top:1px dashed ${p.hair}}
-  .kv .lbl{color:${p.muted};font-size:${px(0.74)};flex:0 0 ${Math.round(fs * 3.4)}px}
-  .kv .val{font-weight:700;font-size:${px(0.9)};word-break:break-word;min-width:0;color:${p.ink};line-height:1.55}
+  /* ─── نوار اطلاعات فاکتور ───────────────────────────────────────────── */
+  .strip{display:flex;flex-wrap:wrap;margin-top:${c ? 8 : 12}px;padding-bottom:${c ? 6 : 9}px;border-bottom:1px solid ${a(0.12)}}
+  .strip-i{flex:1 1 ${c ? 96 : 116}px;min-width:0;padding:${c ? "2px 11px" : "3px 15px"};border-inline-start:1px solid ${a(0.14)}}
+  .strip-i:first-child{border-inline-start:0;padding-inline-start:0}
+  .strip-k{display:flex;align-items:center;gap:5px;font-size:${px(0.68)};color:${p.muted};line-height:1.5}
+  .strip-k .ico{color:${p.accent};opacity:.75}
+  .strip-v{display:block;margin-top:1px;font-size:${px(0.92)};font-weight:700;color:${p.ink};line-height:1.5;word-break:break-word}
+  .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:1px 9px;font-size:${px(0.74)};font-weight:700;
+    background:${a(0.09)};color:${p.accent}}
+  .chip.ok{background:#e8f4ef;color:${p.success}}
+  .chip.due{background:${p.dangerBg};color:${p.danger}}
 
-  /* جدول کالاها */
-  .items-wrap{margin-top:${opts.compact ? 12 : 16}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table.items, table.tpl{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}
-  table.items thead th, table.tpl thead th{background:linear-gradient(120deg, ${p.deep} 0%, ${mixColor(p.deep, p.accent, 0.55)} 55%, ${p.accent} 100%);
-    color:#fff;font-weight:700;padding:${opts.compact ? "9px 7px" : "12px 9px"};font-size:${px(0.78)};text-align:center;letter-spacing:.01em;
-    border:0;white-space:nowrap}
-  table.items thead th .ico, table.tpl thead th .ico{opacity:.75;margin-left:5px;width:.95em;height:.95em}
-  table.items thead th:first-child, table.tpl thead th:first-child{border-start-start-radius:14px}
-  table.items thead th:last-child, table.tpl thead th:last-child{border-start-end-radius:14px}
-  table.items tbody td, table.tpl tbody td{padding:${rowPad};border:0;border-bottom:1px solid ${p.hair};
-    font-size:${px(0.9)};text-align:center;word-break:break-word;overflow-wrap:anywhere;vertical-align:middle;line-height:1.6}
-  table.items tbody tr:nth-child(even) td, table.tpl tbody tr:nth-child(even) td{background:${alphaColor(p.accent, 0.035)}}
-  table.items tbody tr:last-child td, table.tpl tbody tr:last-child td{border-bottom:0}
-  table.items tbody tr:last-child td:first-child, table.tpl tbody tr:last-child td:first-child{border-end-start-radius:14px}
-  table.items tbody tr:last-child td:last-child, table.tpl tbody tr:last-child td:last-child{border-end-end-radius:14px}
-  table.items td.idx{width:8%;color:${p.muted};font-variant-numeric:tabular-nums;font-size:${px(0.82)}}
-  table.items td.name{text-align:right;width:40%;font-weight:700;color:${p.deep}}
-  table.items td.qty{width:14%;white-space:nowrap;font-variant-numeric:tabular-nums}
-  table.items td.price{width:18%;font-variant-numeric:tabular-nums}
-  table.items td.sum{width:20%;font-variant-numeric:tabular-nums;font-weight:800;color:${p.accent}}
-  .row-tag{display:inline-block;margin-right:6px;border-radius:999px;padding:1px 7px;font-size:${px(0.68)};font-weight:700;
-    background:#eef8f2;color:${p.success};border:1px solid #cdeadb}
-  .was{display:block;color:${p.muted};font-size:${px(0.78)};line-height:1.45;font-variant-numeric:tabular-nums}
-  .empty-row td{color:${p.muted};font-size:${px(0.85)}}
+  /* ─── فروشنده و خریدار ──────────────────────────────────────────────── */
+  .parties{margin-top:${c ? 11 : 17}px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${c ? 10 : 15}px}
+  .party{min-width:0;border-radius:${c ? 14 : 18}px;padding:${c ? "10px 13px 11px" : "14px 17px 15px"};background:${a(0.037)}}
+  .party-k{display:flex;align-items:center;gap:6px;font-size:${px(0.68)};font-weight:700;color:${p.accent}}
+  .party-name{margin-top:2px;font-size:${px(1.04)};font-weight:800;color:${p.ink};line-height:1.45;word-break:break-word}
+  .kv{display:flex;gap:7px;align-items:baseline;min-width:0;margin-top:${c ? 2 : 4}px;font-size:${px(0.8)};line-height:1.6}
+  .kv .lbl{color:${p.muted};flex:0 0 auto}
+  .kv .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
 
-  /* جمع‌بندی، توضیحات و امضا */
-  .finale{margin-top:${opts.compact ? 12 : 16}px;display:flex;gap:${opts.compact ? 10 : 14}px;align-items:stretch;flex-wrap:wrap}
-  .pay-card{flex:1 1 ${opts.compact ? 230 : 280}px;max-width:${opts.compact ? 330 : 390}px;border-radius:18px;padding:${opts.compact ? "12px 14px" : "15px 17px"};
-    color:#fff;background:linear-gradient(140deg, ${p.deep} 0%, ${p.accent} 58%, ${mixColor(p.accent, p.glow, 0.45)} 100%);
-    box-shadow:0 12px 28px ${alphaColor(p.accent, 0.28)};position:relative;overflow:hidden}
-  .pay-card::after{content:"";position:absolute;inset-inline-end:-${fs * 2.4}px;top:-${fs * 2.4}px;width:${fs * 7}px;height:${fs * 7}px;border-radius:50%;
-    background:rgba(255,255,255,.08)}
-  .pay-row{display:flex;justify-content:space-between;gap:12px;font-size:${px(0.8)};padding:${opts.compact ? "3px 0" : "4px 0"};position:relative;z-index:1;line-height:1.5}
-  .pay-row .k{color:rgba(255,255,255,.78);min-width:0;flex:1 1 auto}
-  .pay-row .v{font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;white-space:nowrap}
-  .pay-grand{position:relative;z-index:1;margin:${opts.compact ? "8px 0" : "10px 0"};padding:${opts.compact ? "9px 12px" : "11px 14px"};
-    border-radius:14px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22)}
-  .pay-grand .k{display:block;font-size:${px(0.74)};color:rgba(255,255,255,.85);font-weight:600}
-  .pay-grand .v{display:block;font-size:${px(opts.compact ? 1.65 : 1.95)};font-weight:800;line-height:1.25;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-  .pay-grand .cur{font-size:${px(0.74)};font-weight:600;color:rgba(255,255,255,.85);margin-right:5px}
-  .pay-due{position:relative;z-index:1;margin-top:${opts.compact ? 6 : 8}px;display:flex;justify-content:space-between;gap:12px;
-    border-radius:12px;padding:${opts.compact ? "6px 11px" : "8px 12px"};background:#fff;color:${p.danger};font-weight:800;font-size:${px(0.86)}}
-  .pay-due .v{font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* ─── دفتر اقلام ────────────────────────────────────────────────────── */
+  .ledger{margin-top:${c ? 13 : 20}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table.items, table.tpl{width:100%;border-collapse:collapse;table-layout:fixed}
+  table.items thead th, table.tpl thead th{padding:${c ? "0 7px 6px" : "0 9px 9px"};font-size:${px(0.68)};font-weight:700;
+    color:${p.accent};text-align:center;white-space:nowrap;background:transparent;border-bottom:1.5px solid ${a(0.55)}}
+  table.items thead th .ico, table.tpl thead th .ico{opacity:.7;margin-left:4px;width:.9em;height:.9em}
+  table.items thead th.t-name, table.tpl thead th.c-name{text-align:right}
+  table.items tbody td, table.tpl tbody td{padding:${rowPad};font-size:${px(0.9)};text-align:center;vertical-align:middle;line-height:1.65;
+    border-bottom:1px solid ${a(0.11)};word-break:break-word;overflow-wrap:anywhere}
+  table.items tbody tr:last-child td, table.tpl tbody tr:last-child td{border-bottom:1.5px solid ${a(0.3)}}
+  table.items td.idx{width:${c ? 6 : 7}%;color:${a(0.55)};font-weight:800;font-size:${px(0.8)}}
+  table.items td.name{width:${c ? 47 : 41}%;text-align:right;font-weight:700;color:${p.ink}}
+  table.items td.qty{width:${c ? 12 : 13}%;white-space:nowrap;color:${p.muted};font-weight:600}
+  table.items td.price{width:${c ? 17 : 19}%;color:${p.ink}}
+  table.items td.sum{width:18%;font-weight:800;color:${p.ink}}
+  .row-tag{display:inline-block;margin-right:6px;border-radius:999px;padding:0 7px;font-size:${px(0.66)};font-weight:700;
+    background:#e8f4ef;color:${p.success}}
+  .was{display:block;color:${p.muted};font-size:${px(0.74)};line-height:1.4}
+  .empty-row td{color:${p.muted};font-size:${px(0.85)};padding:${c ? "14px" : "20px"} 0}
 
-  .side{flex:1 1 ${opts.compact ? 230 : 280}px;min-width:0;display:flex;flex-direction:column;gap:${opts.compact ? 8 : 11}px}
-  .note-card{border:1px solid ${p.line};border-radius:16px;padding:${opts.compact ? "10px 12px" : "12px 14px"};background:#fff;
-    box-shadow:0 5px 16px ${alphaColor(p.accent, 0.05)}}
-  .note-card h3{display:flex;align-items:center;gap:7px;font-size:${px(0.8)};font-weight:700;color:${p.accent};margin-bottom:4px}
-  .note-card p{font-size:${px(0.85)};color:${p.ink};word-break:break-word;line-height:1.75;white-space:pre-line}
-  .signs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${opts.compact ? 8 : 11}px;margin-top:auto}
-  .sign-box{border:1px solid ${p.line};border-radius:14px;padding:${opts.compact ? "8px 10px 26px" : "10px 12px 34px"};
-    background:linear-gradient(180deg,#fff, ${p.wash});font-size:${px(0.76)};color:${p.muted}}
-  .sign-box strong{display:flex;align-items:center;gap:6px;color:${p.accent};font-size:${px(0.78)};font-weight:700}
+  /* ─── ته‌برگ مالی ────────────────────────────────────────────────────
+     بخش مبلغ مثل «ته‌برگ جداشونده»‌ی یک سند بهادار از بدنه جدا می‌شود:
+     خط پرفراژ نقطه‌چین + دو بریدگی گرد در دو لبه. */
+  .stub{position:relative;margin-top:${c ? 17 : 26}px;border-radius:${c ? 16 : 22}px;background:${a(0.05)};
+    padding:${c ? "15px 14px 13px" : "21px 20px 17px"}}
+  .stub::before{content:"";position:absolute;top:0;inset-inline:${c ? 13 : 19}px;border-top:2px dashed ${a(0.34)}}
+  .notch{position:absolute;top:0;width:${c ? 16 : 20}px;height:${c ? 16 : 20}px;border-radius:50%;background:${p.paper};transform:translateY(-50%)}
+  .notch.s{inset-inline-start:-${c ? 8 : 10}px}
+  .notch.e{inset-inline-end:-${c ? 8 : 10}px}
+  .pay{display:flex;gap:${c ? 12 : 20}px;align-items:flex-end;flex-wrap:wrap}
+  .pay-list{flex:1 1 ${c ? 190 : 230}px;min-width:0}
+  .pay-row{display:flex;align-items:baseline;gap:7px;font-size:${px(0.82)};padding:${c ? "1px 0" : "2px 0"}}
+  .pay-row .k{color:${p.muted};flex:0 1 auto;min-width:0;word-break:break-word}
+  .pay-row .dots{flex:1 1 auto;min-width:12px;border-bottom:1px dotted ${a(0.4)};transform:translateY(-.3em)}
+  .pay-row .v{flex:0 0 auto;font-weight:700;color:${p.ink};white-space:nowrap}
+  .pay-row.due .k, .pay-row.due .v{color:${p.danger};font-weight:800}
+  .pay-stamp{flex:0 0 auto;align-self:center;transform:rotate(-9deg);border:2px solid ${alphaColor(p.success, 0.4)};color:${alphaColor(p.success, 0.72)};
+    border-radius:${c ? 9 : 12}px;padding:${c ? "2px 10px" : "3px 14px"};font-size:${px(c ? 0.8 : 0.95)};font-weight:800;
+    box-shadow:inset 0 0 0 1px ${alphaColor(p.success, 0.14)}}
+  .grand{flex:0 1 auto;min-width:0;text-align:left}
+  .grand-k{display:block;font-size:${px(0.72)};font-weight:700;color:${p.accent}}
+  .grand-v{display:block;font-size:${px(c ? 1.85 : 2.45)};font-weight:800;line-height:1.18;letter-spacing:-.03em;color:${p.ink};white-space:nowrap}
+  .grand-v .cur{font-size:${px(0.78)};font-weight:700;color:${p.accent};margin-inline-start:6px;letter-spacing:0}
+  .pay-words{margin-top:${c ? 9 : 13}px;padding-top:${c ? 7 : 10}px;border-top:1px dashed ${a(0.28)};font-size:${px(0.74)};
+    color:${p.muted};line-height:1.75}
+  .pay-words b{color:${p.accent};font-weight:700}
 
-  /* پانویس */
-  .foot{position:relative;margin-top:${opts.compact ? 10 : 14}px}
-  .foot svg.wave{display:block;width:100%;height:${opts.compact ? 22 : 28}px}
-  .foot-in{background:${p.deep};color:rgba(255,255,255,.88);padding:${opts.compact ? "7px 16px" : "9px 20px"};
-    display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:${px(0.74)}}
-  .foot-in .thanks{font-weight:700;color:#fff;display:inline-flex;align-items:center;gap:6px}
-  .foot-in .ways{display:flex;flex-wrap:wrap;gap:4px 14px;justify-content:flex-start}
-  .foot-in .ways span{display:inline-flex;align-items:center;gap:5px}
+  /* ─── توضیحات، امضا، پانویس ─────────────────────────────────────────── */
+  .closing{margin-top:${c ? 12 : 18}px;display:flex;gap:${c ? 12 : 20}px;align-items:flex-start;flex-wrap:wrap}
+  .note{flex:1 1 ${c ? 200 : 250}px;min-width:0;border-radius:${c ? 12 : 15}px;background:${a(0.04)};padding:${c ? "9px 12px" : "12px 15px"}}
+  .note h3{display:flex;align-items:center;gap:6px;font-size:${px(0.7)};font-weight:700;color:${p.accent};margin-bottom:2px}
+  .note p{font-size:${px(0.84)};color:${p.ink};line-height:1.8;white-space:pre-line;word-break:break-word}
+  .signs{flex:1 1 ${c ? 200 : 250}px;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${c ? 10 : 16}px}
+  .sign{text-align:center;padding-top:${c ? 24 : 36}px}
+  .sign .ln{display:block;border-bottom:1px dashed ${a(0.45)}}
+  .sign .lbl{display:inline-flex;align-items:center;gap:5px;margin-top:5px;font-size:${px(0.72)};color:${p.muted}}
+  .sign .lbl .ico{color:${p.accent};opacity:.7}
+  .foot{margin-top:${c ? 12 : 18}px;padding-top:${c ? 7 : 9}px;border-top:1px solid ${a(0.16)};display:flex;align-items:center;
+    justify-content:space-between;gap:6px 14px;flex-wrap:wrap;font-size:${px(0.7)};color:${p.muted}}
+  .foot .mark{display:inline-flex;align-items:center;gap:6px;font-weight:700;color:${p.accent}}
+  .foot .ways{display:flex;flex-wrap:wrap;gap:2px 14px;min-width:0}
+  .foot .ways span{display:inline-flex;align-items:center;gap:5px;min-width:0}
 
-  /* قالب سفارشی «طراح فاکتور» — همان زبان بصری، ساختار جدولی کاربر */
-  .block{margin-top:${opts.compact ? 10 : 14}px;border:1px solid ${p.line};border-radius:16px;overflow:hidden;background:#fff;
-    box-shadow:0 5px 16px ${alphaColor(p.accent, 0.05)}}
-  .block > h2{display:flex;align-items:center;gap:7px;font-size:${px(0.8)};font-weight:700;color:#fff;
-    background:linear-gradient(120deg, ${p.deep}, ${p.accent});padding:${opts.compact ? "6px 12px" : "8px 14px"};letter-spacing:.02em}
-  .block.plain{border:0;box-shadow:none;background:transparent;overflow:visible}
-  .grid{display:grid}
+  /* ─── قالب سفارشی «طراح فاکتور» — همان زبان بصری، چیدمان دلخواه کاربر ─ */
+  .block{margin-top:${c ? 11 : 16}px;border-radius:${c ? 14 : 18}px;overflow:hidden;background:${a(0.037)}}
+  .block > h2{display:flex;align-items:center;gap:6px;font-size:${px(0.7)};font-weight:700;color:${p.accent};
+    padding:${c ? "8px 13px 2px" : "12px 17px 3px"}}
+  .block.plain{background:transparent;overflow:visible}
+  .grid{display:grid;padding:${c ? "4px 13px 10px" : "5px 17px 13px"}}
   .grid.cols-1{grid-template-columns:minmax(0,1fr)}
   .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .cell{display:flex;align-items:stretch;border-inline-start:1px solid ${p.hair};border-top:1px solid ${p.hair};min-height:${Math.round(fs * 2.2)}px;min-width:0}
-  .cell .lbl{background:${p.wash};color:${p.muted};font-size:${px(0.74)};padding:6px 10px;flex:0 1 auto;max-width:46%;min-width:0;
-    display:flex;align-items:center;font-weight:600;word-break:break-word;line-height:1.45}
-  .cell .val{padding:6px 10px;font-weight:700;font-size:${px(0.9)};display:flex;align-items:center;flex:1;min-width:0;
-    word-break:break-word;overflow-wrap:anywhere;line-height:1.5}
-  table.tpl tbody td.c-name{text-align:right;font-weight:700;color:${p.deep}}
-  table.tpl tbody td.c-index, table.tpl tbody td.c-qty, table.tpl tbody td.c-unit{white-space:nowrap;font-variant-numeric:tabular-nums}
-  table.tpl tbody td.c-price, table.tpl tbody td.c-total{font-variant-numeric:tabular-nums}
-  table.tpl tbody td.c-total{font-weight:800;color:${p.accent}}
+  .cell{display:flex;gap:7px;align-items:baseline;min-width:0;padding:${c ? "2px 0" : "3px 0"};padding-inline-end:12px;font-size:${px(0.8)};line-height:1.6}
+  .cell .lbl{color:${p.muted};flex:0 0 auto}
+  .cell .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
+  .cell .val.blank{flex:1 1 auto;min-width:${Math.round(fs * 3)}px;height:1em;border-bottom:1px dashed ${a(0.35)}}
+  table.tpl tbody td.c-name{text-align:right;font-weight:700;color:${p.ink}}
+  table.tpl tbody td.c-index{color:${a(0.55)};font-weight:800;font-size:${px(0.8)}}
+  table.tpl tbody td.c-qty, table.tpl tbody td.c-unit{white-space:nowrap;color:${p.muted};font-weight:600}
+  table.tpl tbody td.c-total{font-weight:800;color:${p.ink}}
 
+  @media screen {
+    table.items tbody tr:hover td, table.tpl tbody tr:hover td{background:${a(0.045)}}
+  }
   @media (max-width: 640px) {
     .parties{grid-template-columns:1fr}
-    .hero{gap:10px}
-    .hero-doc{text-align:right}
-    .pay-card{max-width:none}
+    .hero-doc{max-width:100%;text-align:right}
+    .grand{text-align:right}
     table.items, table.tpl{min-width:520px}
   }
   @media print {
-    .party, .note-card, .meta-card, .sign-box, .block{box-shadow:none}
-    .pay-card{box-shadow:none}
+    .logo-wrap{box-shadow:none}
   }
   `;
 }
@@ -468,6 +469,20 @@ ${chrome}
 
 // ─── بخش‌های مشترک سند (پیش‌فرض + قالب سفارشی) ──────────────────────────────
 
+/** خط دست‌کشیده‌ی زیر عنوان — امضای بصری سند */
+const SWASH_SVG = `<svg class="swash" viewBox="0 0 240 12" preserveAspectRatio="none" aria-hidden="true"><path d="M3 9.1C48 3.4 105 1.8 153 4.1c29 1.4 55 3.5 84 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+
+/** عنوان سند: واژه‌ی آخر پررنگ می‌شود تا ریتم تایپوگرافی بگیرد */
+function docTitleMarkup(title: string): string {
+  const words = String(title || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 2) return `<b>${esc(words[0] || "فاکتور")}</b>`;
+  const last = words.pop() as string;
+  return `${esc(words.join(" "))} <b>${esc(last)}</b>`;
+}
+
 /** سربرگ: برند سمت راست، عنوان بزرگ سند سمت چپ */
 export function invoiceHeroHtml(
   inv: Invoice,
@@ -482,6 +497,8 @@ export function invoiceHeroHtml(
     .filter(Boolean)
     .join("");
   const sub = opts.subtitle?.trim();
+  const kicker = opts.kicker?.trim();
+  const idLine = opts.note?.trim() || `${inv.id.toUpperCase()}`;
   return `<header class="hero">
     <div class="hero-brand">
       ${showLogo ? `<div class="logo-wrap"><img class="logo" src="${esc(inv.shopLogoUrl!)}" alt="لوگو"/></div>` : ""}
@@ -492,17 +509,17 @@ export function invoiceHeroHtml(
       </div>
     </div>
     <div class="hero-doc">
-      <span class="doc-kicker">${invoiceIcon("doc")}${esc(opts.kicker || "سند مالی")}</span>
-      <div class="doc-title">${esc(opts.docTitle)}</div>
-      <div class="doc-note">${esc(opts.note || "با سپاس از اعتماد شما")}</div>
+      ${kicker ? `<span class="doc-kicker">${esc(kicker)}</span>` : ""}
+      <div class="doc-title">${docTitleMarkup(opts.docTitle)}</div>
+      ${SWASH_SVG}
+      <span class="doc-id">${esc(idLine)}</span>
     </div>
   </header>
-  <div class="hair-rule"></div>`;
+  <div class="rule"></div>`;
 }
 
-/** پانویس موج‌دار با اطلاعات تماس موجود در سیستم */
-export function invoiceFooterHtml(inv: Invoice, accent: string): string {
-  const p = invoicePalette(accent);
+/** پانویس سبک — فقط یک خط مویی و اطلاعات تماسی که در سیستم ثبت شده */
+export function invoiceFooterHtml(inv: Invoice): string {
   const shopName = inv.shopName || "فروشگاه";
   const ways = [
     inv.shopPhone ? `<span>${invoiceIcon("phone")}${esc(inv.shopPhone)}</span>` : "",
@@ -511,52 +528,44 @@ export function invoiceFooterHtml(inv: Invoice, accent: string): string {
     .filter(Boolean)
     .join("");
   return `<footer class="foot">
-    <svg class="wave" viewBox="0 0 1200 60" preserveAspectRatio="none" aria-hidden="true">
-      <path d="M0 34C160 4 330 0 520 18c190 18 330 34 520 20 60-4 118-12 160-22V60H0Z" fill="${p.deep}"/>
-      <path d="M0 44C170 20 340 16 540 32c200 16 350 26 520 12 50-4 100-12 140-20v12H0Z" fill="${alphaColor(p.accent, 0.35)}"/>
-    </svg>
-    <div class="foot-in">
-      <span class="thanks">${invoiceIcon("seal")}${esc(shopName)}</span>
-      ${ways ? `<span class="ways">${ways}</span>` : ""}
-    </div>
+    <span class="mark">${invoiceIcon("seal")}${esc(shopName)}</span>
+    ${ways ? `<span class="ways">${ways}</span>` : ""}
   </footer>`;
 }
 
-/** کارت جمع‌بندی مبالغ — مبلغ قابل پرداخت درشت‌ترین عدد سند است */
+/**
+ * ته‌برگ مالی — سطرهای جمع‌بندی سمت راست، مبلغ قابل پرداخت درشت سمت چپ.
+ * همه‌ی اعداد از invoiceAmountLines می‌آیند؛ اینجا فقط چیده می‌شوند.
+ */
 export function invoicePayCardHtml(inv: Invoice): string {
   const lines = invoiceAmountLines(inv);
   const grandAt = lines.findIndex((l) => l.kind === "grand");
   const grand = grandAt >= 0 ? lines[grandAt] : undefined;
-  const before = grandAt >= 0 ? lines.slice(0, grandAt) : lines;
-  const after = grandAt >= 0 ? lines.slice(grandAt + 1) : [];
+  const rest = lines.filter((l) => l.kind !== "grand");
+  const settled = !!grand && !lines.some((l) => l.kind === "due");
+  const words = grand ? amountToPersianWords(invoiceTotals(inv).total) : "";
   const row = (l: AmountLine) =>
-    `<div class="pay-row"><span class="k">${esc(l.label)}</span><span class="v">${esc(l.value)}</span></div>`;
-  return `<section class="pay-card">
-    ${before.map(row).join("")}
-    ${
-      grand
-        ? `<div class="pay-grand">
-        <span class="k">مبلغ قابل پرداخت</span>
-        <span class="v">${esc(grand.amount)}<span class="cur">${esc(grand.currency)}</span></span>
+    `<div class="pay-row${l.kind === "due" ? " due" : ""}"><span class="k">${esc(l.label)}</span><span class="dots"></span><span class="v">${esc(l.value)}</span></div>`;
+  return `<section class="stub">
+    <span class="notch s"></span><span class="notch e"></span>
+    <div class="pay">
+      <div class="pay-list">${rest.map(row).join("") || `<div class="pay-row"><span class="k">جمع اقلام</span><span class="dots"></span><span class="v">${esc(grand?.value || "")}</span></div>`}</div>
+      ${settled ? `<div class="pay-stamp">تسویه شد</div>` : ""}
+      ${
+        grand
+          ? `<div class="grand">
+        <span class="grand-k">مبلغ قابل پرداخت</span>
+        <span class="grand-v">${esc(grand.amount)}<span class="cur">${esc(grand.currency)}</span></span>
       </div>`
-        : ""
-    }
-    ${after
-      .filter((l) => l.kind !== "due")
-      .map(row)
-      .join("")}
-    ${after
-      .filter((l) => l.kind === "due")
-      .map(
-        (l) =>
-          `<div class="pay-due"><span>${esc(l.label)}</span><span class="v">${esc(l.value)}</span></div>`,
-      )
-      .join("")}
+          : ""
+      }
+    </div>
+    ${words ? `<div class="pay-words"><b>به حروف:</b> ${esc(words)} ${esc(currencyLabel())}</div>` : ""}
   </section>`;
 }
 
-/** خانه‌های کارت اطلاعات فاکتور — فقط داده‌ای که واقعاً روی فاکتور هست */
-function metaCardHtml(inv: Invoice): string {
+/** نوار اطلاعات فاکتور — فقط داده‌ای که واقعاً روی فاکتور هست */
+function metaStripHtml(inv: Invoice): string {
   const t = invoiceTotals(inv);
   const cheques = invoiceCheques(inv);
   const dueDate = cheques
@@ -564,7 +573,6 @@ function metaCardHtml(inv: Invoice): string {
     .filter((d): d is string => !!d)
     .sort()[0];
   const items: { icon: string; k: string; v: string }[] = [
-    { icon: "hash", k: "شماره فاکتور", v: esc(inv.id.toUpperCase()) },
     { icon: "calendar", k: "تاریخ صدور", v: esc(formatJalaliDateTime(inv.createdAt)) },
   ];
   if (dueDate) {
@@ -573,6 +581,7 @@ function metaCardHtml(inv: Invoice): string {
   if (inv.paymentMethod) {
     items.push({ icon: "wallet", k: "نوع فاکتور", v: esc(PAYMENT_LABEL[inv.paymentMethod]) });
   }
+  items.push({ icon: "layers", k: "تعداد اقلام", v: inv.items.length.toLocaleString("fa-IR") });
   items.push({
     icon: "seal",
     k: "وضعیت",
@@ -581,33 +590,36 @@ function metaCardHtml(inv: Invoice): string {
         ? `<span class="chip due">${invoiceIcon("coins")}دارای مانده</span>`
         : `<span class="chip ok">${invoiceIcon("seal")}تسویه شده</span>`,
   });
-  return `<section class="meta-card">${items
+  return `<section class="strip">${items
     .map(
-      (it) => `<div class="meta-item">
-      <span class="meta-badge">${invoiceIcon(it.icon)}</span>
-      <span class="meta-txt"><span class="meta-k">${esc(it.k)}</span><span class="meta-v">${it.v}</span></span>
+      (it) => `<div class="strip-i">
+      <span class="strip-k">${invoiceIcon(it.icon)}${esc(it.k)}</span>
+      <span class="strip-v">${it.v}</span>
     </div>`,
     )
     .join("")}</section>`;
 }
 
+/** کارت فروشنده/خریدار — بدون کادر سنگین، فقط یک لایه‌ی رنگیِ بسیار کم‌رنگ */
 function partyHtml(
-  title: string,
+  kicker: string,
   icon: string,
+  name: string,
   rows: [string, string | undefined][],
-  accentRow?: string,
+  extra?: string,
 ): string {
   const body = rows
-    .filter(([, v], i) => i === 0 || (v && v.trim()))
+    .filter(([, v]) => v && v.trim())
     .map(
       ([k, v]) =>
-        `<div class="kv"><span class="lbl">${esc(k)}</span><span class="val">${esc(v && v.trim() ? v : "—")}</span></div>`,
+        `<div class="kv"><span class="lbl">${esc(k)}</span><span class="val">${esc((v as string).trim())}</span></div>`,
     )
     .join("");
   return `<article class="party">
-    <div class="party-head"><span class="party-ico">${invoiceIcon(icon)}</span><h2>${esc(title)}</h2></div>
+    <span class="party-k">${invoiceIcon(icon)}${esc(kicker)}</span>
+    <div class="party-name">${esc(name && name.trim() ? name : "—")}</div>
     ${body}
-    ${accentRow || ""}
+    ${extra || ""}
   </article>`;
 }
 
@@ -624,6 +636,7 @@ export function buildDefaultInvoiceHTML(
   const docTitle = invoiceDocumentTitle(inv);
   const name = customerDisplayName(inv);
   const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "";
+  const cur = currencyLabel();
 
   const rows = inv.items
     .map(
@@ -649,54 +662,48 @@ export function buildDefaultInvoiceHTML(
     // وقتی تماس و نشانی فروشگاه ثبت نشده، زیرِ نام برند خالی نماند
     subtitle: inv.shopPhone || inv.shopAddress ? undefined : `${docTitle} کالا و خدمات`,
   })}
-  ${metaCardHtml(inv)}
+  ${metaStripHtml(inv)}
   <div class="parties">
-    ${partyHtml("اطلاعات فروشنده", "store", [
-      ["نام", shopName],
+    ${partyHtml("فروشنده", "store", shopName, [
       ["تلفن", inv.shopPhone],
       ["نشانی", inv.shopAddress],
     ])}
     ${partyHtml(
-      "اطلاعات خریدار",
+      "خریدار",
       "user",
-      [
-        ["نام", name],
-        ["تلفن", inv.customer?.phone],
-      ],
+      name,
+      [["تلفن", inv.customer?.phone]],
       payment
         ? `<div class="kv"><span class="lbl">پرداخت</span><span class="val"><span class="chip">${invoiceIcon("wallet")}${esc(payment)}</span></span></div>`
         : "",
     )}
   </div>
-  <div class="items-wrap">
+  <div class="ledger">
   <table class="items">
     <thead><tr>
       <th>ردیف</th>
-      <th>${invoiceIcon("box")}نام کالا / خدمات</th>
+      <th class="t-name">${invoiceIcon("box")}شرح کالا / خدمات</th>
       <th>تعداد</th>
-      <th>مبلغ واحد</th>
-      <th>مبلغ کل</th>
+      <th>مبلغ واحد (${esc(cur)})</th>
+      <th>مبلغ کل (${esc(cur)})</th>
     </tr></thead>
     <tbody>${rows || `<tr class="empty-row"><td colspan="5">قلمی ثبت نشده است</td></tr>`}</tbody>
   </table>
   </div>
-  <div class="finale">
-    ${invoicePayCardHtml(inv)}
-    <div class="side">
-      ${
-        inv.notes
-          ? `<div class="note-card"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>`
-          : ""
-      }
-      <div class="signs">
-        <div class="sign-box"><strong>${invoiceIcon("seal")}مهر و امضای فروشنده</strong></div>
-        <div class="sign-box"><strong>${invoiceIcon("pen")}امضای خریدار</strong></div>
-      </div>
+  ${invoicePayCardHtml(inv)}
+  <div class="closing">
+    ${
+      inv.notes
+        ? `<div class="note"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>`
+        : ""
+    }
+    <div class="signs">
+      <div class="sign"><span class="ln"></span><span class="lbl">${invoiceIcon("seal")}مهر و امضای فروشنده</span></div>
+      <div class="sign"><span class="ln"></span><span class="lbl">${invoiceIcon("pen")}امضای خریدار</span></div>
     </div>
   </div>
-  </div>
-  ${invoiceFooterHtml(inv, accent)}
-</div>`;
+  ${invoiceFooterHtml(inv)}
+  </div></div>`;
 
   return wrapInvoiceHtml({
     title: `${docTitle} ${inv.id.toUpperCase()}`,

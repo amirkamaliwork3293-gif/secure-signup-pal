@@ -14,11 +14,13 @@ import {
   formatNumber,
   formatAmount,
   formatJalaliDateTime,
+  formatChequeDue,
+  currencyLabel,
   PAYMENT_LABEL,
   invoiceDocumentTitle,
   type Invoice,
 } from "@/lib/store";
-import { lineTotal, invoiceTotals } from "@/lib/invoice-math";
+import { lineTotal, invoiceTotals, invoiceCheques } from "@/lib/invoice-math";
 import {
   invoiceAmountLines,
   invoicePalette,
@@ -26,6 +28,7 @@ import {
   qtyWithUnit,
   DEFAULT_INVOICE_ACCENT,
 } from "@/lib/invoice-document";
+import { amountToPersianWords } from "@/lib/amount-words";
 
 // A4 با مقیاس ‎6px/mm ≈ 150dpi — حجم کم، کیفیت چاپ خوب
 const SCALE = 6;
@@ -33,10 +36,11 @@ const PAGE_W = 210 * SCALE;
 const PAGE_H = 297 * SCALE;
 const MARGIN = 12 * SCALE;
 const FONT = "Vazirmatn, Tahoma, 'Segoe UI', sans-serif";
-const FOOTER_H = 20 * SCALE;
+const FOOTER_H = 16 * SCALE;
+const INNER_W = PAGE_W - MARGIN * 2;
 
 const P = invoicePalette(DEFAULT_INVOICE_ACCENT);
-const PAPER = "#ffffff";
+const PAPER = P.paper;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -55,6 +59,15 @@ function loadLogoImage(url?: string): Promise<HTMLImageElement | null> {
   });
 }
 
+function withAlpha(hex: string, a: number): string {
+  const h = hex.replace("#", "");
+  const n = Number.parseInt(h.length === 3 ? h.replace(/./g, (c) => c + c) : h.slice(0, 6), 16);
+  if (!Number.isFinite(n)) return `rgba(13,124,107,${a})`;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+const tint = (a: number) => withAlpha(P.accent, a);
+
 function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
@@ -66,25 +79,27 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-/** کارت روشن با حاشیه‌ی مویی — پایه‌ی همه‌ی باکس‌های سند */
-function softCard(ctx: Ctx, x: number, y: number, w: number, h: number, r = 3.5 * SCALE) {
-  const g = ctx.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, "#ffffff");
-  g.addColorStop(1, P.wash);
+/** پنل رنگیِ بسیار کم‌رنگ — پایه‌ی همه‌ی بخش‌های سند (بدون کادر سنگین) */
+function panel(ctx: Ctx, x: number, y: number, w: number, h: number, alpha = 0.05, r = 4 * SCALE) {
   roundRect(ctx, x, y, w, h, r);
-  ctx.fillStyle = g;
+  ctx.fillStyle = tint(alpha);
   ctx.fill();
-  ctx.strokeStyle = P.line;
-  ctx.lineWidth = 1;
+}
+
+function hLine(ctx: Ctx, x1: number, x2: number, y: number, color: string, width = 1) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x2, y);
   ctx.stroke();
 }
 
-function accentGradient(ctx: Ctx, x: number, y: number, w: number, h: number): CanvasGradient {
-  const g = ctx.createLinearGradient(x + w, y, x, y + h);
-  g.addColorStop(0, P.deep);
-  g.addColorStop(0.55, P.accent);
-  g.addColorStop(1, P.soft);
-  return g;
+function dashed(ctx: Ctx, x1: number, x2: number, y: number, color: string, dash: number[]) {
+  ctx.save();
+  ctx.setLineDash(dash);
+  hLine(ctx, x1, x2, y, color, 1.6);
+  ctx.restore();
 }
 
 function fitText(ctx: Ctx, text: string, maxWidth: number): string {
@@ -111,11 +126,97 @@ function wrapText(ctx: Ctx, text: string, maxWidth: number, maxLines: number): s
   }
   if (out.length < maxLines && line) out.push(line);
   if (out.length === maxLines) {
-    const restStart = out.join(" ").length;
-    const hasRest = restStart < text.replace(/\s+/g, " ").trim().length;
-    if (hasRest) out[maxLines - 1] = fitText(ctx, `${out[maxLines - 1]}…`, maxWidth);
+    const joined = out.join(" ").length;
+    if (joined < text.replace(/\s+/g, " ").trim().length) {
+      out[maxLines - 1] = fitText(ctx, `${out[maxLines - 1]}…`, maxWidth);
+    }
   }
   return out;
+}
+
+/** بوم کوچک فقط برای اندازه‌گیری متن هنگام محاسبه‌ی ارتفاع بخش‌ها */
+let measureCtx: Ctx | null = null;
+function measurer(): Ctx {
+  if (!measureCtx) {
+    const c = document.createElement("canvas");
+    c.width = 10;
+    c.height = 10;
+    measureCtx = c.getContext("2d")!;
+    measureCtx.direction = "rtl";
+  }
+  return measureCtx;
+}
+
+/** آیکون‌های ریز خطی — معادل SVGهای نسخه وب */
+function glyph(ctx: Ctx, kind: string, cx: number, cy: number, size: number, color: string) {
+  const s = size / 2;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(0.9, size * 0.11);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  if (kind === "calendar") {
+    ctx.rect(cx - s * 0.8, cy - s * 0.65, s * 1.6, s * 1.4);
+    ctx.moveTo(cx - s * 0.8, cy - s * 0.18);
+    ctx.lineTo(cx + s * 0.8, cy - s * 0.18);
+  } else if (kind === "clock") {
+    ctx.arc(cx, cy, s * 0.82, 0, Math.PI * 2);
+    ctx.moveTo(cx, cy - s * 0.45);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + s * 0.35, cy + s * 0.2);
+  } else if (kind === "wallet") {
+    ctx.rect(cx - s * 0.85, cy - s * 0.6, s * 1.7, s * 1.2);
+    ctx.moveTo(cx + s * 0.3, cy);
+    ctx.lineTo(cx + s * 0.55, cy);
+  } else if (kind === "layers") {
+    ctx.moveTo(cx, cy - s * 0.75);
+    ctx.lineTo(cx + s * 0.85, cy - s * 0.25);
+    ctx.lineTo(cx, cy + s * 0.25);
+    ctx.lineTo(cx - s * 0.85, cy - s * 0.25);
+    ctx.closePath();
+    ctx.moveTo(cx - s * 0.85, cy + s * 0.35);
+    ctx.lineTo(cx, cy + s * 0.85);
+    ctx.lineTo(cx + s * 0.85, cy + s * 0.35);
+  } else if (kind === "store") {
+    ctx.moveTo(cx - s * 0.85, cy - s * 0.15);
+    ctx.lineTo(cx - s * 0.6, cy - s * 0.78);
+    ctx.lineTo(cx + s * 0.6, cy - s * 0.78);
+    ctx.lineTo(cx + s * 0.85, cy - s * 0.15);
+    ctx.moveTo(cx - s * 0.62, cy - s * 0.15);
+    ctx.lineTo(cx - s * 0.62, cy + s * 0.82);
+    ctx.lineTo(cx + s * 0.62, cy + s * 0.82);
+    ctx.lineTo(cx + s * 0.62, cy - s * 0.15);
+  } else if (kind === "user") {
+    ctx.arc(cx, cy - s * 0.32, s * 0.4, 0, Math.PI * 2);
+    ctx.moveTo(cx - s * 0.72, cy + s * 0.82);
+    ctx.arc(cx, cy + s * 0.82, s * 0.72, Math.PI, 0);
+  } else if (kind === "phone") {
+    ctx.moveTo(cx - s * 0.6, cy - s * 0.8);
+    ctx.lineTo(cx - s * 0.1, cy - s * 0.8);
+    ctx.lineTo(cx + s * 0.1, cy - s * 0.2);
+    ctx.lineTo(cx - s * 0.2, cy + s * 0.05);
+    ctx.lineTo(cx + s * 0.35, cy + s * 0.6);
+    ctx.lineTo(cx + s * 0.75, cy + s * 0.35);
+  } else if (kind === "pin") {
+    ctx.moveTo(cx, cy + s * 0.85);
+    ctx.bezierCurveTo(cx + s * 0.9, cy - s * 0.1, cx + s * 0.6, cy - s * 0.9, cx, cy - s * 0.9);
+    ctx.bezierCurveTo(cx - s * 0.6, cy - s * 0.9, cx - s * 0.9, cy - s * 0.1, cx, cy + s * 0.85);
+  } else if (kind === "note") {
+    ctx.rect(cx - s * 0.62, cy - s * 0.85, s * 1.24, s * 1.7);
+    ctx.moveTo(cx - s * 0.3, cy - s * 0.35);
+    ctx.lineTo(cx + s * 0.3, cy - s * 0.35);
+    ctx.moveTo(cx - s * 0.3, cy + s * 0.1);
+    ctx.lineTo(cx + s * 0.3, cy + s * 0.1);
+  } else {
+    // seal — نشان تأیید
+    ctx.arc(cx, cy, s * 0.85, 0, Math.PI * 2);
+    ctx.moveTo(cx - s * 0.36, cy);
+    ctx.lineTo(cx - s * 0.1, cy + s * 0.3);
+    ctx.lineTo(cx + s * 0.42, cy - s * 0.33);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 function newPage(): { canvas: HTMLCanvasElement; ctx: Ctx } {
@@ -123,98 +224,92 @@ function newPage(): { canvas: HTMLCanvasElement; ctx: Ctx } {
   canvas.width = PAGE_W;
   canvas.height = PAGE_H;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = PAPER;
-  ctx.fillRect(0, 0, PAGE_W, PAGE_H);
   ctx.direction = "rtl";
   ctx.textBaseline = "middle";
   drawPageBackdrop(ctx);
   return { canvas, ctx };
 }
 
-/** پس‌زمینه‌ی ظریف — همان حسِ نسخه وب، بدون کم‌کردن خوانایی متن */
+/** کاغذ: تابش نرم رنگ تم و شیرازه‌ی لبه — همان امضای بصری نسخه وب */
 function drawPageBackdrop(ctx: Ctx) {
-  const top = ctx.createRadialGradient(PAGE_W, 0, 0, PAGE_W, 0, 120 * SCALE);
-  top.addColorStop(0, withAlpha(P.accent, 0.13));
-  top.addColorStop(0.55, withAlpha(P.accent, 0.04));
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+
+  const top = ctx.createRadialGradient(
+    PAGE_W * 0.94,
+    -10 * SCALE,
+    0,
+    PAGE_W * 0.94,
+    -10 * SCALE,
+    130 * SCALE,
+  );
+  top.addColorStop(0, tint(0.11));
+  top.addColorStop(0.45, tint(0.035));
   top.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = top;
   ctx.fillRect(0, 0, PAGE_W, 150 * SCALE);
 
-  const bottom = ctx.createRadialGradient(0, PAGE_H, 0, 0, PAGE_H, 110 * SCALE);
-  bottom.addColorStop(0, withAlpha(P.glow, 0.5));
+  const bottom = ctx.createRadialGradient(0, PAGE_H, 0, 0, PAGE_H, 95 * SCALE);
+  bottom.addColorStop(0, tint(0.07));
   bottom.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = bottom;
-  ctx.fillRect(0, PAGE_H - 150 * SCALE, PAGE_W, 150 * SCALE);
+  ctx.fillRect(0, PAGE_H - 120 * SCALE, PAGE_W, 120 * SCALE);
 
-  ctx.strokeStyle = withAlpha(P.accent, 0.07);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(-14 * SCALE, 18 * SCALE, 58 * SCALE, 0, Math.PI * 2);
-  ctx.stroke();
+  const spine = ctx.createLinearGradient(0, 0, 0, PAGE_H);
+  spine.addColorStop(0, P.accent);
+  spine.addColorStop(0.36, tint(0.6));
+  spine.addColorStop(1, tint(0.14));
+  ctx.fillStyle = spine;
+  ctx.fillRect(PAGE_W - 7 * SCALE, 0, 1.8 * SCALE, PAGE_H);
 }
 
-/** نشان کوچک کنار هر خانه‌ی کارت اطلاعات — معادل آیکون‌های نسخه وب */
-function drawGlyph(ctx: Ctx, kind: string, cx: number, cy: number, size: number) {
-  const s = size / 2;
+// ─── سربرگ ──────────────────────────────────────────────────────────────────
+
+/** خط دست‌کشیده زیر عنوان سند */
+function drawSwash(ctx: Ctx, x: number, y: number, w: number) {
   ctx.save();
-  ctx.strokeStyle = "#ffffff";
-  ctx.fillStyle = "#ffffff";
-  ctx.lineWidth = Math.max(1, size * 0.1);
+  ctx.strokeStyle = P.accent;
+  ctx.lineWidth = 1.1 * SCALE;
   ctx.lineCap = "round";
-  ctx.lineJoin = "round";
   ctx.beginPath();
-  if (kind === "hash") {
-    ctx.moveTo(cx - s * 0.8, cy - s * 0.3);
-    ctx.lineTo(cx + s * 0.8, cy - s * 0.3);
-    ctx.moveTo(cx - s * 0.8, cy + s * 0.3);
-    ctx.lineTo(cx + s * 0.8, cy + s * 0.3);
-    ctx.moveTo(cx - s * 0.25, cy - s * 0.8);
-    ctx.lineTo(cx - s * 0.45, cy + s * 0.8);
-    ctx.moveTo(cx + s * 0.45, cy - s * 0.8);
-    ctx.lineTo(cx + s * 0.25, cy + s * 0.8);
-  } else if (kind === "calendar") {
-    ctx.rect(cx - s * 0.75, cy - s * 0.6, s * 1.5, s * 1.3);
-    ctx.moveTo(cx - s * 0.75, cy - s * 0.15);
-    ctx.lineTo(cx + s * 0.75, cy - s * 0.15);
-    ctx.moveTo(cx - s * 0.35, cy - s * 0.95);
-    ctx.lineTo(cx - s * 0.35, cy - s * 0.45);
-    ctx.moveTo(cx + s * 0.35, cy - s * 0.95);
-    ctx.lineTo(cx + s * 0.35, cy - s * 0.45);
-  } else if (kind === "wallet") {
-    ctx.rect(cx - s * 0.8, cy - s * 0.55, s * 1.6, s * 1.15);
-    ctx.moveTo(cx + s * 0.25, cy + s * 0.05);
-    ctx.lineTo(cx + s * 0.45, cy + s * 0.05);
-  } else if (kind === "store") {
-    ctx.moveTo(cx - s * 0.85, cy - s * 0.15);
-    ctx.lineTo(cx - s * 0.6, cy - s * 0.75);
-    ctx.lineTo(cx + s * 0.6, cy - s * 0.75);
-    ctx.lineTo(cx + s * 0.85, cy - s * 0.15);
-    ctx.moveTo(cx - s * 0.65, cy - s * 0.15);
-    ctx.lineTo(cx - s * 0.65, cy + s * 0.8);
-    ctx.lineTo(cx + s * 0.65, cy + s * 0.8);
-    ctx.lineTo(cx + s * 0.65, cy - s * 0.15);
-  } else if (kind === "user") {
-    ctx.arc(cx, cy - s * 0.3, s * 0.4, 0, Math.PI * 2);
-    ctx.moveTo(cx - s * 0.7, cy + s * 0.8);
-    ctx.arc(cx, cy + s * 0.8, s * 0.7, Math.PI, 0);
-  } else {
-    ctx.arc(cx, cy, s * 0.82, 0, Math.PI * 2);
-    ctx.moveTo(cx - s * 0.35, cy);
-    ctx.lineTo(cx - s * 0.1, cy + s * 0.3);
-    ctx.lineTo(cx + s * 0.42, cy - s * 0.32);
-  }
+  ctx.moveTo(x, y + 1.1 * SCALE);
+  ctx.bezierCurveTo(
+    x + w * 0.3,
+    y - 0.5 * SCALE,
+    x + w * 0.62,
+    y - 0.2 * SCALE,
+    x + w,
+    y + 1.4 * SCALE,
+  );
   ctx.stroke();
   ctx.restore();
 }
 
-function withAlpha(hex: string, a: number): string {
-  const h = hex.replace("#", "");
-  const n = Number.parseInt(h.length === 3 ? h.replace(/./g, (c) => c + c) : h.slice(0, 6), 16);
-  if (!Number.isFinite(n)) return `rgba(35,44,99,${a})`;
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+/** عنوان دو وزنی: واژه‌ی آخر پررنگ — در RTL واژه‌ی آخر سمت چپ می‌نشیند */
+function drawDocTitle(ctx: Ctx, title: string, x: number, y: number, size: number): number {
+  const words = String(title || "فاکتور")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  ctx.textAlign = "left";
+  if (words.length < 2) {
+    ctx.font = `800 ${size}px ${FONT}`;
+    ctx.fillStyle = P.deep;
+    ctx.fillText(words[0] || "فاکتور", x, y);
+    return ctx.measureText(words[0] || "فاکتور").width;
+  }
+  const last = words.pop() as string;
+  const head = words.join(" ");
+  ctx.font = `800 ${size}px ${FONT}`;
+  ctx.fillStyle = P.deep;
+  ctx.fillText(last, x, y);
+  const lastW = ctx.measureText(last).width;
+  ctx.font = `300 ${size}px ${FONT}`;
+  ctx.fillStyle = P.ink;
+  const gap = ctx.measureText(" ").width;
+  ctx.fillText(head, x + lastW + gap, y);
+  return lastW + gap + ctx.measureText(head).width;
 }
-
-// ─── سربرگ ──────────────────────────────────────────────────────────────────
 
 function drawHero(
   ctx: Ctx,
@@ -224,27 +319,26 @@ function drawHero(
 ): number {
   const shopName = inv.shopName || "فروشگاه";
   const docTitle = invoiceDocumentTitle(inv);
-  let y = MARGIN;
+  const y = MARGIN;
 
   if (pageNo > 1) {
     ctx.textAlign = "right";
-    ctx.fillStyle = P.deep;
-    ctx.font = `700 ${4.6 * SCALE}px ${FONT}`;
-    ctx.fillText(shopName, PAGE_W - MARGIN, y + 4 * SCALE);
+    ctx.fillStyle = P.ink;
+    ctx.font = `700 ${4.2 * SCALE}px ${FONT}`;
+    ctx.fillText(shopName, PAGE_W - MARGIN, y + 3 * SCALE);
     ctx.textAlign = "left";
     ctx.fillStyle = P.muted;
-    ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
-    ctx.fillText(`ادامه ${docTitle} — ${inv.id.toUpperCase()}`, MARGIN, y + 4 * SCALE);
-    y += 9 * SCALE;
-    drawHairRule(ctx, y);
-    return y + 5 * SCALE;
+    ctx.font = `400 ${3 * SCALE}px ${FONT}`;
+    ctx.fillText(`ادامه ${docTitle} — ${inv.id.toUpperCase()}`, MARGIN, y + 3 * SCALE);
+    hLine(ctx, MARGIN, PAGE_W - MARGIN, y + 7 * SCALE, tint(0.3));
+    return y + 12 * SCALE;
   }
 
   const brandRight = PAGE_W - MARGIN;
   let textX = brandRight;
 
   if (logoImg) {
-    const box = 17 * SCALE;
+    const box = 15 * SCALE;
     const ratio = Math.min(
       (box - 3 * SCALE) / logoImg.width,
       (box - 3 * SCALE) / logoImg.height,
@@ -253,88 +347,95 @@ function drawHero(
     const w = logoImg.width * ratio;
     const h = logoImg.height * ratio;
     const lx = brandRight - box;
-    softCard(ctx, lx, y, box, box, 4.5 * SCALE);
+    roundRect(ctx, lx, y, box, box, 4.2 * SCALE);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.strokeStyle = P.line;
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.drawImage(logoImg, lx + (box - w) / 2, y + (box - h) / 2, w, h);
-    textX = lx - 4 * SCALE;
+    textX = lx - 3.5 * SCALE;
   }
 
-  const brandW = textX - MARGIN - 62 * SCALE;
+  const brandW = textX - MARGIN - 58 * SCALE;
   ctx.textAlign = "right";
-  ctx.fillStyle = P.deep;
-  ctx.font = `800 ${6.2 * SCALE}px ${FONT}`;
-  ctx.fillText(fitText(ctx, shopName, brandW), textX, y + 6 * SCALE);
+  ctx.fillStyle = P.ink;
+  ctx.font = `800 ${5.4 * SCALE}px ${FONT}`;
+  ctx.fillText(fitText(ctx, shopName, brandW), textX, y + 5 * SCALE);
 
-  const contact = [inv.shopPhone, inv.shopAddress].filter(Boolean).join("  ·  ");
-  if (contact) {
+  ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
+  let cy = y + 11 * SCALE;
+  for (const [kind, value] of [
+    ["phone", inv.shopPhone],
+    ["pin", inv.shopAddress],
+  ] as [string, string | undefined][]) {
+    if (!value) continue;
+    glyph(ctx, kind, textX - 1.4 * SCALE, cy, 2.8 * SCALE, tint(0.75));
     ctx.fillStyle = P.muted;
-    ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, contact, brandW), textX, y + 13 * SCALE);
+    ctx.fillText(fitText(ctx, value, brandW - 4 * SCALE), textX - 4 * SCALE, cy);
+    cy += 4.4 * SCALE;
   }
 
   // عنوان سند — بزرگ‌ترین عنصر متنی سربرگ
-  ctx.textAlign = "left";
-  ctx.fillStyle = P.soft;
-  ctx.font = `700 ${2.8 * SCALE}px ${FONT}`;
-  ctx.fillText("سند مالی", MARGIN, y + 2.6 * SCALE);
+  const titleW = drawDocTitle(ctx, docTitle, MARGIN, y + 6 * SCALE, 8.6 * SCALE);
+  const swashW = Math.min(Math.max(titleW, 26 * SCALE), 74 * SCALE);
+  drawSwash(ctx, MARGIN, y + 11 * SCALE, swashW);
 
-  const titleGrad = ctx.createLinearGradient(MARGIN + 58 * SCALE, 0, MARGIN, 0);
-  titleGrad.addColorStop(0, P.deep);
-  titleGrad.addColorStop(0.6, P.accent);
-  titleGrad.addColorStop(1, P.soft);
-  ctx.fillStyle = titleGrad;
-  ctx.font = `800 ${9.4 * SCALE}px ${FONT}`;
-  ctx.fillText(fitText(ctx, docTitle, 62 * SCALE), MARGIN, y + 10.5 * SCALE);
+  const idText = inv.id.toUpperCase();
+  ctx.font = `700 ${3 * SCALE}px ${FONT}`;
+  const idW = ctx.measureText(idText).width + 7 * SCALE;
+  const pillY = y + 14.5 * SCALE;
+  roundRect(ctx, MARGIN, pillY, idW, 6.4 * SCALE, 3.2 * SCALE);
+  ctx.fillStyle = tint(0.09);
+  ctx.fill();
+  ctx.textAlign = "center";
+  ctx.fillStyle = P.accent;
+  ctx.fillText(idText, MARGIN + idW / 2, pillY + 3.3 * SCALE);
 
-  ctx.fillStyle = P.muted;
-  ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
-  ctx.fillText("با سپاس از اعتماد شما", MARGIN, y + 16 * SCALE);
-
-  y += 20 * SCALE;
-  drawHairRule(ctx, y);
-  return y + 5 * SCALE;
-}
-
-function drawHairRule(ctx: Ctx, y: number) {
+  const bottom = Math.max(cy, pillY + 6.4 * SCALE, y + 17 * SCALE);
   const g = ctx.createLinearGradient(PAGE_W - MARGIN, 0, MARGIN, 0);
-  g.addColorStop(0, P.accent);
-  g.addColorStop(0.45, withAlpha(P.accent, 0.3));
+  g.addColorStop(0, tint(0.55));
+  g.addColorStop(0.45, tint(0.2));
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
-  ctx.fillRect(MARGIN, y, PAGE_W - MARGIN * 2, 1.4);
+  ctx.fillRect(MARGIN, bottom + 2 * SCALE, INNER_W, 1.2);
+  return bottom + 6 * SCALE;
 }
 
-// ─── کارت اطلاعات فاکتور ────────────────────────────────────────────────────
+// ─── نوار اطلاعات فاکتور ────────────────────────────────────────────────────
 
-type MetaItem = { k: string; v: string; glyph: string; tone?: "ok" | "due" };
+type MetaItem = { k: string; v: string; icon: string; tone?: "ok" | "due" };
 
 function metaItems(inv: Invoice): MetaItem[] {
   const t = invoiceTotals(inv);
   const out: MetaItem[] = [
-    { k: "شماره فاکتور", v: inv.id.toUpperCase(), glyph: "hash" },
-    { k: "تاریخ صدور", v: formatJalaliDateTime(inv.createdAt), glyph: "calendar" },
+    { k: "تاریخ صدور", v: formatJalaliDateTime(inv.createdAt), icon: "calendar" },
   ];
+  const due = invoiceCheques(inv)
+    .map((c) => c.dueDate)
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  if (due) out.push({ k: "سررسید چک", v: formatChequeDue(due), icon: "clock" });
   if (inv.paymentMethod) {
-    out.push({ k: "نوع فاکتور", v: PAYMENT_LABEL[inv.paymentMethod], glyph: "wallet" });
+    out.push({ k: "نوع فاکتور", v: PAYMENT_LABEL[inv.paymentMethod], icon: "wallet" });
   }
+  out.push({ k: "تعداد اقلام", v: formatNumber(inv.items.length), icon: "layers" });
   out.push(
     t.remaining > 0
-      ? { k: "وضعیت", v: "دارای مانده", glyph: "seal", tone: "due" }
-      : { k: "وضعیت", v: "تسویه شده", glyph: "seal", tone: "ok" },
+      ? { k: "وضعیت", v: "دارای مانده", icon: "seal", tone: "due" }
+      : { k: "وضعیت", v: "تسویه شده", icon: "seal", tone: "ok" },
   );
   return out;
 }
 
-function drawMetaCard(ctx: Ctx, y: number, inv: Invoice): number {
+function drawMetaStrip(ctx: Ctx, y: number, inv: Invoice): number {
   const items = metaItems(inv);
-  const h = 15 * SCALE;
-  const w = PAGE_W - MARGIN * 2;
-  softCard(ctx, MARGIN, y, w, h);
+  const h = 11 * SCALE;
 
-  // عرض هر خانه به اندازه‌ی متنش — تاریخ و ساعت جا بماند و کوتاه نشود
-  ctx.font = `700 ${3.6 * SCALE}px ${FONT}`;
-  const weights = items.map((it) => Math.max(18 * SCALE, ctx.measureText(it.v).width + 16 * SCALE));
-  const weightSum = weights.reduce((s, x) => s + x, 0);
-  const widths = weights.map((x) => (x / weightSum) * w);
+  ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
+  const weights = items.map((it) => Math.max(16 * SCALE, ctx.measureText(it.v).width + 12 * SCALE));
+  const sum = weights.reduce((s, x) => s + x, 0);
+  const widths = weights.map((x) => (x / sum) * INNER_W);
 
   let offset = 0;
   items.forEach((it, i) => {
@@ -342,101 +443,91 @@ function drawMetaCard(ctx: Ctx, y: number, inv: Invoice): number {
     const right = PAGE_W - MARGIN - offset;
     offset += cellW;
     if (i > 0) {
-      ctx.strokeStyle = withAlpha(P.accent, 0.12);
+      ctx.strokeStyle = tint(0.14);
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(right, y + 3 * SCALE);
-      ctx.lineTo(right, y + h - 3 * SCALE);
+      ctx.moveTo(right, y + 0.5 * SCALE);
+      ctx.lineTo(right, y + h - 1.5 * SCALE);
       ctx.stroke();
     }
-    const badge = 8 * SCALE;
-    const bx = right - 4 * SCALE - badge;
-    roundRect(ctx, bx, y + (h - badge) / 2, badge, badge, 2.4 * SCALE);
-    ctx.fillStyle = accentGradient(ctx, bx, y, badge, badge);
-    ctx.fill();
-    drawGlyph(ctx, it.glyph, bx + badge / 2, y + h / 2, badge * 0.62);
-
-    const textRight = bx - 2.6 * SCALE;
-    const textW = cellW - badge - 10 * SCALE;
+    const textRight = i === 0 ? right : right - 3.5 * SCALE;
+    const textW = cellW - 6 * SCALE;
+    glyph(ctx, it.icon, textRight - 1.3 * SCALE, y + 2.6 * SCALE, 2.7 * SCALE, tint(0.8));
     ctx.textAlign = "right";
     ctx.fillStyle = P.muted;
     ctx.font = `400 ${2.8 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, it.k, textW), textRight, y + 5.4 * SCALE);
-    ctx.fillStyle = it.tone === "due" ? P.danger : it.tone === "ok" ? P.success : P.deep;
-    ctx.font = `700 ${3.6 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, it.v, textW), textRight, y + 10.4 * SCALE);
+    ctx.fillText(fitText(ctx, it.k, textW - 4 * SCALE), textRight - 3.6 * SCALE, y + 2.6 * SCALE);
+    ctx.fillStyle = it.tone === "due" ? P.danger : it.tone === "ok" ? P.success : P.ink;
+    ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
+    ctx.fillText(fitText(ctx, it.v, textW), textRight, y + 7.6 * SCALE);
   });
 
-  return y + h + 4 * SCALE;
+  hLine(ctx, MARGIN, PAGE_W - MARGIN, y + h, tint(0.12));
+  return y + h + 5 * SCALE;
 }
 
 // ─── فروشنده و خریدار ───────────────────────────────────────────────────────
 
 function drawParties(ctx: Ctx, y: number, inv: Invoice): number {
   const gap = 4 * SCALE;
-  const boxW = (PAGE_W - MARGIN * 2 - gap) / 2;
-  const seller: [string, string][] = [
-    ["نام", inv.shopName || "فروشگاه"],
-    ["تلفن", inv.shopPhone || "—"],
-    ["نشانی", inv.shopAddress || "—"],
+  const boxW = (INNER_W - gap) / 2;
+  const seller: [string, string | undefined][] = [
+    ["تلفن", inv.shopPhone],
+    ["نشانی", inv.shopAddress],
   ];
-  const buyer: [string, string][] = [
-    ["نام", customerDisplayName(inv) || "—"],
-    ["تلفن", inv.customer?.phone || "—"],
-    ["پرداخت", inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "—"],
+  const buyer: [string, string | undefined][] = [
+    ["تلفن", inv.customer?.phone],
+    ["پرداخت", inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : undefined],
   ];
-  const h = 27 * SCALE;
+  const h = 24 * SCALE;
 
-  const drawParty = (x: number, title: string, glyph: string, rows: [string, string][]) => {
-    softCard(ctx, x, y, boxW, h);
-    const dot = 6.8 * SCALE;
-    const dx = x + boxW - 4 * SCALE - dot;
-    ctx.beginPath();
-    ctx.arc(dx + dot / 2, y + 6.5 * SCALE, dot / 2, 0, Math.PI * 2);
-    ctx.fillStyle = accentGradient(ctx, dx, y, dot, dot);
-    ctx.fill();
-    drawGlyph(ctx, glyph, dx + dot / 2, y + 6.5 * SCALE, dot * 0.55);
+  const drawParty = (
+    x: number,
+    kicker: string,
+    icon: string,
+    name: string,
+    rows: [string, string | undefined][],
+  ) => {
+    panel(ctx, x, y, boxW, h, 0.04, 4.5 * SCALE);
+    const right = x + boxW - 4.5 * SCALE;
+    glyph(ctx, icon, right - 1.4 * SCALE, y + 5 * SCALE, 3 * SCALE, P.accent);
     ctx.textAlign = "right";
     ctx.fillStyle = P.accent;
-    ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
-    ctx.fillText(title, dx - 2.4 * SCALE, y + 6.5 * SCALE);
+    ctx.font = `700 ${3 * SCALE}px ${FONT}`;
+    ctx.fillText(kicker, right - 4 * SCALE, y + 5 * SCALE);
 
-    let ly = y + 13 * SCALE;
-    rows.forEach(([k, v], i) => {
-      if (i > 0) {
-        ctx.strokeStyle = withAlpha(P.accent, 0.08);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x + 4 * SCALE, ly - 3.2 * SCALE);
-        ctx.lineTo(x + boxW - 4 * SCALE, ly - 3.2 * SCALE);
-        ctx.stroke();
-      }
-      ctx.textAlign = "right";
+    ctx.fillStyle = P.ink;
+    ctx.font = `800 ${4.3 * SCALE}px ${FONT}`;
+    ctx.fillText(fitText(ctx, name || "—", boxW - 9 * SCALE), right, y + 11 * SCALE);
+
+    let ly = y + 16.5 * SCALE;
+    for (const [k, v] of rows) {
+      if (!v || !v.trim()) continue;
       ctx.fillStyle = P.muted;
-      ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
-      ctx.fillText(k, x + boxW - 4 * SCALE, ly);
+      ctx.font = `400 ${3 * SCALE}px ${FONT}`;
+      ctx.fillText(k, right, ly);
+      const kw = ctx.measureText(k).width;
       ctx.fillStyle = P.ink;
-      ctx.font = `600 ${3.3 * SCALE}px ${FONT}`;
-      ctx.fillText(fitText(ctx, v, boxW - 22 * SCALE), x + boxW - 17 * SCALE, ly);
-      ly += 6 * SCALE;
-    });
+      ctx.font = `600 ${3.2 * SCALE}px ${FONT}`;
+      ctx.fillText(fitText(ctx, v.trim(), boxW - kw - 12 * SCALE), right - kw - 2.4 * SCALE, ly);
+      ly += 4.6 * SCALE;
+    }
   };
 
-  drawParty(PAGE_W - MARGIN - boxW, "اطلاعات فروشنده", "store", seller);
-  drawParty(MARGIN, "اطلاعات خریدار", "user", buyer);
-  return y + h + 5 * SCALE;
+  drawParty(PAGE_W - MARGIN - boxW, "فروشنده", "store", inv.shopName || "فروشگاه", seller);
+  drawParty(MARGIN, "خریدار", "user", customerDisplayName(inv), buyer);
+  return y + h + 6 * SCALE;
 }
 
-// ─── جدول کالاها ────────────────────────────────────────────────────────────
-// ستون‌ها از راست به چپ: ردیف | نام کالا / خدمات | تعداد | مبلغ واحد | مبلغ کل
+// ─── دفتر اقلام ─────────────────────────────────────────────────────────────
+// ستون‌ها از راست به چپ: ردیف | شرح کالا / خدمات | تعداد | مبلغ واحد | مبلغ کل
 
 function columns() {
-  const inner = PAGE_W - MARGIN * 2;
-  const idx = 11 * SCALE;
+  const idx = 10 * SCALE;
   const qty = 22 * SCALE;
   const unitPrice = 34 * SCALE;
   const total = 38 * SCALE;
-  const name = inner - idx - qty - unitPrice - total;
+  const name = INNER_W - idx - qty - unitPrice - total;
   const xRight = PAGE_W - MARGIN;
   return {
     idx: { x: xRight, w: idx },
@@ -447,259 +538,278 @@ function columns() {
   };
 }
 
-const ROW_H = 10.5 * SCALE;
-const HEAD_H = 12 * SCALE;
-const SIG_H = 20 * SCALE;
-const RADIUS = 3.5 * SCALE;
+const ROW_H = 10 * SCALE;
+const HEAD_H = 7 * SCALE;
 
 function drawTableHead(ctx: Ctx, y: number): number {
   const cols = columns();
-  const w = PAGE_W - MARGIN * 2;
-  ctx.save();
-  roundRect(ctx, MARGIN, y, w, HEAD_H + RADIUS, RADIUS);
-  ctx.clip();
-  ctx.fillStyle = accentGradient(ctx, MARGIN, y, w, HEAD_H);
-  ctx.fillRect(MARGIN, y, w, HEAD_H + RADIUS);
-  ctx.restore();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${3.5 * SCALE}px ${FONT}`;
-  ctx.textAlign = "center";
+  const cur = currencyLabel();
+  ctx.fillStyle = P.accent;
+  ctx.font = `700 ${2.9 * SCALE}px ${FONT}`;
   const cy = y + HEAD_H / 2;
+  ctx.textAlign = "center";
   ctx.fillText("ردیف", cols.idx.x - cols.idx.w / 2, cy);
-  ctx.fillText("نام کالا / خدمات", cols.name.x - cols.name.w / 2, cy);
   ctx.fillText("تعداد", cols.qty.x - cols.qty.w / 2, cy);
-  ctx.fillText("مبلغ واحد", cols.unitPrice.x - cols.unitPrice.w / 2, cy);
-  ctx.fillText("مبلغ کل", cols.total.x - cols.total.w / 2, cy);
-  return y + HEAD_H;
+  ctx.fillText(`مبلغ واحد (${cur})`, cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  ctx.fillText(`مبلغ کل (${cur})`, cols.total.x - cols.total.w / 2, cy);
+  ctx.textAlign = "right";
+  ctx.fillText("شرح کالا / خدمات", cols.name.x - 2 * SCALE, cy);
+  hLine(ctx, MARGIN, PAGE_W - MARGIN, y + HEAD_H, tint(0.55), 1.6);
+  return y + HEAD_H + 0.5 * SCALE;
 }
 
 function drawRow(ctx: Ctx, y: number, i: number, item: Invoice["items"][number]): number {
   const cols = columns();
-  const w = PAGE_W - MARGIN * 2;
-  if (i % 2 === 1) {
-    ctx.fillStyle = withAlpha(P.accent, 0.035);
-    ctx.fillRect(MARGIN, y, w, ROW_H);
-  }
-  ctx.strokeStyle = withAlpha(P.accent, 0.1);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(MARGIN, y + ROW_H);
-  ctx.lineTo(MARGIN + w, y + ROW_H);
-  ctx.stroke();
+  hLine(ctx, MARGIN, PAGE_W - MARGIN, y + ROW_H, tint(0.11));
 
   const cy = y + ROW_H / 2;
-  ctx.fillStyle = P.muted;
-  ctx.font = `400 ${3.3 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
+  ctx.fillStyle = tint(0.6);
+  ctx.font = `800 ${3.1 * SCALE}px ${FONT}`;
   ctx.fillText(formatNumber(i + 1), cols.idx.x - cols.idx.w / 2, cy);
 
-  ctx.fillStyle = P.ink;
-  ctx.font = `400 ${3.5 * SCALE}px ${FONT}`;
+  ctx.fillStyle = P.muted;
+  ctx.font = `600 ${3.3 * SCALE}px ${FONT}`;
   ctx.fillText(qtyWithUnit(item), cols.qty.x - cols.qty.w / 2, cy);
-  ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
 
-  ctx.font = `700 ${3.7 * SCALE}px ${FONT}`;
-  ctx.fillStyle = P.accent;
+  ctx.fillStyle = P.ink;
+  ctx.font = `400 ${3.4 * SCALE}px ${FONT}`;
+  if (item.originalPrice) {
+    ctx.fillText(
+      formatAmount(item.price),
+      cols.unitPrice.x - cols.unitPrice.w / 2,
+      cy - 1.8 * SCALE,
+    );
+    ctx.fillStyle = P.muted;
+    ctx.font = `400 ${2.8 * SCALE}px ${FONT}`;
+    const was = formatAmount(item.originalPrice);
+    const wy = cy + 2.6 * SCALE;
+    const wx = cols.unitPrice.x - cols.unitPrice.w / 2;
+    ctx.fillText(was, wx, wy);
+    const ww = ctx.measureText(was).width;
+    hLine(ctx, wx - ww / 2, wx + ww / 2, wy, P.muted);
+  } else {
+    ctx.fillText(formatAmount(item.price), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
+  }
+
+  ctx.fillStyle = P.ink;
+  ctx.font = `800 ${3.5 * SCALE}px ${FONT}`;
   ctx.fillText(formatAmount(lineTotal(item)), cols.total.x - cols.total.w / 2, cy);
 
-  ctx.fillStyle = P.deep;
-  ctx.font = `700 ${3.6 * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  const name = item.discountPercent
-    ? `${item.name}  (٪${formatNumber(item.discountPercent)} تخفیف)`
-    : item.name;
-  ctx.fillText(fitText(ctx, name, cols.name.w - 4 * SCALE), cols.name.x - 2 * SCALE, cy);
+  const nameRight = cols.name.x - 2 * SCALE;
+  const nameW = cols.name.w - 4 * SCALE;
+  if (item.discountPercent) {
+    ctx.fillStyle = P.success;
+    ctx.font = `700 ${2.7 * SCALE}px ${FONT}`;
+    ctx.fillText(`٪${formatNumber(item.discountPercent)} تخفیف`, nameRight, cy + 3 * SCALE);
+    ctx.fillStyle = P.ink;
+    ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
+    ctx.fillText(fitText(ctx, item.name, nameW), nameRight, cy - 2 * SCALE);
+  } else {
+    ctx.fillStyle = P.ink;
+    ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
+    ctx.fillText(fitText(ctx, item.name, nameW), nameRight, cy);
+  }
 
   return y + ROW_H;
 }
 
-// ─── جمع‌بندی، توضیحات و امضا ───────────────────────────────────────────────
+// ─── ته‌برگ مالی ────────────────────────────────────────────────────────────
 
-const PAY_W = 78 * SCALE;
+const STUB_PAD = 6 * SCALE;
+const PAY_ROW_H = 5 * SCALE;
+const GRAND_H = 15 * SCALE;
+const SIGN_H = 14 * SCALE;
 
-function payCardHeight(inv: Invoice): number {
-  const lines = invoiceAmountLines(inv);
-  const normal = lines.filter((l) => l.kind === "normal").length;
-  const due = lines.some((l) => l.kind === "due") ? 10 * SCALE : 0;
-  return 10 * SCALE + normal * 5.6 * SCALE + 20 * SCALE + due;
+function payWordsLines(inv: Invoice): string[] {
+  const t = invoiceTotals(inv);
+  const words = amountToPersianWords(t.total);
+  if (!words) return [];
+  const ctx = measurer();
+  ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
+  return wrapText(ctx, `به حروف: ${words} ${currencyLabel()}`, INNER_W - STUB_PAD * 2, 2);
 }
 
-function drawPayCard(ctx: Ctx, y: number, inv: Invoice): number {
-  const lines = invoiceAmountLines(inv);
-  const grandAt = lines.findIndex((l) => l.kind === "grand");
-  const grand = grandAt >= 0 ? lines[grandAt] : undefined;
-  const before = lines.filter((l, i) => l.kind === "normal" && (grandAt < 0 || i < grandAt));
-  const after = lines.filter((l, i) => l.kind === "normal" && grandAt >= 0 && i > grandAt);
-  const due = lines.find((l) => l.kind === "due");
+function stubHeight(inv: Invoice): number {
+  const lines = invoiceAmountLines(inv).filter((l) => l.kind !== "grand");
+  const body = Math.max(lines.length * PAY_ROW_H, GRAND_H);
+  const words = payWordsLines(inv);
+  const wordsH = words.length ? 3.5 * SCALE + words.length * 4.2 * SCALE : 0;
+  return STUB_PAD + body + wordsH + STUB_PAD;
+}
 
-  const h = payCardHeight(inv);
-  const x = PAGE_W - MARGIN - PAY_W;
-  roundRect(ctx, x, y, PAY_W, h, 4.5 * SCALE);
-  ctx.fillStyle = accentGradient(ctx, x, y, PAY_W, h);
-  ctx.fill();
+function drawStub(ctx: Ctx, y: number, inv: Invoice): number {
+  const all = invoiceAmountLines(inv);
+  const grand = all.find((l) => l.kind === "grand");
+  const rows = all.filter((l) => l.kind !== "grand");
+  const settled = !!grand && !all.some((l) => l.kind === "due");
+  const h = stubHeight(inv);
+  const x = MARGIN;
 
-  let ly = y + 6 * SCALE;
-  const row = (label: string, value: string) => {
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(255,255,255,.8)";
-    ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, label, PAY_W * 0.55), x + PAY_W - 5 * SCALE, ly);
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `600 ${3.2 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, value, PAY_W * 0.45), x + 5 * SCALE, ly);
-    ly += 5.6 * SCALE;
-  };
-
-  for (const l of before) row(l.label, l.value);
-
-  if (grand) {
-    const boxH = 17 * SCALE;
-    const bx = x + 4 * SCALE;
-    const bw = PAY_W - 8 * SCALE;
-    roundRect(ctx, bx, ly - 1.5 * SCALE, bw, boxH, 3 * SCALE);
-    ctx.fillStyle = "rgba(255,255,255,.15)";
+  panel(ctx, x, y, INNER_W, h, 0.05, 5.5 * SCALE);
+  dashed(ctx, x + 5 * SCALE, x + INNER_W - 5 * SCALE, y, tint(0.34), [3 * SCALE, 2.4 * SCALE]);
+  for (const nx of [x, x + INNER_W]) {
+    ctx.beginPath();
+    ctx.arc(nx, y, 2.6 * SCALE, 0, Math.PI * 2);
+    ctx.fillStyle = PAPER;
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.26)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(255,255,255,.86)";
-    ctx.font = `600 ${2.9 * SCALE}px ${FONT}`;
-    ctx.fillText("مبلغ قابل پرداخت", bx + bw - 4 * SCALE, ly + 3.4 * SCALE);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `800 ${6.2 * SCALE}px ${FONT}`;
-    const amountText = fitText(ctx, grand.amount, bw - 22 * SCALE);
-    ctx.fillText(amountText, bx + bw - 4 * SCALE, ly + 10.8 * SCALE);
-    const amountW = ctx.measureText(amountText).width;
-    ctx.fillStyle = "rgba(255,255,255,.85)";
-    ctx.font = `600 ${2.9 * SCALE}px ${FONT}`;
-    ctx.fillText(grand.currency, bx + bw - 6 * SCALE - amountW, ly + 11.4 * SCALE);
-    ly += boxH + 2.5 * SCALE;
   }
 
-  for (const l of after) row(l.label, l.value);
-
-  if (due) {
-    const boxH = 8 * SCALE;
-    const bx = x + 4 * SCALE;
-    const bw = PAY_W - 8 * SCALE;
-    roundRect(ctx, bx, ly - 1 * SCALE, bw, boxH, 2.6 * SCALE);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
+  // ستون راست: سطرهای جمع‌بندی با راهنمای نقطه‌چین
+  const listRight = x + INNER_W - STUB_PAD;
+  const listW = INNER_W * 0.52;
+  let ly = y + STUB_PAD + 2.4 * SCALE;
+  for (const l of rows) {
+    const isDue = l.kind === "due";
     ctx.textAlign = "right";
-    ctx.fillStyle = P.danger;
-    ctx.font = `700 ${3.2 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, due.label, bw * 0.5), bx + bw - 4 * SCALE, ly + 3 * SCALE);
+    ctx.fillStyle = isDue ? P.danger : P.muted;
+    ctx.font = `${isDue ? 800 : 400} ${3 * SCALE}px ${FONT}`;
+    const label = fitText(ctx, l.label, listW * 0.55);
+    ctx.fillText(label, listRight, ly);
+    const labelW = ctx.measureText(label).width;
+
     ctx.textAlign = "left";
-    ctx.fillText(fitText(ctx, due.value, bw * 0.46), bx + 4 * SCALE, ly + 3 * SCALE);
-    ly += boxH + 1 * SCALE;
+    ctx.fillStyle = isDue ? P.danger : P.ink;
+    ctx.font = `${isDue ? 800 : 700} ${3.1 * SCALE}px ${FONT}`;
+    const valueLeft = listRight - listW;
+    ctx.fillText(l.value, valueLeft, ly);
+    const valueW = ctx.measureText(l.value).width;
+
+    const dotFrom = valueLeft + valueW + 1.6 * SCALE;
+    const dotTo = listRight - labelW - 1.6 * SCALE;
+    if (dotTo > dotFrom) {
+      ctx.save();
+      ctx.setLineDash([1, 2.4]);
+      hLine(ctx, dotFrom, dotTo, ly + 1.2 * SCALE, tint(0.45));
+      ctx.restore();
+    }
+    ly += PAY_ROW_H;
+  }
+
+  // ستون چپ: مبلغ قابل پرداخت
+  if (grand) {
+    const gx = x + STUB_PAD;
+    const gy = y + STUB_PAD + 2 * SCALE;
+    ctx.textAlign = "left";
+    ctx.fillStyle = P.accent;
+    ctx.font = `700 ${3 * SCALE}px ${FONT}`;
+    ctx.fillText("مبلغ قابل پرداخت", gx, gy);
+
+    ctx.font = `800 ${8.6 * SCALE}px ${FONT}`;
+    ctx.fillStyle = P.ink;
+    const amount = fitText(ctx, grand.amount, INNER_W * 0.4);
+    ctx.fillText(amount, gx, gy + 7 * SCALE);
+    const aw = ctx.measureText(amount).width;
+    ctx.fillStyle = P.accent;
+    ctx.font = `700 ${3 * SCALE}px ${FONT}`;
+    ctx.fillText(grand.currency, gx + aw + 2 * SCALE, gy + 9 * SCALE);
+
+    if (settled) {
+      const sw = 22 * SCALE;
+      const sh = 8 * SCALE;
+      const sx = gx + Math.max(aw, INNER_W * 0.28) + 8 * SCALE;
+      const sy = gy + 2 * SCALE;
+      ctx.save();
+      ctx.translate(sx + sw / 2, sy + sh / 2);
+      ctx.rotate((-9 * Math.PI) / 180);
+      roundRect(ctx, -sw / 2, -sh / 2, sw, sh, 2.4 * SCALE);
+      ctx.strokeStyle = withAlpha(P.success, 0.42);
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.textAlign = "center";
+      ctx.fillStyle = withAlpha(P.success, 0.75);
+      ctx.font = `800 ${3.4 * SCALE}px ${FONT}`;
+      ctx.fillText("تسویه شد", 0, 0.2 * SCALE);
+      ctx.restore();
+    }
+  }
+
+  const words = payWordsLines(inv);
+  if (words.length) {
+    const wy = y + h - STUB_PAD - (words.length - 1) * 4.2 * SCALE - 1 * SCALE;
+    ctx.save();
+    ctx.setLineDash([2.5, 2.5]);
+    hLine(ctx, x + STUB_PAD, x + INNER_W - STUB_PAD, wy - 4.4 * SCALE, tint(0.3));
+    ctx.restore();
+    ctx.textAlign = "right";
+    ctx.fillStyle = P.muted;
+    ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
+    words.forEach((line, i) => {
+      ctx.fillText(line, x + INNER_W - STUB_PAD, wy + i * 4.2 * SCALE);
+    });
   }
 
   return y + h;
 }
 
-function drawSideColumn(ctx: Ctx, y: number, inv: Invoice, maxH: number): number {
-  const w = PAGE_W - MARGIN * 2 - PAY_W - 5 * SCALE;
-  const x = MARGIN;
-  let ly = y;
+// ─── توضیحات و امضا ─────────────────────────────────────────────────────────
 
-  const noteH = Math.min(maxH - SIG_H - 4 * SCALE, 20 * SCALE);
-  if (inv.notes && noteH > 11 * SCALE) {
-    softCard(ctx, x, ly, w, noteH);
-    ctx.textAlign = "right";
-    ctx.fillStyle = P.accent;
-    ctx.font = `700 ${3.2 * SCALE}px ${FONT}`;
-    ctx.fillText("توضیحات", x + w - 4 * SCALE, ly + 5.5 * SCALE);
-    ctx.fillStyle = P.ink;
-    ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
-    const maxW = w - 8 * SCALE;
-    const maxLines = Math.max(1, Math.floor((noteH - 9 * SCALE) / (4.6 * SCALE)));
-    const wrapped = wrapText(ctx, inv.notes, maxW, maxLines);
-    wrapped.forEach((line, idx) => {
-      ctx.fillText(line, x + w - 4 * SCALE, ly + 11.5 * SCALE + idx * 4.6 * SCALE);
-    });
-    ly += noteH + 4 * SCALE;
-  }
+function closingHeight(inv: Invoice): number {
+  const noteH = inv.notes ? 20 * SCALE : 0;
+  return Math.max(noteH, SIGN_H) + 5 * SCALE;
+}
 
-  const sigW = (w - 4 * SCALE) / 2;
-  const sigY = Math.max(ly, y + maxH - SIG_H);
-  const drawSign = (sx: number, label: string) => {
-    softCard(ctx, sx, sigY, sigW, SIG_H);
+function drawClosing(ctx: Ctx, y: number, inv: Invoice) {
+  const gap = 5 * SCALE;
+  const half = (INNER_W - gap) / 2;
+
+  if (inv.notes) {
+    const h = 20 * SCALE;
+    const x = PAGE_W - MARGIN - half;
+    panel(ctx, x, y, half, h, 0.04, 3.6 * SCALE);
+    const right = x + half - 4 * SCALE;
+    glyph(ctx, "note", right - 1.3 * SCALE, y + 4.6 * SCALE, 2.8 * SCALE, P.accent);
     ctx.textAlign = "right";
     ctx.fillStyle = P.accent;
     ctx.font = `700 ${3 * SCALE}px ${FONT}`;
-    ctx.fillText(fitText(ctx, label, sigW - 6 * SCALE), sx + sigW - 3.5 * SCALE, sigY + 5 * SCALE);
+    ctx.fillText("توضیحات", right - 3.6 * SCALE, y + 4.6 * SCALE);
+    ctx.fillStyle = P.ink;
+    ctx.font = `400 ${3.1 * SCALE}px ${FONT}`;
+    const lines = wrapText(ctx, inv.notes, half - 8 * SCALE, 3);
+    lines.forEach((line, i) => ctx.fillText(line, right, y + 10 * SCALE + i * 4.4 * SCALE));
+  }
+
+  const signW = (half - gap) / 2;
+  const drawSign = (sx: number, label: string, icon: string) => {
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    hLine(ctx, sx, sx + signW, y + SIGN_H - 5 * SCALE, tint(0.5));
+    ctx.restore();
+    ctx.textAlign = "center";
+    ctx.fillStyle = P.muted;
+    ctx.font = `400 ${2.9 * SCALE}px ${FONT}`;
+    const cx = sx + signW / 2;
+    ctx.fillText(label, cx + 2 * SCALE, y + SIGN_H - 0.6 * SCALE);
+    const lw = ctx.measureText(label).width;
+    glyph(ctx, icon, cx + lw / 2 + 4 * SCALE, y + SIGN_H - 0.6 * SCALE, 2.6 * SCALE, tint(0.8));
   };
-  drawSign(x + sigW + 4 * SCALE, "مهر و امضای فروشنده");
-  drawSign(x, "امضای خریدار");
-
-  return sigY + SIG_H;
-}
-
-function closingHeight(inv: Invoice): number {
-  return Math.max(payCardHeight(inv), (inv.notes ? 24 * SCALE : 0) + SIG_H) + 4 * SCALE;
+  drawSign(MARGIN + signW + gap, "مهر و امضای فروشنده", "seal");
+  drawSign(MARGIN, "امضای خریدار", "note");
 }
 
 // ─── پانویس ─────────────────────────────────────────────────────────────────
 
 function drawFooter(ctx: Ctx, inv: Invoice, pageNo: number, pageCount: number) {
   const shopName = inv.shopName || "فروشگاه";
-  const bandH = 9 * SCALE;
-  const top = PAGE_H - bandH;
-  const waveTop = top - 7 * SCALE;
-
-  ctx.beginPath();
-  ctx.moveTo(0, waveTop + 5 * SCALE);
-  ctx.bezierCurveTo(
-    PAGE_W * 0.28,
-    waveTop - 4 * SCALE,
-    PAGE_W * 0.52,
-    waveTop + 9 * SCALE,
-    PAGE_W,
-    waveTop + 1.5 * SCALE,
-  );
-  ctx.lineTo(PAGE_W, PAGE_H);
-  ctx.lineTo(0, PAGE_H);
-  ctx.closePath();
-  ctx.fillStyle = withAlpha(P.accent, 0.3);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(0, waveTop + 9 * SCALE);
-  ctx.bezierCurveTo(
-    PAGE_W * 0.3,
-    waveTop + 2 * SCALE,
-    PAGE_W * 0.58,
-    waveTop + 12 * SCALE,
-    PAGE_W,
-    waveTop + 6 * SCALE,
-  );
-  ctx.lineTo(PAGE_W, PAGE_H);
-  ctx.lineTo(0, PAGE_H);
-  ctx.closePath();
-  ctx.fillStyle = P.deep;
-  ctx.fill();
+  const y = PAGE_H - 10 * SCALE;
+  hLine(ctx, MARGIN, PAGE_W - MARGIN, y - 4 * SCALE, tint(0.18));
 
   ctx.textAlign = "right";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${3.1 * SCALE}px ${FONT}`;
-  ctx.fillText(fitText(ctx, shopName, 70 * SCALE), PAGE_W - MARGIN, top + bandH / 2);
+  ctx.fillStyle = P.accent;
+  ctx.font = `700 ${2.9 * SCALE}px ${FONT}`;
+  glyph(ctx, "seal", PAGE_W - MARGIN - 1.3 * SCALE, y, 2.8 * SCALE, P.accent);
+  ctx.fillText(fitText(ctx, shopName, 70 * SCALE), PAGE_W - MARGIN - 3.8 * SCALE, y);
 
   const ways = [inv.shopPhone, inv.shopAddress].filter(Boolean).join("  ·  ");
-  ctx.textAlign = "left";
-  ctx.fillStyle = "rgba(255,255,255,.85)";
-  ctx.font = `400 ${2.8 * SCALE}px ${FONT}`;
-  const tail =
-    pageCount > 1
-      ? `صفحه ${formatNumber(pageNo)} از ${formatNumber(pageCount)}`
-      : "با سپاس از اعتماد شما";
-  ctx.fillText(
-    fitText(ctx, ways ? `${ways}  ·  ${tail}` : tail, 120 * SCALE),
-    MARGIN,
-    top + bandH / 2,
-  );
+  const tail = pageCount > 1 ? `صفحه ${formatNumber(pageNo)} از ${formatNumber(pageCount)}` : "";
+  const text = [ways, tail].filter(Boolean).join("  ·  ");
+  if (text) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = P.muted;
+    ctx.font = `400 ${2.8 * SCALE}px ${FONT}`;
+    ctx.fillText(fitText(ctx, text, 120 * SCALE), MARGIN, y);
+  }
 }
 
 // ─── ساخت صفحات ─────────────────────────────────────────────────────────────
@@ -722,12 +832,12 @@ async function renderInvoiceCanvases(inv: Invoice): Promise<HTMLCanvasElement[]>
     const { ctx } = page;
     let y = drawHero(ctx, inv, pageNo, logoImg);
     if (pageNo === 1) {
-      y = drawMetaCard(ctx, y, inv);
+      y = drawMetaStrip(ctx, y, inv);
       y = drawParties(ctx, y, inv);
     }
     y = drawTableHead(ctx, y);
 
-    const closing = closingHeight(inv);
+    const closing = stubHeight(inv) + closingHeight(inv) + 6 * SCALE;
     const bottomLimit = PAGE_H - FOOTER_H;
     while (i < items.length && y + ROW_H + closing <= bottomLimit) {
       y = drawRow(ctx, y, i, items[i]);
@@ -736,10 +846,9 @@ async function renderInvoiceCanvases(inv: Invoice): Promise<HTMLCanvasElement[]>
 
     const isLast = i >= items.length;
     if (isLast) {
-      const closeY = y + 5 * SCALE;
-      const boxH = closingHeight(inv) - 4 * SCALE;
-      drawPayCard(ctx, closeY, inv);
-      drawSideColumn(ctx, closeY, inv, boxH);
+      const stubY = y + 7 * SCALE;
+      const afterStub = drawStub(ctx, stubY, inv);
+      drawClosing(ctx, afterStub + 5 * SCALE, inv);
     }
 
     pages.push(page);

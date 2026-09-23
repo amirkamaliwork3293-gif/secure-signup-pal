@@ -749,6 +749,12 @@ function stampChangedRows(key: string, value: unknown): unknown {
 
 function write<T>(key: string, value: T): boolean {
   if (!assertBusinessWriteAllowed()) return false;
+  // تب دیگری روی همین مرورگر با اکانت دیگری وارد شده و اسکوپ مشترک localStorage
+  // عوض شده، ولی این تب هنوز اکانت قبلی است: نوشتن دادهٔ این تب در حافظهٔ اکانت دیگر ممنوع.
+  if (cloudUserId && getStorageScope() !== cloudUserId) {
+    console.warn("[store] write refused: storage scope belongs to another account");
+    return false;
+  }
   const field = CLOUD_FIELDS[key];
   const stamped = stampChangedRows(key, value) as T;
   if (field) {
@@ -788,7 +794,10 @@ function clearInMemoryPush() {
  */
 export function beginUserScope(userId: string) {
   if (!userId || userId === "anon") return;
-  if (cloudUserId && cloudUserId !== userId) {
+  // صف حافظه همیشه مال cloudUserId است. بعد از خروج (cloudUserId=null) هم ممکن است
+  // آپلودِ ناموفقِ کاربر قبلی چیزی در صف گذاشته باشد؛ آن تغییرات با نشانهٔ dirty در
+  // حافظهٔ اسکوپ‌شدهٔ همان کاربر می‌مانند و در ورود بعدی خودش دوباره فرستاده می‌شوند.
+  if (cloudUserId !== userId) {
     clearInMemoryPush();
     cloudHydrated = false;
     lastCloudUpdatedAt = null;
@@ -1062,6 +1071,8 @@ async function dropVandalizedCatalogPushes(
   } catch {
     liveOk = false;
   }
+  // در فاصلهٔ خواندن شبکه کاربر عوض شده: هیچ چیز در حافظه/صف کاربر جدید ننویس.
+  if (cloudUserId !== userId || getStorageScope() !== userId) return;
 
   for (const field of protectedInPush) {
     const localVal = fieldsToPush[field];
@@ -1143,6 +1154,7 @@ async function runFlushCloudPush() {
     const fieldsToPush = { ...pendingPush };
     const userId = cloudUserId;
     await dropVandalizedCatalogPushes(userId, fieldsToPush);
+    if (cloudUserId !== userId || getStorageScope() !== userId) return;
     const fieldNames = Object.keys(fieldsToPush);
     if (fieldNames.length === 0) {
       publishSyncState({
@@ -1259,6 +1271,9 @@ async function runFlushCloudPush() {
       if (Object.keys(pendingPush).length === 0) return;
     } catch (e) {
       console.error("[store] cloud push failed", { fields: fieldNames, error: e });
+      // کاربر در حین آپلود عوض شده (خروج یا ورود مستقیم با اکانت دیگر): دادهٔ کاربر
+      // قبلی هرگز به صف کاربر فعلی برنمی‌گردد. نشانهٔ dirty در حافظهٔ خودش باقی است.
+      if (cloudUserId !== userId || getStorageScope() !== userId) return;
       for (const f of fieldNames) {
         if (!(f in pendingPush)) pendingPush[f] = fieldsToPush[f];
       }

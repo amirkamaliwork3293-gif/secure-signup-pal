@@ -38,7 +38,8 @@ function table(name: string) {
         maybeSingle() {
           return network((asUser) => {
             const id = String(filters.user_id ?? "");
-            if (name !== "user_data" || !asUser || asUser !== id) return { data: null, error: null };
+            if (name !== "user_data" || !asUser || asUser !== id)
+              return { data: null, error: null };
             const row = fake.rows.get(id);
             if (!row) return { data: null, error: null };
             if (cols === "*") return { data: structuredClone(row), error: null };
@@ -71,12 +72,16 @@ export const supabase = {
   from: table,
   auth: {
     async refreshSession() {
-      return fake.sessionUser ? { data: {}, error: null } : { data: {}, error: { message: "no session" } };
+      return fake.sessionUser
+        ? { data: {}, error: null }
+        : { data: {}, error: { message: "no session" } };
     },
     async getSession() {
       return {
         data: {
-          session: fake.sessionUser ? { access_token: `tok-${fake.sessionUser}`, user: { id: fake.sessionUser } } : null,
+          session: fake.sessionUser
+            ? { access_token: `tok-${fake.sessionUser}`, user: { id: fake.sessionUser } }
+            : null,
         },
       };
     },

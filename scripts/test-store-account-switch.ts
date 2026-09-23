@@ -8,64 +8,21 @@
  */
 import assert from "node:assert/strict";
 
-// ─── محیط مرورگر شبیه‌سازی‌شده ───────────────────────────────────────────────
-const mem = new Map<string, string>();
-const localStorage = {
-  getItem: (k: string) => (mem.has(k) ? mem.get(k)! : null),
-  setItem: (k: string, v: string) => void mem.set(k, String(v)),
-  removeItem: (k: string) => void mem.delete(k),
-  get length() {
-    return mem.size;
-  },
-  key: (i: number) => [...mem.keys()][i] ?? null,
-};
-const win = new EventTarget() as EventTarget & Record<string, unknown>;
-win.localStorage = localStorage;
-win.setInterval = () => 0;
-const g = globalThis as Record<string, unknown>;
-g.window = win;
-g.localStorage = localStorage;
-g.document = { addEventListener() {}, removeEventListener() {}, visibilityState: "visible" };
-
-// ساعت دستی: تایمرهای store.ts (debounce ۶۰۰ms، retry ۵s، hydrate retry ۱۵s) بدون انتظار واقعی.
-let now = 0;
-let seq = 0;
-const timers = new Map<number, { at: number; fn: () => void }>();
-g.setTimeout = ((fn: () => void, ms = 0) => {
-  const id = ++seq;
-  timers.set(id, { at: now + ms, fn });
-  return id;
-}) as unknown as typeof setTimeout;
-g.clearTimeout = ((id: number) => void timers.delete(id)) as unknown as typeof clearTimeout;
-const flush = async () => {
-  for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r));
-};
-async function advance(ms: number) {
-  const until = now + ms;
-  await flush();
-  for (;;) {
-    const due = [...timers.entries()].filter(([, t]) => t.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
-    if (!due) break;
-    timers.delete(due[0]);
-    now = due[1].at;
-    due[1].fn();
-    await flush();
-  }
-  now = until;
-}
-
+const { localStorage, timers, flush, advance } = await import("./fakes/browser-env.ts");
 const { fake } = await import("./fakes/supabase-client.ts");
 const store = await import("../src/lib/store.ts");
 const { products, hydrateFromCloud, stopCloudSync, setStorageScope, beginUserScope } = store;
 
 const A = "user-a";
 const B = "user-b";
-const ids = (list: unknown) => (Array.isArray(list) ? list.map((r) => (r as { id: string }).id).sort() : []);
-const localIds = (user: string) => ids(JSON.parse(localStorage.getItem(`acc.products.v2:${user}`) ?? "[]"));
+const ids = (list: unknown) =>
+  Array.isArray(list) ? list.map((r) => (r as { id: string }).id).sort() : [];
+const localIds = (user: string) =>
+  ids(JSON.parse(localStorage.getItem(`acc.products.v2:${user}`) ?? "[]"));
 const product = (id: string) => ({ id, name: id, price: 1000, category: "", code: "", stock: 5 });
 
 function reset() {
-  mem.clear();
+  localStorage.clear();
   timers.clear();
   fake.rows.clear();
   fake.upserts.length = 0;
@@ -94,7 +51,11 @@ function signOut() {
 function assertBClean(label: string) {
   for (const u of fake.upserts) {
     if (u.payload.user_id !== B) continue;
-    assert.deepEqual(ids(u.payload.products ?? []).filter((id) => id.startsWith("a")), [], `${label}: A product pushed to B row`);
+    assert.deepEqual(
+      ids(u.payload.products ?? []).filter((id) => id.startsWith("a")),
+      [],
+      `${label}: A product pushed to B row`,
+    );
     const shop = (u.payload.settings as { shopName?: string } | undefined)?.shopName;
     if (shop !== undefined) assert.equal(shop, "shop B", `${label}: A settings pushed to B row`);
   }
@@ -103,12 +64,19 @@ function assertBClean(label: string) {
 }
 
 async function assertANotLost(label: string) {
-  assert.ok(localIds(A).includes("a2"), `${label}: A's unsynced product vanished from A's device storage`);
+  assert.ok(
+    localIds(A).includes("a2"),
+    `${label}: A's unsynced product vanished from A's device storage`,
+  );
   signOut();
   await advance(1000);
   await signIn(A);
   await advance(10_000);
-  assert.deepEqual(ids(fake.rows.get(A)!.products), ["a1", "a2"], `${label}: A's edit never reached A's row`);
+  assert.deepEqual(
+    ids(fake.rows.get(A)!.products),
+    ["a1", "a2"],
+    `${label}: A's edit never reached A's row`,
+  );
   assert.deepEqual(localIds(A), ["a1", "a2"]);
 }
 

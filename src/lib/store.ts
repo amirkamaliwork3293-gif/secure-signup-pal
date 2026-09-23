@@ -766,6 +766,34 @@ function write<T>(key: string, value: T): boolean {
   return true;
 }
 
+/**
+ * لیستی که بیرون از store ساخته شده (setter هوک useStore یا X.save) ممکن است از
+ * نسخهٔ کهنه‌تری ساخته شده باشد (مودالِ باز، await، تب دیگر). ردیفی که الان در
+ * حافظه هست ولی در این لیست نیست «حذف» حساب نمی‌شود و سر جای قبلی‌اش می‌ماند.
+ * حذف فقط از توابع صریح remove/deleteFromHistory که در همان لحظه
+ * read → filter → write می‌کنند (پس لیستشان تازه است).
+ */
+function keepUndeletedRows<T>(key: string, value: T): T {
+  if (!Array.isArray(value) || !CLOUD_FIELDS[key] || key === INVOICE_KEY) return value;
+  const present = new Set(value.map(catalogRowId).filter(Boolean));
+  const current = read<unknown[]>(key, []);
+  const out = [...value];
+  const kept: string[] = [];
+  current.forEach((row, index) => {
+    const id = catalogRowId(row);
+    if (!id || present.has(id)) return;
+    out.splice(Math.min(index, out.length), 0, row);
+    kept.push(id);
+  });
+  if (kept.length === 0) return value;
+  console.warn("[store] rows missing from a list save were kept (not deleted)", { key, ids: kept });
+  return out as T;
+}
+
+function saveList<T>(key: string, list: T[]): boolean {
+  return write(key, keepUndeletedRows(key, list));
+}
+
 // ─── Cloud sync ──────────────────────────────────────────────────────────────
 
 let cloudUserId: string | null = null;
@@ -1619,7 +1647,7 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
   }, [key]);
   const set = (v: T | ((p: T) => T)) => {
     setState((prev) => {
-      const next = typeof v === "function" ? (v as (p: T) => T)(prev) : v;
+      const next = keepUndeletedRows(key, typeof v === "function" ? (v as (p: T) => T)(prev) : v);
       if (!write(key, next)) return prev;
       return next;
     });
@@ -1632,7 +1660,7 @@ export function useStore<T>(key: string, fallback: T): [T, (v: T | ((p: T) => T)
 export const products = {
   useAll: () => useStore<Product[]>(PRODUCTS_KEY, []),
   getAll: () => read<Product[]>(PRODUCTS_KEY, []),
-  save: (list: Product[]) => write(PRODUCTS_KEY, list),
+  save: (list: Product[]) => saveList(PRODUCTS_KEY, list),
   findByCode: (code: string) => findProductByCode(read<Product[]>(PRODUCTS_KEY, []), code),
   findById: (id: string) => read<Product[]>(PRODUCTS_KEY, []).find((p) => p.id === id),
   update: (updated: Product) => {
@@ -1653,6 +1681,14 @@ export const products = {
       ),
     );
   },
+  /** حذف صریح (دکمهٔ حذف کاربر). save دیگر هیچ محصولی را حذف نمی‌کند. */
+  remove: (ids: readonly string[]) => {
+    const drop = new Set(ids);
+    return write(
+      PRODUCTS_KEY,
+      read<Product[]>(PRODUCTS_KEY, []).filter((p) => !drop.has(p.id)),
+    );
+  },
 };
 
 // ─── Categories ──────────────────────────────────────────────────────────────
@@ -1663,7 +1699,13 @@ export const categories = {
     const stored = read<Category[] | null>(CATEGORIES_KEY, null);
     return stored ?? DEFAULT_CATEGORIES;
   },
-  save: (list: Category[]) => write(CATEGORIES_KEY, list),
+  save: (list: Category[]) => saveList(CATEGORIES_KEY, list),
+  /** حذف صریح دسته‌بندی (دکمهٔ حذف کاربر) */
+  remove: (id: string) =>
+    write(
+      CATEGORIES_KEY,
+      categories.getAll().filter((c) => c.id !== id),
+    ),
 };
 
 // ─── Invoice (multi-tab) ─────────────────────────────────────────────────────
@@ -1927,7 +1969,7 @@ export const invoice = {
 export const purchases = {
   useAll: () => useStore<Purchase[]>(PURCHASES_KEY, []),
   getAll: () => read<Purchase[]>(PURCHASES_KEY, []),
-  save: (list: Purchase[]) => write(PURCHASES_KEY, list),
+  save: (list: Purchase[]) => saveList(PURCHASES_KEY, list),
   /**
    * ثبت نهایی فاکتور خرید:
    *  - برای کالاهای موجود: موجودی را اضافه و قیمت خرید را به‌روزرسانی می‌کند.
@@ -2126,7 +2168,7 @@ export function expensesByCategory(list: Expense[]): { category: string; total: 
 export const expenses = {
   useAll: () => useStore<Expense[]>(EXPENSES_KEY, []),
   getAll: () => read<Expense[]>(EXPENSES_KEY, []),
-  save: (list: Expense[]) => write(EXPENSES_KEY, list),
+  save: (list: Expense[]) => saveList(EXPENSES_KEY, list),
   add: (e: Expense) => {
     const list = read<Expense[]>(EXPENSES_KEY, []);
     const created = { ...e, id: e.id || cryptoId(), createdAt: e.createdAt || Date.now() };
@@ -2249,7 +2291,7 @@ export function manualLedgerTotals(list: ManualLedgerEntry[]): {
 export const manualLedger = {
   useAll: () => useStore<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []),
   getAll: () => read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []),
-  save: (list: ManualLedgerEntry[]) => write(MANUAL_LEDGER_KEY, list),
+  save: (list: ManualLedgerEntry[]) => saveList(MANUAL_LEDGER_KEY, list),
   add: (e: ManualLedgerEntry) => {
     const list = read<ManualLedgerEntry[]>(MANUAL_LEDGER_KEY, []);
     const created: ManualLedgerEntry = {
@@ -2327,7 +2369,7 @@ export function dueReminderCount(list: Reminder[]): number {
 export const reminders = {
   useAll: () => useStore<Reminder[]>(REMINDERS_KEY, []),
   getAll: () => read<Reminder[]>(REMINDERS_KEY, []),
-  save: (list: Reminder[]) => write(REMINDERS_KEY, list),
+  save: (list: Reminder[]) => saveList(REMINDERS_KEY, list),
 
   add: (r: Omit<Reminder, "id" | "createdAt" | "done" | "doneAt">) => {
     const created: Reminder = {
@@ -2526,7 +2568,7 @@ function logProductionSales(inv: Invoice) {
 export const production = {
   useAll: () => useStore<ProductionEvent[]>(PRODUCTION_KEY, []),
   getAll: () => read<ProductionEvent[]>(PRODUCTION_KEY, []),
-  save: (list: ProductionEvent[]) => write(PRODUCTION_KEY, list),
+  save: (list: ProductionEvent[]) => saveList(PRODUCTION_KEY, list),
 
   /**
    * تولید دسته‌ای: مواد فرمول از انبار کم و موجودی محصول نهایی زیاد می‌شود.
@@ -2582,7 +2624,7 @@ export const settings = {
 export const customers = {
   useAll: () => useStore<Customer[]>(CUSTOMERS_KEY, []),
   getAll: () => read<Customer[]>(CUSTOMERS_KEY, []),
-  save: (list: Customer[]) => write(CUSTOMERS_KEY, list),
+  save: (list: Customer[]) => saveList(CUSTOMERS_KEY, list),
 
   add: (c: Omit<Customer, "id" | "createdAt" | "txs">): Customer => {
     const created: Customer = { ...c, id: cryptoId(), createdAt: Date.now(), txs: [] };
@@ -2917,7 +2959,7 @@ export function studentStatus(s: Student): StudentStatus {
 export const students = {
   useAll: () => useStore<Student[]>(STUDENTS_KEY, []),
   getAll: () => read<Student[]>(STUDENTS_KEY, []),
-  save: (list: Student[]) => write(STUDENTS_KEY, list),
+  save: (list: Student[]) => saveList(STUDENTS_KEY, list),
 
   add: (
     s: Omit<Student, "id" | "createdAt" | "payments" | "nextDueAt" | "active"> & {

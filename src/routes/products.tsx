@@ -123,7 +123,7 @@ function ProductsPageInner() {
   const remove = (id: string) => {
     if (!confirm("حذف این محصول؟")) return;
     if (!requireOnlineWrite()) return;
-    setList(list.filter((p) => p.id !== id));
+    products.remove([id]);
   };
 
   const removeAll = () => {
@@ -135,7 +135,8 @@ function ProductsPageInner() {
     )
       return;
     if (!requireOnlineWrite()) return;
-    setList([]);
+    // فقط همان محصولاتی که کاربر دید و تأیید کرد؛ کالایی که همین حالا از دستگاه دیگر رسیده حذف نمی‌شود.
+    products.remove(list.map((p) => p.id));
     setSelected(new Set());
   };
 
@@ -1313,10 +1314,12 @@ function CategoryManager({
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
+  // save دیگر دسته‌ای را حذف نمی‌کند؛ لیست دیالوگ از حافظهٔ تازه خوانده می‌شود
+  // تا دسته‌ای که در حین باز بودن دیالوگ از دستگاه دیگر رسیده هم دیده شود.
   const save = (updated: Category[]) => {
-    setList(updated);
     onChange(updated);
     categories.save(updated);
+    setList(categories.getAll());
   };
 
   const add = () => {
@@ -1326,7 +1329,8 @@ function CategoryManager({
   };
 
   const remove = (id: string) => {
-    save(list.filter((c) => c.id !== id));
+    categories.remove(id);
+    setList(categories.getAll());
   };
 
   const startEdit = (c: Category) => {

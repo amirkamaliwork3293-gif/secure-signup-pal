@@ -642,6 +642,47 @@ export function mergeSettingsKeepBoth(local: unknown, cloud: unknown): Record<st
   return out;
 }
 
+/**
+ * تنظیمات هنگام همگام‌سازی دستگاه: نسخهٔ ابر مرجع است. فقط کلیدهایی که همین
+ * دستگاه با ذخیرهٔ کاربر عوض کرده و ذخیره‌شان هنوز از سرور تأیید نشده (dirtyKeys)
+ * از نسخهٔ محلی می‌آیند. حذف‌ها (catalogTombstones) همیشه اجتماع هر دو است.
+ * اگر ابر هنوز تنظیماتی ندارد (اولین دستگاه)، رفتار قبلی: نسخهٔ محلی می‌ماند.
+ */
+export function mergeSettingsFromCloud(
+  local: unknown,
+  cloud: unknown,
+  dirtyKeys: ReadonlySet<string>,
+): Record<string, unknown> {
+  const c = asRecord(cloud);
+  if (!c || Object.keys(c).every((k) => k === "catalogTombstones")) {
+    return mergeSettingsKeepBoth(local, cloud);
+  }
+  const l = asRecord(local) ?? {};
+  const out: Record<string, unknown> = { ...c };
+  for (const k of dirtyKeys) {
+    if (k === "catalogTombstones") continue;
+    if (k in l) out[k] = l[k];
+    else delete out[k];
+  }
+  // نام فروشگاه هرگز با نام خالی ابر پاک نشود (همان قاعدهٔ قبلی)
+  const cloudName = typeof out.shopName === "string" ? out.shopName.trim() : "";
+  const localName = typeof l.shopName === "string" ? l.shopName.trim() : "";
+  if (!cloudName && localName && !dirtyKeys.has("shopName")) out.shopName = localName;
+  const ts = compactTombstones(mergeTombstoneMaps(c.catalogTombstones, l.catalogTombstones));
+  if (ts) out.catalogTombstones = ts;
+  else delete out.catalogTombstones;
+  return out;
+}
+
+/** کلیدهای سطح اول که بین دو نسخهٔ تنظیمات فرق دارند (بدون catalogTombstones) */
+export function changedSettingKeys(prev: unknown, next: unknown): string[] {
+  const p = asRecord(prev) ?? {};
+  const n = asRecord(next) ?? {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  keys.delete("catalogTombstones");
+  return [...keys].filter((k) => catalogArraysDiffer(p[k], n[k]));
+}
+
 export function catalogArraysDiffer(a: unknown, b: unknown): boolean {
   try {
     return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);

@@ -12,7 +12,8 @@ import {
   mergeInvoicePricesFromCloud,
   mergeProductPricesFromCloud,
   compactTombstones,
-  mergeSettingsKeepBoth,
+  mergeSettingsFromCloud,
+  changedSettingKeys,
   mergeTombstoneMaps,
   preferCloudValue,
   unionMergeById,
@@ -472,6 +473,11 @@ const TOMBSTONE_KEY = "acc.tombstones.v1";
 const CLOUD_DIRTY_KEY = "acc.cloudDirty.v1";
 /** فاکتورهایی که از تب باز ثبت شده‌اند تا hydrate دوباره بازشان نکند */
 const CLOSED_OPEN_IDS_KEY = "acc.closedOpenInvoiceIds.v1";
+/**
+ * کلیدهای تنظیماتی که همین دستگاه با ذخیرهٔ کاربر عوض کرده و ذخیره‌شان هنوز از
+ * سرور تأیید نشده. فقط همین کلیدها هنگام ادغام بر ابر برنده‌اند؛ بقیه از ابر می‌آیند.
+ */
+const SETTINGS_DIRTY_KEYS_KEY = "acc.settingsDirtyKeys.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
@@ -760,6 +766,11 @@ function write<T>(key: string, value: T): boolean {
   if (field) {
     const prev = read<unknown>(key, Array.isArray(value) ? [] : null);
     rememberRemovedIds(field, prev, stamped);
+  }
+  if (key === SETTINGS_KEY) {
+    for (const k of changedSettingKeys(read(SETTINGS_KEY, DEFAULT_SETTINGS), stamped)) {
+      addIdToSet(SETTINGS_DIRTY_KEYS_KEY, k);
+    }
   }
   writeLocalOnly(key, stamped);
   scheduleCloudPush(key, stamped);
@@ -1060,6 +1071,14 @@ function localValueForCloudField(field: string): unknown {
   }
 }
 
+function clearSettingsDirtyKeys() {
+  try {
+    localStorage.removeItem(scopedKey(SETTINGS_DIRTY_KEYS_KEY));
+  } catch {
+    /* noop */
+  }
+}
+
 function adoptCloudField(field: string, cloudValue: unknown) {
   const localKey = FIELD_TO_LOCAL_KEY[field];
   if (localKey && cloudValue != null) writeLocalOnly(localKey, cloudValue);
@@ -1289,6 +1308,8 @@ async function runFlushCloudPush() {
         }
       }
       clearDirty(confirmed);
+      // همان نسخه‌ای که کلیدهای تغییرکرده را داشت روی سرور نشست
+      if (confirmed.includes("settings")) clearSettingsDirtyKeys();
       retryDelay = 5000;
       publishSyncState({
         pending: readDirtySet().size,
@@ -1324,7 +1345,12 @@ function applyCloudRow(data: Record<string, unknown>) {
   // اول حذف‌های همه‌ی دستگاه‌ها را یکی می‌کنیم، بعد آرایه‌ها را ادغام می‌کنیم
   // تا کالای حذف‌شده روی گوشی دیگر دوباره ظاهر نشود.
   const cloudSettings = data.settings;
-  const mergedSettings = mergeSettingsKeepBoth(localValueForCloudField("settings"), cloudSettings);
+  // ابر مرجع است؛ فقط کلیدهایی که همین دستگاه عوض کرده و هنوز تأیید نشده‌اند محلی می‌مانند.
+  const mergedSettings = mergeSettingsFromCloud(
+    localValueForCloudField("settings"),
+    cloudSettings,
+    readIdSet(SETTINGS_DIRTY_KEYS_KEY),
+  );
   const ts = mergeTombstoneMaps(readTombstones(), mergedSettings.catalogTombstones);
   const compact = compactTombstones(ts);
   writeTombstones(compact ?? {});
@@ -1337,6 +1363,7 @@ function applyCloudRow(data: Record<string, unknown>) {
   } else {
     delete pendingPush.settings;
     clearDirty(["settings"]);
+    clearSettingsDirtyKeys(); // ابر همین مقدارها را دارد؛ چیزی ذخیره‌نشده نمانده
   }
 
   const applyMerged = (field: string, key: string, cloudValue: unknown) => {

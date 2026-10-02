@@ -821,11 +821,8 @@ function stampChangedRows(key: string, value: unknown): unknown {
     const b = { ...(old as Record<string, unknown>) };
     delete a.updatedAt;
     delete b.updatedAt;
-    try {
-      if (JSON.stringify(a) === JSON.stringify(b)) return old;
-    } catch {
-      /* مقایسه نشد — مهر تازه می‌زنیم */
-    }
+    // مقایسه بدون حساسیت به ترتیب کلیدها (ردیفی که از ابر آمده ترتیب jsonb دارد)
+    if (!catalogArraysDiffer(a, b)) return old;
     return { ...rec, updatedAt: now };
   });
 }
@@ -945,8 +942,21 @@ export function beginUserScope(userId: string) {
   setStorageScope(userId);
 }
 
+let persistRequested = false;
+/** از مرورگر/WebView می‌خواهیم حافظهٔ این سایت را هنگام کمبود فضا پاک نکند */
+function requestPersistentStorage() {
+  if (persistRequested || typeof navigator === "undefined") return;
+  persistRequested = true;
+  try {
+    void navigator.storage?.persist?.().catch(() => {});
+  } catch {
+    /* پشتیبانی نمی‌شود */
+  }
+}
+
 function markCloudHydrated() {
   cloudHydrated = true;
+  requestPersistentStorage();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("store-hydrated"));
     if (cloudUserId) startRealtimeSync(cloudUserId, onRemoteChangeSignal);

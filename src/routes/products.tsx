@@ -1329,6 +1329,8 @@ function CategoryManager({
   };
 
   const remove = (id: string) => {
+    const name = list.find((c) => c.id === id)?.name ?? "";
+    if (!confirm(`دسته‌بندی «${name}» حذف شود؟ (محصولات این دسته حذف نمی‌شوند)`)) return;
     categories.remove(id);
     setList(categories.getAll());
   };

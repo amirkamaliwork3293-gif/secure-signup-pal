@@ -9,7 +9,17 @@
  * fake.upserts ثبت می‌شود. با fake.serverMerge یک تابع ادغام سمت سرور (مثل تریگر
  * user_data_protect_catalog) روی هر نوشتن اعمال می‌شود.
  */
+import { AsyncResource } from "node:async_hooks";
+
 type Row = Record<string, unknown>;
+
+/** کانال‌های realtime فعال — هر نوشتن روی user_data سیگنال (user_id, updated_at) می‌فرستد */
+type FakeChannel = {
+  userFilter: string | null;
+  cb: ((payload: { new: Row }) => void) | null;
+  removed: boolean;
+};
+const channels = new Set<FakeChannel>();
 
 let clock = Date.UTC(2026, 0, 1);
 function serverNow(): string {
@@ -34,6 +44,8 @@ export const fake = {
       release();
     };
   },
+  /** سیگنال realtime فعال باشد (پیش‌فرض خاموش؛ مثل وقتی مهاجرت سیگنال اجرا نشده) */
+  realtime: false,
   /** نوشتن مستقیم دستگاه دیگر روی سرور (مثل اپ قدیمی با upsert کور) */
   externalWrite(userId: string, patch: Row) {
     applyWrite(userId, patch);
@@ -46,6 +58,13 @@ function applyWrite(id: string, payload: Row): Row {
   const merged = fake.serverMerge ? fake.serverMerge(old, incoming) : { ...old, ...incoming };
   const next = { ...merged, user_id: id, updated_at: serverNow() };
   fake.rows.set(id, next);
+  if (fake.realtime) {
+    for (const ch of channels) {
+      if (ch.removed || !ch.cb || (ch.userFilter && ch.userFilter !== id)) continue;
+      const cb = ch.cb;
+      setTimeout(() => cb({ new: { user_id: id, updated_at: next.updated_at } }), 50);
+    }
+  }
   return next;
 }
 
@@ -155,8 +174,45 @@ function table(name: string) {
   };
 }
 
+function channel(_name: string) {
+  const ch: FakeChannel = { userFilter: null, cb: null, removed: false };
+  const api = {
+    on(_type: string, opts: { filter?: string }, cb: (payload: { new: Row }) => void) {
+      ch.userFilter = opts.filter?.replace(/^user_id=eq\./, "") ?? null;
+      // کال‌بک در «دستگاهی» که کانال را ساخته اجرا می‌شود
+      ch.cb = AsyncResource.bind(cb);
+      return api;
+    },
+    subscribe(statusCb?: (status: string) => void) {
+      if (!fake.realtime) {
+        if (statusCb)
+          setTimeout(
+            AsyncResource.bind(() => statusCb("CHANNEL_ERROR")),
+            10,
+          );
+        return api;
+      }
+      channels.add(ch);
+      if (statusCb)
+        setTimeout(
+          AsyncResource.bind(() => statusCb("SUBSCRIBED")),
+          10,
+        );
+      return api;
+    },
+    _ch: ch,
+  };
+  return api;
+}
+
 export const supabase = {
   from: table,
+  channel,
+  removeChannel(api: { _ch: FakeChannel }) {
+    api._ch.removed = true;
+    channels.delete(api._ch);
+    return Promise.resolve("ok");
+  },
   auth: {
     async refreshSession() {
       return fake.sessionUser

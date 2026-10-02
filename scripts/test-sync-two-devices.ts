@@ -401,6 +401,20 @@ async function run(serverMode: "blind" | "trigger") {
     assert.ok(ids(await on(B, (s) => s.products.getAll())).includes("p-full"), `${tag} 11: B`);
   });
 
+  // ۱۲) سیگنال لحظه‌ای: تغییر A بدون هیچ رفرش دستی (و بدون دریافت دوره‌ای) به B می‌رسد
+  await scenario(async () => {
+    fake.realtime = true;
+    try {
+      const { A, B } = await freshWorld(serverMode);
+      await on(A, (s) => s.customers.addTx("c1", { type: "payment", amount: 400 }));
+      await settle(6000); // ذخیرهٔ A + سیگنال + دریافت B (تایمر ۴۰ ثانیه‌ای در محیط تست خاموش است)
+      const c = await on(B, (s) => s.customers.getAll().find((x) => x.id === "c1")!);
+      assert.equal(c.txs.length, 2, `${tag} 12: realtime signal did not bring A's payment to B`);
+    } finally {
+      fake.realtime = false;
+    }
+  });
+
   if (!failures.length) console.log(`✓ ${tag} two-device sync scenarios passed`);
 }
 

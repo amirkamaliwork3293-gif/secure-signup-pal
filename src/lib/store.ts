@@ -39,6 +39,7 @@ import {
 import { rememberCloudRead } from "@/lib/offline-cache";
 import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
 import { findProductByCode } from "@/lib/barcode-match";
+import { ensureRealtimeSync, startRealtimeSync, stopRealtimeSync } from "@/lib/realtime-sync";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -935,6 +936,7 @@ export function beginUserScope(userId: string) {
   // حافظهٔ اسکوپ‌شدهٔ همان کاربر می‌مانند و در ورود بعدی خودش دوباره فرستاده می‌شوند.
   if (cloudUserId !== userId) {
     clearInMemoryPush();
+    stopRealtimeSync();
     cloudHydrated = false;
     lastCloudUpdatedAt = null;
     hydrateEpoch += 1;
@@ -947,7 +949,16 @@ function markCloudHydrated() {
   cloudHydrated = true;
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("store-hydrated"));
+    if (cloudUserId) startRealtimeSync(cloudUserId, onRemoteChangeSignal);
   }
+}
+
+/** دستگاه دیگری با همین حساب چیزی ذخیره کرد (یا کانال لحظه‌ای تازه وصل شد) */
+function onRemoteChangeSignal(updatedAt: string | null) {
+  if (updatedAt && updatedAt === lastCloudUpdatedAt) return; // پژواک ذخیرهٔ خودمان
+  void refreshFromCloud();
+  // اگر همین الان دریافت/ذخیرهٔ دیگری در جریان بود، refreshFromCloud رد می‌شود
+  setTimeout(() => void refreshFromCloud(), 3000);
 }
 
 /** آیا داده‌ی ابری این نشست خوانده شده (یا تلاش اول تمام شده) — برای تور شروع کار */
@@ -1765,6 +1776,7 @@ export async function refreshFromCloud() {
 }
 
 export function stopCloudSync() {
+  stopRealtimeSync();
   hydrateEpoch += 1;
   cloudUserId = null;
   cloudHydrated = false;
@@ -1785,6 +1797,7 @@ function onReconnect() {
   if (Object.keys(pendingPush).length > 0) {
     flushCloudPush();
   }
+  ensureRealtimeSync();
   void refreshFromCloud();
 }
 
@@ -1806,9 +1819,17 @@ if (typeof window !== "undefined") {
   };
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushNow();
-    else if (document.visibilityState === "visible") void refreshFromCloud();
+    else if (document.visibilityState === "visible") {
+      ensureRealtimeSync();
+      void refreshFromCloud();
+    }
   });
   window.addEventListener("pagehide", flushNow);
+  // برگشت از bfcache (دکمهٔ بازگشت مرورگر) و فوکوس پنجره: داده‌ی دستگاه‌های دیگر را بیاور
+  window.addEventListener("pageshow", (e) => {
+    if ((e as PageTransitionEvent).persisted) void refreshFromCloud();
+  });
+  window.addEventListener("focus", () => void refreshFromCloud());
   // وقتی برنامه باز است، هر ۴۰ ثانیه اگر ابر عوض شده باشد داده را می‌آوریم
   // تا همان اکانت روی گوشی/مرورگر دیگر آخرین تغییرات را ببیند.
   window.setInterval(() => {

@@ -887,7 +887,7 @@ function TxRow({ tx, customer }: { tx: CustomerTx; customer: Customer }) {
   const isPurchaseCredit = !!tx.purchaseId;
   const removeTx = () => {
     if (!confirm("این تراکنش حذف شود؟")) return;
-    customers.update({ ...customer, txs: customer.txs.filter((t) => t.id !== tx.id) });
+    customers.removeTx(customer.id, tx.id);
   };
   const kindLabel = isPurchaseCredit ? "طلبکاری (خرید نسیه)" : isDebt ? "بدهی" : "پرداخت";
   return (

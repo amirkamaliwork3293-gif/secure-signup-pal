@@ -556,13 +556,59 @@ export function pickRicherCatalogRow(local: unknown, cloud: unknown): unknown {
 }
 
 /**
+ * دفتر داخل یک ردیف (تراکنش‌های مشتری، پرداخت‌های هنرجو): وقتی دو دستگاه همان
+ * ردیف را عوض کرده‌اند، برنده‌شدن یک نسخهٔ کامل یعنی گم شدن تراکنشی که فقط در نسخهٔ
+ * دیگر ثبت شده. پس تراکنش‌ها جدا و شناسه‌به‌شناسه ادغام می‌شوند.
+ * شناسه‌های tombstone (حذف صریح کاربر) برنمی‌گردند.
+ */
+export type NestedLedgerOptions = {
+  /** نام آرایهٔ داخلی، مثلاً «txs» */
+  key: string;
+  /** شناسه‌های حذف‌شدهٔ همان آرایه */
+  tombstoned?: ReadonlySet<string>;
+};
+
+function ledgerTime(row: unknown): number {
+  const n = Number(asRecord(row)?.at);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function mergeNestedLedger(
+  chosen: unknown,
+  other: unknown,
+  opts: NestedLedgerOptions,
+): unknown {
+  const c = asRecord(chosen);
+  if (!c || !Array.isArray(c[opts.key])) return chosen;
+  const tomb = opts.tombstoned ?? new Set<string>();
+  const mine = c[opts.key] as unknown[];
+  const kept = tomb.size ? mine.filter((e) => !tomb.has(catalogRowId(e))) : mine;
+  const o = asRecord(other);
+  const theirs = o && Array.isArray(o[opts.key]) ? (o[opts.key] as unknown[]) : [];
+  const have = new Set(kept.map(catalogRowId).filter(Boolean));
+  const extra = theirs.filter((e) => {
+    const id = catalogRowId(e);
+    if (!id || have.has(id) || tomb.has(id)) return false;
+    have.add(id);
+    return true;
+  });
+  if (extra.length === 0 && kept.length === mine.length) return chosen;
+  const merged = [...kept, ...extra];
+  // جدیدترین اول، مثل ترتیبی که برنامه تراکنش‌ها را ثبت می‌کند
+  if (extra.length) merged.sort((a, b) => ledgerTime(b) - ledgerTime(a));
+  return { ...c, [opts.key]: merged };
+}
+
+/**
  * ادغام بدون حذف: هر شناسه‌ای که در محلی یا ابر باشد می‌ماند.
  * شناسه‌های tombstone (حذف عمدی همین دستگاه) از نتیجه بیرون می‌مانند.
+ * با nested، آرایهٔ داخلی هر ردیف (مثل تراکنش‌های مشتری) هم جداگانه ادغام می‌شود.
  */
 export function unionMergeById(
   local: unknown,
   cloud: unknown,
   tombstoned: ReadonlySet<string> = new Set(),
+  nested?: NestedLedgerOptions,
 ): unknown[] {
   const localArr = Array.isArray(local) ? local : [];
   const cloudArr = Array.isArray(cloud) ? cloud : [];
@@ -578,10 +624,11 @@ export function unionMergeById(
     }
     const prev = map.get(id);
     if (!prev) {
-      map.set(id, row);
+      map.set(id, nested ? mergeNestedLedger(row, null, nested) : row);
       return;
     }
-    map.set(id, preferLocal ? pickRicherCatalogRow(row, prev) : pickRicherCatalogRow(prev, row));
+    const picked = preferLocal ? pickRicherCatalogRow(row, prev) : pickRicherCatalogRow(prev, row);
+    map.set(id, nested ? mergeNestedLedger(picked, picked === row ? prev : row, nested) : picked);
   };
 
   for (const row of cloudArr) take(row, false);
@@ -683,9 +730,24 @@ export function changedSettingKeys(prev: unknown, next: unknown): string[] {
   return [...keys].filter((k) => catalogArraysDiffer(p[k], n[k]));
 }
 
+/**
+ * JSON با کلیدهای مرتب: Postgres (jsonb) ترتیب کلیدهای هر شیء را عوض می‌کند، پس
+ * مقایسهٔ JSON.stringify ساده بین نسخهٔ محلی و ابری همیشه «متفاوت» می‌گفت و هر
+ * دریافت ابری همه‌چیز را دوباره بالا می‌فرستاد (رفت‌وبرگشت بی‌پایان بین دستگاه‌ها).
+ */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value ?? null, (_k, v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+    const rec = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(rec).sort()) out[k] = rec[k];
+    return out;
+  });
+}
+
 export function catalogArraysDiffer(a: unknown, b: unknown): boolean {
   try {
-    return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+    return stableStringify(a) !== stableStringify(b);
   } catch {
     return true;
   }

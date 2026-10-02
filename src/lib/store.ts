@@ -15,8 +15,10 @@ import {
   mergeSettingsFromCloud,
   changedSettingKeys,
   mergeTombstoneMaps,
+  mergeNestedLedger,
   preferCloudValue,
   unionMergeById,
+  type NestedLedgerOptions,
   type TombstoneMap,
 } from "@/lib/catalog-integrity";
 import {
@@ -37,6 +39,7 @@ import {
 import { rememberCloudRead } from "@/lib/offline-cache";
 import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
 import { findProductByCode } from "@/lib/barcode-match";
+import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -518,6 +521,14 @@ const FIELD_TO_LOCAL_KEY: Record<string, string> = Object.fromEntries(
   Object.entries(CLOUD_FIELDS).map(([k, v]) => [v, k]),
 );
 
+/**
+ * دفترهای داخل ردیف: تراکنش‌های بدهی/پرداخت مشتری و پرداخت‌های هنرجو.
+ * این‌ها جدا از خود ردیف شناسه‌به‌شناسه ادغام می‌شوند تا ثبت هم‌زمان روی دو دستگاه
+ * هیچ تراکنشی را گم نکند. حذف‌شان در tombstone با کلید «customers.txs» ثبت می‌شود
+ * (همان کلیدی که تریگر سرور می‌شناسد).
+ */
+const NESTED_LEDGERS: Record<string, string> = { customers: "txs", students: "payments" };
+
 export type AppSettings = {
   invoiceFontSize: number;
   shopName: string;
@@ -718,6 +729,44 @@ export function assertBusinessWriteAllowed(): boolean {
   return false;
 }
 
+// ─── ساعت سرور ─────────────────────────────────────────────────────────────
+// برندهٔ ادغام دو نسخهٔ یک ردیف، updatedAt جدیدتر است. اگر ساعت گوشی عقب باشد،
+// ویرایش‌های آن گوشی همیشه به نسخهٔ قدیمی‌تر دستگاه دیگر می‌بازد و «ذخیره نمی‌شود».
+// تریگر سرور updated_at را با ساعت خودش می‌زند؛ اختلاف ساعت گوشی با سرور از
+// همان پاسخ تخمین زده و در مهر زمان ردیف‌ها اصلاح می‌شود.
+const CLOCK_OFFSET_KEY = "kamix.serverClockOffset.v1";
+const MAX_CLOCK_OFFSET_MS = 400 * 86_400_000;
+let serverClockOffsetMs = (() => {
+  if (typeof window === "undefined") return 0;
+  try {
+    const n = Number(localStorage.getItem(CLOCK_OFFSET_KEY));
+    return Number.isFinite(n) && Math.abs(n) < MAX_CLOCK_OFFSET_MS ? n : 0;
+  } catch {
+    return 0;
+  }
+})();
+
+/** Date.now() تصحیح‌شده با ساعت سرور — فقط برای مهر updatedAt ردیف‌ها */
+function syncedNow(): number {
+  return Date.now() + serverClockOffsetMs;
+}
+
+function noteServerClock(serverAt: string, sentStamp: string, sentAt: number, receivedAt: number) {
+  // سرور مقدار ما را نگه داشته (تریگر نصب نیست) — اطلاعاتی دربارهٔ ساعتش نداریم.
+  if (serverAt === sentStamp) return;
+  const server = Date.parse(serverAt);
+  if (!Number.isFinite(server) || receivedAt - sentAt > 10_000) return;
+  const offset = server - (sentAt + receivedAt) / 2;
+  if (Math.abs(offset) >= MAX_CLOCK_OFFSET_MS) return;
+  // اختلاف کوچک (تأخیر شبکه) را صفر می‌گیریم تا مهرها بی‌دلیل جابه‌جا نشوند.
+  serverClockOffsetMs = Math.abs(offset) < 5_000 ? 0 : Math.round(offset);
+  try {
+    localStorage.setItem(CLOCK_OFFSET_KEY, String(serverClockOffsetMs));
+  } catch {
+    /* noop */
+  }
+}
+
 /**
  * فقط ردیف‌هایی که واقعاً عوض شده‌اند updatedAt می‌گیرند.
  * اگر روی همه‌ی ردیف‌ها مهر بزنیم، نسخهٔ کهنهٔ همین دستگاه هنگام ادغام
@@ -731,7 +780,7 @@ function stampChangedRows(key: string, value: unknown): unknown {
     const id = catalogRowId(row);
     if (id) prevById.set(id, row);
   }
-  const now = Date.now();
+  const now = syncedNow();
   return value.map((row) => {
     if (!row || typeof row !== "object" || Array.isArray(row)) return row;
     const rec = row as Record<string, unknown>;
@@ -788,7 +837,10 @@ function keepUndeletedRows<T>(key: string, value: T): T {
   if (!Array.isArray(value) || !CLOUD_FIELDS[key] || key === INVOICE_KEY) return value;
   const present = new Set(value.map(catalogRowId).filter(Boolean));
   const current = read<unknown[]>(key, []);
-  const out = [...value];
+  // تراکنش داخل ردیف (مثلاً پرداخت مشتری) هم با لیست کهنه حذف نمی‌شود؛
+  // حذف تراکنش فقط از customers.removeTx و توابع صریح.
+  const nestedKey = NESTED_LEDGERS[CLOUD_FIELDS[key]];
+  const out = nestedKey ? keepNestedItems(current, value, nestedKey) : [...value];
   const kept: string[] = [];
   current.forEach((row, index) => {
     const id = catalogRowId(row);
@@ -796,9 +848,27 @@ function keepUndeletedRows<T>(key: string, value: T): T {
     out.splice(Math.min(index, out.length), 0, row);
     kept.push(id);
   });
-  if (kept.length === 0) return value;
+  if (kept.length === 0) {
+    const nestedKept = out.some((row, i) => row !== value[i]);
+    if (nestedKept) {
+      console.warn("[store] ledger entries missing from a list save were kept", { key });
+    }
+    return (nestedKept ? out : value) as T;
+  }
   console.warn("[store] rows missing from a list save were kept (not deleted)", { key, ids: kept });
   return out as T;
+}
+
+function keepNestedItems(current: unknown[], next: unknown[], nestedKey: string): unknown[] {
+  const byId = new Map<string, unknown>();
+  for (const row of current) {
+    const id = catalogRowId(row);
+    if (id) byId.set(id, row);
+  }
+  return next.map((row) => {
+    const stored = byId.get(catalogRowId(row));
+    return stored && stored !== row ? mergeNestedLedger(row, stored, { key: nestedKey }) : row;
+  });
 }
 
 function saveList<T>(key: string, list: T[]): boolean {
@@ -929,6 +999,37 @@ function tombstoneSet(field: string): Set<string> {
   return new Set(readTombstones()[field] || []);
 }
 
+function nestedLedgerOptions(field: string): NestedLedgerOptions | undefined {
+  const key = NESTED_LEDGERS[field];
+  if (!key) return undefined;
+  return { key, tombstoned: tombstoneSet(`${field}.${key}`) };
+}
+
+/** شناسهٔ اقلام دفتر داخلی که در prev بوده‌اند و در next (همان ردیف) نیستند */
+function removedNestedIds(field: string, prev: unknown, next: unknown): string[] {
+  const key = NESTED_LEDGERS[field];
+  if (!key || !Array.isArray(prev) || !Array.isArray(next)) return [];
+  const nextById = new Map<string, unknown>();
+  for (const row of next) {
+    const id = catalogRowId(row);
+    if (id) nextById.set(id, row);
+  }
+  const removed: string[] = [];
+  for (const row of prev) {
+    const n = nextById.get(catalogRowId(row));
+    if (!n) continue; // خود ردیف حذف شده؛ tombstone ردیف کافی است
+    const before = (row as Record<string, unknown>)[key];
+    const after = (n as Record<string, unknown>)[key];
+    if (before === after || !Array.isArray(before) || !Array.isArray(after)) continue;
+    const still = new Set(after.map(catalogRowId));
+    for (const item of before) {
+      const id = catalogRowId(item);
+      if (id && !still.has(id)) removed.push(id);
+    }
+  }
+  return removed;
+}
+
 function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
   const idsOf = (value: unknown): string[] => {
     if (Array.isArray(value)) return value.map(catalogRowId).filter(Boolean);
@@ -936,6 +1037,13 @@ function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
   };
   const prevIds = idsOf(prev);
   const nextIds = idsOf(next);
+  const nestedRemoved = removedNestedIds(field, prev, next);
+  if (nestedRemoved.length) {
+    const nestedKey = `${field}.${NESTED_LEDGERS[field]}`;
+    const map = readTombstones();
+    map[nestedKey] = [...new Set([...(map[nestedKey] || []), ...nestedRemoved])];
+    persistTombstones(map);
+  }
   if (prevIds.length === 0 && nextIds.length === 0) return;
   const nextSet = new Set(nextIds);
   const removed: string[] = [];
@@ -1146,7 +1254,12 @@ async function dropVandalizedCatalogPushes(
         continue;
       }
       if (preferCloudValue(localVal, cloudVal, field)) {
-        const merged = unionMergeById(localVal, cloudVal, tombstoneSet(field));
+        const merged = unionMergeById(
+          localVal,
+          cloudVal,
+          tombstoneSet(field),
+          nestedLedgerOptions(field),
+        );
         fieldsToPush[field] = merged;
         adoptCloudField(field, merged);
       }
@@ -1211,94 +1324,24 @@ async function runFlushCloudPush() {
       });
       return;
     }
-    const payload: Record<string, unknown> = {
-      ...fieldsToPush,
-      user_id: userId,
-      updated_at: new Date().toISOString(),
-    };
     try {
-      let { error } = await supabase
-        .from("user_data")
-        .upsert(payload as never, { onConflict: "user_id" });
-      if (isCloudPermissionError(error)) {
-        const { error: refreshError } = await supabase.auth.refreshSession();
-        if (!refreshError) {
-          const retry = await supabase
-            .from("user_data")
-            .upsert(payload as never, { onConflict: "user_id" });
-          error = retry.error;
-        }
-      }
-      if (error && /customers/.test(error.message) && "customers" in payload) {
-        delete payload.customers;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /students/.test(error.message) && "students" in payload) {
-        delete payload.students;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /purchases/.test(error.message) && "purchases" in payload) {
-        delete payload.purchases;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /expenses/.test(error.message) && "expenses" in payload) {
-        delete payload.expenses;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /reminders/.test(error.message) && "reminders" in payload) {
-        delete payload.reminders;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /accounts/.test(error.message) && "accounts" in payload) {
-        delete payload.accounts;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /account_txs/.test(error.message) && "account_txs" in payload) {
-        delete payload.account_txs;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /production/.test(error.message) && "production" in payload) {
-        delete payload.production;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error && /manual_ledger/.test(error.message) && "manual_ledger" in payload) {
-        delete payload.manual_ledger;
-        const retry = await supabase
-          .from("user_data")
-          .upsert(payload as never, { onConflict: "user_id" });
-        error = retry.error;
-      }
-      if (error) throw error;
+      const result = await compareAndSwapUserData(userId, fieldsToPush);
       if (cloudUserId !== userId || getStorageScope() !== userId) return;
+      if (result.kind === "conflict") {
+        // دستگاه دیگری از آخرین خواندن ما چیزی ذخیره کرده. هرگز روی آن نمی‌نویسیم:
+        // نسخهٔ تازهٔ سرور را می‌خوانیم، با حافظهٔ محلی ادغام می‌کنیم و دوباره می‌فرستیم.
+        await mergeLatestServerRow(userId);
+        continue;
+      }
       lastLocalPushAt = Date.now();
-      const pushedAt = typeof payload.updated_at === "string" ? payload.updated_at : "";
-      if (pushedAt) lastCloudUpdatedAt = pushedAt;
+      lastCloudUpdatedAt = result.updatedAt;
       const confirmed: string[] = [];
       for (const f of fieldNames) {
+        if (result.skipped.includes(f)) {
+          // ستون روی سرور نیست: ذخیره نشده؛ نشانهٔ dirty می‌ماند تا بعد از migrate برود.
+          markDirty([f]);
+          continue;
+        }
         if (pendingPush[f] === fieldsToPush[f]) {
           delete pendingPush[f];
           confirmed.push(f);
@@ -1313,10 +1356,15 @@ async function runFlushCloudPush() {
       retryDelay = 5000;
       publishSyncState({
         pending: readDirtySet().size,
-        failed: false,
-        lastError: undefined,
+        failed: result.skipped.length > 0,
+        lastError: result.skipped.length
+          ? `missing columns on server: ${result.skipped.join(", ")}`
+          : undefined,
         lastOkAt: Date.now(),
       });
+      if (result.skipped.length) {
+        for (const f of result.skipped) delete pendingPush[f];
+      }
       if (Object.keys(pendingPush).length === 0) return;
     } catch (e) {
       console.error("[store] cloud push failed", { fields: fieldNames, error: e });
@@ -1335,6 +1383,89 @@ async function runFlushCloudPush() {
       return;
     }
   }
+  // چند بار پشت سر هم دستگاه دیگری زودتر ذخیره کرد؛ کمی بعد دوباره.
+  if (Object.keys(pendingPush).length > 0) scheduleRetry();
+}
+
+type CasResult = { kind: "ok"; updatedAt: string; skipped: string[] } | { kind: "conflict" };
+
+function isDuplicateKeyError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "23505" || /duplicate key/i.test(String(error.message || ""));
+}
+
+/**
+ * ذخیرهٔ شرطی (compare-and-swap): فقط وقتی سرور هنوز همان نسخه‌ای است که آخرین بار
+ * خوانده/نوشته‌ایم (updated_at برابر). اگر دستگاه دیگری در این فاصله نوشته باشد،
+ * هیچ ردیفی عوض نمی‌شود و «conflict» برمی‌گردد. قبلاً upsert کور آرایهٔ کامل
+ * دستگاه دیگر را بازنویسی می‌کرد و ردیف‌های تازه‌اش از سرور پاک می‌شد.
+ */
+async function compareAndSwapUserData(
+  userId: string,
+  fields: Record<string, unknown>,
+): Promise<CasResult> {
+  let payload: Record<string, unknown> = { ...fields };
+  const skipped: string[] = [];
+  let refreshed = false;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const base = lastCloudUpdatedAt;
+    const sentAt = Date.now();
+    // اگر تریگر سرور نصب نباشد همین مقدار ذخیره می‌شود و باز هم با هر نوشتن عوض می‌شود.
+    const stamp = new Date(sentAt).toISOString();
+    const run = () =>
+      base
+        ? supabase
+            .from("user_data")
+            .update({ ...payload, updated_at: stamp } as never)
+            .eq("user_id", userId)
+            .eq("updated_at", base)
+            .select("updated_at")
+        : supabase
+            .from("user_data")
+            .insert({ ...payload, user_id: userId, updated_at: stamp } as never)
+            .select("updated_at");
+    let { data, error } = await run();
+    if (isCloudPermissionError(error) && !refreshed) {
+      refreshed = true;
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (!refreshError) ({ data, error } = await run());
+    }
+    if (error) {
+      const col = missingUserDataColumnFromError(error.message);
+      if (col && col in payload) {
+        payload = stripMissingUserDataColumn(payload, col);
+        skipped.push(col);
+        continue;
+      }
+      if (!base && isDuplicateKeyError(error)) return { kind: "conflict" };
+      throw error;
+    }
+    const rows = (Array.isArray(data) ? data : data ? [data] : []) as { updated_at?: string }[];
+    if (rows.length === 0) return { kind: "conflict" };
+    const serverAt = typeof rows[0].updated_at === "string" ? rows[0].updated_at : stamp;
+    noteServerClock(serverAt, stamp, sentAt, Date.now());
+    return { kind: "ok", updatedAt: serverAt, skipped };
+  }
+  throw new Error("user_data save failed: too many missing columns");
+}
+
+/** نسخهٔ کامل سرور را می‌خواند و با حافظهٔ محلی ادغام می‌کند (بدون حذف هیچ ردیف). */
+async function mergeLatestServerRow(userId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("user_data")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (cloudUserId !== userId || getStorageScope() !== userId) return;
+  if (!data) {
+    // ردیفی نیست (یا دیده نمی‌شود): تلاش بعدی insert است که روی هیچ داده‌ای نمی‌نویسد.
+    lastCloudUpdatedAt = null;
+    return;
+  }
+  applyCloudRow(data as Record<string, unknown>);
+  lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : null;
+  if (isCapacitor()) rememberCloudRead(userId);
 }
 
 let lastCloudUpdatedAt: string | null = null;
@@ -1393,7 +1524,12 @@ function applyCloudRow(data: Record<string, unknown>) {
     }
     const localVal = localValueForCloudField(field);
     const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
-    const merged = unionMergeById(localVal, cloudArr, tombstoneSet(field));
+    const merged = unionMergeById(
+      localVal,
+      cloudArr,
+      tombstoneSet(field),
+      nestedLedgerOptions(field),
+    );
     writeLocalOnly(key, merged);
     if (catalogArraysDiffer(merged, cloudArr)) {
       pendingPush[field] = merged;
@@ -2659,11 +2795,29 @@ export const customers = {
     return created;
   },
 
+  /**
+   * ویرایش مشخصات مشتری. نسخهٔ ورودی ممکن است کهنه باشد (فرم ویرایش باز بوده و
+   * در همین فاصله تراکنشی از دستگاه دیگر یا ثبت فاکتور رسیده)، پس تراکنش‌هایی که
+   * در حافظه هست و در نسخهٔ ورودی نیست نگه داشته می‌شوند. حذف تراکنش: removeTx.
+   */
   update: (updated: Customer) => {
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
     write(
       CUSTOMERS_KEY,
-      list.map((c) => (c.id === updated.id ? updated : c)),
+      list.map((c) =>
+        c.id === updated.id ? (mergeNestedLedger(updated, c, { key: "txs" }) as Customer) : c,
+      ),
+    );
+  },
+
+  /** حذف صریح یک تراکنش بدهی/پرداخت (دکمهٔ حذف کاربر) */
+  removeTx: (customerId: string, txId: string) => {
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) =>
+        c.id === customerId ? { ...c, txs: c.txs.filter((t) => t.id !== txId) } : c,
+      ),
     );
   },
 
@@ -2983,6 +3137,20 @@ export function studentStatus(s: Student): StudentStatus {
   return "ok";
 }
 
+function keepPaidInstallments(stored: Student, next: Student): Student {
+  if (!next.installments || !stored.installments) return next;
+  const paid = new Map(stored.installments.filter((i) => i.paidAt).map((i) => [i.id, i]));
+  if (paid.size === 0) return next;
+  let changed = false;
+  const installments = next.installments.map((i) => {
+    const p = paid.get(i.id);
+    if (!p || i.paidAt) return i;
+    changed = true;
+    return { ...i, paidAt: p.paidAt, paidAmount: p.paidAmount };
+  });
+  return changed ? { ...next, installments } : next;
+}
+
 export const students = {
   useAll: () => useStore<Student[]>(STUDENTS_KEY, []),
   getAll: () => read<Student[]>(STUDENTS_KEY, []),
@@ -3007,11 +3175,19 @@ export const students = {
     return created;
   },
 
+  /**
+   * ویرایش هنرجو از فرم. فرم ممکن است کهنه باشد: پرداختی که در همین فاصله ثبت شده
+   * و قسطی که پرداخت شده نباید با ذخیرهٔ فرم پاک شود (لغو پرداخت: unpayInstallment).
+   */
   update: (updated: Student) => {
     const list = read<Student[]>(STUDENTS_KEY, []);
     write(
       STUDENTS_KEY,
-      list.map((s) => (s.id === updated.id ? updated : s)),
+      list.map((s) =>
+        s.id === updated.id
+          ? keepPaidInstallments(s, mergeNestedLedger(updated, s, { key: "payments" }) as Student)
+          : s,
+      ),
     );
   },
 

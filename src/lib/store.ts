@@ -679,11 +679,28 @@ const DEFAULT_CATEGORIES: Category[] = [
 
 // ─── Core helpers ────────────────────────────────────────────────────────────
 
+/**
+ * اگر localStorage پر باشد (QuotaExceededError — حدود ۵ مگابایت؛ فروشگاه پرفاکتور
+ * به آن می‌رسد) setItem پرتاب می‌کرد: ذخیره نیمه‌کاره می‌ماند و به ابر هم نمی‌رسید.
+ * حالا مقدار تازه در حافظهٔ برنامه نگه داشته می‌شود، خواندن‌ها همان را می‌بینند،
+ * به ابر فرستاده می‌شود و به کاربر هشدار داده می‌شود.
+ */
+const memoryOverlay = new Map<string, unknown>();
+
+function readLocalJson(key: string): { found: boolean; value: unknown } {
+  const keyWithScope = scopedKey(key);
+  if (memoryOverlay.has(keyWithScope)) {
+    return { found: true, value: memoryOverlay.get(keyWithScope) };
+  }
+  const raw = localStorage.getItem(keyWithScope);
+  return raw != null ? { found: true, value: JSON.parse(raw) } : { found: false, value: null };
+}
+
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = localStorage.getItem(scopedKey(key));
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    const { found, value } = readLocalJson(key);
+    return found ? (value as T) : fallback;
   } catch {
     return fallback;
   }
@@ -692,7 +709,17 @@ function read<T>(key: string, fallback: T): T {
 function writeLocalOnly<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
   const keyWithScope = scopedKey(key);
-  localStorage.setItem(keyWithScope, JSON.stringify(value));
+  try {
+    localStorage.setItem(keyWithScope, JSON.stringify(value));
+    memoryOverlay.delete(keyWithScope);
+  } catch (e) {
+    memoryOverlay.set(keyWithScope, value);
+    console.error("[store] device storage refused the write; kept in memory and sent to cloud", {
+      key,
+      error: e,
+    });
+    publishSyncState({ localStorageFull: true });
+  }
   // مقدار تازه را داخل خود رویداد می‌فرستیم تا مشترک‌ها مجبور نباشند کل داده را
   // دوباره از localStorage بخوانند و JSON.parse کنند — این باعث می‌شود ثبت هر
   // تغییر (ثبت پرداخت، افزودن کالا، ...) و همچنین هیدریت اولیه‌ی ابری روان‌تر شود.
@@ -1106,6 +1133,8 @@ export type SyncState = {
   lastError?: string;
   /** زمان آخرین ذخیره‌ی موفق روی سرور */
   lastOkAt?: number;
+  /** حافظهٔ این دستگاه پر است؛ تغییرات فقط تا بستن برنامه در حافظه و روی سرور می‌مانند */
+  localStorageFull?: boolean;
 };
 
 let syncState: SyncState = { pending: 0, failed: false };
@@ -1172,11 +1201,33 @@ function localValueForCloudField(field: string): unknown {
   const localKey = FIELD_TO_LOCAL_KEY[field];
   if (!localKey) return null;
   try {
-    const raw = localStorage.getItem(scopedKey(localKey));
-    return raw != null ? JSON.parse(raw) : null;
+    return readLocalJson(localKey).value;
   } catch {
     return null;
   }
+}
+
+/** آیا تغییری روی همین دستگاه هست که هنوز روی سرور ننشسته؟ */
+export function hasUnsyncedChanges(): boolean {
+  return Object.keys(pendingPush).length > 0 || readDirtySet().size > 0;
+}
+
+/**
+ * پیش از خروج از حساب: صف ذخیره همین حالا فرستاده می‌شود (بدون منتظر ماندن برای
+ * تایمر ۶۰۰ میلی‌ثانیه‌ای) و تا timeoutMs صبر می‌کنیم. true یعنی همه چیز روی سرور است.
+ */
+export async function flushPendingCloudWrites(timeoutMs = 8000): Promise<boolean> {
+  if (cloudUserId && cloudHydrated && Object.keys(pendingPush).length > 0) {
+    if (pushTimer) {
+      clearTimeout(pushTimer);
+      pushTimer = null;
+    }
+    await Promise.race([
+      flushCloudPush(),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+  return !hasUnsyncedChanges();
 }
 
 function clearSettingsDirtyKeys() {
@@ -1568,8 +1619,8 @@ async function pullUserData(
     const localKey = FIELD_TO_LOCAL_KEY[field];
     if (!localKey) continue;
     try {
-      const raw = localStorage.getItem(scopedKey(localKey));
-      if (raw != null) pendingPush[field] = JSON.parse(raw);
+      const local = readLocalJson(localKey);
+      if (local.found) pendingPush[field] = local.value;
     } catch {}
   }
   try {
@@ -1597,9 +1648,9 @@ async function pullUserData(
       // همان مسیر upsert معمولی — با همه‌ی fallbackهای ستون‌های قدیمی — ذخیره شوند.
       for (const [localKey, field] of Object.entries(CLOUD_FIELDS)) {
         try {
-          const raw = localStorage.getItem(scopedKey(localKey));
-          if (raw == null) continue;
-          pendingPush[field] = JSON.parse(raw);
+          const local = readLocalJson(localKey);
+          if (!local.found) continue;
+          pendingPush[field] = local.value;
           markDirty([field]);
         } catch {
           /* مقدار خراب — نادیده */

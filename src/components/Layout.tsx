@@ -189,6 +189,17 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
+      {loggedIn && sync.localStorageFull && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-destructive px-4 py-2 text-xs font-semibold text-destructive-foreground"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <CloudOff className="h-3.5 w-3.5 shrink-0" />
+          حافظهٔ این دستگاه پر است؛ تغییرات تازه فقط روی سرور ذخیره می‌شوند. تا رفع مشکل اینترنت را
+          وصل نگه دارید و برنامه را نبندید (از «پشتیبان‌گیری» هم یک نسخه بگیرید).
+        </div>
+      )}
+
       {readOnly && (
         <div
           className="sticky z-20 flex items-center justify-center gap-2 bg-red-600 px-4 py-2 text-xs font-semibold text-white"

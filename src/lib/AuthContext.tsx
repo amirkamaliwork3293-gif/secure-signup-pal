@@ -4,7 +4,13 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, type UserProfile } from "@/lib/supabase";
-import { setStorageScope, hydrateFromCloud, stopCloudSync, beginUserScope } from "@/lib/store";
+import {
+  setStorageScope,
+  hydrateFromCloud,
+  stopCloudSync,
+  beginUserScope,
+  flushPendingCloudWrites,
+} from "@/lib/store";
 import { isCapacitor } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
@@ -37,6 +43,13 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const UNSYNCED_SIGN_OUT_MESSAGE =
+  "بعضی از تغییرات شما هنوز روی سرور ذخیره نشده‌اند (احتمالاً اینترنت قطع است).\n\n" +
+  "اگر الان خارج شوید، این تغییرات روی همین دستگاه می‌مانند و دفعهٔ بعد که با همین حساب " +
+  "وارد شوید ذخیره می‌شوند؛ ولی تا آن موقع روی دستگاه‌های دیگر دیده نمی‌شوند.\n\n" +
+  "برای اطمینان: «انصراف» را بزنید، اینترنت را وصل کنید و چند ثانیه بعد دوباره خارج شوید.\n\n" +
+  "با این حال خارج می‌شوید؟";
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
@@ -360,13 +373,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    // قبلاً صف ذخیره بدون ارسال دور ریخته می‌شد و در اپ اندروید حافظهٔ محلی کاربر
+    // (همراه تغییرات ذخیره‌نشده) پاک می‌شد: هر چه در چند ثانیهٔ آخر یا آفلاین ثبت
+    // شده بود برای همیشه از بین می‌رفت. حالا اول ذخیره می‌کنیم.
+    const synced = await flushPendingCloudWrites();
+    if (!synced && typeof window !== "undefined" && !window.confirm(UNSYNCED_SIGN_OUT_MESSAGE)) {
+      return;
+    }
     explicitSignOutRef.current = true;
     clearStaySignedIn();
     const prev = stateRef.current;
     const prevId = scopedUserId(prev);
     stopCloudSync();
     await supabase.auth.signOut();
-    if (isCapacitor() && prevId) clearUserOfflineCache(prevId);
+    // تغییرات ذخیره‌نشده روی همین دستگاه می‌مانند تا ورود بعدی همین حساب آن‌ها را بفرستد.
+    if (isCapacitor() && prevId && synced) clearUserOfflineCache(prevId);
     setStorageScope(null);
     setState({ status: "unauthenticated" });
   };

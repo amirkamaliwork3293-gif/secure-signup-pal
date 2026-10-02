@@ -341,12 +341,71 @@ async function run(serverMode: "blind" | "trigger") {
     );
   });
 
+  // ۹) خروج بلافاصله بعد از ثبت: صف ذخیره پیش از خروج فرستاده می‌شود
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) =>
+      s.expenses.add({ ...s.emptyExpense(), id: "e-last", title: "آخرین", amount: 9 }),
+    );
+    const synced = await on(A, (s) => s.flushPendingCloudWrites(5000));
+    assert.equal(synced, true, `${tag} 9: flush before sign-out did not finish`);
+    assert.deepEqual(ids(server().expenses), ["e-last"], `${tag} 9: last change lost on sign-out`);
+    await refresh(B);
+    assert.deepEqual(ids(await on(B, (s) => s.expenses.getAll())), ["e-last"], `${tag} 9: B`);
+  });
+
+  // ۱۰) خروج در حالت آفلاین: تغییر روی دستگاه می‌ماند و ورود بعدی آن را می‌فرستد
+  await scenario(async () => {
+    const { A } = await freshWorld(serverMode);
+    const release = fake.hold();
+    await on(A, (s) =>
+      s.expenses.add({ ...s.emptyExpense(), id: "e-off", title: "آفلاین", amount: 5 }),
+    );
+    const pending = on(A, (s) => s.flushPendingCloudWrites(4000));
+    await settle(5000);
+    assert.equal(await pending, false, `${tag} 10: offline flush must report unsynced`);
+    await on(A, (s) => s.stopCloudSync());
+    release();
+    await settle();
+    // اپ بسته و دوباره باز می‌شود (نسخهٔ تازهٔ store روی همان حافظه)
+    const A2 = await newDevice("A");
+    await signIn(A2);
+    await settle(3000);
+    assert.ok(
+      ids(server().expenses).includes("e-off"),
+      `${tag} 10: offline change never reached server`,
+    );
+  });
+
+  // ۱۱) حافظهٔ دستگاه پر است: ثبت تازه گم نمی‌شود و به سرور می‌رسد
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    storageLimits.maxChars = 0; // هر setItem تازه رد می‌شود
+    try {
+      await on(A, (s) => s.products.save([...s.products.getAll(), product("p-full")]));
+      assert.ok(
+        ids(await on(A, (s) => s.products.getAll())).includes("p-full"),
+        `${tag} 11: write lost when storage is full`,
+      );
+      await settle();
+      assert.ok(ids(server().products).includes("p-full"), `${tag} 11: not sent to server`);
+      assert.equal(
+        (await on(A, (s) => s.getSyncState())).localStorageFull,
+        true,
+        `${tag} 11: no warning`,
+      );
+    } finally {
+      storageLimits.maxChars = Infinity;
+    }
+    await refresh(B);
+    assert.ok(ids(await on(B, (s) => s.products.getAll())).includes("p-full"), `${tag} 11: B`);
+  });
+
   if (!failures.length) console.log(`✓ ${tag} two-device sync scenarios passed`);
 }
 
 await run("blind");
 await run("trigger");
-void storageLimits;
 if (failures.length) {
   console.log(failures.map((f) => `✗ ${f}`).join("\n"));
   process.exit(1);

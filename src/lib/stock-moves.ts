@@ -7,7 +7,7 @@
  * خریدهای قدیمی که واحد ردیفشان با کالا یکی است دقیقاً مثل قبل رفتار می‌کنند.
  */
 import type { Product, PurchaseItem } from "./store";
-import { convertQuantity, convertUnitPrice, roundQty } from "./units.ts";
+import { convertQuantity, convertUnitPrice, roundQty, unitsConvertible } from "./units.ts";
 
 /** مقدار یک ردیف خرید به واحد موجودی کالا */
 export function purchaseQtyInProductUnit(
@@ -67,4 +67,33 @@ export function purchaseEditStockDeltas(
 /** موجودی جدید پس از اعمال اختلاف (هرگز منفی نمی‌شود؛ خطای اعشار گرد می‌شود) */
 export function applyStockDelta(stock: number, delta: number): number {
   return Math.max(0, roundQty((Number(stock) || 0) + delta));
+}
+
+/**
+ * تعویض واحد ورود یک ردیف خرید (مثلاً کیلوگرم ← گرم). مقدار و قیمت هر واحد
+ * طوری تبدیل می‌شوند که جمع ردیف تغییر نکند: ۰٫۵ کیلو × ۲۰۰٬۰۰۰ = ۵۰۰ گرم × ۲۰۰.
+ */
+export function switchPurchaseLineUnit(item: PurchaseItem, toUnit: string): PurchaseItem {
+  if (!unitsConvertible(item.unit, toUnit)) return { ...item, unit: toUnit };
+  return {
+    ...item,
+    unit: toUnit,
+    quantity: convertQuantity(Number(item.quantity) || 0, item.unit, toUnit),
+    buyPrice: convertUnitPrice(Number(item.buyPrice) || 0, item.unit, toUnit),
+    sellPrice:
+      item.sellPrice != null ? convertUnitPrice(item.sellPrice, item.unit, toUnit) : item.sellPrice,
+  };
+}
+
+/** ردیف خرید تازه برای کالای موجود — واحد کالا در لحظهٔ خرید ثبت می‌شود */
+export function newPurchaseLine(p: Product): PurchaseItem {
+  return {
+    productId: p.id,
+    name: p.name,
+    quantity: 1,
+    buyPrice: p.buyPrice ?? 0,
+    unit: p.unit,
+    productUnit: p.unit || "عدد",
+    category: p.category,
+  };
 }

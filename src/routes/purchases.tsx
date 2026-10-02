@@ -35,7 +35,16 @@ import {
 } from "@/lib/store";
 import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
-import { QuantityStepper } from "@/components/QuantityStepper";
+import { QtyUnitInput, EntryUnitSwitch } from "@/components/QtyUnitInput";
+import { formatQtyWithUnit } from "@/lib/qty-format";
+import { MoneyInput } from "@/components/MoneyInput";
+import {
+  newPurchaseLine,
+  purchaseQtyInProductUnit,
+  purchaseUnitCostInProductUnit,
+  switchPurchaseLineUnit,
+} from "@/lib/stock-moves";
+import { alternateEntryUnits, convertQuantity, roundQty, unitsConvertible } from "@/lib/units";
 import {
   ShoppingBag,
   Plus,
@@ -71,81 +80,155 @@ export const Route = createFileRoute("/purchases")({
   component: PurchasesPage,
 });
 
-// ─── ویرایش یک قلم فاکتور خرید ───────────────────────────────────────────────
+// ─── یک قلم فاکتور خرید (ثبت جدید و ویرایش — یک ظاهر و یک منطق) ─────────────
 
-function EditablePurchaseItem({
+function sameName(a: string, b: string): boolean {
+  const n = (s: string) => s.trim().replace(/\s+/g, " ").replace(/ي/g, "ی").replace(/ك/g, "ک");
+  return !!n(a) && n(a) === n(b);
+}
+
+/** یک واحدِ کالا به واحد ورود همین ردیف (برای «+۱» روی کالای تکراری) */
+function oneProductUnitInLineUnit(it: PurchaseItem, productUnit?: string): number {
+  return convertQuantity(1, productUnit || it.unit, it.unit) || 1;
+}
+
+function PurchaseLineEditor({
   item,
   onChange,
   onRemove,
   unitDefs,
+  allProducts,
+  compact = false,
 }: {
   item: PurchaseItem;
   onChange: (updated: PurchaseItem) => void;
   onRemove: () => void;
   unitDefs: UnitDef[];
+  allProducts: Product[];
+  compact?: boolean;
 }) {
+  const product = item.productId ? allProducts.find((p) => p.id === item.productId) : undefined;
+  const productUnit = product?.unit || item.productUnit || item.unit || COUNT_UNIT;
+  const lineUnit = item.unit || productUnit;
+  const entryUnits = item.productId ? [productUnit, ...alternateEntryUnits(productUnit)] : [];
+  const converted = item.productId && unitsConvertible(lineUnit, productUnit);
+  const twin =
+    !item.productId && item.name.trim()
+      ? allProducts.find((p) => sameName(p.name, item.name))
+      : undefined;
+  const box = compact ? "bg-background" : "bg-card";
   return (
-    <li className="space-y-2 rounded-xl border border-border bg-background px-3 py-2">
+    <li className={`space-y-2 rounded-xl border border-border px-3 py-2.5 ${box}`}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           {item.productId ? (
-            <div className="truncate text-sm font-medium">{item.name}</div>
+            <div className="truncate text-sm font-semibold">{item.name}</div>
           ) : (
             <input
               value={item.name}
               onChange={(e) => onChange({ ...item, name: e.target.value })}
-              placeholder="نام کالا"
-              className="w-full rounded-lg border border-input bg-card px-2 py-1 text-sm outline-none focus:border-primary"
+              placeholder="نام کالای جدید"
+              className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
             />
           )}
-          <div className="text-[11px] text-muted-foreground">
-            جمع: {formatToman(purchaseLineTotal(item))}
-          </div>
         </div>
-        <QuantityStepper
-          value={item.quantity}
-          min={0.001}
-          step={isWeightUnit(item.unit) ? 0.1 : 1}
-          allowDecimal={isWeightUnit(item.unit)}
-          onChange={(quantity) => onChange({ ...item, quantity: Math.max(0.001, quantity) })}
-        />
+        {entryUnits.length > 1 && (
+          <EntryUnitSwitch
+            units={entryUnits}
+            value={lineUnit}
+            onChange={(u) =>
+              onChange({ ...switchPurchaseLineUnit(item, u), productUnit: productUnit })
+            }
+          />
+        )}
         <button
           type="button"
           onClick={onRemove}
-          className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
           title="حذف"
+          aria-label="حذف ردیف"
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex items-center gap-2">
-        <label className="text-[11px] text-muted-foreground">قیمت خرید واحد:</label>
-        <input
-          inputMode="numeric"
-          value={item.buyPrice.toLocaleString("fa-IR")}
-          onChange={(e) =>
-            onChange({ ...item, buyPrice: Math.max(0, parseNumberInput(e.target.value)) })
+
+      {twin && (
+        <button
+          type="button"
+          onClick={() =>
+            onChange({
+              ...item,
+              productId: twin.id,
+              name: twin.name,
+              unit: twin.unit,
+              productUnit: twin.unit || COUNT_UNIT,
+              category: twin.category,
+              sellPrice: undefined,
+            })
           }
-          className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
-        />
-        <span className="text-[11px] text-muted-foreground">تومان</span>
-      </div>
-      {!item.productId && (
-        <div className="flex items-center gap-2">
-          <label className="text-[11px] text-muted-foreground shrink-0">واحد:</label>
-          <select
-            value={item.unit || COUNT_UNIT}
-            onChange={(e) => onChange({ ...item, unit: e.target.value })}
-            className="flex-1 rounded-lg border border-input bg-card px-2 py-1 text-xs outline-none focus:border-primary"
-          >
-            {unitDefs.map((u) => (
-              <option key={u.name} value={u.name}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-        </div>
+          className="w-full rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-right text-[11px] text-amber-800 dark:text-amber-300"
+        >
+          «{twin.name}» از قبل در انبار هست — برای جلوگیری از کالای تکراری، روی همان ثبت شود
+        </button>
       )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <MiniField label={`مقدار (${lineUnit})`}>
+          <QtyUnitInput
+            value={item.quantity}
+            unit={lineUnit}
+            onChange={(quantity) => onChange({ ...item, quantity })}
+          />
+        </MiniField>
+        <MiniField
+          label={lineUnit === COUNT_UNIT ? "قیمت خرید (هر عدد)" : `قیمت خرید هر ${lineUnit}`}
+        >
+          <MoneyInput
+            value={item.buyPrice}
+            onChange={(buyPrice) => onChange({ ...item, buyPrice })}
+            ariaLabel="قیمت خرید"
+          />
+        </MiniField>
+        {!item.productId && (
+          <>
+            <MiniField label="قیمت فروش پیشنهادی">
+              <MoneyInput
+                value={item.sellPrice || 0}
+                onChange={(sellPrice) => onChange({ ...item, sellPrice })}
+                ariaLabel="قیمت فروش پیشنهادی"
+              />
+            </MiniField>
+            <MiniField label="واحد">
+              <select
+                value={item.unit || COUNT_UNIT}
+                onChange={(e) => onChange({ ...item, unit: e.target.value })}
+                className="h-[38px] w-full rounded-lg border border-input bg-background px-2 text-sm outline-none focus:border-primary"
+              >
+                {unitDefs.map((u) => (
+                  <option key={u.name} value={u.name}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </MiniField>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+        {converted ? (
+          <span>
+            به انبار: {formatNumber(purchaseQtyInProductUnit(item, { unit: productUnit }))}{" "}
+            {productUnit} · قیمت خرید هر {productUnit}:{" "}
+            {formatToman(purchaseUnitCostInProductUnit(item, { unit: productUnit }))}
+          </span>
+        ) : (
+          <span />
+        )}
+        <span className="font-semibold text-foreground">
+          جمع: {formatToman(purchaseLineTotal(item))}
+        </span>
+      </div>
     </li>
   );
 }
@@ -229,19 +312,11 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
       const already = d.items.find((it) => it.productId === prod.id);
       const items = already
         ? d.items.map((it) =>
-            it.productId === prod.id ? { ...it, quantity: it.quantity + 1 } : it,
+            it.productId === prod.id
+              ? { ...it, quantity: roundQty(it.quantity + oneProductUnitInLineUnit(it, prod.unit)) }
+              : it,
           )
-        : [
-            ...d.items,
-            {
-              productId: prod.id,
-              name: prod.name,
-              quantity: 1,
-              buyPrice: prod.buyPrice ?? 0,
-              unit: prod.unit,
-              category: prod.category,
-            },
-          ];
+        : [...d.items, newPurchaseLine(prod)];
       return { ...d, items };
     });
     setAddQuery("");
@@ -360,7 +435,7 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
                 {saved.items.map((it, i) => (
                   <li key={i} className="flex justify-between text-xs text-muted-foreground">
                     <span>
-                      {it.name} × {formatNumber(it.quantity)}
+                      {it.name} × {formatQtyWithUnit(it.quantity, it.unit)}
                     </span>
                     <span>{formatToman(purchaseLineTotal(it))}</span>
                   </li>
@@ -449,12 +524,14 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
               {/* اقلام */}
               <ul className="space-y-2">
                 {draft.items.map((item, idx) => (
-                  <EditablePurchaseItem
+                  <PurchaseLineEditor
                     key={idx}
                     item={item}
                     onChange={(u) => updateItem(idx, u)}
                     onRemove={() => removeItem(idx)}
                     unitDefs={unitDefs}
+                    allProducts={allProducts}
+                    compact
                   />
                 ))}
               </ul>
@@ -628,17 +705,15 @@ function PurchaseDiscountBox({
           <span className="text-[11px] text-muted-foreground">٪</span>
         </div>
         <div className="flex flex-1 items-center gap-1">
-          <input
-            inputMode="numeric"
-            value={discountAmount ? formatNumber(discountAmount) : ""}
-            onChange={(e) => {
-              const v = Math.max(0, parseNumberInput(e.target.value));
-              onChange({ discountAmount: v || undefined, discountPercent: undefined });
-            }}
+          <MoneyInput
+            value={discountAmount || 0}
+            onChange={(v) =>
+              onChange({ discountAmount: v || undefined, discountPercent: undefined })
+            }
             placeholder="مبلغ"
-            className="w-full rounded-lg border border-input bg-card px-2 py-1.5 text-xs outline-none focus:border-primary"
+            ariaLabel="مبلغ تخفیف"
+            className="w-full"
           />
-          <span className="text-[11px] text-muted-foreground">تومان</span>
         </div>
       </div>
     </div>
@@ -710,19 +785,11 @@ export function PurchasesPageInner() {
       const already = prev.items.find((it) => it.productId === p.id);
       const items = already
         ? prev.items.map((it) =>
-            it.productId === p.id ? { ...it, quantity: it.quantity + 1 } : it,
+            it.productId === p.id
+              ? { ...it, quantity: roundQty(it.quantity + oneProductUnitInLineUnit(it, p.unit)) }
+              : it,
           )
-        : [
-            ...prev.items,
-            {
-              productId: p.id,
-              name: p.name,
-              quantity: 1,
-              buyPrice: p.buyPrice ?? 0,
-              unit: p.unit,
-              category: p.category,
-            } as PurchaseItem,
-          ];
+        : [...prev.items, newPurchaseLine(p)];
       return recalcPurchase({ ...prev, items });
     });
     setQuery("");
@@ -754,6 +821,12 @@ export function PurchasesPageInner() {
         ...prev,
         items: prev.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
       }),
+    );
+  };
+
+  const replaceItem = (idx: number, next: PurchaseItem) => {
+    setDraft((prev) =>
+      recalcPurchase({ ...prev, items: prev.items.map((it, i) => (i === idx ? next : it)) }),
     );
   };
 
@@ -891,79 +964,18 @@ export function PurchasesPageInner() {
       </div>
 
       {draft.items.length > 0 && (
-        <div className="mb-3 space-y-2">
+        <ul className="mb-3 space-y-2">
           {draft.items.map((it, idx) => (
-            <div key={idx} className="rounded-2xl border border-border bg-card p-3">
-              <div className="flex items-center justify-between gap-2">
-                {it.productId ? (
-                  <span className="text-sm font-semibold">{it.name}</span>
-                ) : (
-                  <input
-                    value={it.name}
-                    onChange={(e) => updateItem(idx, { name: e.target.value })}
-                    placeholder="نام کالای جدید"
-                    className="flex-1 rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary"
-                  />
-                )}
-                <button onClick={() => removeItem(idx)} className="text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-              <div className={`mt-2 grid gap-2 ${it.productId ? "grid-cols-2" : "grid-cols-2"}`}>
-                <MiniField label="تعداد">
-                  <input
-                    inputMode="decimal"
-                    value={formatNumber(it.quantity)}
-                    onChange={(e) =>
-                      updateItem(idx, { quantity: parseNumberInput(e.target.value) })
-                    }
-                    className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                  />
-                </MiniField>
-                <MiniField label="قیمت خرید (واحد)">
-                  <input
-                    inputMode="decimal"
-                    value={formatNumber(it.buyPrice)}
-                    onChange={(e) =>
-                      updateItem(idx, { buyPrice: parseNumberInput(e.target.value) })
-                    }
-                    className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                  />
-                </MiniField>
-                {!it.productId && (
-                  <>
-                    <MiniField label="قیمت فروش پیشنهادی">
-                      <input
-                        inputMode="decimal"
-                        value={formatNumber(it.sellPrice || 0)}
-                        onChange={(e) =>
-                          updateItem(idx, { sellPrice: parseNumberInput(e.target.value) })
-                        }
-                        className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                      />
-                    </MiniField>
-                    <MiniField label="واحد">
-                      <select
-                        value={it.unit || COUNT_UNIT}
-                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
-                        className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                      >
-                        {unitDefs.map((u) => (
-                          <option key={u.name} value={u.name}>
-                            {u.name}
-                          </option>
-                        ))}
-                      </select>
-                    </MiniField>
-                  </>
-                )}
-              </div>
-              <div className="mt-1.5 text-left text-xs text-muted-foreground">
-                جمع: {formatToman(purchaseLineTotal(it))}
-              </div>
-            </div>
+            <PurchaseLineEditor
+              key={idx}
+              item={it}
+              onChange={(u) => replaceItem(idx, u)}
+              onRemove={() => removeItem(idx)}
+              unitDefs={unitDefs}
+              allProducts={allProducts}
+            />
           ))}
-        </div>
+        </ul>
       )}
 
       <div className="mb-3 grid grid-cols-2 gap-2">
@@ -1117,14 +1129,7 @@ export function PurchasesPageInner() {
           <label className="block text-[11px] font-medium text-muted-foreground">
             مبلغ پرداخت‌شده نقد (اختیاری) — بقیه به‌عنوان طلب تامین‌کننده ثبت می‌شود
           </label>
-          <input
-            value={paidAmount ? formatNumber(paidAmount) : ""}
-            onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
-            placeholder="۰"
-            inputMode="numeric"
-            dir="ltr"
-            className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-          />
+          <MoneyInput value={paidAmount} onChange={setPaidAmount} ariaLabel="مبلغ پرداخت‌شده" />
           <div className="flex justify-between text-[11px] text-muted-foreground">
             <span>
               جمع کل: <b className="text-foreground">{formatToman(total)}</b>

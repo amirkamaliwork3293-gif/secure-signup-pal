@@ -3,7 +3,8 @@
  */
 import { jsPDF } from "jspdf";
 import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Purchase } from "@/lib/store";
-import { purchaseLineTotal } from "@/lib/invoice-math";
+import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
+import { formatQtyWithUnit } from "@/lib/qty-format";
 
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
@@ -185,7 +186,7 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Purchase["items"][number]
   ctx.textAlign = "center";
   ctx.fillText(formatNumber(i + 1), cols.idx.x - cols.idx.w / 2, cy);
   ctx.fillText(
-    formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
+    formatQtyWithUnit(item.quantity, item.unit),
     cols.qty.x - cols.qty.w / 2, cy,
   );
   ctx.fillText(formatAmount(item.buyPrice), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
@@ -208,9 +209,15 @@ function drawTotal(ctx: Ctx, y: number, p: Purchase): number {
   ctx.fillStyle = INK;
   ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText("جمع کل", PAGE_W - MARGIN - 2 * SCALE, cy);
+  // جمع از روی اقلام (همان purchaseTotals صفحه)؛ تخفیف کل اگر باشد کنار برچسب می‌آید
+  const t = purchaseTotals(p);
+  ctx.fillText(
+    t.discount > 0 ? `جمع کل (پس از ${formatAmount(t.discount)} تخفیف)` : "جمع کل",
+    PAGE_W - MARGIN - 2 * SCALE,
+    cy,
+  );
   ctx.textAlign = "center";
-  ctx.fillText(`${formatAmount(p.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(`${formatAmount(t.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
 
   return y + HEAD_H;
 }

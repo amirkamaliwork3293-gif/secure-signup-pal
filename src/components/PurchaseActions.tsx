@@ -85,6 +85,7 @@ export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
   <div><span>تاریخ: </span><strong>${esc(date)}</strong></div>
   <div><span>تامین‌کننده: </span><strong>${esc(p.supplierName || "—")}</strong></div>
   <div><span>تلفن: </span><strong>${esc(p.supplierPhone || "—")}</strong></div>
+  ${(p.supplierFields ?? []).map((f) => `<div><span>${esc(f.label)}: </span><strong>${esc(f.value)}</strong></div>`).join("")}
   ${p.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[p.paymentMethod]}</strong></div>` : ""}
 </div>
 ${p.note ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;background:#f7f7f7;border:1px solid #e2e2e2;font-size:${Math.round(fontSize * 0.9)}px;"><strong>یادداشت: </strong>${esc(p.note)}</div>` : ""}
@@ -153,6 +154,7 @@ ${p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt="لوگو" 
   <div><span>تاریخ:</span><span>${esc(date)}</span></div>
   ${p.supplierName ? `<div><span>تامین‌کننده:</span><span>${esc(p.supplierName)}</span></div>` : ""}
   ${p.supplierPhone ? `<div><span>تلفن:</span><span>${esc(p.supplierPhone)}</span></div>` : ""}
+  ${(p.supplierFields ?? []).map((f) => `<div><span>${esc(f.label)}:</span><span>${esc(f.value)}</span></div>`).join("")}
   ${p.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[p.paymentMethod]}</span></div>` : ""}
 </div>
 ${p.note ? `<div class="sep"></div><div class="muted">یادداشت: ${esc(p.note)}</div>` : ""}

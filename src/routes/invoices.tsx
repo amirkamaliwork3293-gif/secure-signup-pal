@@ -15,10 +15,10 @@ import {
   formatNumber,
   formatJalaliDateTime,
   PAYMENT_LABEL,
-  invoiceBelongsToCustomer,
   type Invoice,
   type Customer,
 } from "@/lib/store";
+import { buildCustomerIndex, matchCustomer, type CustomerIndex } from "@/lib/customer-link";
 import {
   Receipt,
   ShoppingBag,
@@ -49,15 +49,14 @@ export const Route = createFileRoute("/invoices")({
 
 type Tab = "sales" | "purchases";
 
-function invoiceCustomerSearchFields(inv: Invoice, allCustomers: Customer[]): string[] {
+/** نام‌های قابل جستجو: نام روی فاکتور + نام فعلی پروندهٔ مشتری (با ایندکس، O(1) برای هر فاکتور) */
+function invoiceCustomerSearchFields(inv: Invoice, idx: CustomerIndex): string[] {
   const onInvoice = personNameSearchFields(inv.customer);
-  const extra: string[] = [];
-  for (const c of allCustomers) {
-    if (invoiceBelongsToCustomer(inv, c)) {
-      extra.push(...personNameSearchFields(c), customerFullName(c));
-    }
+  const m = matchCustomer(inv.customer, idx);
+  if (m.kind === "id" || m.kind === "phone" || m.kind === "name") {
+    return [...onInvoice, ...personNameSearchFields(m.customer), customerFullName(m.customer)];
   }
-  return [...onInvoice, ...extra];
+  return onInvoice;
 }
 
 function InvoicesPageInner() {
@@ -82,9 +81,10 @@ function InvoicesPageInner() {
   const filteredSales = useMemo(() => {
     const q = searchQ.trim();
     if (!q) return salesHistory;
+    const idx = buildCustomerIndex(allCustomers);
     return filterAndRankSearch(salesHistory, q, (inv) => [
       inv.id,
-      ...invoiceCustomerSearchFields(inv, allCustomers),
+      ...invoiceCustomerSearchFields(inv, idx),
       inv.customer?.phone,
       ...inv.items.map((i) => i.name),
     ]);

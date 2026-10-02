@@ -674,7 +674,10 @@ export function buildDefaultInvoiceHTML(
     ${partyHtml(
       "خریدار",
       name,
-      [["تلفن", inv.customer?.phone]],
+      [
+        ["تلفن", inv.customer?.phone],
+        ...(inv.customerFields ?? []).map((f): [string, string] => [f.label, f.value]),
+      ],
       payment
         ? `<div class="kv"><span class="lbl">پرداخت</span><span class="val">${esc(payment)}</span></div>`
         : "",
@@ -776,6 +779,7 @@ ${
   <div><span>تاریخ:</span><span>${esc(date)}</span></div>
   ${customerName ? `<div><span>مشتری:</span><span>${esc(customerName)}</span></div>` : ""}
   ${inv.customer?.phone ? `<div><span>تلفن:</span><span>${esc(inv.customer.phone)}</span></div>` : ""}
+  ${(inv.customerFields ?? []).map((f) => `<div><span>${esc(f.label)}:</span><span>${esc(f.value)}</span></div>`).join("")}
   ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
 </div>
 ${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${esc(inv.notes)}</div>` : ""}
@@ -797,6 +801,7 @@ export function buildShareText(inv: Invoice): string {
     `🧾 ${invoiceDocumentTitle(inv)} ${inv.shopName || "فروشگاه"}`,
     `📅 تاریخ: ${date}`,
     customerName ? `👤 مشتری: ${customerName}` : "",
+    ...(inv.customerFields ?? []).map((f) => `   ${f.label}: ${f.value}`),
     inv.notes ? `📝 توضیحات: ${inv.notes}` : "",
     `─────────────────`,
     ...inv.items.map(

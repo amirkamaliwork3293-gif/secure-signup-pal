@@ -24,6 +24,7 @@ import {
   evaluateInvoiceStockSet,
   invoiceProductQty,
   isManualInvoiceItem,
+  customerAmbiguity,
   productStockHint,
   type Customer,
   type CustomerInfo,
@@ -65,6 +66,14 @@ import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { requireOnlineWrite } from "@/lib/online-status";
 import { StockNoticeBanner } from "@/components/StockGuardUi";
+import { InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
+import { CustomerChoiceDialog } from "@/components/CustomerChoiceDialog";
+import {
+  cleanInvoiceFields,
+  pinnedInvoiceFields,
+  prefillTemplateFields,
+  type InvoicePartyField,
+} from "@/lib/customer-fields";
 
 /** صفحه فاکتور — جدا از مسیر `/` تا بازدیدکننده‌های لندینگ کد اپ را دانلود نکنند. */
 function scheduleChequeReminders(
@@ -135,6 +144,10 @@ export function InvoiceWorkspace() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [editingPrice, setEditingPrice] = useState<string | null>(null);
   const [doneInv, setDoneInv] = useState<Invoice | null>(null);
+  // اطلاعات تکمیلی مشتری روی همین فاکتور (از فیلدهای سنجاق‌شده پر می‌شود)
+  const [partyFields, setPartyFields] = useState<InvoicePartyField[]>(inv.customerFields ?? []);
+  const [saveFieldsToProfile, setSaveFieldsToProfile] = useState(false);
+  const [ambiguous, setAmbiguous] = useState<Customer[] | null>(null);
   const [stockNotice, setStockNotice] = useState<StockAddResult | null>(null);
 
   // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
@@ -166,6 +179,7 @@ export function InvoiceWorkspace() {
     customer,
     paymentMethod,
     customFields: Object.keys(customFields).length ? customFields : undefined,
+    customerFields: cleanInvoiceFields(partyFields),
     paidAmount: deferred ? paidNow : undefined,
     ...(paymentMethod === "check"
       ? withSyncedChequeFields({
@@ -208,6 +222,8 @@ export function InvoiceWorkspace() {
       setCheques([]);
     }
     setNotes(inv.notes ?? "");
+    setPartyFields(inv.customerFields ?? []);
+    setSaveFieldsToProfile(false);
     setShowCustomer(
       !!(
         inv.customer?.firstName?.trim() ||
@@ -288,10 +304,16 @@ export function InvoiceWorkspace() {
     });
   };
 
-  const checkout = () => {
+  const customerState = customer;
+  /**
+   * picked: وقتی اطلاعات تایپ‌شده با چند مشتری ذخیره‌شده می‌خواند، کاربر یکی را
+   * انتخاب می‌کند (یا «مشتری جدید») و ثبت با همان ادامه پیدا می‌کند — بدون حدس.
+   */
+  const checkout = (picked?: Customer | "new") => {
     if (!requireActive()) return;
     if (!requireOnlineWrite()) return;
     if (inv.items.length === 0) return;
+    let customer: CustomerInfo = customerState;
     const hasCustomer = !!(
       customer.firstName?.trim() ||
       customer.lastName?.trim() ||
@@ -304,10 +326,45 @@ export function InvoiceWorkspace() {
       );
       return;
     }
+    // شناسهٔ مشتری پیش از ثبت قطعی می‌شود تا فاکتور از همان لحظه به پروندهٔ درست وصل باشد
+    let resolved: Customer | undefined;
+    if (hasCustomer && !customer.customerId) {
+      if (picked && picked !== "new") {
+        customer = {
+          firstName: picked.firstName,
+          lastName: picked.lastName,
+          phone: customer.phone?.trim() || picked.phone,
+          customerId: picked.id,
+        };
+        resolved = picked;
+      } else if (picked === "new") {
+        const created = customers.add({
+          firstName: customer.firstName?.trim() || customer.phone?.trim() || "مشتری",
+          lastName: customer.lastName?.trim() || undefined,
+          phone: customer.phone?.trim() || undefined,
+        });
+        customer = { ...customer, customerId: created.id };
+      } else {
+        const candidates = customerAmbiguity(customer);
+        if (candidates.length > 0) {
+          setAmbiguous(candidates);
+          return;
+        }
+        const found = customers.findOrCreate(customer);
+        if (found) customer = { ...customer, customerId: found.id };
+        resolved = found ?? undefined;
+      }
+      setCustomer(customer);
+    }
+    // مشتری تازه‌شناخته‌شده: اگر کاربر چیزی ننوشته، فیلدهای سنجاق‌شدهٔ همان پرونده می‌آیند
+    const partyFieldList = cleanInvoiceFields(
+      partyFields.length || !resolved ? partyFields : pinnedInvoiceFields(resolved),
+    );
     // مبلغ نقد پرداخت‌شده و مبلغ چک نمی‌توانند از «جمع کل پس از تخفیف» بیشتر باشند
     const paid = paidNow;
     const chk = checkNow;
-    const customerLabel = customerName || "مشتری";
+    const customerLabel =
+      [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() || "مشتری";
     let chequeList: InvoiceCheque[] = cheques.map((c) => ({
       ...c,
       drawerName: c.drawerName?.trim() || customerLabel,
@@ -333,6 +390,7 @@ export function InvoiceWorkspace() {
       customer,
       paymentMethod,
       customFields: Object.keys(customFields).length ? customFields : undefined,
+      customerFields: partyFieldList,
       shopName: appSettings.shopName,
       shopAddress: appSettings.storeAddress || undefined,
       shopPhone: (appSettings.storePhones && appSettings.storePhones[0]) || undefined,
@@ -368,7 +426,12 @@ export function InvoiceWorkspace() {
         customer: { ...saved.customer, customerId: linked.id },
       });
     }
+    if (saveFieldsToProfile && partyFieldList && (linked?.id || customer.customerId)) {
+      customers.upsertFields((linked?.id || customer.customerId)!, partyFieldList);
+    }
     setCustomer({});
+    setPartyFields([]);
+    setSaveFieldsToProfile(false);
     setPaymentMethod("cash");
     setPaidAmount(0);
     setCheques([]);
@@ -381,7 +444,7 @@ export function InvoiceWorkspace() {
   };
 
   const saveCustomer = () => {
-    setInv((prev) => ({ ...prev, customer }));
+    setInv((prev) => ({ ...prev, customer, customerFields: cleanInvoiceFields(partyFields) }));
   };
 
   const addFromSearch = (productId: string) => {
@@ -404,8 +467,16 @@ export function InvoiceWorkspace() {
       phone: c.phone,
       customerId: c.id,
     });
+    // فیلدهای سنجاق‌شده خودکار روی فاکتور؛ خانه‌های هم‌نام طراح فاکتور هم پر می‌شوند
+    const pinned = pinnedInvoiceFields(c);
+    setPartyFields(pinned);
+    setSaveFieldsToProfile(false);
+    setCustomFields((cur) => prefillTemplateFields(askFields, pinned, cur));
     setCustomerQ("");
   };
+  const linkedCustomer = customer.customerId
+    ? allCustomers.find((c) => c.id === customer.customerId)
+    : undefined;
 
   const customerMatches =
     customerQ.trim().length > 0
@@ -739,7 +810,7 @@ export function InvoiceWorkspace() {
           )}
 
           <button
-            onClick={checkout}
+            onClick={() => checkout()}
             disabled={inv.items.length === 0}
             className="flex w-full shrink-0 items-center justify-center gap-1 rounded-xl bg-background px-3 py-2 text-xs font-semibold text-primary shadow-sm transition disabled:opacity-50 sm:w-auto"
           >
@@ -851,6 +922,19 @@ export function InvoiceWorkspace() {
             inputMode="tel"
             dir="ltr"
             className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+          />
+          {linkedCustomer && (
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-success">
+              <UserCheck className="h-3.5 w-3.5" />
+              فاکتور به پروندهٔ «{customerFullName(linkedCustomer)}» وصل است
+            </div>
+          )}
+          <InvoicePartyFieldsEditor
+            customer={linkedCustomer}
+            value={partyFields}
+            onChange={setPartyFields}
+            saveToProfile={saveFieldsToProfile}
+            onSaveToProfileChange={setSaveFieldsToProfile}
           />
           <button
             onClick={saveCustomer}
@@ -1421,6 +1505,17 @@ export function InvoiceWorkspace() {
       )}
 
       {doneInv && <InvoiceSavedDialog inv={doneInv} onClose={() => setDoneInv(null)} />}
+      {ambiguous && (
+        <CustomerChoiceDialog
+          candidates={ambiguous}
+          typedName={customerName}
+          onCancel={() => setAmbiguous(null)}
+          onPick={(c) => {
+            setAmbiguous(null);
+            checkout(c);
+          }}
+        />
+      )}
     </Layout>
   );
 }

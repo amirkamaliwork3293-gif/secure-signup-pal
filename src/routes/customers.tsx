@@ -53,6 +53,16 @@ import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseActions } from "@/components/PurchaseActions";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { StockNoticeBanner } from "@/components/StockGuardUi";
+import { buildCustomerDocIndex } from "@/lib/customer-link";
+import { CustomerFieldsEditor, InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
+import {
+  cleanInvoiceFields,
+  customerFields,
+  fieldLabelSuggestions,
+  pinnedInvoiceFields,
+  type CustomerField,
+  type InvoicePartyField,
+} from "@/lib/customer-fields";
 import {
   Users,
   Plus,
@@ -144,8 +154,10 @@ function CustomersPageInner() {
   /** آمار خرید هر مشتری از روی فاکتورهای آرشیوشده */
   const buyStats = useMemo(() => {
     const m = new Map<string, { total: number; count: number; lastAt: number }>();
+    // یک پیمایش برای همهٔ مشتریان (قبلاً مشتری × فاکتور — با هزاران رکورد کند بود)
+    const docs = buildCustomerDocIndex(list, history);
     for (const c of list) {
-      const invs = invoicesOfCustomer(c, history);
+      const invs = docs.byCustomer.get(c.id)?.invoices ?? [];
       m.set(c.id, {
         total: invs.reduce((s, i) => s + (i.total || 0), 0),
         count: invs.length,
@@ -688,7 +700,9 @@ function CustomersPageInner() {
           initial={editTarget}
           onClose={() => setEditTarget(null)}
           onSave={(c) => {
-            customers.update({ ...editTarget, ...c });
+            // پایهٔ ویرایش نسخهٔ فعلی حافظه است، نه نسخهٔ لحظهٔ باز شدن فرم
+            const current = customers.getAll().find((x) => x.id === editTarget.id) ?? editTarget;
+            customers.update({ ...current, ...c });
             setEditTarget(null);
           }}
         />
@@ -934,9 +948,12 @@ function CustomerModal({
   initial?: Customer;
   onClose: () => void;
   onSave: (
-    c: Pick<Customer, "firstName" | "lastName" | "phone" | "note" | "settlementDate">,
+    c: Pick<Customer, "firstName" | "lastName" | "phone" | "note" | "settlementDate" | "fields">,
   ) => void;
 }) {
+  const [allCustomers] = customers.useAll();
+  const suggestions = useMemo(() => fieldLabelSuggestions(allCustomers), [allCustomers]);
+  const [fields, setFields] = useState<CustomerField[]>(() => customerFields(initial));
   const [firstName, setFirstName] = useState(initial?.firstName ?? "");
   const [lastName, setLastName] = useState(initial?.lastName ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
@@ -958,6 +975,12 @@ function CustomerModal({
       phone: phone.trim() || undefined,
       note: note.trim() || undefined,
       settlementDate: hasSettlement ? settlementDate : undefined,
+      fields: (() => {
+        const clean = fields
+          .map((f) => ({ ...f, label: f.label.trim(), value: f.value.trim() }))
+          .filter((f) => f.label && f.value);
+        return clean.length ? clean : initial?.fields?.length ? [] : undefined;
+      })(),
     });
   };
 
@@ -968,7 +991,7 @@ function CustomerModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-sm rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+      <div className="max-h-[92vh] w-full max-w-sm overflow-y-auto rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold">{initial ? "ویرایش مشتری" : "مشتری جدید"}</h3>
           <button
@@ -1008,6 +1031,7 @@ function CustomerModal({
             placeholder="یادداشت (اختیاری)"
             className={`${inputCls} resize-none`}
           />
+          <CustomerFieldsEditor value={fields} onChange={setFields} suggestions={suggestions} />
           <div className="rounded-xl border border-border bg-background p-3">
             <label className="flex items-center gap-2 text-xs font-medium">
               <input
@@ -1968,16 +1992,18 @@ function CustomerDetailModal({
 }) {
   const [salesHistory] = invoice.useHistory();
   const [purchaseHistory] = purchases.useHistory();
+  const [allCustomers] = customers.useAll();
   const [appSettings] = settings.useAll();
   const balance = customerBalance(customer);
   const dueKind = settlementAlertKind(customer);
+  // فاکتور قدیمیِ بی‌شناسه فقط اگر تنها مشتری مطابق همین باشد (هم‌نام‌ها قاطی نمی‌شوند)
   const myInvoices = useMemo(
-    () => invoicesOfCustomer(customer, salesHistory),
-    [customer, salesHistory],
+    () => invoicesOfCustomer(customer, salesHistory, allCustomers),
+    [customer, salesHistory, allCustomers],
   );
   const myPurchases = useMemo(
-    () => purchasesOfCustomer(customer, purchaseHistory),
-    [customer, purchaseHistory],
+    () => purchasesOfCustomer(customer, purchaseHistory, allCustomers),
+    [customer, purchaseHistory, allCustomers],
   );
 
   return (
@@ -2285,6 +2311,9 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paidAmount, setPaidAmount] = useState("");
   const [stockNotice, setStockNotice] = useState<StockAddResult | null>(null);
+  const [partyFields, setPartyFields] = useState<InvoicePartyField[]>(() =>
+    pinnedInvoiceFields(customer),
+  );
 
   const matches = searchQ.trim()
     ? filterAndRankSearch(allProducts, searchQ, (p) => [p.name, p.code]).slice(0, 8)
@@ -2376,6 +2405,7 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
     const finalInv = recalc({
       ...cartInv,
       customer: customerInfo,
+      customerFields: cleanInvoiceFields(partyFields),
       shopName: appSettings.shopName,
       shopLogoUrl: appSettings.logoUrl || undefined,
       paymentMethod,
@@ -2559,6 +2589,12 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
               ))}
             </ul>
           )}
+
+          <InvoicePartyFieldsEditor
+            customer={customer}
+            value={partyFields}
+            onChange={setPartyFields}
+          />
 
           {/* روش پرداخت */}
           <div className="mt-4">

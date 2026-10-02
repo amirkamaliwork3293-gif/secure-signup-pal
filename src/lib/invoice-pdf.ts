@@ -336,7 +336,18 @@ function drawFacts(ctx: Ctx, y: number, inv: Invoice): number {
 function drawParties(ctx: Ctx, y: number, inv: Invoice): number {
   const gap = 8 * SCALE;
   const boxW = (INNER_W - gap) / 2;
-  const h = 22 * SCALE;
+  const sellerRows: [string, string | undefined][] = [
+    ["تلفن", inv.shopPhone],
+    ["نشانی", inv.shopAddress],
+  ];
+  const buyerRows: [string, string | undefined][] = [
+    ["تلفن", inv.customer?.phone],
+    ...(inv.customerFields ?? []).map((f): [string, string] => [f.label, f.value]),
+    ["پرداخت", inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : undefined],
+  ];
+  // ارتفاع کادر با تعداد ردیف‌ها (فیلدهای تکمیلی مشتری) بزرگ می‌شود تا چیزی بیرون نزند
+  const filled = (r: [string, string | undefined][]) => r.filter(([, v]) => v && v.trim()).length;
+  const h = Math.max(22, 14.2 + Math.max(filled(sellerRows), filled(buyerRows)) * 4.6 + 1) * SCALE;
   const mid = MARGIN + boxW + gap / 2;
   vLine(ctx, mid, y + 1 * SCALE, y + h - 1 * SCALE, withAlpha(GOLD, 0.55));
 
@@ -368,14 +379,8 @@ function drawParties(ctx: Ctx, y: number, inv: Invoice): number {
     }
   };
 
-  drawParty(PAGE_W - MARGIN - boxW, "فروشنده", inv.shopName || "فروشگاه", [
-    ["تلفن", inv.shopPhone],
-    ["نشانی", inv.shopAddress],
-  ]);
-  drawParty(MARGIN, "خریدار", customerDisplayName(inv), [
-    ["تلفن", inv.customer?.phone],
-    ["پرداخت", inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : undefined],
-  ]);
+  drawParty(PAGE_W - MARGIN - boxW, "فروشنده", inv.shopName || "فروشگاه", sellerRows);
+  drawParty(MARGIN, "خریدار", customerDisplayName(inv), buyerRows);
   return y + h + 6 * SCALE;
 }
 

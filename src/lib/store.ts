@@ -37,6 +37,8 @@ import {
 } from "@/lib/stock-moves";
 import { roundQty } from "@/lib/units";
 import { coerceProductNumbers, type HealthFix } from "@/lib/data-health";
+import type { CustomerField, InvoicePartyField } from "@/lib/customer-fields";
+import { buildCustomerIndex, matchCustomer } from "@/lib/customer-link";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 import { isCapacitor } from "@/lib/isWebView";
 import {
@@ -261,6 +263,11 @@ export type Invoice = {
    * روی فاکتور ثبت‌شده در تاریخچه ذخیره نمی‌شود.
    */
   documentTitle?: string;
+  /**
+   * اطلاعات تکمیلی مشتری که روی همین فاکتور چاپ می‌شود (کد ملی، نام شرکت، …) —
+   * عکس لحظهٔ صدور؛ ویرایش بعدی پروندهٔ مشتری این فاکتور را عوض نمی‌کند.
+   */
+  customerFields?: InvoicePartyField[];
 };
 
 /** عنوان نمایشی سند فاکتور (چاپ / پیش‌نمایش / PDF) */
@@ -312,6 +319,8 @@ export type Purchase = {
   discountPercent?: number;
   /** مبلغ تخفیف کل فاکتور خرید */
   discountAmount?: number;
+  /** اطلاعات تکمیلی تامین‌کننده روی همین فاکتور (عکس لحظهٔ ثبت) */
+  supplierFields?: InvoicePartyField[];
 };
 
 export function emptyPurchase(): Purchase {
@@ -350,6 +359,8 @@ export type Customer = {
    * اگر مانده بدهی صفر شود، هنگام ثبت پرداخت پاک می‌شود.
    */
   settlementDate?: string;
+  /** فیلدهای اختصاصی (کد ملی، نام شرکت، …) — ‎@/lib/customer-fields‎ */
+  fields?: CustomerField[];
 };
 
 /** مانده حساب مشتری: مثبت یعنی بدهکار است */
@@ -446,9 +457,27 @@ export function invoiceBelongsToCustomer(inv: Invoice, customer: Customer): bool
   return namesReferToSamePerson(customer, c);
 }
 
-/** فاکتورهای فروشی که مشتری در آن‌ها طرف حساب بوده */
-export function invoicesOfCustomer(customer: Customer, allInvoices: Invoice[]): Invoice[] {
-  return allInvoices.filter((inv) => invoiceBelongsToCustomer(inv, customer));
+/**
+ * فاکتورهای فروشی که مشتری در آن‌ها طرف حساب بوده.
+ * با allCustomers، فاکتور قدیمیِ بی‌شناسه فقط وقتی به این مشتری نسبت داده می‌شود
+ * که تنها مشتریِ مطابق باشد (دو هم‌نام → به هیچ‌کدام). برای فهرست‌های بزرگ از
+ * buildCustomerDocIndex (یک‌بار برای همه) استفاده کنید.
+ */
+export function invoicesOfCustomer(
+  customer: Customer,
+  allInvoices: Invoice[],
+  allCustomers?: Customer[],
+): Invoice[] {
+  if (!allCustomers) return allInvoices.filter((inv) => invoiceBelongsToCustomer(inv, customer));
+  const idx = buildCustomerIndex(
+    allCustomers.some((c) => c.id === customer.id) ? allCustomers : [...allCustomers, customer],
+  );
+  return allInvoices.filter((inv) => {
+    const m = matchCustomer(inv.customer, idx);
+    return (
+      (m.kind === "id" || m.kind === "phone" || m.kind === "name") && m.customer.id === customer.id
+    );
+  });
 }
 
 /** آیا این فاکتور خرید متعلق به همین مشتری/تامین‌کننده است؟ */
@@ -461,9 +490,25 @@ export function purchaseBelongsToCustomer(p: Purchase, customer: Customer): bool
   return namesReferToSamePerson(customer, info);
 }
 
-/** فاکتورهای خریدی که این شخص تامین‌کننده/طرف حساب بوده */
-export function purchasesOfCustomer(customer: Customer, allPurchases: Purchase[]): Purchase[] {
-  return allPurchases.filter((p) => purchaseBelongsToCustomer(p, customer));
+/** فاکتورهای خریدی که این شخص تامین‌کننده/طرف حساب بوده (allCustomers: مثل invoicesOfCustomer) */
+export function purchasesOfCustomer(
+  customer: Customer,
+  allPurchases: Purchase[],
+  allCustomers?: Customer[],
+): Purchase[] {
+  if (!allCustomers) return allPurchases.filter((p) => purchaseBelongsToCustomer(p, customer));
+  const idx = buildCustomerIndex(
+    allCustomers.some((c) => c.id === customer.id) ? allCustomers : [...allCustomers, customer],
+  );
+  return allPurchases.filter((p) => {
+    const m = matchCustomer(
+      supplierToCustomerInfo(p.supplierName, p.supplierPhone, p.supplierCustomerId),
+      idx,
+    );
+    return (
+      (m.kind === "id" || m.kind === "phone" || m.kind === "name") && m.customer.id === customer.id
+    );
+  });
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -2335,6 +2380,16 @@ export const purchases = {
 
     products.save(nextProducts);
     let saved: Purchase = { ...stamped, items: resolvedItems };
+    if (!saved.supplierCustomerId && (saved.supplierName?.trim() || saved.supplierPhone?.trim())) {
+      // فقط تطبیق یکتا (شناسه/تلفن/نام کامل)؛ هم‌نامِ چندگانه وصل نمی‌شود
+      const m = matchCustomer(
+        supplierToCustomerInfo(saved.supplierName, saved.supplierPhone),
+        buildCustomerIndex(read<Customer[]>(CUSTOMERS_KEY, [])),
+      );
+      if (m.kind === "phone" || m.kind === "name") {
+        saved = { ...saved, supplierCustomerId: m.customer.id };
+      }
+    }
     const supplierId = customers.syncPurchaseCredit(saved);
     if (supplierId && saved.supplierCustomerId !== supplierId) {
       saved = { ...saved, supplierCustomerId: supplierId };
@@ -2973,6 +3028,35 @@ export const customers = {
     );
   },
 
+  /**
+   * «ذخیره در پرونده»: مقدارهای اطلاعات تکمیلی یک فاکتور در پروندهٔ مشتری
+   * نوشته و سنجاق می‌شوند (فیلد هم‌عنوان به‌روز می‌شود، بقیه دست نمی‌خورند).
+   */
+  upsertFields: (customerId: string, fields: readonly InvoicePartyField[]) => {
+    if (!fields.length) return;
+    const norm = (s: string) => s.trim().replace(/\s+/g, " ").replace(/ي/g, "ی").replace(/ك/g, "ک");
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    write(
+      CUSTOMERS_KEY,
+      list.map((c) => {
+        if (c.id !== customerId) return c;
+        const cur = Array.isArray(c.fields) ? [...c.fields] : [];
+        for (const f of fields) {
+          const i = cur.findIndex((x) => norm(x.label) === norm(f.label));
+          if (i >= 0) cur[i] = { ...cur[i], value: f.value, pinned: true };
+          else
+            cur.push({
+              id: "f" + Math.random().toString(36).slice(2, 9),
+              label: f.label,
+              value: f.value,
+              pinned: true,
+            });
+        }
+        return { ...c, fields: cur };
+      }),
+    );
+  },
+
   /** حذف صریح یک تراکنش بدهی/پرداخت (دکمهٔ حذف کاربر) */
   removeTx: (customerId: string, txId: string) => {
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
@@ -3310,18 +3394,27 @@ export const dataHealth = {
 };
 
 function matchCustomerRecord(list: Customer[], info: CustomerInfo): Customer | undefined {
-  if (info.customerId) {
-    const byId = list.find((c) => c.id === info.customerId);
-    if (byId) return byId;
+  const m = matchCustomer(info, buildCustomerIndex(list));
+  if (m.kind === "id" || m.kind === "phone" || m.kind === "name") return m.customer;
+  if (m.kind === "ambiguous") {
+    // صفحه‌ها پیش از ثبت، انتخاب صریح را از کاربر می‌خواهند (customerAmbiguity).
+    // اگر فراخوانی قدیمی به اینجا برسد، رفتار قبلی حفظ می‌شود تا بدهی گم نشود.
+    console.warn("[store] ambiguous customer match; caller should ask the user", {
+      candidates: m.candidates.map((c) => c.id),
+    });
+    return m.candidates[0];
   }
-  const phone = info.phone?.trim();
-  if (phone) {
-    const byPhone = list.find((c) => phonesLikelySame(c.phone, phone));
-    if (byPhone) return byPhone;
-  }
-  const name = [info.firstName, info.lastName].filter(Boolean).join(" ").trim();
-  if (!name) return undefined;
-  return list.find((c) => customerFullName(c) === name);
+  return undefined;
+}
+
+/**
+ * پیش از ثبت فاکتور: اگر اطلاعات مشتریِ تایپ‌شده با چند مشتری ذخیره‌شده بخواند
+ * (مثلاً دو «علی رضایی» بدون تلفن)، فهرست آن‌ها برمی‌گردد تا کاربر یکی را انتخاب کند.
+ */
+export function customerAmbiguity(info: CustomerInfo | undefined): Customer[] {
+  if (!info || info.customerId) return [];
+  const m = matchCustomer(info, buildCustomerIndex(read<Customer[]>(CUSTOMERS_KEY, [])));
+  return m.kind === "ambiguous" ? m.candidates : [];
 }
 
 /** مانده نسیه فاکتور خرید — فقط وقتی روش پرداخت نسیه است */

@@ -27,6 +27,9 @@ import {
   COUNT_UNIT,
   isWeightUnit,
   purchaseCreditRemaining,
+  customerAmbiguity,
+  supplierToCustomerInfo,
+  type Customer,
   type Product,
   type PurchaseItem,
   type Purchase,
@@ -38,6 +41,13 @@ import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { QtyUnitInput, EntryUnitSwitch } from "@/components/QtyUnitInput";
 import { formatQtyWithUnit } from "@/lib/qty-format";
 import { MoneyInput } from "@/components/MoneyInput";
+import { InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
+import { CustomerChoiceDialog } from "@/components/CustomerChoiceDialog";
+import {
+  cleanInvoiceFields,
+  pinnedInvoiceFields,
+  type InvoicePartyField,
+} from "@/lib/customer-fields";
 import {
   newPurchaseLine,
   purchaseQtyInProductUnit,
@@ -736,6 +746,8 @@ export function PurchasesPageInner() {
   const [supplierPhone, setSupplierPhone] = useState("");
   const [supplierCustomerId, setSupplierCustomerId] = useState<string | undefined>(undefined);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [partyFields, setPartyFields] = useState<InvoicePartyField[]>([]);
+  const [ambiguous, setAmbiguous] = useState<Customer[] | null>(null);
   const [customerQuery, setCustomerQuery] = useState("");
   const [note, setNote] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -837,7 +849,7 @@ export function PurchasesPageInner() {
   const canSubmit =
     draft.items.length > 0 && draft.items.every((it) => it.quantity > 0 && it.name.trim());
 
-  const submit = () => {
+  const submit = (picked?: Customer | "new") => {
     if (!canSubmit) {
       alert("حداقل یک کالا با نام، تعداد و قیمت خرید معتبر وارد کنید.");
       return;
@@ -855,6 +867,33 @@ export function PurchasesPageInner() {
       );
       return;
     }
+    // تامین‌کننده‌ای که با چند پرونده می‌خواند: انتخاب صریح کاربر، بدون حدس
+    let supplierId = supplierCustomerId;
+    let supplierRecord = supplierId ? customerList.find((c) => c.id === supplierId) : undefined;
+    if (!supplierId && (supplierName.trim() || supplierPhone.trim())) {
+      if (picked && picked !== "new") {
+        supplierId = picked.id;
+        supplierRecord = picked;
+      } else if (picked === "new") {
+        const info = supplierToCustomerInfo(supplierName, supplierPhone);
+        const created = customers.add({
+          firstName: info.firstName || info.phone || "تامین‌کننده",
+          lastName: info.lastName,
+          phone: info.phone,
+        });
+        supplierId = created.id;
+        supplierRecord = created;
+      } else {
+        const candidates = customerAmbiguity(supplierToCustomerInfo(supplierName, supplierPhone));
+        if (candidates.length) {
+          setAmbiguous(candidates);
+          return;
+        }
+      }
+    }
+    const fieldsForPurchase = cleanInvoiceFields(
+      partyFields.length || !supplierRecord ? partyFields : pinnedInvoiceFields(supplierRecord),
+    );
     const paid =
       paymentMethod === "credit"
         ? Math.min(total, Math.max(0, Math.round(paidAmount || 0)))
@@ -865,7 +904,8 @@ export function PurchasesPageInner() {
         createdAt,
         supplierName: supplierName.trim() || undefined,
         supplierPhone: supplierPhone.trim() || undefined,
-        supplierCustomerId,
+        supplierCustomerId: supplierId,
+        supplierFields: fieldsForPurchase,
         note: note.trim() || undefined,
         paymentMethod,
         paidAmount: paid,
@@ -879,6 +919,7 @@ export function PurchasesPageInner() {
     setSupplierName("");
     setSupplierPhone("");
     setSupplierCustomerId(undefined);
+    setPartyFields([]);
     setNote("");
     setPaymentMethod("cash");
     setPaidAmount(0);
@@ -1041,6 +1082,7 @@ export function PurchasesPageInner() {
                         setSupplierName(customerFullName(c));
                         setSupplierPhone(c.phone ?? "");
                         setSupplierCustomerId(c.id);
+                        setPartyFields(pinnedInvoiceFields(c));
                         setShowCustomerPicker(false);
                         setCustomerQuery("");
                       }}
@@ -1065,6 +1107,15 @@ export function PurchasesPageInner() {
             </Link>
           </div>
         )}
+      </div>
+
+      <div className="mb-3">
+        <InvoicePartyFieldsEditor
+          customer={customerList.find((c) => c.id === supplierCustomerId)}
+          value={partyFields}
+          onChange={setPartyFields}
+          title="اطلاعات تکمیلی تامین‌کننده روی این فاکتور"
+        />
       </div>
 
       <div className="mb-3">
@@ -1181,7 +1232,7 @@ export function PurchasesPageInner() {
       </div>
 
       <button
-        onClick={submit}
+        onClick={() => submit()}
         disabled={!canSubmit}
         className="mb-6 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
       >
@@ -1253,6 +1304,17 @@ export function PurchasesPageInner() {
           </div>
         )}
       </div>
+      {ambiguous && (
+        <CustomerChoiceDialog
+          candidates={ambiguous}
+          typedName={supplierName.trim()}
+          onCancel={() => setAmbiguous(null)}
+          onPick={(c) => {
+            setAmbiguous(null);
+            submit(c);
+          }}
+        />
+      )}
     </Layout>
   );
 }

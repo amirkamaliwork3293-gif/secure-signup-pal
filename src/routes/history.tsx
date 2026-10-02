@@ -1,5 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { InvoiceActions } from "@/components/InvoiceActions";
@@ -375,6 +375,20 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
                   {customer.phone}
                 </span>
               )}
+              {customer?.customerId && (
+                <Link
+                  to="/customers"
+                  search={{ c: customer.customerId }}
+                  className="mr-2 font-medium text-primary hover:underline"
+                >
+                  پرونده مشتری
+                </Link>
+              )}
+              {(saved.customerFields ?? []).map((f) => (
+                <div key={f.label} className="mt-0.5">
+                  {f.label}: <span className="text-foreground">{f.value}</span>
+                </div>
+              ))}
             </div>
           )}
 

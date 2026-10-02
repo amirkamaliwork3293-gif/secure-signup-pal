@@ -34,6 +34,8 @@ import {
   settlementAlertKind,
   productStockHint,
   type Customer,
+  type Invoice,
+  type Purchase,
   type CustomerTx,
   type Product,
   type PaymentMethod,
@@ -54,6 +56,7 @@ import { PurchaseActions } from "@/components/PurchaseActions";
 import { QuantityStepper } from "@/components/QuantityStepper";
 import { StockNoticeBanner } from "@/components/StockGuardUi";
 import { buildCustomerDocIndex } from "@/lib/customer-link";
+import { CustomerProfile } from "@/components/customer/CustomerProfile";
 import { CustomerFieldsEditor, InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
 import {
   cleanInvoiceFields,
@@ -92,7 +95,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 
-const searchSchema = z.object({ q: z.string().optional() });
+const searchSchema = z.object({ q: z.string().optional(), c: z.string().optional() });
 
 export const Route = createFileRoute("/customers")({
   validateSearch: searchSchema,
@@ -123,8 +126,12 @@ const SORT_LABEL: Record<SortBy, string> = {
 const inputCls =
   "w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
 
+const LIST_PAGE = 60;
+const EMPTY_INVOICES: Invoice[] = [];
+const EMPTY_PURCHASES: Purchase[] = [];
+
 function CustomersPageInner() {
-  const { q: incomingQuery } = Route.useSearch();
+  const { q: incomingQuery, c: incomingCustomerId } = Route.useSearch();
   const [list, setList] = customers.useAll();
   const [searchQ, setSearchQ] = useState(incomingQuery ?? "");
   const [filter, setFilter] = useState<Filter>("all");
@@ -144,18 +151,33 @@ function CustomersPageInner() {
   // ثبت سریع: "debt" = مشتری به ما بدهکار شد (طلب ما)، "payment" = ما به مشتری بدهکاریم (طلب مشتری)
   const [quickEntry, setQuickEntry] = useState<"debt" | "payment" | null>(null);
   const [showDeleteAll, setShowDeleteAll] = useState(false);
+  // فهرست‌های بزرگ (هزاران مشتری) تکه‌تکه رندر می‌شوند تا صفحه روان بماند
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE);
+  useEffect(() => setVisibleCount(LIST_PAGE), [searchQ, filter, sortBy]);
 
   useEffect(() => {
     if (incomingQuery != null) setSearchQ(incomingQuery);
   }, [incomingQuery]);
 
   const [history] = invoice.useHistory();
+  const [purchaseHistory] = purchases.useHistory();
+  /** فاکتورهای فروش و خرید هر مشتری — یک پیمایش برای همه (O(n)) */
+  const docs = useMemo(
+    () => buildCustomerDocIndex(list, history, purchaseHistory),
+    [list, history, purchaseHistory],
+  );
+
+  // لینک مستقیم به پروندهٔ مشتری: /customers?c=<id>
+  useEffect(() => {
+    if (!incomingCustomerId) return;
+    const c = list.find((x) => x.id === incomingCustomerId);
+    if (c) setDetailTarget(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingCustomerId]);
 
   /** آمار خرید هر مشتری از روی فاکتورهای آرشیوشده */
   const buyStats = useMemo(() => {
     const m = new Map<string, { total: number; count: number; lastAt: number }>();
-    // یک پیمایش برای همهٔ مشتریان (قبلاً مشتری × فاکتور — با هزاران رکورد کند بود)
-    const docs = buildCustomerDocIndex(list, history);
     for (const c of list) {
       const invs = docs.byCustomer.get(c.id)?.invoices ?? [];
       m.set(c.id, {
@@ -165,7 +187,7 @@ function CustomersPageInner() {
       });
     }
     return m;
-  }, [list, history]);
+  }, [list, docs]);
 
   const totals = useMemo(() => {
     let receivable = 0; // مجموع طلب ما از بدهکارها
@@ -390,10 +412,11 @@ function CustomersPageInner() {
 
   const renderCards = (items: Customer[]) => (
     <ul className="space-y-2">
-      {items.map((c) => (
+      {items.slice(0, visibleCount).map((c) => (
         <CustomerCard
           key={c.id}
           customer={c}
+          stats={buyStats.get(c.id)}
           onOpenDetail={() => setDetailTarget(c)}
           onDebt={() => setTxTarget({ customer: c, type: "debt" })}
           onPayment={() => setTxTarget({ customer: c, type: "payment" })}
@@ -402,6 +425,18 @@ function CustomersPageInner() {
           onRemind={() => setReminderTarget(c)}
         />
       ))}
+      {items.length > visibleCount && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setVisibleCount((n) => n + LIST_PAGE)}
+            className="w-full rounded-xl border border-border py-2.5 text-xs font-medium"
+          >
+            نمایش {formatNumber(Math.min(LIST_PAGE, items.length - visibleCount))} مشتری دیگر (از{" "}
+            {formatNumber(items.length - visibleCount)})
+          </button>
+        </li>
+      )}
     </ul>
   );
 
@@ -738,8 +773,10 @@ function CustomersPageInner() {
       )}
 
       {detailTarget && (
-        <CustomerDetailModal
+        <CustomerProfile
           customer={list.find((c) => c.id === detailTarget.id) ?? detailTarget}
+          invoices={docs.byCustomer.get(detailTarget.id)?.invoices ?? EMPTY_INVOICES}
+          purchases={docs.byCustomer.get(detailTarget.id)?.purchases ?? EMPTY_PURCHASES}
           onClose={() => setDetailTarget(null)}
           onDebt={() => {
             setTxTarget({ customer: detailTarget, type: "debt" });
@@ -757,7 +794,7 @@ function CustomersPageInner() {
             removeCustomer(detailTarget);
             setDetailTarget(null);
           }}
-          onRemind={() => {
+          onRemindDebt={() => {
             setReminderTarget(detailTarget);
             setDetailTarget(null);
           }}
@@ -779,10 +816,12 @@ function CustomersPageInner() {
 
 function CustomerCard({
   customer,
+  stats,
   onOpenDetail,
   onRemind,
 }: {
   customer: Customer;
+  stats?: { total: number; count: number; lastAt: number };
   onOpenDetail: () => void;
   onDebt: () => void;
   onPayment: () => void;
@@ -865,6 +904,15 @@ function CustomerCard({
               </span>
             )}
           </div>
+          {stats && stats.count > 0 && (
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {formatNumber(stats.count)} فاکتور · آخرین خرید{" "}
+              {(() => {
+                const d = Math.floor((Date.now() - stats.lastAt) / 86_400_000);
+                return d <= 0 ? "امروز" : `${formatNumber(d)} روز پیش`;
+              })()}
+            </div>
+          )}
         </div>
         <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-muted-foreground" />
       </button>
@@ -1963,261 +2011,6 @@ function SmsCampaignModal({
               </div>
             </div>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── پنجره‌ی کامل مشتری (نمایش، تراکنش‌ها، فاکتورهای فروش، اقدامات) ───────────
-
-function CustomerDetailModal({
-  customer,
-  onClose,
-  onDebt,
-  onPayment,
-  onEdit,
-  onDelete,
-  onRemind,
-  onNewInvoice,
-}: {
-  customer: Customer;
-  onClose: () => void;
-  onDebt: () => void;
-  onPayment: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRemind: () => void;
-  onNewInvoice: () => void;
-}) {
-  const [salesHistory] = invoice.useHistory();
-  const [purchaseHistory] = purchases.useHistory();
-  const [allCustomers] = customers.useAll();
-  const [appSettings] = settings.useAll();
-  const balance = customerBalance(customer);
-  const dueKind = settlementAlertKind(customer);
-  // فاکتور قدیمیِ بی‌شناسه فقط اگر تنها مشتری مطابق همین باشد (هم‌نام‌ها قاطی نمی‌شوند)
-  const myInvoices = useMemo(
-    () => invoicesOfCustomer(customer, salesHistory, allCustomers),
-    [customer, salesHistory, allCustomers],
-  );
-  const myPurchases = useMemo(
-    () => purchasesOfCustomer(customer, purchaseHistory, allCustomers),
-    [customer, purchaseHistory, allCustomers],
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-3xl border border-border bg-card shadow-elegant sm:rounded-3xl">
-        {/* هدر */}
-        <div className="flex items-center justify-between gap-2 border-b border-border p-4">
-          <div className="min-w-0">
-            <h3 className="truncate text-base font-bold">{customerFullName(customer)}</h3>
-            {customer.phone && (
-              <span
-                className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
-                dir="ltr"
-              >
-                <Phone className="h-3 w-3" />
-                {customer.phone}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-secondary"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* خلاصه‌ی مانده حساب */}
-          <div
-            className={`mb-4 rounded-2xl p-4 text-center ${
-              balance > 0
-                ? "bg-destructive/10 text-destructive"
-                : balance < 0
-                  ? "bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                  : "bg-green-500/10 text-green-600"
-            }`}
-          >
-            <div className="text-[11px] opacity-80">
-              {balance > 0 ? "بدهکار به شما" : balance < 0 ? "طلبکار از شما" : "وضعیت حساب"}
-            </div>
-            <div className="mt-1 text-xl font-bold">
-              {balance === 0 ? "تسویه است" : formatToman(Math.abs(balance))}
-            </div>
-            {customer.settlementDate && balance > 0 && (
-              <div className="mt-1 flex items-center justify-center gap-1 text-[11px] opacity-80">
-                <CalendarClock className="h-3 w-3" />
-                موعد تسویه: {formatJalaliYmd(customer.settlementDate)}
-                {dueKind === "overdue"
-                  ? " · گذشته"
-                  : dueKind === "today"
-                    ? " · امروز"
-                    : dueKind === "tomorrow"
-                      ? " · فردا"
-                      : ""}
-              </div>
-            )}
-          </div>
-
-          {/* اقدامات سریع */}
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            <button
-              onClick={onNewInvoice}
-              className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground shadow-elegant"
-            >
-              <ShoppingCart className="h-4 w-4" />
-              فاکتور فروش جدید برای این مشتری
-            </button>
-            <button
-              onClick={onDebt}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive"
-            >
-              <ArrowUpCircle className="h-3.5 w-3.5" />
-              ثبت بدهی
-            </button>
-            <button
-              onClick={onPayment}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-700 dark:text-green-400"
-            >
-              <ArrowDownCircle className="h-3.5 w-3.5" />
-              ثبت پرداخت
-            </button>
-            {balance > 0 && (
-              <>
-                <button
-                  onClick={onRemind}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  پیامک بدهی
-                </button>
-                <button
-                  type="button"
-                  disabled={!customer.phone}
-                  onClick={() => {
-                    const href = telHref(customer.phone || "");
-                    if (href) openExternal(href);
-                  }}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-500/20 disabled:opacity-40 dark:text-sky-400"
-                >
-                  <Phone className="h-3.5 w-3.5" />
-                  تماس
-                </button>
-              </>
-            )}
-          </div>
-
-          {customer.note && (
-            <div className="mb-4 rounded-lg bg-accent px-3 py-2 text-xs text-muted-foreground">
-              {customer.note}
-            </div>
-          )}
-
-          {/* فاکتورهای فروش این مشتری */}
-          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <Receipt className="h-3.5 w-3.5" />
-            فاکتورهای فروش ({formatNumber(myInvoices.length)})
-          </h4>
-          {myInvoices.length === 0 ? (
-            <p className="mb-4 py-2 text-center text-xs text-muted-foreground">
-              هنوز فاکتور فروشی برای این مشتری ثبت نشده است.
-            </p>
-          ) : (
-            <ul className="mb-4 space-y-1.5 max-h-52 overflow-y-auto">
-              {myInvoices.map((inv) => (
-                <li
-                  key={inv.id}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-primary">{formatToman(inv.total)}</div>
-                    <div className="text-[10px] text-muted-foreground">
-                      {formatJalaliDateTime(inv.createdAt)}
-                      {inv.paymentMethod && ` · ${PAYMENT_LABEL[inv.paymentMethod]}`}
-                    </div>
-                  </div>
-                  <InvoiceActions
-                    inv={{ ...inv, shopLogoUrl: inv.shopLogoUrl || appSettings.logoUrl }}
-                    size="sm"
-                    showLabels={false}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* فاکتورهای خرید این مشتری (تامین‌کننده) */}
-          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <ShoppingBag className="h-3.5 w-3.5" />
-            فاکتورهای خرید ({formatNumber(myPurchases.length)})
-          </h4>
-          {myPurchases.length === 0 ? (
-            <p className="mb-4 py-2 text-center text-xs text-muted-foreground">
-              هنوز فاکتور خریدی برای این طرف حساب ثبت نشده است.
-            </p>
-          ) : (
-            <ul className="mb-4 space-y-1.5 max-h-52 overflow-y-auto">
-              {myPurchases.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-sky-700 dark:text-sky-400">
-                      {formatToman(p.total)}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      {formatJalaliDateTime(p.createdAt)}
-                      {p.paymentMethod && ` · ${PAYMENT_LABEL[p.paymentMethod]}`}
-                    </div>
-                  </div>
-                  <PurchaseActions p={p} size="sm" showLabels={false} />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* تراکنش‌های بدهی/پرداخت */}
-          <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-            <Wallet className="h-3.5 w-3.5" />
-            تراکنش‌های بدهی/پرداخت ({formatNumber(customer.txs.length)})
-          </h4>
-          {customer.txs.length === 0 ? (
-            <p className="py-2 text-center text-xs text-muted-foreground">تراکنشی ثبت نشده است.</p>
-          ) : (
-            <ul className="space-y-1.5 max-h-52 overflow-y-auto">
-              {customer.txs.map((t) => (
-                <TxRow key={t.id} tx={t} customer={customer} />
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* پایین: ویرایش/حذف */}
-        <div className="flex justify-end gap-1 border-t border-border p-3">
-          <button
-            onClick={onEdit}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            ویرایش
-          </button>
-          <button
-            onClick={onDelete}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            حذف مشتری
-          </button>
         </div>
       </div>
     </div>

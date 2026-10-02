@@ -38,6 +38,7 @@ import {
 import { roundQty } from "@/lib/units";
 import { coerceProductNumbers, type HealthFix } from "@/lib/data-health";
 import type { CustomerField, InvoicePartyField } from "@/lib/customer-fields";
+import type { ReceiptSettings } from "@/lib/receipt";
 import { buildCustomerIndex, matchCustomer } from "@/lib/customer-link";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 import { isCapacitor } from "@/lib/isWebView";
@@ -644,6 +645,8 @@ export type AppSettings = {
   currencyUnit?: "toman" | "rial";
   /** چیدمان سفارشی فاکتور چاپی (طراح فاکتور) — ساختار در ‎@/lib/invoice-template‎ */
   invoiceTemplate?: { [key: string]: JsonValue };
+  /** تنظیمات چاپ فیش (چاپگر حرارتی) — ‎@/lib/receipt‎؛ خالی یعنی پیش‌فرض‌های بدون‌تنظیم */
+  receipt?: Partial<ReceiptSettings>;
   /** اندازه کاغذ چاپ فاکتور فروش — محتوا روی همین برگه مقیاس می‌شود تا دو صفحه نشود */
   invoicePaperSize?: "A4" | "A5" | "Letter";
   /** دسته‌بندی‌های هزینه‌ی سفارشی کاربر (علاوه بر EXPENSE_CATEGORIES پیش‌فرض) */

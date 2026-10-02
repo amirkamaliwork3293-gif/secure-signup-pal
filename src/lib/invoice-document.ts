@@ -22,27 +22,37 @@ import {
   COUNT_UNIT,
   formatChequeDue,
   invoiceDocumentTitle,
+  settings,
   type Invoice,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import { type PaperSize } from "@/lib/print";
 import { escapeHtml } from "@/lib/html-escape";
 import { amountToPersianWords } from "@/lib/amount-words";
+import {
+  normalizeReceiptSettings,
+  printFontFaceCss,
+  receiptDocument,
+  receiptParts,
+  type ReceiptSettings,
+} from "@/lib/receipt";
 
 export type InvoiceHtmlMode = "screen" | "print";
 
-/** زرشکی سلطنتی — رنگ تأکیدی سند؛ کاربر می‌تواند در «طراح فاکتور» عوضش کند */
-export const DEFAULT_INVOICE_ACCENT = "#6e2432";
+/**
+ * رنگ تأکیدی پیش‌فرض — سرمه‌ای تیره. روی چاپگر سیاه‌وسفید تقریباً سیاه چاپ می‌شود
+ * و روی رنگی، رسمی و آرام است. کاربر در «طراح فاکتور» می‌تواند عوضش کند؛ رنگ‌های
+ * روشن خودکار تیره می‌شوند تا روی کاغذ کمرنگ نشوند.
+ */
+export const DEFAULT_INVOICE_ACCENT = "#1f3a5f";
 
 const esc = escapeHtml;
 
-// ─── ابزار رنگ ──────────────────────────────────────────────────────────────
-// رنگ تم فاکتور دلخواهِ کاربر است؛ سایه‌ها و طیف‌ها باید از همان رنگ ساخته شوند
-// تا هر رنگی که کاربر انتخاب می‌کند هماهنگ بماند.
+// ─── رنگ — همه با کنتراست کافی برای چاپ سیاه‌وسفید ─────────────────────────
 
 type Rgb = [number, number, number];
 
-const FALLBACK_RGB: Rgb = [110, 36, 50];
+const FALLBACK_RGB: Rgb = [31, 58, 95];
 
 function hexToRgb(hex: string): Rgb {
   let h = String(hex || "")
@@ -69,7 +79,6 @@ function rgbToHex([r, g, b]: Rgb): string {
   return `#${p(r)}${p(g)}${p(b)}`;
 }
 
-/** ترکیب دو رنگ — t=0 یعنی رنگ اول، t=1 یعنی رنگ دوم */
 function mixColor(hex: string, target: string, t: number): string {
   const a = hexToRgb(hex);
   const b = hexToRgb(target);
@@ -77,24 +86,34 @@ function mixColor(hex: string, target: string, t: number): string {
   return rgbToHex([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]);
 }
 
-const lighten = (hex: string, t: number) => mixColor(hex, "#ffffff", t);
-const darken = (hex: string, t: number) => mixColor(hex, "#14080c", t);
-
-/** طلای شامپاین — فلز ثابت سند؛ با رنگ تم مخلوط نمی‌شود تا فاکتور «رنگی» نشود */
-const METAL = "#c4a574";
-const IVORY = "#f7f1e6";
-const INK = "#1a1410";
-
-/** همان رنگ با شفافیت — برای سایه و خطوط بسیار ظریف */
-function alphaColor(hex: string, a: number): string {
+/** درخشندگی نسبی (WCAG) */
+export function relativeLuminance(hex: string): number {
+  const lin = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
   const [r, g, b] = hexToRgb(hex);
-  return `rgba(${r},${g},${b},${a})`;
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/**
+ * رنگ تأکیدی خوانا روی کاغذ سفید: کنتراست حداقل ۷:۱ با سفید (معادل متن تیره)
+ * تا در چاپ سیاه‌وسفید به خاکستری کمرنگ تبدیل نشود. رنگ تیره دست نمی‌خورد.
+ */
+export function printableAccent(hex: string): string {
+  let c = rgbToHex(hexToRgb(hex || DEFAULT_INVOICE_ACCENT));
+  for (let i = 0; i < 20 && 1.05 / (relativeLuminance(c) + 0.05) < 7; i++) {
+    c = mixColor(c, "#000000", 0.12);
+  }
+  return c;
 }
 
 export type InvoicePalette = {
   accent: string;
   deep: string;
+  /** خطوط اصلی (قاب، جدول) */
   gold: string;
+  /** برچسب‌ها */
   bronze: string;
   paper: string;
   ink: string;
@@ -110,30 +129,34 @@ export type InvoicePalette = {
   success: string;
 };
 
+/**
+ * پالت چاپی. نام کلیدها برای سازگاری با PDF و قالب‌های قبلی حفظ شده‌اند، ولی همه
+ * تیره و با کنتراست بالا هستند: متن سیاه، برچسب خاکستری تیره (#333)، خطوط ۴۰٪ و
+ * کاغذ سفید (بدون پس‌زمینهٔ عاجی که جوهر مصرف می‌کرد و کنتراست را کم می‌کرد).
+ */
 export function invoicePalette(accent: string): InvoicePalette {
-  const base = accent || DEFAULT_INVOICE_ACCENT;
+  const base = printableAccent(accent || DEFAULT_INVOICE_ACCENT);
   return {
     accent: base,
-    deep: darken(base, 0.22),
-    gold: METAL,
-    bronze: mixColor(METAL, "#2a1c10", 0.48),
-    paper: IVORY,
-    ink: INK,
-    muted: "#8a7d70",
-    line: METAL,
-    hair: "rgba(26,20,16,.08)",
-    wash: "#f1eadc",
-    tint: lighten(base, 0.92),
-    soft: lighten(base, 0.42),
-    glow: lighten(METAL, 0.45),
-    danger: darken(base, 0.05),
-    dangerBg: "#f8eee8",
-    success: "#2d5a45",
+    deep: mixColor(base, "#000000", 0.25),
+    gold: "#3d3d3d",
+    bronze: "#2b2b2b",
+    paper: "#ffffff",
+    ink: "#000000",
+    muted: "#333333",
+    line: "#3d3d3d",
+    hair: "#8c8c8c",
+    wash: "#ececec",
+    tint: mixColor(base, "#ffffff", 0.9),
+    soft: mixColor(base, "#ffffff", 0.6),
+    glow: "#d9d9d9",
+    danger: "#8b0000",
+    dangerBg: "#f3e3e3",
+    success: "#14532d",
   };
 }
 
 // ─── آیکون‌ها ───────────────────────────────────────────────────────────────
-// SVG درون‌خطی و بدون وابستگی — سبک، قابل چاپ و بدون درخواست شبکه.
 
 const ICON_PATHS: Record<string, string> = {
   hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
@@ -160,11 +183,11 @@ const ICON_PATHS: Record<string, string> = {
   doc: '<path d="M6 3.2h7.6L18 7.6v13.2H6z"/><path d="M13.4 3.2v4.6H18"/><path d="M9 12.4h6M9 16h4"/>',
 };
 
-/** آیکون خطی کوچک — رنگ از currentColor می‌آید تا با هر تم هماهنگ باشد */
+/** آیکون خطی کوچک — رنگ از currentColor */
 export function invoiceIcon(name: keyof typeof ICON_PATHS | string, cls = ""): string {
   const d = ICON_PATHS[name];
   if (!d) return "";
-  return `<svg class="ico${cls ? ` ${cls}` : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  return `<svg class="ico${cls ? ` ${cls}` : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
 export type AmountLine = {
@@ -178,7 +201,7 @@ export type AmountLine = {
   kind: "normal" | "grand" | "due";
 };
 
-/** سطرهای جمع‌بندی — منبع واحد برای HTML پیش‌فرض، قالب سفارشی و PDF */
+/** سطرهای جمع‌بندی — منبع واحد برای HTML پیش‌فرض، قالب سفارشی، فیش و PDF */
 export function invoiceAmountLines(inv: Invoice): AmountLine[] {
   const t = invoiceTotals(inv);
   const cur = currencyLabel();
@@ -253,7 +276,7 @@ export function invoicePageAssets(
   #print-root { width: 100%; }
   thead { display: table-header-group; }
   tfoot { display: table-footer-group; }
-  tr, .party, .sign, .note, .block, .seal { break-inside: avoid; page-break-inside: avoid; }
+  tr, .party, .sign, .note, .block, .seal, .totals { break-inside: avoid; page-break-inside: avoid; }
   @media print {
     html, body { background: #fff !important; padding: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     #print-root, .sheet { box-shadow: none !important; border-radius: 0 !important; }
@@ -261,10 +284,10 @@ export function invoicePageAssets(
   }
   ${
     mode === "screen"
-      ? `html, body { background: #e8dfd0; }
+      ? `html, body { background: #e9ebef; }
          body { padding: 18px 10px 30px; }
-         #print-root { max-width: 940px; margin: 0 auto; }
-         .sheet { border-radius: 6px; box-shadow: 0 28px 64px rgba(40,24,16,.18), 0 2px 6px rgba(40,24,16,.06); }`
+         #print-root { max-width: 920px; margin: 0 auto; }
+         .sheet { border-radius: 4px; box-shadow: 0 18px 48px rgba(15,23,42,.16), 0 1px 3px rgba(15,23,42,.08); }`
       : `html, body { background: #fff; }
          body { padding: 0; }`
   }
@@ -272,6 +295,14 @@ export function invoicePageAssets(
   return { css, script: "" };
 }
 
+/**
+ * ظاهر سند — طراحی رسمی و چاپ‌محور:
+ *  - کاغذ سفید، متن سیاه، برچسب‌ها #2b2b2b، هیچ متنی کمرنگ‌تر از #333 نیست
+ *  - ساختار با «خط» ساخته می‌شود نه با رنگ زمینه؛ زمینه‌های خاکستری روشن تزئینی‌اند
+ *    و اگر چاپگر/مرورگر پس‌زمینه را نیندازد، چیزی گم نمی‌شود
+ *  - خطوط جدول ۱px تیره و قاب جمع کل ۲px — روی چاپگر لیزری و جوهرافشان سیاه‌وسفید دیده می‌شوند
+ *  - رنگ تأکیدی فقط برای عنوان و قاب جمع کل؛ همیشه تیره (printableAccent)
+ */
 export function invoiceChromeCss(opts: {
   fontSize: number;
   accent: string;
@@ -280,165 +311,148 @@ export function invoiceChromeCss(opts: {
   const fs = opts.fontSize;
   const p = invoicePalette(opts.accent);
   const c = !!opts.compact;
-  const pad = c ? 12 : 22;
-  const gap = c ? 9 : 18;
-  const rowPad = c ? "6px 5px" : "12px 8px";
-  const px = (mult: number) => `${Math.round(fs * mult)}px`;
-  const gold = p.gold;
-  const g = (t: number) => alphaColor(gold, t);
-  const wine = (t: number) => alphaColor(p.accent, t);
-  const corner = c ? 16 : 22;
-  const inset = c ? 8 : 11;
+  const px = (mult: number) => `${Math.max(10, Math.round(fs * mult))}px`;
+  const gap = c ? 8 : 14;
+  const cell = c ? "4px 6px" : "7px 9px";
+  const rule = `1px solid ${p.line}`;
 
   return `
+  ${printFontFaceCss(printOrigin())}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fs}px;color:${p.ink};direction:rtl;
-    line-height:1.65;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  body{font-family:"Vazirmatn",Tahoma,"Noto Naskh Arabic","Segoe UI",sans-serif;font-size:${fs}px;color:${p.ink};direction:rtl;
+    line-height:1.6;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
   .ico{width:.95em;height:.95em;flex:0 0 auto;vertical-align:-.14em}
-
-  /* ─── ورق گواهی ─────────────────────────────────────────────────────────
-     کاغذ عاجی ثابت است. طلا و زرشکی فقط برای قاب، عنوان و مبلغ نهایی‌اند
-     تا سند شبیه کارت نعنایی یا بلوک تیره نشود. */
-  .sheet{position:relative;background-color:${p.paper};overflow:hidden;isolation:isolate;
-    border:1px solid ${gold};
-    background-image:
-      linear-gradient(${gold},${gold}),linear-gradient(${gold},${gold}),
-      linear-gradient(${gold},${gold}),linear-gradient(${gold},${gold}),
-      linear-gradient(${gold},${gold}),linear-gradient(${gold},${gold}),
-      linear-gradient(${gold},${gold}),linear-gradient(${gold},${gold});
-    background-size:${corner}px 1.5px,1.5px ${corner}px,${corner}px 1.5px,1.5px ${corner}px,${corner}px 1.5px,1.5px ${corner}px,${corner}px 1.5px,1.5px ${corner}px;
-    background-repeat:no-repeat;
-    background-position:
-      top ${inset}px right ${inset}px, top ${inset}px right ${inset}px,
-      top ${inset}px left ${inset}px, top ${inset}px left ${inset}px,
-      bottom ${inset}px right ${inset}px, bottom ${inset}px right ${inset}px,
-      bottom ${inset}px left ${inset}px, bottom ${inset}px left ${inset}px}
-  .doc{position:relative;z-index:1;margin:${c ? 7 : 10}px;padding:${pad}px ${pad}px ${c ? 10 : 14}px;
-    border:1px solid ${wine(0.42)}}
+  .sheet{position:relative;background:#fff}
+  .doc{padding:${c ? "4px" : "6px"} ${c ? "2px" : "4px"} 0}
 
   /* ─── سربرگ ───────────────────────────────────────────────────────────── */
-  .hero{display:flex;align-items:center;justify-content:space-between;gap:${gap}px;flex-wrap:wrap}
-  .hero-brand{display:flex;align-items:center;gap:${c ? 10 : 14}px;min-width:0;flex:1 1 46%}
-  .mono{width:${c ? 46 : 58}px;height:${c ? 46 : 58}px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
-    background:${p.accent};color:${gold};border:1.5px solid ${gold};box-shadow:0 0 0 3px ${p.paper},0 0 0 4px ${g(0.55)};overflow:hidden}
-  .mono span{font-size:${px(c ? 1.35 : 1.55)};font-weight:800;line-height:1}
+  .hero{display:flex;align-items:stretch;justify-content:space-between;gap:${gap}px;padding-bottom:${c ? 8 : 12}px;
+    border-bottom:3px solid ${p.accent}}
+  .hero-brand{display:flex;align-items:center;gap:${c ? 10 : 14}px;min-width:0;flex:1 1 55%}
+  .mono{width:${c ? 48 : 64}px;height:${c ? 48 : 64}px;flex:0 0 auto;display:grid;place-items:center;overflow:hidden;
+    border:1.5px solid ${p.ink};border-radius:8px;background:#fff}
+  .mono span{font-size:${px(c ? 1.5 : 1.8)};font-weight:900;line-height:1;color:${p.accent}}
   .mono .logo,.logo{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
-  .brand-name{font-size:${px(1.22)};font-weight:800;line-height:1.35;color:${p.ink};word-break:break-word}
-  .brand-sub{margin-top:2px;font-size:${px(0.72)};color:${p.muted};display:flex;flex-wrap:wrap;gap:1px 12px;line-height:1.7}
+  .brand-name{font-size:${px(c ? 1.3 : 1.5)};font-weight:900;line-height:1.3;color:${p.ink};word-break:break-word}
+  .brand-sub{margin-top:2px;font-size:${px(0.8)};color:${p.muted};display:flex;flex-wrap:wrap;gap:1px 12px;line-height:1.6}
   .brand-sub span{display:inline-flex;align-items:center;gap:4px;min-width:0}
-  .brand-sub .ico{color:${p.bronze}}
-
-  .hero-doc{flex:0 1 auto;min-width:0;max-width:52%;text-align:left}
-  .doc-kicker{display:block;font-size:${px(0.66)};font-weight:700;color:${p.bronze};margin-bottom:2px}
-  .doc-title{font-size:${px(c ? 1.85 : 2.35)};font-weight:800;line-height:1.15;color:${p.accent};word-break:break-word}
-  .doc-id{display:block;margin-top:4px;font-size:${px(0.82)};font-weight:700;color:${p.bronze}}
-
-  /* شمسه — ستارهٔ هشت‌پر ایرانی روی خط طلایی */
-  .ornament{display:flex;align-items:center;gap:${c ? 8 : 12}px;margin-top:${gap}px}
-  .ornament .orn-line{flex:1 1 auto;height:0;border-top:1px solid ${gold};box-shadow:0 2px 0 ${wine(0.35)}}
-  .shamse{width:${c ? 22 : 26}px;height:${c ? 22 : 26}px;flex:0 0 auto;color:${gold}}
+  .hero-doc{flex:0 0 auto;min-width:${c ? 120 : 170}px;max-width:48%;border:1.5px solid ${p.ink};border-radius:6px;overflow:hidden;align-self:center}
+  .doc-title{padding:${c ? "4px 10px" : "6px 14px"};font-size:${px(c ? 1.15 : 1.35)};font-weight:900;line-height:1.3;color:#fff;
+    background:${p.accent};text-align:center;word-break:break-word}
+  .doc-kicker{display:none}
+  .doc-rows{padding:${c ? "4px 8px" : "6px 12px"}}
+  .doc-row{display:flex;justify-content:space-between;gap:10px;font-size:${px(0.82)};line-height:1.7}
+  .doc-row .k{color:${p.bronze}}
+  .doc-row .v{font-weight:700;color:${p.ink};direction:ltr;unicode-bidi:plaintext;text-align:left}
+  .doc-id{display:none}
+  .ornament{display:none}
 
   /* ─── مشخصات فاکتور ─────────────────────────────────────────────────── */
-  .facts{margin-top:${c ? 10 : 14}px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;
-    gap:6px 18px;padding-bottom:${c ? 8 : 11}px;border-bottom:1px solid ${g(0.45)}}
-  .fact{display:flex;align-items:baseline;gap:7px;min-width:0}
-  .fact .k{font-size:${px(0.7)};font-weight:700;color:${p.bronze};white-space:nowrap}
-  .fact .v{font-size:${px(0.9)};font-weight:700;color:${p.ink};word-break:break-word}
+  .facts{margin-top:${gap}px;display:grid;grid-template-columns:repeat(auto-fit,minmax(${c ? 90 : 120}px,1fr));border:${rule};border-radius:6px;overflow:hidden}
+  .fact{display:flex;flex-direction:column;gap:1px;padding:${c ? "3px 8px" : "5px 10px"};min-width:0;border-inline-start:${rule}}
+  .fact:first-child{border-inline-start:0}
+  .fact .k{font-size:${px(0.72)};color:${p.bronze}}
+  .fact .v{font-size:${px(0.88)};font-weight:700;color:${p.ink};word-break:break-word}
   .fact.due .v{color:${p.danger}}
   .fact.ok .v{color:${p.success}}
 
   /* ─── فروشنده و خریدار ──────────────────────────────────────────────── */
-  .parties{margin-top:${c ? 12 : 18}px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
-  .party{min-width:0;padding:${c ? "2px 14px 2px 0" : "2px 22px 2px 0"}}
-  .party + .party{border-inline-start:1px solid ${g(0.55)};padding-inline-start:${c ? 14 : 22}px;padding-inline-end:0}
-  .party-k{display:block;font-size:${px(0.68)};font-weight:700;color:${p.bronze}}
-  .party-name{margin-top:1px;font-size:${px(1.08)};font-weight:800;color:${p.ink};line-height:1.45;word-break:break-word}
-  .kv{display:flex;gap:7px;align-items:baseline;min-width:0;margin-top:${c ? 2 : 3}px;font-size:${px(0.8)};line-height:1.6}
-  .kv .lbl{color:${p.muted};flex:0 0 auto}
-  .kv .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
+  .parties{margin-top:${gap}px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${c ? 8 : 12}px}
+  .party{min-width:0;border:${rule};border-radius:6px;overflow:hidden}
+  .party-k{display:block;padding:${c ? "3px 8px" : "4px 12px"};font-size:${px(0.8)};font-weight:900;color:${p.ink};
+    background:${p.wash};border-bottom:${rule}}
+  .party-body{padding:${c ? "4px 8px" : "6px 12px"}}
+  .party-name{font-size:${px(1.02)};font-weight:900;color:${p.ink};line-height:1.45;word-break:break-word}
+  .kv{display:flex;gap:7px;align-items:baseline;min-width:0;margin-top:${c ? 1 : 2}px;font-size:${px(0.84)};line-height:1.6}
+  .kv .lbl{color:${p.bronze};flex:0 0 auto}
+  .kv .lbl::after{content:":"}
+  .kv .val{color:${p.ink};font-weight:700;min-width:0;word-break:break-word;overflow-wrap:anywhere}
 
-  /* ─── دفتر اقلام ────────────────────────────────────────────────────── */
-  .ledger{margin-top:${c ? 10 : 22}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table.items, table.tpl{width:100%;border-collapse:collapse;table-layout:fixed}
-  table.items thead th, table.tpl thead th{padding:${c ? "0 6px 7px" : "0 8px 9px"};font-size:${px(0.68)};font-weight:700;
-    color:${p.bronze};text-align:center;white-space:nowrap;background:transparent;
-    border-bottom:1px solid ${p.accent};box-shadow:0 2px 0 ${gold}}
-  table.items thead th.t-name, table.tpl thead th.c-name{text-align:right}
-  table.items tbody td, table.tpl tbody td{padding:${rowPad};font-size:${px(0.9)};text-align:center;vertical-align:middle;line-height:1.65;
-    border-bottom:1px solid ${p.hair};word-break:break-word;overflow-wrap:anywhere}
-  table.items tbody tr:last-child td, table.tpl tbody tr:last-child td{border-bottom:1px solid ${p.accent};box-shadow:0 2px 0 ${gold}}
-  table.items td.idx{width:${c ? 6 : 7}%;color:${p.bronze};font-weight:700;font-size:${px(0.78)}}
-  table.items td.name{width:${c ? 47 : 41}%;text-align:right;font-weight:700;color:${p.ink}}
-  table.items td.qty{width:${c ? 12 : 13}%;white-space:nowrap;color:${p.muted};font-weight:600}
-  table.items td.price{width:${c ? 17 : 19}%;color:${p.ink}}
-  table.items td.sum{width:18%;font-weight:800;color:${p.ink}}
-  .row-tag{display:inline-block;margin-right:6px;font-size:${px(0.66)};font-weight:700;color:${p.accent}}
-  .was{display:block;color:${p.muted};font-size:${px(0.74)};line-height:1.4}
-  .empty-row td{color:${p.muted};font-size:${px(0.85)};padding:${c ? 14 : 20}px 0}
+  /* ─── جدول اقلام ────────────────────────────────────────────────────── */
+  .ledger{margin-top:${gap}px;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table.items, table.tpl{width:100%;border-collapse:collapse;table-layout:fixed;border:1.5px solid ${p.ink}}
+  table.items thead th, table.tpl thead th{padding:${cell};font-size:${px(0.82)};font-weight:900;color:${p.ink};text-align:center;
+    background:${p.wash};border:${rule};border-bottom:1.5px solid ${p.ink};white-space:normal;line-height:1.35}
+  table.items tbody td, table.tpl tbody td{padding:${cell};font-size:${px(0.92)};text-align:center;vertical-align:middle;line-height:1.55;
+    border:${rule};word-break:break-word;overflow-wrap:anywhere;color:${p.ink}}
+  table.items td.idx, table.tpl td.c-index{width:${c ? 7 : 6}%;font-weight:700}
+  table.items td.name, table.tpl td.c-name{text-align:right;font-weight:700}
+  table.items td.qty, table.tpl td.c-qty, table.tpl td.c-unit{white-space:nowrap}
+  table.items td.sum, table.tpl td.c-total{font-weight:900}
+  table.items .num, table.items td.price, table.items td.sum, table.tpl td.c-price, table.tpl td.c-total{direction:ltr;unicode-bidi:plaintext}
+  .row-tag{display:inline-block;margin-right:6px;font-size:${px(0.74)};font-weight:700;color:${p.ink};border:1px solid ${p.ink};border-radius:4px;padding:0 4px;line-height:1.4}
+  .was{display:block;color:${p.muted};font-size:${px(0.76)};line-height:1.3;text-decoration:line-through}
+  .empty-row td{color:${p.muted};font-size:${px(0.85)};padding:${c ? 12 : 18}px 0}
 
-  /* ─── مبلغ — بزرگ‌ترین عدد سند ──────────────────────────────────────── */
-  .folio{margin-top:${c ? 10 : 24}px;padding-top:${c ? 8 : 16}px;border-top:1px solid ${gold};box-shadow:0 -2px 0 ${wine(0.35)};
-    display:flex;gap:${c ? 12 : 20}px;align-items:flex-end;flex-wrap:wrap}
-  .pay-list{flex:1 1 ${c ? 180 : 220}px;min-width:0}
-  .pay-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:${px(0.82)};padding:${c ? "1px 0" : "3px 0"}}
-  .pay-row .k{color:${p.muted};min-width:0}
+  /* ─── جمع‌بندی ──────────────────────────────────────────────────────── */
+  .folio{margin-top:${gap}px;display:flex;gap:${gap}px;align-items:flex-start;flex-wrap:wrap}
+  .folio-side{flex:1 1 ${c ? 160 : 240}px;min-width:0;display:flex;flex-direction:column;gap:${c ? 6 : 10}px}
+  .pay-words{border:${rule};border-radius:6px;padding:${c ? "4px 8px" : "6px 12px"};font-size:${px(0.84)};color:${p.ink};line-height:1.7}
+  .pay-words b{font-weight:900}
+  .seal{align-self:flex-start;border:2px solid ${p.success};color:${p.success};border-radius:6px;padding:${c ? "2px 10px" : "4px 14px"};
+    font-size:${px(0.9)};font-weight:900}
+  .totals{flex:0 1 ${c ? 220 : 300}px;min-width:${c ? 180 : 240}px;border:1.5px solid ${p.ink};border-radius:6px;overflow:hidden}
+  .pay-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:${px(0.88)};padding:${c ? "3px 8px" : "5px 12px"};
+    border-bottom:${rule}}
+  .pay-row:last-child{border-bottom:0}
+  .pay-row .k{color:${p.bronze};min-width:0}
   .pay-row .v{flex:0 0 auto;font-weight:700;color:${p.ink};white-space:nowrap}
-  .pay-row.due .k,.pay-row.due .v{color:${p.danger};font-weight:800}
-  .grand{flex:0 1 auto;min-width:0;text-align:left;padding-bottom:2px}
-  .grand-k{display:block;font-size:${px(0.7)};font-weight:700;color:${p.bronze}}
-  .grand-v{display:block;font-size:${px(c ? 1.9 : 2.55)};font-weight:800;line-height:1.12;color:${p.accent};white-space:nowrap}
-  .grand-v .cur{font-size:${px(0.72)};font-weight:700;color:${p.bronze};margin-inline-start:7px}
-  .seal{flex:0 0 auto;width:${c ? 52 : 64}px;height:${c ? 52 : 64}px;border-radius:50%;display:grid;place-items:center;align-self:center;
-    border:1.5px solid ${gold};box-shadow:inset 0 0 0 3px ${p.paper},inset 0 0 0 4px ${g(0.7)};color:${p.accent};
-    font-size:${px(c ? 0.62 : 0.7)};font-weight:800;text-align:center;line-height:1.3;transform:rotate(-8deg)}
-  .pay-words{flex:1 1 100%;margin-top:${c ? 6 : 8}px;padding-top:${c ? 6 : 8}px;border-top:1px solid ${g(0.4)};
-    font-size:${px(0.74)};color:${p.muted};line-height:1.75}
-  .pay-words b{color:${p.accent};font-weight:700}
+  .pay-row.due .k,.pay-row.due .v{color:${p.danger};font-weight:900}
+  .grand{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:${c ? "6px 8px" : "8px 12px"};
+    border-top:2px solid ${p.ink};border-bottom:2px solid ${p.ink};background:${p.tint}}
+  .grand:first-child{border-top:0}
+  .grand-k{font-size:${px(0.92)};font-weight:900;color:${p.ink}}
+  .grand-v{font-size:${px(c ? 1.3 : 1.55)};font-weight:900;color:${p.ink};white-space:nowrap}
+  .grand-v .cur{font-size:${px(0.78)};font-weight:700;margin-inline-start:5px}
 
   /* ─── توضیحات، امضا، پانویس ─────────────────────────────────────────── */
-  .closing{margin-top:${c ? 10 : 20}px;display:flex;gap:${c ? 10 : 22}px;align-items:flex-start;flex-wrap:wrap}
-  .note{flex:1 1 ${c ? 200 : 250}px;min-width:0}
-  .note h3{font-size:${px(0.68)};font-weight:700;color:${p.bronze};margin-bottom:3px}
-  .note p{font-size:${px(0.84)};color:${p.ink};line-height:1.8;white-space:pre-line;word-break:break-word}
-  .signs{flex:1 1 ${c ? 200 : 250}px;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${c ? 12 : 20}px}
-  .sign{text-align:center;padding-top:${c ? 22 : 34}px}
-  .sign .ln{display:block;border-bottom:1px solid ${gold}}
-  .sign .lbl{display:block;margin-top:6px;font-size:${px(0.7)};color:${p.muted}}
-  .foot{margin-top:${c ? 12 : 18}px;padding-top:${c ? 8 : 10}px;border-top:1px solid ${g(0.45)};display:flex;align-items:center;
-    justify-content:space-between;gap:6px 14px;flex-wrap:wrap;font-size:${px(0.7)};color:${p.muted}}
-  .foot .mark{display:inline-flex;align-items:center;gap:7px;font-weight:700;color:${p.accent}}
-  .foot .mark .shamse{width:12px;height:12px;color:${gold}}
+  .closing{margin-top:${gap}px;display:flex;gap:${gap}px;align-items:stretch;flex-wrap:wrap}
+  .note{flex:1 1 ${c ? 180 : 250}px;min-width:0;border:${rule};border-radius:6px;padding:${c ? "4px 8px" : "6px 12px"}}
+  .note h3{display:flex;align-items:center;gap:5px;font-size:${px(0.8)};font-weight:900;color:${p.ink};margin-bottom:2px}
+  .note p{font-size:${px(0.88)};color:${p.ink};line-height:1.75;white-space:pre-line;word-break:break-word}
+  .signs{flex:1 1 ${c ? 200 : 260}px;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${c ? 8 : 12}px}
+  .sign{border:${rule};border-radius:6px;min-height:${c ? 54 : 78}px;display:flex;flex-direction:column;justify-content:flex-end;
+    padding:${c ? "4px 8px" : "6px 10px"};text-align:center}
+  .sign .ln{display:none}
+  .sign .lbl{display:inline-flex;justify-content:center;align-items:center;gap:4px;font-size:${px(0.8)};color:${p.bronze}}
+  .foot{margin-top:${gap}px;padding-top:${c ? 5 : 8}px;border-top:${rule};display:flex;align-items:center;
+    justify-content:space-between;gap:4px 14px;flex-wrap:wrap;font-size:${px(0.76)};color:${p.muted}}
+  .foot .mark{font-weight:900;color:${p.ink}}
   .foot .ways{display:flex;flex-wrap:wrap;gap:2px 14px;min-width:0}
   .foot .ways span{display:inline-flex;align-items:center;gap:5px;min-width:0}
 
   /* ─── قالب سفارشی «طراح فاکتور» ─────────────────────────────────────── */
-  .block{margin-top:${c ? 12 : 16}px}
-  .block > h2{font-size:${px(0.68)};font-weight:700;color:${p.bronze};padding:0 0 4px}
-  .block.plain{background:transparent;overflow:visible}
-  .grid{display:grid;padding:0}
+  .block{margin-top:${gap}px;border:${rule};border-radius:6px;overflow:hidden}
+  .block > h2{font-size:${px(0.8)};font-weight:900;color:${p.ink};padding:${c ? "3px 8px" : "4px 12px"};background:${p.wash};border-bottom:${rule}}
+  .block.plain{background:transparent}
+  .grid{display:grid;padding:${c ? "2px 8px" : "4px 12px"}}
   .grid.cols-1{grid-template-columns:minmax(0,1fr)}
   .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
   .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .cell{display:flex;gap:7px;align-items:baseline;min-width:0;padding:${c ? "3px 12px 3px 0" : "4px 16px 4px 0"};font-size:${px(0.8)};line-height:1.6}
-  .cell .lbl{color:${p.bronze};font-weight:700;flex:0 0 auto;font-size:${px(0.72)}}
-  .cell .val{color:${p.ink};font-weight:600;min-width:0;word-break:break-word;overflow-wrap:anywhere}
-  .cell .val.blank{flex:1 1 auto;min-width:${Math.round(fs * 3)}px;height:1em;border-bottom:1px solid ${g(0.55)}}
-  table.tpl tbody td.c-name{text-align:right;font-weight:700;color:${p.ink}}
-  table.tpl tbody td.c-index{color:${p.bronze};font-weight:700;font-size:${px(0.78)}}
-  table.tpl tbody td.c-qty, table.tpl tbody td.c-unit{white-space:nowrap;color:${p.muted};font-weight:600}
-  table.tpl tbody td.c-total{font-weight:800;color:${p.ink}}
+  .cell{display:flex;gap:6px;align-items:baseline;min-width:0;padding:${c ? "2px 8px 2px 0" : "3px 12px 3px 0"};font-size:${px(0.84)};line-height:1.6}
+  .cell .lbl{color:${p.bronze};flex:0 0 auto}
+  .cell .lbl::after{content:":"}
+  .cell .val{color:${p.ink};font-weight:700;min-width:0;word-break:break-word;overflow-wrap:anywhere}
+  .cell .val.blank{flex:1 1 auto;min-width:${Math.round(fs * 3)}px;height:1em;border-bottom:1px dotted ${p.ink}}
 
-  @media screen {
-    table.items tbody tr:hover td, table.tpl tbody tr:hover td{background:${g(0.08)}}
-  }
   @media (max-width: 640px) {
+    .hero{flex-direction:column}
+    .hero-doc{max-width:100%;width:100%}
     .parties{grid-template-columns:1fr}
-    .party + .party{border-inline-start:0;border-top:1px solid ${g(0.45)};padding:12px 0 0;margin-top:12px}
-    .hero-doc{max-width:100%;text-align:right}
-    .grand{text-align:right}
     table.items, table.tpl{min-width:520px}
+    .totals{flex-basis:100%}
   }
   `;
+}
+
+function printOrigin(): string {
+  try {
+    return typeof window !== "undefined" && window.location?.origin?.startsWith("http")
+      ? window.location.origin
+      : "";
+  } catch {
+    return "";
+  }
 }
 
 export function wrapInvoiceHtml(opts: {
@@ -475,20 +489,7 @@ ${chrome}
 
 // ─── بخش‌های مشترک سند (پیش‌فرض + قالب سفارشی) ──────────────────────────────
 
-/** ستارهٔ هشت‌پر — امضای هندسی سند، ساخته از دو مربع چرخیده */
-function shamseSvg(cls = "shamse"): string {
-  return `<svg class="${cls}" viewBox="0 0 32 32" aria-hidden="true">
-    <g fill="currentColor" stroke="none">
-      <polygon points="16.0,3.0 18.1,10.8 25.2,6.8 21.2,13.9 29.0,16.0 21.2,18.1 25.2,25.2 18.1,21.2 16.0,29.0 13.9,21.2 6.8,25.2 10.8,18.1 3.0,16.0 10.8,13.9 6.8,6.8 13.9,10.8"/>
-    </g>
-  </svg>`;
-}
-
-function ornamentHtml(): string {
-  return `<div class="ornament" aria-hidden="true"><span class="orn-line"></span>${shamseSvg()}<span class="orn-line"></span></div>`;
-}
-
-/** مونوگرام حلقه‌طلا: لوگو اگر باشد، وگرنه حرف اول نام فروشگاه */
+/** لوگو اگر باشد، وگرنه حرف اول نام فروشگاه */
 function shopMonogramHtml(inv: Invoice, showLogo: boolean): string {
   if (showLogo && inv.shopLogoUrl) {
     return `<div class="mono"><img class="logo" src="${esc(inv.shopLogoUrl)}" alt="لوگو"/></div>`;
@@ -497,7 +498,10 @@ function shopMonogramHtml(inv: Invoice, showLogo: boolean): string {
   return `<div class="mono" aria-hidden="true"><span>${esc(ch)}</span></div>`;
 }
 
-/** سربرگ: مونوگرام و برند سمت راست، عنوان زرشکی سند سمت چپ */
+/**
+ * سربرگ: نام و تماس فروشگاه سمت راست، کادر عنوان سند با شماره و تاریخ سمت چپ.
+ * opts.note (قالب‌های سفارشی قدیمی «شماره · تاریخ» می‌فرستند) به ردیف‌ها تبدیل می‌شود.
+ */
 export function invoiceHeroHtml(
   inv: Invoice,
   opts: { docTitle: string; subtitle?: string; showLogo?: boolean; kicker?: string; note?: string },
@@ -511,8 +515,6 @@ export function invoiceHeroHtml(
     .filter(Boolean)
     .join("");
   const sub = opts.subtitle?.trim();
-  const kicker = opts.kicker?.trim();
-  const idLine = opts.note?.trim() || inv.id.toUpperCase();
   return `<header class="hero">
     <div class="hero-brand">
       ${shopMonogramHtml(inv, showLogo)}
@@ -523,15 +525,16 @@ export function invoiceHeroHtml(
       </div>
     </div>
     <div class="hero-doc">
-      ${kicker ? `<span class="doc-kicker">${esc(kicker)}</span>` : `<span class="doc-kicker">سند فروش</span>`}
       <div class="doc-title">${esc(opts.docTitle)}</div>
-      <span class="doc-id">${esc(idLine)}</span>
+      <div class="doc-rows">
+        <div class="doc-row"><span class="k">شماره</span><span class="v">${esc(inv.id.toUpperCase())}</span></div>
+        <div class="doc-row"><span class="k">تاریخ</span><span class="v">${esc(formatJalaliDate(inv.createdAt))}</span></div>
+      </div>
     </div>
-  </header>
-  ${ornamentHtml()}`;
+  </header>`;
 }
 
-/** پانویس گواهی — شمسه کوچک و اطلاعات تماسی که در سیستم ثبت شده */
+/** پانویس — نام فروشگاه و راه‌های تماس */
 export function invoiceFooterHtml(inv: Invoice): string {
   const shopName = inv.shopName || "فروشگاه";
   const ways = [
@@ -541,45 +544,33 @@ export function invoiceFooterHtml(inv: Invoice): string {
     .filter(Boolean)
     .join("");
   return `<footer class="foot">
-    <span class="mark">${shamseSvg()} ${esc(shopName)}</span>
+    <span class="mark">${esc(shopName)}</span>
     ${ways ? `<span class="ways">${ways}</span>` : ""}
   </footer>`;
 }
 
 /**
- * جمع‌بندی سلطنتی — مبلغ قابل پرداخت درشت‌ترین عدد سند است.
- * همه‌ی اعداد از invoiceAmountLines می‌آیند؛ اینجا فقط چیده می‌شوند.
+ * جمع‌بندی: جدول مبالغ (جمع اقلام، تخفیف، مالیات، جمع کل در قاب پررنگ، پرداخت، چک،
+ * مانده) و مبلغ به حروف. همه‌ی اعداد از invoiceAmountLines؛ اینجا فقط چیده می‌شوند.
  */
 export function invoicePayCardHtml(inv: Invoice): string {
   const lines = invoiceAmountLines(inv);
-  const grandAt = lines.findIndex((l) => l.kind === "grand");
-  const grand = grandAt >= 0 ? lines[grandAt] : undefined;
-  const rest = lines.filter((l) => l.kind !== "grand");
-  const settled = !!grand && !lines.some((l) => l.kind === "due");
-  const words = grand ? amountToPersianWords(invoiceTotals(inv).total) : "";
+  const settled = lines.some((l) => l.kind === "grand") && !lines.some((l) => l.kind === "due");
+  const words = amountToPersianWords(invoiceTotals(inv).total);
   const row = (l: AmountLine) =>
-    `<div class="pay-row${l.kind === "due" ? " due" : ""}"><span class="k">${esc(l.label)}</span><span class="v">${esc(l.value)}</span></div>`;
+    l.kind === "grand"
+      ? `<div class="grand"><span class="grand-k">${esc(l.label)}</span><span class="grand-v">${esc(l.amount)}<span class="cur">${esc(l.currency)}</span></span></div>`
+      : `<div class="pay-row${l.kind === "due" ? " due" : ""}"><span class="k">${esc(l.label)}</span><span class="v">${esc(l.value)}</span></div>`;
   return `<section class="folio">
-    <div class="pay-list">${
-      rest.map(row).join("") ||
-      (grand
-        ? `<div class="pay-row"><span class="k">جمع اقلام</span><span class="v">${esc(grand.value)}</span></div>`
-        : "")
-    }</div>
-    ${settled ? `<div class="seal">تسویه<br/>شد</div>` : ""}
-    ${
-      grand
-        ? `<div class="grand">
-        <span class="grand-k">مبلغ قابل پرداخت</span>
-        <span class="grand-v">${esc(grand.amount)}<span class="cur">${esc(grand.currency)}</span></span>
-      </div>`
-        : ""
-    }
-    ${words ? `<div class="pay-words"><b>به حروف</b> — ${esc(words)} ${esc(currencyLabel())}</div>` : ""}
+    <div class="folio-side">
+      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)} ${esc(currencyLabel())}</div>` : ""}
+      ${settled ? `<div class="seal">تسویه شد</div>` : ""}
+    </div>
+    <div class="totals">${lines.map(row).join("")}</div>
   </section>`;
 }
 
-/** مشخصات فاکتور — یک ردیف ظریف، بدون کارت و بدون آیکون شلوغ */
+/** مشخصات فاکتور — نوار جدول‌مانند */
 function metaStripHtml(inv: Invoice): string {
   const t = invoiceTotals(inv);
   const cheques = invoiceCheques(inv);
@@ -588,11 +579,11 @@ function metaStripHtml(inv: Invoice): string {
     .filter((d): d is string => !!d)
     .sort()[0];
   const items: { k: string; v: string; tone?: string }[] = [
-    { k: "تاریخ", v: esc(formatJalaliDateTime(inv.createdAt)) },
+    { k: "تاریخ و ساعت", v: esc(formatJalaliDateTime(inv.createdAt)) },
   ];
   if (dueDate) items.push({ k: "سررسید چک", v: esc(formatChequeDue(dueDate)) });
-  if (inv.paymentMethod) items.push({ k: "نوع", v: esc(PAYMENT_LABEL[inv.paymentMethod]) });
-  items.push({ k: "اقلام", v: inv.items.length.toLocaleString("fa-IR") });
+  if (inv.paymentMethod) items.push({ k: "نوع پرداخت", v: esc(PAYMENT_LABEL[inv.paymentMethod]) });
+  items.push({ k: "تعداد اقلام", v: inv.items.length.toLocaleString("fa-IR") });
   items.push(
     t.remaining > 0
       ? { k: "وضعیت", v: "دارای مانده", tone: "due" }
@@ -606,7 +597,7 @@ function metaStripHtml(inv: Invoice): string {
     .join("")}</section>`;
 }
 
-function partyHtml(
+export function partyHtml(
   kicker: string,
   name: string,
   rows: [string, string | undefined][],
@@ -621,9 +612,11 @@ function partyHtml(
     .join("");
   return `<article class="party">
     <span class="party-k">${esc(kicker)}</span>
-    <div class="party-name">${esc(name && name.trim() ? name : "—")}</div>
-    ${body}
-    ${extra || ""}
+    <div class="party-body">
+      <div class="party-name">${esc(name && name.trim() ? name : "—")}</div>
+      ${body}
+      ${extra || ""}
+    </div>
   </article>`;
 }
 
@@ -639,8 +632,8 @@ export function buildDefaultInvoiceHTML(
   const shopName = inv.shopName || "فروشگاه";
   const docTitle = invoiceDocumentTitle(inv);
   const name = customerDisplayName(inv);
-  const payment = inv.paymentMethod ? PAYMENT_LABEL[inv.paymentMethod] : "";
   const cur = currencyLabel();
+  const hasUnit = inv.items.some((i) => itemUnitOf(i.unit) !== COUNT_UNIT);
 
   const rows = inv.items
     .map(
@@ -661,34 +654,25 @@ export function buildDefaultInvoiceHTML(
     .join("");
 
   const inner = `<div class="sheet"><div class="doc">
-  ${invoiceHeroHtml(inv, {
-    docTitle,
-    subtitle: inv.shopPhone || inv.shopAddress ? undefined : `${docTitle} کالا و خدمات`,
-  })}
+  ${invoiceHeroHtml(inv, { docTitle })}
   ${metaStripHtml(inv)}
   <div class="parties">
-    ${partyHtml("فروشنده", shopName, [
+    ${partyHtml("مشخصات فروشنده", shopName, [
       ["تلفن", inv.shopPhone],
       ["نشانی", inv.shopAddress],
     ])}
-    ${partyHtml(
-      "خریدار",
-      name,
-      [
-        ["تلفن", inv.customer?.phone],
-        ...(inv.customerFields ?? []).map((f): [string, string] => [f.label, f.value]),
-      ],
-      payment
-        ? `<div class="kv"><span class="lbl">پرداخت</span><span class="val">${esc(payment)}</span></div>`
-        : "",
-    )}
+    ${partyHtml("مشخصات خریدار", name, [
+      ["تلفن", inv.customer?.phone],
+      ...(inv.customerFields ?? []).map((f): [string, string] => [f.label, f.value]),
+    ])}
   </div>
   <div class="ledger">
   <table class="items">
+    <colgroup><col style="width:${compact ? 7 : 6}%"/><col/><col style="width:${hasUnit ? 15 : 11}%"/><col style="width:${compact ? 18 : 17}%"/><col style="width:${compact ? 19 : 18}%"/></colgroup>
     <thead><tr>
       <th>ردیف</th>
       <th class="t-name">شرح کالا / خدمات</th>
-      <th>تعداد</th>
+      <th>${hasUnit ? "مقدار" : "تعداد"}</th>
       <th>مبلغ واحد (${esc(cur)})</th>
       <th>مبلغ کل (${esc(cur)})</th>
     </tr></thead>
@@ -697,10 +681,10 @@ export function buildDefaultInvoiceHTML(
   </div>
   ${invoicePayCardHtml(inv)}
   <div class="closing">
-    ${inv.notes ? `<div class="note"><h3>توضیحات</h3><p>${esc(inv.notes)}</p></div>` : ""}
+    ${inv.notes ? `<div class="note"><h3>${invoiceIcon("note")}توضیحات</h3><p>${esc(inv.notes)}</p></div>` : ""}
     <div class="signs">
-      <div class="sign"><span class="ln"></span><span class="lbl">مهر و امضای فروشنده</span></div>
-      <div class="sign"><span class="ln"></span><span class="lbl">امضای خریدار</span></div>
+      <div class="sign"><span class="lbl">مهر و امضای فروشنده</span></div>
+      <div class="sign"><span class="lbl">امضای خریدار</span></div>
     </div>
   </div>
   ${invoiceFooterHtml(inv)}
@@ -717,80 +701,77 @@ export function buildDefaultInvoiceHTML(
   });
 }
 
-export function buildThermalInvoiceHTML(inv: Invoice): string {
-  const date = formatJalaliDateTime(inv.createdAt);
+/**
+ * فیش فروش برای چاپگر حرارتی — با تنظیمات کاربر (عرض کاغذ/ناحیه چاپ/قلم/بخش‌ها).
+ * همهٔ مبالغ از invoiceAmountLines می‌آیند؛ همان اعداد A4 و PDF.
+ */
+export function buildThermalInvoiceHTML(
+  inv: Invoice,
+  receipt: ReceiptSettings = normalizeReceiptSettings(settings.get().receipt),
+): string {
+  const s = receipt;
+  const sh = s.show;
   const customerName = customerDisplayName(inv);
   const shopName = inv.shopName || "فروشگاه";
   const fmt = formatAmount;
-  const rows = inv.items
-    .map(
-      (it) => `
-      <div class="row">
-        <div class="name">${esc(it.name)}${it.discountPercent ? ` <span style="font-weight:400;color:#333;">(٪${it.discountPercent.toLocaleString("fa-IR")} تخفیف)</span>` : ""}</div>
-        <div class="line"><span>${esc(qtyWithUnit(it))} × ${it.originalPrice ? `<s>${fmt(it.originalPrice)}</s> ` : ""}${fmt(it.price)}</span><span>${fmt(lineTotal(it))}</span></div>
-      </div>`,
+  const amountLines = invoiceAmountLines(inv);
+  const grand = amountLines.find((l) => l.kind === "grand");
+  const t = invoiceTotals(inv);
+  // شماره تلفن جدا (LTR) تا در متن راست‌به‌چپ وارونه نشود
+  const contact = [
+    inv.shopAddress ? esc(inv.shopAddress) : "",
+    inv.shopPhone ? `تلفن: <span class="ltr">${esc(inv.shopPhone)}</span>` : "",
+  ]
+    .filter(Boolean)
+    .join(" — ");
+  const meta = [
+    sh.invoiceId ? receiptParts.kv("شماره", inv.id.toUpperCase()) : "",
+    receiptParts.kv("تاریخ", formatJalaliDateTime(inv.createdAt)),
+    sh.customer && customerName ? receiptParts.kv("مشتری", customerName) : "",
+    sh.customer && inv.customer?.phone ? receiptParts.kv("تلفن", inv.customer.phone) : "",
+    ...(sh.customerFields
+      ? (inv.customerFields ?? []).map((f) => receiptParts.kv(f.label, f.value))
+      : []),
+    inv.paymentMethod ? receiptParts.kv("پرداخت", PAYMENT_LABEL[inv.paymentMethod]) : "",
+  ].join("");
+  const items = inv.items
+    .map((it) =>
+      receiptParts.item({
+        name: it.name,
+        tag:
+          sh.itemDiscount && it.discountPercent
+            ? `٪${formatNumber(it.discountPercent)} تخفیف`
+            : undefined,
+        qty: qtyWithUnit(it),
+        was: sh.itemDiscount && it.originalPrice ? fmt(it.originalPrice) : undefined,
+        unitPrice: fmt(it.price),
+        total: fmt(lineTotal(it)),
+      }),
     )
     .join("");
-  const amountLines = invoiceAmountLines(inv);
-  const grandAt = amountLines.findIndex((l) => l.kind === "grand");
-  const beforeGrand = amountLines.slice(0, Math.max(0, grandAt));
-  const grand = grandAt >= 0 ? amountLines[grandAt] : undefined;
-  const afterGrand = grandAt >= 0 ? amountLines.slice(grandAt + 1) : [];
-  const asLines = (list: AmountLine[]) =>
-    list
-      .map(
-        (l) => `<div class="line"><span>${esc(l.label)}</span><span>${esc(l.value)}</span></div>`,
-      )
-      .join("");
-  return `<!DOCTYPE html>
-<html lang="fa" dir="rtl"><head>
-<meta charset="utf-8"/>
-<title>فیش ${esc(inv.id.toUpperCase())}</title>
-<style>
-  @page { size: 80mm auto; margin: 0; }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;color:#000;direction:rtl;width:80mm;padding:8px 9px;font-size:13px;line-height:1.55}
-  .center{text-align:center}
-  .shop{font-weight:800;font-size:16px}
-  .muted{color:#333;font-size:11px}
-  .sep{border-top:1px dashed #000;margin:7px 0}
-  .sep-d{border-top:2px solid #000;margin:7px 0}
-  .meta{font-size:12px}
-  .meta div{display:flex;justify-content:space-between;gap:6px}
-  .row{padding:3px 0}
-  .name{font-weight:800}
-  .line{display:flex;justify-content:space-between;font-size:12px;color:#111}
-  .total{display:flex;justify-content:space-between;font-weight:800;font-size:14px;margin-top:4px}
-  .foot{font-size:11px;text-align:center;margin-top:8px}
-  .logo{display:block;margin:0 auto 5px;max-width:56mm;max-height:28mm;object-fit:contain}
-  @media print { body { width: 80mm; } }
-</style></head><body>
-${inv.shopLogoUrl ? `<img class="logo" src="${esc(inv.shopLogoUrl)}" alt="لوگو" />` : ""}
-<div class="center shop">${esc(shopName)}</div>
-<div class="center muted">${esc(invoiceDocumentTitle(inv))}</div>
-${
-  inv.shopAddress || inv.shopPhone
-    ? `<div class="center muted">${esc([inv.shopAddress, inv.shopPhone ? `تلفن: ${inv.shopPhone}` : ""].filter(Boolean).join(" — "))}</div>`
-    : ""
-}
-<div class="sep-d"></div>
-<div class="meta">
-  <div><span>شماره:</span><span>${esc(inv.id.toUpperCase())}</span></div>
-  <div><span>تاریخ:</span><span>${esc(date)}</span></div>
-  ${customerName ? `<div><span>مشتری:</span><span>${esc(customerName)}</span></div>` : ""}
-  ${inv.customer?.phone ? `<div><span>تلفن:</span><span>${esc(inv.customer.phone)}</span></div>` : ""}
-  ${(inv.customerFields ?? []).map((f) => `<div><span>${esc(f.label)}:</span><span>${esc(f.value)}</span></div>`).join("")}
-  ${inv.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[inv.paymentMethod]}</span></div>` : ""}
-</div>
-${inv.notes ? `<div class="sep"></div><div class="muted">توضیحات: ${esc(inv.notes)}</div>` : ""}
-<div class="sep"></div>
-${rows}
-<div class="sep-d"></div>
-${asLines(beforeGrand)}
-${grand ? `<div class="total"><span>${esc(grand.label)}</span><span>${esc(grand.value)}</span></div>` : ""}
-${asLines(afterGrand)}
-<div class="foot">با تشکر از خرید شما</div>
-</body></html>`;
+  const lines = amountLines
+    .map((l) =>
+      l.kind === "grand"
+        ? receiptParts.total(l.label, l.value)
+        : `<div class="kv${l.kind === "due" ? " due" : ""}"><span>${esc(l.label)}</span><span>${esc(l.value)}</span></div>`,
+    )
+    .join("");
+  const body = `
+  ${sh.logo && inv.shopLogoUrl ? `<img class="logo" src="${esc(inv.shopLogoUrl)}" alt=""/>` : ""}
+  <div class="c shop">${esc(shopName)}</div>
+  ${sh.shopContact && contact ? `<div class="c sub">${contact}</div>` : ""}
+  <div class="c"><span class="title">${esc(invoiceDocumentTitle(inv))}</span></div>
+  <hr class="b"/>
+  ${meta}
+  ${sh.notes && inv.notes ? `<hr/><div class="sub">توضیحات: ${esc(inv.notes)}</div>` : ""}
+  <hr/>
+  ${items || `<div class="c sub">قلمی ثبت نشده است</div>`}
+  <hr class="b"/>
+  ${lines}
+  ${sh.amountWords && grand ? `<div class="words">به حروف: ${esc(amountToPersianWords(t.total))} ${esc(currencyLabel())}</div>` : ""}
+  ${sh.thanks && s.footerText.trim() ? `<div class="foot">${esc(s.footerText.trim())}</div>` : ""}
+  <div class="cut">- - - - - - - -</div>`;
+  return receiptDocument({ title: `فیش ${inv.id.toUpperCase()}`, body, s });
 }
 
 export function buildShareText(inv: Invoice): string {

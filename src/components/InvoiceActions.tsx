@@ -190,7 +190,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
           type="button"
           onClick={handleThermalPrint}
           className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-          title="چاپ حرارتی ۸۰ میلی‌متر (فیش/رسید)"
+          title="چاپ فیش (چاپگر حرارتی)"
         >
           <Receipt className={iconSize} />
           {showLabels && <span>چاپ حرارتی</span>}

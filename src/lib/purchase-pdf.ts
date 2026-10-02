@@ -13,10 +13,10 @@ const MARGIN = 14 * SCALE;
 const FONT = "Vazirmatn, Tahoma, 'Segoe UI', sans-serif";
 
 const INK = "#111111";
-const MUTED = "#555555";
-const BORDER = "#bbbbbb";
+const MUTED = "#333333";
+const BORDER = "#555555";
 const HEAD_BG = "#f0f0f0";
-const ZEBRA_BG = "#fafafa";
+const ZEBRA_BG = "#ffffff";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -224,13 +224,13 @@ function drawTotal(ctx: Ctx, y: number, p: Purchase): number {
 
 function drawFooter(ctx: Ctx, y: number, p: Purchase) {
   const shopName = p.shopName || "فروشگاه";
-  ctx.strokeStyle = "#dddddd";
+  ctx.strokeStyle = "#777777";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(MARGIN, y + 4 * SCALE);
   ctx.lineTo(PAGE_W - MARGIN, y + 4 * SCALE);
   ctx.stroke();
-  ctx.fillStyle = "#888888";
+  ctx.fillStyle = "#333333";
   ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
   ctx.fillText(`فاکتور خرید — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);

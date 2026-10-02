@@ -17,6 +17,7 @@ import {
 } from "@/lib/print";
 import { buildInvoiceHTML, type InvoiceTemplate } from "@/lib/invoice-template";
 import { buildThermalInvoiceHTML, buildShareText } from "@/lib/invoice-document";
+import { normalizeReceiptSettings } from "@/lib/receipt";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 
 type Props = {
@@ -45,6 +46,16 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
   const printDoc = useMemo(
     () => buildInvoiceHTML(inv, fontSize, template, paper, "print"),
     [inv, fontSize, template, paper],
+  );
+  // پیش‌نمایش فیش: همان HTML که چاپ می‌شود، در عرض واقعی کاغذ
+  const [view, setView] = useState<"page" | "receipt">("page");
+  const receiptSettings = useMemo(
+    () => normalizeReceiptSettings(appSettings.receipt),
+    [appSettings.receipt],
+  );
+  const receiptHtml = useMemo(
+    () => (view === "receipt" ? buildThermalInvoiceHTML(inv, receiptSettings) : ""),
+    [view, inv, receiptSettings],
   );
 
   const printNow = async () => {
@@ -105,17 +116,31 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-[#e8dfd0] p-2 sm:p-4">
-          <iframe
-            title={title}
-            srcDoc={screenHtml}
-            className="mx-auto w-full rounded-xl border border-black/5 bg-transparent"
-            style={{
-              height: "min(72vh, 980px)",
-              zoom,
-              minHeight: 520,
-            }}
-          />
+        <div className="min-h-0 flex-1 overflow-auto bg-[#e9ebef] p-2 sm:p-4">
+          {view === "page" ? (
+            <iframe
+              title={title}
+              srcDoc={screenHtml}
+              className="mx-auto w-full rounded-xl border border-black/5 bg-transparent"
+              style={{
+                height: "min(72vh, 980px)",
+                zoom,
+                minHeight: 520,
+              }}
+            />
+          ) : (
+            <iframe
+              title={`${title} — فیش`}
+              srcDoc={receiptHtml}
+              className="mx-auto block bg-white shadow-md"
+              style={{
+                width: `${receiptSettings.paperMm}mm`,
+                height: "min(72vh, 980px)",
+                zoom: Math.max(zoom, 1.15),
+                minHeight: 520,
+              }}
+            />
+          )}
         </div>
 
         <div className="space-y-2 border-t border-border p-3">
@@ -125,9 +150,12 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setPaper(p.id)}
+                  onClick={() => {
+                    setPaper(p.id);
+                    setView("page");
+                  }}
                   className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
-                    paper === p.id
+                    view === "page" && paper === p.id
                       ? "bg-primary text-primary-foreground"
                       : "border border-border bg-background text-muted-foreground"
                   }`}
@@ -135,6 +163,17 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
                   {p.id}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setView("receipt")}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium ${
+                  view === "receipt"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground"
+                }`}
+              >
+                فیش {receiptSettings.paperMm.toLocaleString("fa-IR")}
+              </button>
             </div>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
               <button
@@ -180,7 +219,7 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
               className="flex items-center justify-center gap-2 rounded-xl border border-border py-3 text-sm font-semibold disabled:opacity-50"
             >
               <Receipt className="h-4 w-4" />
-              چاپ حرارتی
+              چاپ فیش
             </button>
           </div>
 

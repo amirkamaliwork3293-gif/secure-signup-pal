@@ -6,6 +6,7 @@
  * کسب‌وکارهایی که تولید ندارند این بخش را در تنظیمات خاموش نگه می‌دارند.
  */
 import type { InvoiceItem, Product } from "./store";
+import { convertQuantity } from "./units.ts";
 
 export type RecipeIngredient = {
   productId: string;
@@ -36,28 +37,23 @@ export type ProductionEvent = {
   note?: string;
 };
 
-/** خانواده‌ی تبدیل واحدهای رایج — واحدهای سفارشی بدون تبدیل، همان‌طور مصرف می‌شوند */
-const UNIT_BASE: Record<string, { family: string; factor: number }> = {
-  گرم: { family: "mass", factor: 1 },
-  کیلوگرم: { family: "mass", factor: 1000 },
-  میلی‌لیتر: { family: "volume", factor: 1 },
-  میلیلیتر: { family: "volume", factor: 1 },
-  لیتر: { family: "volume", factor: 1000 },
-};
+/**
+ * تبدیل واحد در ‎@/lib/units‎ متمرکز است (فروش، خرید، تولید همه از همان استفاده می‌کنند).
+ * واحدهای سفارشی بدون تبدیل، همان‌طور مصرف می‌شوند.
+ */
+export { convertQuantity } from "./units.ts";
 
-export function convertQuantity(
-  qty: number,
-  fromUnit: string | undefined,
-  toUnit: string | undefined,
+/**
+ * مقدار ردیف فاکتور به واحد موجودی کالا.
+ * ردیف‌های قدیمی که واحد ندارند یا واحدشان با کالا یکی است دقیقاً همان مقدار قبلی را می‌دهند.
+ */
+export function itemQtyInProductUnit(
+  item: { quantity: number; unit?: string },
+  product: Pick<Product, "unit"> | undefined,
 ): number {
-  if (!Number.isFinite(qty)) return 0;
-  const from = (fromUnit || "").trim();
-  const to = (toUnit || "").trim();
-  if (!from || !to || from === to) return qty;
-  const a = UNIT_BASE[from];
-  const b = UNIT_BASE[to];
-  if (a && b && a.family === b.family) return (qty * a.factor) / b.factor;
-  return qty;
+  const qty = Number(item.quantity) || 0;
+  if (!product) return qty;
+  return convertQuantity(qty, item.unit, product.unit);
 }
 
 export function productHasRecipe(p?: Product | null): boolean {
@@ -115,13 +111,15 @@ export function stockDeltasForSoldItems(
   };
   for (const it of items) {
     if (!it.productId) continue;
-    add(it.productId, it.quantity);
     const prod = byId.get(it.productId);
+    // مقدار فروش به واحد موجودی کالا (مثلاً ۵۰۰ گرم از کالای کیلوگرمی = ۰٫۵)
+    const qty = itemQtyInProductUnit(it, prod);
+    add(it.productId, qty);
     if (!prod?.recipe?.length) continue;
     const have = remainingFg.get(it.productId) || 0;
-    const fromStock = Math.min(have, it.quantity);
+    const fromStock = Math.min(have, qty);
     remainingFg.set(it.productId, have - fromStock);
-    const assembled = it.quantity - fromStock;
+    const assembled = qty - fromStock;
     if (assembled <= 0) continue;
     for (const u of expandRecipeForQty(prod, assembled, catalog)) {
       add(u.productId, u.quantity);
@@ -142,10 +140,11 @@ export function ingredientsUsedOnSale(
     if (!it.productId) continue;
     const prod = byId.get(it.productId);
     if (!prod?.recipe?.length) continue;
+    const qty = itemQtyInProductUnit(it, prod);
     const have = remainingFg.get(it.productId) || 0;
-    const fromStock = Math.min(have, it.quantity);
+    const fromStock = Math.min(have, qty);
     remainingFg.set(it.productId, have - fromStock);
-    const assembled = it.quantity - fromStock;
+    const assembled = qty - fromStock;
     if (assembled <= 0) continue;
     out.push({
       product: prod,

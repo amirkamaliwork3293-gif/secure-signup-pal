@@ -29,6 +29,14 @@ import {
   type ProductionEvent,
 } from "@/lib/production";
 import { dueAtReadyToNotify } from "@/lib/reminder-notifications";
+import {
+  applyStockDelta,
+  purchaseEditStockDeltas,
+  purchaseQtyInProductUnit,
+  purchaseUnitCostInProductUnit,
+} from "@/lib/stock-moves";
+import { roundQty } from "@/lib/units";
+import { coerceProductNumbers, type HealthFix } from "@/lib/data-health";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 import { isCapacitor } from "@/lib/isWebView";
 import {
@@ -272,7 +280,14 @@ export type PurchaseItem = {
   buyPrice: number;
   /** قیمت فروش پیشنهادی برای کالای جدید (اختیاری، فقط هنگام ساخت کالای جدید) */
   sellPrice?: number;
+  /**
+   * واحد مقدار و «قیمت خرید» همین ردیف. برای کالای موجود معمولاً همان واحد کالاست؛
+   * کالای کیلوگرمی را می‌توان گرمی هم خرید (unit = «گرم»). موجودی و قیمت خرید کالا
+   * هنگام ثبت به واحد خود کالا تبدیل می‌شوند (‎@/lib/stock-moves‎).
+   */
   unit?: string;
+  /** واحد خود کالا در لحظهٔ ثبت این ردیف (برای ردیف‌های قدیمی خالی است) */
+  productUnit?: string;
   category?: string;
 };
 
@@ -616,12 +631,7 @@ export type AppSettings = {
 
 /** مقدار سازگار با JSON — برای فیلدهای آزادِ ذخیره‌شده در ابر */
 export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 const DEFAULT_SETTINGS: AppSettings = {
   shopName: "فروشگاه من",
@@ -1915,6 +1925,24 @@ export const products = {
       list.map((p) => (p.id === updated.id ? updated : p)),
     );
   },
+  /**
+   * ذخیرهٔ فرم ویرایش محصول بدون بازنویسی تغییرات هم‌زمان.
+   * فرم ممکن است چند دقیقه باز بماند؛ در همین فاصله فروش/خرید/تولید (روی همین
+   * دستگاه یا دستگاه دیگر) موجودی یا قیمت خرید را عوض کرده باشد. قبلاً ذخیرهٔ فرم
+   * عدد کهنهٔ موجودی را برمی‌گرداند. حالا فقط فیلدهایی که کاربر در فرم واقعاً
+   * عوض کرده اعمال می‌شوند و بقیه از نسخهٔ فعلی حافظه می‌آیند (ادغام سه‌طرفه).
+   * اگر محصول در این فاصله حذف شده باشد، چیزی ذخیره نمی‌شود و false برمی‌گردد.
+   */
+  applyEdit: (edited: Product, original: Product): boolean => {
+    const list = read<Product[]>(PRODUCTS_KEY, []);
+    const current = list.find((p) => p.id === edited.id);
+    if (!current) return false;
+    const merged = mergeProductEdit(edited, original, current);
+    return write(
+      PRODUCTS_KEY,
+      list.map((p) => (p.id === edited.id ? merged : p)),
+    );
+  },
   decreaseStock: (productId: string, qty: number) => {
     const list = read<Product[]>(PRODUCTS_KEY, []);
     write(
@@ -1936,6 +1964,25 @@ export const products = {
   },
 };
 
+/**
+ * ادغام سه‌طرفهٔ فرم ویرایش محصول: فیلدی که در فرم عوض نشده (edited == original)
+ * از نسخهٔ فعلی (current) گرفته می‌شود تا تغییر هم‌زمان (مثلاً کم شدن موجودی با
+ * فروش) گم نشود. فیلدی که کاربر عوض کرده، مقدار فرم را می‌گیرد.
+ */
+export function mergeProductEdit(edited: Product, original: Product, current: Product): Product {
+  const out: Record<string, unknown> = { ...current };
+  const e = edited as unknown as Record<string, unknown>;
+  const o = original as unknown as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(e), ...Object.keys(o)])) {
+    if (key === "id" || key === "updatedAt") continue;
+    if (!catalogArraysDiffer(e[key], o[key])) continue; // کاربر دست نزده
+    if (e[key] === undefined) delete out[key];
+    else out[key] = e[key];
+  }
+  out.id = current.id;
+  return out as Product;
+}
+
 // ─── Categories ──────────────────────────────────────────────────────────────
 
 export const categories = {
@@ -1945,6 +1992,35 @@ export const categories = {
     return stored ?? DEFAULT_CATEGORIES;
   },
   save: (list: Category[]) => saveList(CATEGORIES_KEY, list),
+  /**
+   * تغییر نام دسته‌بندی. دستهٔ هر محصول با «نام» ذخیره می‌شود، پس محصولاتِ همان
+   * دسته هم به نام جدید منتقل می‌شوند؛ قبلاً با تغییر نام، محصولات نام قدیمی را
+   * نگه می‌داشتند و از فیلتر دسته بیرون می‌افتادند.
+   */
+  rename: (id: string, newName: string): boolean => {
+    const name = newName.trim();
+    const list = categories.getAll();
+    const target = list.find((c) => c.id === id);
+    if (!name || !target) return false;
+    const oldName = target.name;
+    if (
+      !write(
+        CATEGORIES_KEY,
+        list.map((c) => (c.id === id ? { ...c, name } : c)),
+      )
+    )
+      return false;
+    if (oldName !== name) {
+      const prods = read<Product[]>(PRODUCTS_KEY, []);
+      if (prods.some((p) => p.category === oldName)) {
+        write(
+          PRODUCTS_KEY,
+          prods.map((p) => (p.category === oldName ? { ...p, category: name } : p)),
+        );
+      }
+    }
+    return true;
+  },
   /** حذف صریح دسته‌بندی (دکمهٔ حذف کاربر) */
   remove: (id: string) =>
     write(
@@ -2022,7 +2098,7 @@ function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: Invoice
     if (!delta) return p;
     changed = true;
     // delta مثبت یعنی فروش بیشتر شده → از انبار کم می‌شود
-    return { ...p, stock: Math.max(0, (p.stock || 0) - delta) };
+    return { ...p, stock: applyStockDelta(p.stock, -delta) };
   });
   if (changed) products.save(next);
 }
@@ -2032,24 +2108,17 @@ function reconcileStockForInvoiceEdit(oldItems: InvoiceItem[], newItems: Invoice
  * چون هنگام ثبت اولیه، موجودی اضافه شده بود.
  */
 function reconcileStockForPurchaseEdit(oldItems: PurchaseItem[], newItems: PurchaseItem[]) {
-  const deltaByProduct = new Map<string, number>();
-  for (const it of oldItems) {
-    if (!it.productId) continue;
-    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) - it.quantity);
-  }
-  for (const it of newItems) {
-    if (!it.productId) continue;
-    deltaByProduct.set(it.productId, (deltaByProduct.get(it.productId) || 0) + it.quantity);
-  }
-  if (deltaByProduct.size === 0) return;
   const list = read<Product[]>(PRODUCTS_KEY, []);
+  // اختلاف به واحد خود کالا (خرید گرمی برای کالای کیلوگرمی درست تبدیل می‌شود)
+  const deltaByProduct = purchaseEditStockDeltas(oldItems, newItems, list);
+  if (deltaByProduct.size === 0) return;
   let changed = false;
   const next = list.map((p) => {
     if (!productTracksStock(p)) return p;
     const delta = deltaByProduct.get(p.id);
     if (!delta) return p;
     changed = true;
-    return { ...p, stock: Math.max(0, (p.stock || 0) + delta) };
+    return { ...p, stock: applyStockDelta(p.stock, delta) };
   });
   if (changed) products.save(next);
 }
@@ -2236,10 +2305,13 @@ export const purchases = {
       const idx = item.productId ? nextProducts.findIndex((pr) => pr.id === item.productId) : -1;
       if (idx >= 0) {
         const prev = nextProducts[idx];
+        // مقدار و قیمت به واحد خود کالا (مثلاً خرید ۵۰۰ گرم ← ۰٫۵ کیلوگرم موجودی)
+        const qty = purchaseQtyInProductUnit(item, prev);
+        const unitCost = purchaseUnitCostInProductUnit(item, prev);
         nextProducts[idx] = {
           ...prev,
-          stock: productTracksStock(prev) ? (prev.stock || 0) + item.quantity : prev.stock || 0,
-          buyPrice: item.buyPrice,
+          stock: productTracksStock(prev) ? applyStockDelta(prev.stock, qty) : prev.stock || 0,
+          buyPrice: unitCost,
         };
         resolvedItems.push({ ...item, productId: prev.id, name: prev.name });
       } else {
@@ -2252,7 +2324,7 @@ export const purchases = {
             item.sellPrice && item.sellPrice > 0 ? item.sellPrice : Math.round(item.buyPrice * 1.3),
           category,
           code: "",
-          stock: item.quantity,
+          stock: roundQty(Math.max(0, item.quantity)),
           buyPrice: item.buyPrice,
           unit: item.unit || COUNT_UNIT,
         };
@@ -2291,7 +2363,16 @@ export const purchases = {
       hist.map((p) => (p.id === updated.id ? saved : p)),
     );
   },
-  deleteFromHistory: (id: string) => {
+  /**
+   * حذف فاکتور خرید. پیش‌فرض (مثل قبل) موجودی انبار دست نمی‌خورد؛ با
+   * opts.unstock=true مقدار همین خرید از موجودی کالاها کم می‌شود
+   * (برای «فاکتور اشتباه ثبت شده بود»).
+   */
+  deleteFromHistory: (id: string, opts?: { unstock?: boolean }) => {
+    if (opts?.unstock) {
+      const target = read<Purchase[]>(PURCHASES_KEY, []).find((p) => p.id === id);
+      if (target) reconcileStockForPurchaseEdit(target.items, []);
+    }
     customers.clearPurchaseCredit(id);
     const hist = read<Purchase[]>(PURCHASES_KEY, []);
     write(
@@ -2827,10 +2908,10 @@ export const production = {
     if (ingredients.length === 0) return null;
     const next = catalog.map((p) => {
       if (!productTracksStock(p)) return p;
-      if (p.id === productId) return { ...p, stock: (p.stock || 0) + qty };
+      if (p.id === productId) return { ...p, stock: applyStockDelta(p.stock, qty) };
       const used = ingredients.find((u) => u.productId === p.id);
       if (!used) return p;
-      return { ...p, stock: Math.max(0, (p.stock || 0) - used.quantity) };
+      return { ...p, stock: applyStockDelta(p.stock, -used.quantity) };
     });
     products.save(next);
     const event: ProductionEvent = {
@@ -3068,6 +3149,163 @@ export const customers = {
       note: "فاکتور خرید نسیه",
     });
     return cust?.id ?? purchase.supplierCustomerId;
+  },
+};
+
+// ─── سلامت داده‌ها: اعمال اصلاح‌های تأییدشده توسط کاربر ────────────────────────
+
+/** نسخهٔ قبل و بعد یک ردیف — برای «بازگردانی» همان اصلاح در همین نشست */
+export type HealthUndoEntry =
+  | { field: "products" | "invoices" | "purchases"; id: string; before: unknown; after: unknown }
+  | { field: "categories"; id: string; addedName: string }
+  | { field: "units"; addedName: string };
+
+function sameIgnoringStamp(a: unknown, b: unknown): boolean {
+  const strip = (v: unknown) => {
+    if (!v || typeof v !== "object") return v;
+    const { updatedAt: _u, ...rest } = v as Record<string, unknown>;
+    return rest;
+  };
+  return !catalogArraysDiffer(strip(a), strip(b));
+}
+
+export const dataHealth = {
+  /** همهٔ دادهٔ لازم برای بررسی (فقط خواندن) */
+  snapshot: () => ({
+    products: read<Product[]>(PRODUCTS_KEY, []),
+    categories: categories.getAll(),
+    units: getUnitDefs(),
+    invoices: read<Invoice[]>(HISTORY_KEY, []),
+    purchases: read<Purchase[]>(PURCHASES_KEY, []),
+    customers: read<Customer[]>(CUSTOMERS_KEY, []),
+  }),
+
+  /**
+   * فقط اصلاح‌هایی که کاربر انتخاب کرده اعمال می‌شوند. هر اصلاح یک ردیف مشخص را
+   * عوض می‌کند (یا چیزی اضافه می‌کند) و نسخهٔ قبلی برای بازگردانی برمی‌گردد.
+   * اصلاحی که شرطش دیگر برقرار نیست (مثلاً ردیف حذف شده) نادیده گرفته می‌شود.
+   */
+  apply: (fixes: readonly HealthFix[]): { applied: number; undo: HealthUndoEntry[] } => {
+    if (!assertBusinessWriteAllowed()) return { applied: 0, undo: [] };
+    const undo: HealthUndoEntry[] = [];
+    let prods = read<Product[]>(PRODUCTS_KEY, []);
+    let invs = read<Invoice[]>(HISTORY_KEY, []);
+    let purs = read<Purchase[]>(PURCHASES_KEY, []);
+    let prodsChanged = false;
+    let invsChanged = false;
+    let pursChanged = false;
+    const custIds = new Set(read<Customer[]>(CUSTOMERS_KEY, []).map((c) => c.id));
+
+    for (const fix of fixes) {
+      if (fix.kind === "coerce-product-numbers") {
+        prods = prods.map((p) => {
+          if (p.id !== fix.productId) return p;
+          const after = coerceProductNumbers(p);
+          if (sameIgnoringStamp(after, p)) return p;
+          undo.push({ field: "products", id: p.id, before: p, after });
+          prodsChanged = true;
+          return after;
+        });
+      } else if (fix.kind === "add-category") {
+        const list = categories.getAll();
+        if (!list.some((c) => c.name === fix.name)) {
+          const id = cryptoId();
+          write(CATEGORIES_KEY, [...list, { id, name: fix.name }]);
+          undo.push({ field: "categories", id, addedName: fix.name });
+        }
+      } else if (fix.kind === "add-unit") {
+        if (!getUnitDefs().some((u) => u.name === fix.name)) {
+          addUnitDef({ name: fix.name, allowDecimal: true });
+          undo.push({ field: "units", addedName: fix.name });
+        }
+      } else if (fix.kind === "recalc-invoice-total") {
+        invs = invs.map((inv) => {
+          if (inv.id !== fix.invoiceId) return inv;
+          const after = { ...inv, total: invoiceTotals(inv).total };
+          if (after.total === inv.total) return inv;
+          undo.push({ field: "invoices", id: inv.id, before: inv, after });
+          invsChanged = true;
+          return after;
+        });
+      } else if (fix.kind === "recalc-purchase-total") {
+        purs = purs.map((pu) => {
+          if (pu.id !== fix.purchaseId) return pu;
+          const after = { ...pu, total: purchaseTotals(pu).total };
+          if (after.total === pu.total) return pu;
+          undo.push({ field: "purchases", id: pu.id, before: pu, after });
+          pursChanged = true;
+          return after;
+        });
+      } else if (fix.kind === "link-invoice-customer") {
+        if (!custIds.has(fix.customerId)) continue;
+        invs = invs.map((inv) => {
+          if (inv.id !== fix.invoiceId || inv.customer?.customerId) return inv;
+          // فقط شناسه اضافه می‌شود؛ نام و تلفن چاپ‌شده روی فاکتور دست نمی‌خورد
+          const after: Invoice = {
+            ...inv,
+            customer: { ...(inv.customer ?? {}), customerId: fix.customerId },
+          };
+          undo.push({ field: "invoices", id: inv.id, before: inv, after });
+          invsChanged = true;
+          return after;
+        });
+      } else if (fix.kind === "link-purchase-supplier") {
+        if (!custIds.has(fix.customerId)) continue;
+        purs = purs.map((pu) => {
+          if (pu.id !== fix.purchaseId || pu.supplierCustomerId) return pu;
+          const after: Purchase = { ...pu, supplierCustomerId: fix.customerId };
+          undo.push({ field: "purchases", id: pu.id, before: pu, after });
+          pursChanged = true;
+          return after;
+        });
+      }
+    }
+    if (prodsChanged) write(PRODUCTS_KEY, prods);
+    if (invsChanged) write(HISTORY_KEY, invs);
+    if (pursChanged) write(PURCHASES_KEY, purs);
+    return { applied: undo.length, undo };
+  },
+
+  /**
+   * بازگردانی اصلاح‌های همین نشست. ردیفی که بعد از اصلاح دوباره عوض شده
+   * (مثلاً فروش تازه یا ویرایش از دستگاه دیگر) دست نمی‌خورد تا آن تغییر گم نشود.
+   * خروجی: تعداد ردیف‌های برگشته و ردشده.
+   */
+  undo: (entries: readonly HealthUndoEntry[]): { restored: number; skipped: number } => {
+    if (!assertBusinessWriteAllowed()) return { restored: 0, skipped: entries.length };
+    let restored = 0;
+    let skipped = 0;
+    const keyOf = { products: PRODUCTS_KEY, invoices: HISTORY_KEY, purchases: PURCHASES_KEY };
+    for (const field of ["products", "invoices", "purchases"] as const) {
+      const mine = entries.filter(
+        (e): e is Extract<HealthUndoEntry, { before: unknown }> => e.field === field,
+      );
+      if (!mine.length) continue;
+      const list = read<{ id: string }[]>(keyOf[field], []);
+      let changed = false;
+      const next = list.map((row) => {
+        const e = mine.find((x) => x.id === row.id);
+        if (!e) return row;
+        if (!sameIgnoringStamp(row, e.after)) {
+          skipped++;
+          return row;
+        }
+        changed = true;
+        restored++;
+        return e.before as { id: string };
+      });
+      if (changed) write(keyOf[field], next);
+    }
+    for (const e of entries) {
+      if (e.field === "categories") {
+        categories.remove(e.id);
+        restored++;
+      } else if (e.field === "units") {
+        removeUnitDef(e.addedName);
+        restored++;
+      }
+    }
+    return { restored, skipped };
   },
 };
 

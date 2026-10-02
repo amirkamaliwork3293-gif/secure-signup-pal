@@ -210,11 +210,10 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
     setDateErr(null);
   };
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm("این فاکتور خرید از تاریخچه حذف شود؟ (تاثیری در موجودی فعلی انبار ندارد)")) {
-      purchases.deleteFromHistory(saved.id);
-    }
+    setConfirmDelete(true);
   };
 
   const updateItem = (idx: number, updated: PurchaseItem) => {
@@ -546,6 +545,53 @@ export function PurchaseCard({ p: initialP }: { p: Purchase }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* تایید حذف فاکتور خرید — با انتخاب کم شدن کالاها از انبار (مثل فاکتور فروش) */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setConfirmDelete(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xl"
+          >
+            <div className="text-sm font-bold">حذف فاکتور خرید</div>
+            <p className="text-xs leading-6 text-muted-foreground">
+              هنگام ثبت این فاکتور، کالاهایش به موجودی انبار اضافه شده بود. اگر فاکتور اشتباه ثبت
+              شده، همان مقدار را از انبار کم کنید؛ اگر کالا واقعاً رسیده و فقط سند را پاک می‌کنید،
+              موجودی را دست نزنید.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                purchases.deleteFromHistory(saved.id, { unstock: true });
+                setConfirmDelete(false);
+              }}
+              className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
+            >
+              حذف فاکتور + کم شدن کالاها از انبار
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                purchases.deleteFromHistory(saved.id);
+                setConfirmDelete(false);
+              }}
+              className="w-full rounded-xl border border-destructive/40 py-2.5 text-sm font-medium text-destructive"
+            >
+              فقط حذف فاکتور (بدون تغییر موجودی)
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              className="w-full rounded-xl border border-border py-2.5 text-sm"
+            >
+              انصراف
+            </button>
+          </div>
         </div>
       )}
     </li>

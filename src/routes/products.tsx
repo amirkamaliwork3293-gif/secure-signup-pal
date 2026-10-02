@@ -32,6 +32,8 @@ import {
   type UnitDef,
 } from "@/lib/store";
 import { generateUniqueCode } from "@/lib/barcode-code";
+import { convertProductUnit } from "@/lib/product-unit-change";
+import { unitsConvertible } from "@/lib/units";
 import { filterAndRankSearch } from "@/lib/search";
 import { isWebView } from "@/lib/isWebView";
 // مودال‌های سنگین فقط هنگام باز شدن بارگذاری می‌شوند (bwip-js/jsPDF/xlsx) تا
@@ -153,7 +155,23 @@ function ProductsPageInner() {
 
   const onEdit = (p: Product) => {
     if (!requireOnlineWrite()) return;
-    setList(list.map((x) => (x.id === p.id ? p : x)));
+    const original = editTarget && editTarget.id === p.id ? editTarget : p;
+    let edited = p;
+    // تغییر واحد بین کیلوگرم/گرم (یا لیتر/میلی‌لیتر): موجودی و قیمت‌ها فقط با تأیید کاربر
+    // تبدیل می‌شوند؛ شاید کاربر فقط برچسب اشتباه را درست می‌کند.
+    if (unitsConvertible(original.unit, p.unit)) {
+      const current = products.findById(p.id) ?? original;
+      const convert = confirm(
+        `واحد «${p.name}» از «${original.unit}» به «${p.unit}» تغییر کرد.\n\n` +
+          `آیا موجودی، قیمت‌ها و فرمول تولید هم به «${p.unit}» تبدیل شوند؟\n` +
+          `(مثلاً ۲ کیلوگرم ← ۲٬۰۰۰ گرم و قیمت هر کیلو ← قیمت هر گرم)\n\n` +
+          `«تأیید» = تبدیل شود · «انصراف» = اعداد همان‌طور بمانند و فقط واحد عوض شود`,
+      );
+      if (convert) edited = convertProductUnit(p, original, current);
+    }
+    if (!products.applyEdit(edited, original)) {
+      alert("این محصول در این فاصله (از دستگاه دیگر) حذف شده و ذخیره نشد.");
+    }
     setEditTarget(null);
   };
 
@@ -1341,7 +1359,16 @@ function CategoryManager({
   };
   const commitEdit = () => {
     if (!editName.trim() || !editId) return;
-    save(list.map((c) => (c.id === editId ? { ...c, name: editName.trim() } : c)));
+    const name = editName.trim();
+    if (list.some((c) => c.id !== editId && c.name === name)) {
+      alert("دسته‌ای با همین نام وجود دارد.");
+      return;
+    }
+    // محصولات همین دسته هم به نام جدید منتقل می‌شوند
+    categories.rename(editId, name);
+    const fresh = categories.getAll();
+    onChange(fresh);
+    setList(fresh);
     setEditId(null);
   };
 

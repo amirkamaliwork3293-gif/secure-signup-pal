@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
-import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX } from "lucide-react";
+import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX, Stethoscope } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState, formatJalaliDateTime } from "@/lib/store";
 import { useOnlineStatus } from "@/lib/online-status";
@@ -33,6 +33,7 @@ const nav = [
   { to: "/reports",   label: "گزارش",    icon: BarChart3, settingKey: null },
   { to: "/invoice-design", label: "طراح فاکتور", icon: LayoutTemplate, settingKey: null },
   { to: "/backup",    label: "پشتیبان‌گیری", icon: DatabaseBackup, settingKey: null },
+  { to: "/data-health", label: "سلامت داده‌ها", icon: Stethoscope, settingKey: null },
   { to: "/settings",  label: "تنظیمات",  icon: Settings, settingKey: null },
 ] as const;
 

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import {
-  products, invoice, formatToman, formatNumber, formatJalaliDate, productTracksStock, type Product,
+  products, invoice, formatToman, formatNumber, formatJalaliDate, productTracksStock, stockStatus, type Product,
 } from "@/lib/store";
 import { productStats, inventoryValue } from "@/lib/analytics";
 import { Boxes, AlertTriangle, CalendarClock, TrendingUp, Ban, Search } from "lucide-react";
@@ -58,7 +58,8 @@ function InventoryPageInner() {
   const statMap = useMemo(() => new Map(stats.map((s) => [s.productId, s])), [stats]);
 
   const low = useMemo(
-    () => stocked.filter((p) => p.stock <= (p.lowStockThreshold ?? 3)),
+    // همان قاعدهٔ صفحهٔ «محصولات» (stockStatus) تا دو صفحه یک عدد نشان بدهند
+    () => stocked.filter((p) => stockStatus(p) !== "ok"),
     [stocked],
   );
   const nearExpiry = useMemo(
@@ -105,7 +106,7 @@ function InventoryPageInner() {
         <Card label="ارزش خرید موجودی" value={formatToman(value.cost)} />
         <Card label="ارزش فروش موجودی" value={formatToman(value.sale)} tone="primary" />
         <Card label="سود بالقوه انبار" value={formatToman(value.potentialProfit)} tone="good" />
-        <Card label="مجموع موجودی" value={`${formatNumber(value.units)} واحد`} />
+        <Card label="مجموع موجودی" value={totalStockLabel(stocked, value.units)} />
       </div>
 
       <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
@@ -172,8 +173,7 @@ function InventoryPageInner() {
 }
 
 function Row({ p, sold, revenue, profit }: { p: Product; sold: number; revenue: number; profit: number | null }) {
-  const lowLimit = p.lowStockThreshold ?? 3;
-  const isLow = p.stock <= lowLimit;
+  const isLow = stockStatus(p) !== "ok";
   const expDays = p.expiryAt ? Math.ceil((p.expiryAt - Date.now()) / DAY) : null;
   const unit = p.unit || "عدد";
   return (
@@ -222,6 +222,13 @@ function Row({ p, sold, revenue, profit }: { p: Product; sold: number; revenue: 
       </div>
     </li>
   );
+}
+
+/** جمع موجودی فقط وقتی معنا دارد که همه یک واحد داشته باشند (کیلو + عدد جمع‌پذیر نیست) */
+function totalStockLabel(list: Product[], units: number): string {
+  const unitSet = new Set(list.map((p) => p.unit || "عدد"));
+  if (unitSet.size <= 1) return `${formatNumber(units)} ${[...unitSet][0] ?? "عدد"}`;
+  return `${formatNumber(list.length)} قلم کالا`;
 }
 
 function Card({ label, value, tone }: { label: string; value: string; tone?: "primary" | "good" }) {

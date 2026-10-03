@@ -243,6 +243,28 @@ for (let i = 0; i < 3; i++) {
 assert.equal(writes.length, before, `idle browsers uploaded ${writes.length - before} times`);
 console.log("✓ idle browsers do not re-upload");
 
+// ۴.۵) قلمی که از فاکتور باز (پیش‌نویس) حذف می‌شود روی هیچ مرورگری برنمی‌گردد
+const draftItem = (id) => ({ productId: id, name: id, price: 1000, quantity: 1 });
+await store(A, (s, a) => s.invoice.save({ ...s.invoice.getCurrent(), items: a }), [
+  draftItem("x"),
+  draftItem("y"),
+  draftItem("z"),
+]);
+await A.page.waitForTimeout(1500);
+await refresh(B);
+await store(A, (s) => {
+  const cur = s.invoice.getCurrent();
+  s.invoice.save({ ...cur, items: cur.items.filter((i) => i.productId !== "y") });
+});
+await A.page.waitForTimeout(1500);
+await refresh(B);
+await refresh(A);
+for (const d of [A, B]) {
+  const ids = await store(d, (s) => s.invoice.getCurrent().items.map((i) => i.productId));
+  assert.deepEqual(ids, ["x", "z"], `${d.name} draft items: ${ids}`);
+}
+console.log("✓ item removed from an open invoice stays removed on both browsers");
+
 // ۵) ثبت و بلافاصله زدن دکمهٔ «خروج»: ثبت آخر قبل از خروج به سرور می‌رسد
 let dialogs = 0;
 A.page.on("dialog", (d) => {

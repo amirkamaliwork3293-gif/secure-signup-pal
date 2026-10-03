@@ -35,6 +35,27 @@ export function pickRicherRow(a: unknown, b: unknown): unknown {
   return a;
 }
 
+function rowUpdatedAt(row: unknown): number {
+  if (!row || typeof row !== "object") return 0;
+  const n = Number((row as { updatedAt?: unknown }).updatedAt);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * فاکتور باز (پیش‌نویس) بین دو نسخه: آخرین ویرایش برنده است.
+ * قبلاً نسخهٔ «پر‌قلم‌تر» برنده می‌شد، پس قلمی که کاربر حذف کرده بود از
+ * دستگاه دیگر یا نسخهٔ ابری دوباره برمی‌گشت. فقط اگر هیچ‌کدام زمان ویرایش
+ * نداشته باشند (دادهٔ قدیمی) همان قاعدهٔ قبلی استفاده می‌شود.
+ */
+export function pickNewerOpenInvoice(local: unknown, cloud: unknown): unknown {
+  if (local == null) return cloud;
+  if (cloud == null) return local;
+  const lu = rowUpdatedAt(local);
+  const cu = rowUpdatedAt(cloud);
+  if (lu || cu) return cu > lu ? cloud : local;
+  return pickRicherRow(local, cloud);
+}
+
 export function historyIds(history: unknown): Set<string> {
   const ids = new Set<string>();
   if (!Array.isArray(history)) return ids;
@@ -116,7 +137,7 @@ export function mergeOpenInvoiceBoard(
     const id = rowId(row);
     if (!id || registeredIds.has(id)) continue;
     const prev = byId.get(id);
-    byId.set(id, prev ? pickRicherRow(row, prev) : row);
+    byId.set(id, prev ? pickNewerOpenInvoice(row, prev) : row);
   }
   const open = [...byId.values()];
   if (open.length === 0) return { open: [], activeId: "" };

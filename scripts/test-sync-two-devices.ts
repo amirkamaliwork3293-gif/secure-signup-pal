@@ -415,6 +415,52 @@ async function run(serverMode: "blind" | "trigger") {
     }
   });
 
+  // ۱۳) حذف قلم از فاکتور باز (پیش‌نویس) روی A با دستگاهِ کهنهٔ B برنمی‌گردد
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    const item = (id: string) => ({ productId: id, name: id, price: 1000, quantity: 1 });
+    await on(A, (s) =>
+      s.invoice.save({ ...s.invoice.getCurrent(), items: [item("x"), item("y"), item("z")] }),
+    );
+    await settle();
+    await refresh(B);
+    assert.equal(
+      (await on(B, (s) => s.invoice.getCurrent())).items.length,
+      3,
+      `${tag} 13: B draft`,
+    );
+    await on(A, (s) => {
+      const cur = s.invoice.getCurrent();
+      s.invoice.save({ ...cur, items: cur.items.filter((i) => i.productId !== "y") });
+    });
+    await settle();
+    await refresh(B);
+    await refresh(A);
+    for (const d of [A, B]) {
+      const ids = (await on(d, (s) => s.invoice.getCurrent())).items.map((i) => i.productId);
+      assert.deepEqual(ids, ["x", "z"], `${tag} 13: ${d.name} draft items came back: ${ids}`);
+    }
+  });
+
+  // ۱۴) حذف قلم از فاکتور باز وقتی دستگاه دیگری هم‌زمان چیزی ذخیره کرده (ادغام پس از تعارض)
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    const item = (id: string) => ({ productId: id, name: id, price: 1000, quantity: 1 });
+    await on(A, (s) =>
+      s.invoice.save({ ...s.invoice.getCurrent(), items: [item("x"), item("y")] }),
+    );
+    await settle();
+    await on(B, (s) => s.reminders.add({ title: "از B", dueAt: Date.now() + 86_400_000 }));
+    await settle();
+    await on(A, (s) => {
+      const cur = s.invoice.getCurrent();
+      s.invoice.save({ ...cur, items: cur.items.filter((i) => i.productId !== "y") });
+    });
+    await settle();
+    const ids = (await on(A, (s) => s.invoice.getCurrent())).items.map((i) => i.productId);
+    assert.deepEqual(ids, ["x"], `${tag} 14: deleted draft item came back after conflict: ${ids}`);
+  });
+
   if (!failures.length) console.log(`✓ ${tag} two-device sync scenarios passed`);
 }
 

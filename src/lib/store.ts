@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson, phonesLikelySame } from "@/lib/search";
-import { mergeOpenInvoiceBoard, historyIds, extractOpenInvoices } from "@/lib/store-merge";
+import {
+  mergeOpenInvoiceBoard,
+  historyIds,
+  extractOpenInvoices,
+  rowId as boardRowId,
+} from "@/lib/store-merge";
 import {
   catalogArraysDiffer,
   catalogHasVandalPrice,
@@ -253,6 +258,8 @@ export type Invoice = {
    * روی فاکتور ثبت‌شده در تاریخچه ذخیره نمی‌شود.
    */
   documentTitle?: string;
+  /** زمان آخرین ویرایش — برای اینکه در ادغام بین دستگاه‌ها آخرین ویرایش برنده شود */
+  updatedAt?: number;
 };
 
 /** عنوان نمایشی سند فاکتور (چاپ / پیش‌نمایش / PDF) */
@@ -779,6 +786,16 @@ function syncedNow(): number {
   return Date.now() + serverClockOffsetMs;
 }
 
+/**
+ * مهر زمان ویرایش تازه روی نسخهٔ قبلی همان ردیف: همیشه بعد از نسخهٔ قبلی.
+ * ویرایشی که روی نسخهٔ V انجام شده باید بر V برنده شود، حتی اگر ساعت این دستگاه
+ * (یا تصحیح ساعتش با سرور) عقب‌تر از زمانِ ثبت‌شده در V باشد.
+ */
+function editStamp(now: number, previous: unknown): number {
+  const prev = Number((previous as { updatedAt?: unknown } | null | undefined)?.updatedAt);
+  return Number.isFinite(prev) && prev >= now ? prev + 1 : now;
+}
+
 function noteServerClock(serverAt: string, sentStamp: string, sentAt: number, receivedAt: number) {
   // سرور مقدار ما را نگه داشته (تریگر نصب نیست) — اطلاعاتی دربارهٔ ساعتش نداریم.
   if (serverAt === sentStamp) return;
@@ -823,8 +840,42 @@ function stampChangedRows(key: string, value: unknown): unknown {
     delete b.updatedAt;
     // مقایسه بدون حساسیت به ترتیب کلیدها (ردیفی که از ابر آمده ترتیب jsonb دارد)
     if (!catalogArraysDiffer(a, b)) return old;
-    return { ...rec, updatedAt: now };
+    return { ...rec, updatedAt: editStamp(now, old) };
   });
+}
+
+/**
+ * فاکتورهای باز (پیش‌نویس): هر تبی که عوض شده updatedAt تازه می‌گیرد تا در ادغام
+ * با ابر یا دستگاه دیگر، آخرین ویرایش برنده شود (نه نسخهٔ پر‌قلم‌تر). بدون این،
+ * قلمی که کاربر از فاکتور حذف می‌کرد از نسخهٔ قدیمی‌تر دوباره برمی‌گشت.
+ */
+function stampOpenInvoices(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { open?: unknown }).open)) {
+    return value;
+  }
+  const prevById = new Map<string, unknown>();
+  for (const row of extractOpenInvoices(read<unknown>(INVOICE_KEY, null))) {
+    const id = boardRowId(row);
+    if (id) prevById.set(id, row);
+  }
+  const now = syncedNow();
+  let changed = false;
+  const open = (value as { open: unknown[] }).open.map((row) => {
+    if (!row || typeof row !== "object") return row;
+    const rec = row as Record<string, unknown>;
+    const old = prevById.get(boardRowId(rec)) as Record<string, unknown> | undefined;
+    if (old === rec) return rec;
+    if (old) {
+      const a = { ...rec };
+      const b = { ...old };
+      delete a.updatedAt;
+      delete b.updatedAt;
+      if (!catalogArraysDiffer(a, b)) return rec.updatedAt === old.updatedAt ? rec : old;
+    }
+    changed = true;
+    return { ...rec, updatedAt: editStamp(now, old) };
+  });
+  return changed ? { ...(value as object), open } : value;
 }
 
 function write<T>(key: string, value: T): boolean {
@@ -836,7 +887,9 @@ function write<T>(key: string, value: T): boolean {
     return false;
   }
   const field = CLOUD_FIELDS[key];
-  const stamped = stampChangedRows(key, value) as T;
+  const stamped = (
+    key === INVOICE_KEY ? stampOpenInvoices(value) : stampChangedRows(key, value)
+  ) as T;
   if (field) {
     const prev = read<unknown>(key, Array.isArray(value) ? [] : null);
     rememberRemovedIds(field, prev, stamped);

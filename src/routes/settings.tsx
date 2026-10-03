@@ -17,6 +17,7 @@ import {
 import { openExternal } from "@/lib/openExternal";
 import { OfflineWriteError, requireOnlineWrite } from "@/lib/online-status";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
+import { ReceiptSettingsCard } from "@/components/ReceiptSettingsCard";
 import {
   Settings,
   Save,
@@ -222,6 +223,9 @@ function SettingsPageInner() {
             خوانا است؛ فاکتورهای بلند در چاپ چند صفحه می‌شوند تا نوشته ریز نشود.
           </p>
         </div>
+
+        {/* چاپ فیش — عرض کاغذ، حاشیه، قلم، بخش‌ها و چاپ آزمایشی */}
+        <ReceiptSettingsCard />
 
         {/* طراح فاکتور */}
         <Link

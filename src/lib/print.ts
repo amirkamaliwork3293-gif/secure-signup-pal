@@ -14,6 +14,7 @@
  */
 
 import { isWebView } from "@/lib/isWebView";
+import { RECEIPT_MARK, withReceiptPageHeight } from "@/lib/receipt";
 
 type PrinterPlugin = {
   print?: (opts: { content: string; name?: string; orientation?: string }) => Promise<void>;
@@ -137,6 +138,10 @@ export async function printHtml(html: string, title = "چاپ"): Promise<boolean
   if (printInFlight) return true;
   printInFlight = true;
   try {
+    // فیش: ارتفاع واقعی صفحه از روی محتوا (کاغذ رول) — بدون این، چاپگر کاغذ A4 فرض
+    // می‌کرد و فیش کوچک/نصفه چاپ می‌شد. فونت هم داخل سند جاسازی می‌شود.
+    if (html.includes(RECEIPT_MARK)) html = await prepareReceiptHtml(html);
+    html = await inlinePrintFonts(html);
     const printer = nativePrinter();
     if (printer) {
       try {
@@ -159,7 +164,12 @@ export async function printHtml(html: string, title = "چاپ"): Promise<boolean
 }
 
 function inferIframeSize(html: string): { width: string; height: string } {
-  // فیش حرارتی ۸۰mm باید قبل از تطبیق اندازهٔ سفارشی لیبل بررسی شود
+  // فیش: عرض و ارتفاع دقیق صفحه (پس از prepareReceiptHtml) — قاب کوتاه‌تر از فیش
+  // در بعضی مرورگرها انتهای فیش را نمی‌انداخت
+  if (html.includes(RECEIPT_MARK)) {
+    const m = html.match(/@page\s*\{\s*size:\s*([\d.]+)mm\s+([\d.]+)mm/i);
+    if (m) return { width: `${m[1]}mm`, height: `${m[2]}mm` };
+  }
   if (/size:\s*80mm/i.test(html)) return { width: "80mm", height: "240mm" };
   const customMm = html.match(/@page\s*\{[^}]*size:\s*([\d.]+)mm\s+([\d.]+)mm/i);
   if (customMm) return { width: `${customMm[1]}mm`, height: `${customMm[2]}mm` };
@@ -201,22 +211,24 @@ function iframePrint(html: string, opts: { allowWindowFallback: boolean }): Prom
       const doPrint = () => {
         if (fired) return;
         fired = true;
-        // فونت از گوگل لود نمی‌شود؛ کمی صبر برای layout کافی است
-        setTimeout(() => {
-          try {
-            const win = iframe.contentWindow;
-            if (!win || typeof win.print !== "function") throw new Error("no print");
-            win.focus();
-            win.print();
-            cleanup();
-            resolve(true);
-          } catch (e) {
-            console.warn("[print] iframe print failed", e);
-            cleanup();
-            if (opts.allowWindowFallback) resolve(fallbackWindowPrint(html));
-            else resolve(false);
-          }
-        }, 220);
+        // صبر برای فونت وزیرمتن (همان فونت پیش‌نمایش) و layout — حداکثر ۲٫۵ ثانیه
+        void waitForFonts(iframe.contentDocument, 2500).then(() =>
+          setTimeout(() => {
+            try {
+              const win = iframe.contentWindow;
+              if (!win || typeof win.print !== "function") throw new Error("no print");
+              win.focus();
+              win.print();
+              cleanup();
+              resolve(true);
+            } catch (e) {
+              console.warn("[print] iframe print failed", e);
+              cleanup();
+              if (opts.allowWindowFallback) resolve(fallbackWindowPrint(html));
+              else resolve(false);
+            }
+          }, 220),
+        );
       };
 
       iframe.onload = doPrint;
@@ -372,3 +384,107 @@ export async function savePdf(
 /** پیام استاندارد وقتی ذخیره/چاپ در نسخه قدیمی اپ ممکن نیست */
 export const OLD_APP_MESSAGE =
   "این قابلیت در نسخه قدیمی اپلیکیشن در دسترس نیست — لطفاً نسخه جدید APK را از سایت دانلود و نصب کنید.";
+
+// ─── فیش: اندازه‌گیری ارتفاع و جاسازی فونت ───────────────────────────────────
+
+async function waitForFonts(doc: Document | null | undefined, timeoutMs: number): Promise<void> {
+  try {
+    const ready = (doc as Document & { fonts?: { ready?: Promise<unknown> } })?.fonts?.ready;
+    if (!ready) return;
+    await Promise.race([ready, new Promise((r) => setTimeout(r, timeoutMs))]);
+  } catch {
+    /* ignore */
+  }
+}
+
+const PX_TO_MM = 25.4 / 96;
+
+/**
+ * فیش را در یک قاب پنهان با عرض واقعی کاغذ می‌چیند، ارتفاع محتوا را اندازه می‌گیرد
+ * و ‎@page‎ را به «عرض × ارتفاع دقیق» تبدیل می‌کند (یک صفحهٔ بلند بدون برش).
+ * اگر اندازه‌گیری ممکن نبود، همان HTML (با ارتفاع پیش‌فرض) برمی‌گردد.
+ */
+export function prepareReceiptHtml(html: string): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") return resolve(html);
+    const paper = Number(html.match(/data-kamix-receipt="([\d.]+)"/)?.[1]) || 80;
+    let done = false;
+    const finish = (out: string) => {
+      if (done) return;
+      done = true;
+      try {
+        document.body.removeChild(frame);
+      } catch {
+        /* ignore */
+      }
+      resolve(out);
+    };
+    const frame = document.createElement("iframe");
+    frame.setAttribute("title", "receipt-measure");
+    Object.assign(frame.style, {
+      position: "fixed",
+      left: "-10000px",
+      top: "0",
+      width: `${paper}mm`,
+      height: "100px",
+      border: "0",
+      visibility: "hidden",
+    });
+    frame.onload = () => {
+      void waitForFonts(frame.contentDocument, 2500).then(() => {
+        try {
+          const doc = frame.contentDocument;
+          // ارتفاع واقعی محتوا (نه ارتفاع قاب): پایین‌ترین لبهٔ ظرف فیش
+          const box = doc?.querySelector(".r") ?? doc?.body;
+          const h = box ? Math.ceil(box.getBoundingClientRect().bottom) : 0;
+          if (!h) return finish(html);
+          finish(withReceiptPageHeight(html, Math.ceil(h * PX_TO_MM) + 2));
+        } catch {
+          finish(html);
+        }
+      });
+    };
+    document.body.appendChild(frame);
+    frame.srcdoc = html;
+    setTimeout(() => finish(html), 5000);
+  });
+}
+
+let fontDataCache: Record<string, string> | null = null;
+
+async function loadFontData(): Promise<Record<string, string> | null> {
+  if (fontDataCache) return fontDataCache;
+  if (typeof fetch === "undefined" || typeof window === "undefined") return null;
+  const files = ["Vazirmatn-Regular.woff2", "Vazirmatn-Bold.woff2", "Vazirmatn-Black.woff2"];
+  try {
+    const out: Record<string, string> = {};
+    for (const f of files) {
+      const res = await fetch(`/fonts/${f}`);
+      if (!res.ok) return null;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000) {
+        bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      }
+      out[f] = `data:font/woff2;base64,${btoa(bin)}`;
+    }
+    fontDataCache = out;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * آدرس فونت‌های وزیرمتن داخل سند با data: جایگزین می‌شود تا چاپ داخل اپ اندروید
+ * (پلاگین چاپ، بدون دسترسی به آدرس سایت) و چاپ آفلاین هم همان فونت پیش‌نمایش را داشته باشد.
+ */
+export async function inlinePrintFonts(html: string): Promise<string> {
+  if (!/fonts\/Vazirmatn-/.test(html)) return html;
+  const data = await loadFontData();
+  if (!data) return html;
+  return html.replace(
+    /url\("[^"]*\/fonts\/(Vazirmatn-(?:Regular|Bold|Black)\.woff2)"\)/g,
+    (m, file: string) => (data[file] ? `url("${data[file]}")` : m),
+  );
+}

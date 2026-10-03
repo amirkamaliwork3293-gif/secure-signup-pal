@@ -18,6 +18,7 @@ import {
 } from "@/lib/store";
 import {
   printHtml,
+  normalizePaperSize,
   OLD_APP_MESSAGE,
   isNativeApp,
   isAppShell,
@@ -26,139 +27,185 @@ import {
   downloadBlob,
 } from "@/lib/print";
 import { shareText } from "@/lib/openExternal";
-import { purchaseLineTotal } from "@/lib/invoice-math";
+import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
+import { purchaseCreditRemaining, settings } from "@/lib/store";
+import { formatQtyWithUnit } from "@/lib/qty-format";
+import {
+  normalizeReceiptSettings,
+  receiptDocument,
+  receiptParts,
+  type ReceiptSettings,
+} from "@/lib/receipt";
 import { escapeHtml as esc } from "@/lib/html-escape";
+import {
+  DEFAULT_INVOICE_ACCENT,
+  invoiceBaseFontSize,
+  invoiceHeroHtml,
+  partyHtml,
+  wrapInvoiceHtml,
+  type InvoiceHtmlMode,
+} from "@/lib/invoice-document";
+import { amountToPersianWords } from "@/lib/amount-words";
+import type { PaperSize } from "@/lib/print";
 
 // ─── HTML فاکتور خرید (A4) ──────────────────────────────────────────────────
 
-export function buildPurchaseHTML(p: Purchase, fontSize: number = 13): string {
-  const date = formatJalaliDateTime(p.createdAt);
-  const shopName = p.shopName || "فروشگاه";
-
+/**
+ * فاکتور خرید A4 — همان سیستم طراحی فاکتور فروش (سربرگ، کادر طرفین، جدول خط‌دار،
+ * کادر جمع) تا خرید و فروش یک‌شکل و هر دو روی چاپگر سیاه‌وسفید خوانا باشند.
+ */
+export function buildPurchaseHTML(
+  p: Purchase,
+  fontSize: number = 13,
+  paper: PaperSize = "A4",
+  mode: InvoiceHtmlMode = "print",
+): string {
+  const t = purchaseTotals(p);
+  const s = settings.get();
+  const shopName = p.shopName || s.shopName || "فروشگاه";
+  const cur = currencyLabel();
+  const fs = invoiceBaseFontSize(fontSize, mode);
+  const compact = paper === "A5" && mode === "print";
+  // سربرگ از همان تابع فاکتور فروش؛ تلفن/نشانی فروشگاه از تنظیمات فعلی
+  const head = invoiceHeroHtml(
+    {
+      id: p.id,
+      createdAt: p.createdAt,
+      items: [],
+      total: t.total,
+      shopName,
+      shopLogoUrl: p.shopLogoUrl,
+      shopPhone: s.storePhones?.[0],
+      shopAddress: s.storeAddress,
+    },
+    { docTitle: "فاکتور خرید" },
+  );
   const rows = p.items
     .map(
       (item, i) => `<tr>
-        <td>${(i + 1).toLocaleString("fa-IR")}</td>
-        <td>${esc(item.name)}</td>
-        <td>${item.quantity.toLocaleString("fa-IR")}${item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""}</td>
-        <td>${formatAmount(item.buyPrice)}</td>
-        <td>${formatAmount(purchaseLineTotal(item))}</td>
+        <td class="idx">${(i + 1).toLocaleString("fa-IR")}</td>
+        <td class="name">${esc(item.name)}</td>
+        <td class="qty">${esc(formatQtyWithUnit(item.quantity, item.unit))}</td>
+        <td class="price">${formatAmount(item.buyPrice)}</td>
+        <td class="sum">${formatAmount(purchaseLineTotal(item))}</td>
       </tr>`,
     )
     .join("");
-
-  return `<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>فاکتور خرید ${esc(p.id.toUpperCase())}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;font-size:${fontSize}px;color:#111;padding:24px 32px;direction:rtl}
-  .header{text-align:center;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
-  .header h1{font-size:${Math.round(fontSize * 1.54)}px;font-weight:700}
-  .header p{font-size:${Math.round(fontSize * 0.85)}px;color:#555;margin-top:4px}
-  .logo{display:block;margin:0 auto 8px;max-width:120px;max-height:120px;object-fit:contain}
-  .meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:16px;font-size:${Math.round(fontSize * 0.92)}px}
-  .meta span{color:#555}
-  table{width:100%;border-collapse:collapse;margin-bottom:16px}
-  th{background:#f0f0f0;font-weight:600;padding:7px 10px;border:1px solid #ccc;text-align:right;font-size:${Math.round(fontSize * 0.92)}px}
-  td{padding:6px 10px;border:1px solid #ccc;font-size:${Math.round(fontSize * 0.92)}px}
-  tr:nth-child(even) td{background:#fafafa}
-  .total-row td{font-weight:700;background:#f0f0f0!important}
-  .footer{text-align:center;font-size:${Math.round(fontSize * 0.85)}px;color:#888;margin-top:20px;border-top:1px solid #ddd;padding-top:10px}
-  @media print{body{padding:12px}}
-</style>
-</head>
-<body>
-<div class="header">
-  ${p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt="لوگو" />` : ""}
-  <h1>${esc(shopName)}</h1>
-  <p>سیستم حسابداری کمالی | فاکتور خرید</p>
-</div>
-<div class="meta">
-  <div><span>شماره: </span><strong>${esc(p.id.toUpperCase())}</strong></div>
-  <div><span>تاریخ: </span><strong>${esc(date)}</strong></div>
-  <div><span>تامین‌کننده: </span><strong>${esc(p.supplierName || "—")}</strong></div>
-  <div><span>تلفن: </span><strong>${esc(p.supplierPhone || "—")}</strong></div>
-  ${p.paymentMethod ? `<div><span>روش پرداخت: </span><strong>${PAYMENT_LABEL[p.paymentMethod]}</strong></div>` : ""}
-</div>
-${p.note ? `<div style="margin-bottom:16px;padding:8px 12px;border-radius:8px;background:#f7f7f7;border:1px solid #e2e2e2;font-size:${Math.round(fontSize * 0.9)}px;"><strong>یادداشت: </strong>${esc(p.note)}</div>` : ""}
-<table>
-  <thead><tr><th>#</th><th>نام کالا</th><th>تعداد</th><th>قیمت خرید</th><th>جمع</th></tr></thead>
-  <tbody>${rows}</tbody>
-  <tfoot>
-    <tr class="total-row">
-      <td colspan="4">جمع کل</td>
-      <td>${formatAmount(p.total)} ${currencyLabel()}</td>
-    </tr>
-    ${p.paidAmount != null ? `<tr><td colspan="4">پرداخت‌شده</td><td>${formatAmount(p.paidAmount)} ${currencyLabel()}</td></tr>` : ""}
-    ${p.paymentMethod === "credit" && p.paidAmount != null ? `<tr><td colspan="4">مانده بدهی به تامین‌کننده</td><td>${formatAmount(Math.max(0, p.total - (p.paidAmount || 0)))} ${currencyLabel()}</td></tr>` : ""}
-  </tfoot>
-</table>
-<div class="footer">فاکتور خرید — ${esc(shopName)}</div>
-</body>
-</html>`;
+  const row = (k: string, v: string, cls = "") =>
+    `<div class="pay-row${cls}"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+  const remaining = purchaseCreditRemaining(p);
+  const totals = [
+    t.discount > 0 ? row("جمع اقلام", `${formatAmount(t.subtotal)} ${cur}`) : "",
+    t.discount > 0
+      ? row(
+          `تخفیف${t.discountPercent ? ` (٪${t.discountPercent.toLocaleString("fa-IR")})` : ""}`,
+          `${formatAmount(t.discount)} ${cur}`,
+        )
+      : "",
+    `<div class="grand"><span class="grand-k">جمع کل</span><span class="grand-v">${formatAmount(t.total)}<span class="cur">${esc(cur)}</span></span></div>`,
+    p.paidAmount != null ? row("پرداخت‌شده", `${formatAmount(p.paidAmount)} ${cur}`) : "",
+    p.paymentMethod === "credit" && p.paidAmount != null
+      ? row("مانده بدهی به تامین‌کننده", `${formatAmount(remaining)} ${cur}`, " due")
+      : "",
+  ].join("");
+  const words = amountToPersianWords(t.total);
+  const inner = `<div class="sheet"><div class="doc">
+  ${head}
+  <section class="facts">
+    <div class="fact"><span class="k">تاریخ و ساعت</span><span class="v">${esc(formatJalaliDateTime(p.createdAt))}</span></div>
+    ${p.paymentMethod ? `<div class="fact"><span class="k">نوع پرداخت</span><span class="v">${esc(PAYMENT_LABEL[p.paymentMethod])}</span></div>` : ""}
+    <div class="fact"><span class="k">تعداد اقلام</span><span class="v">${p.items.length.toLocaleString("fa-IR")}</span></div>
+  </section>
+  <div class="parties">
+    ${partyHtml("مشخصات فروشنده (تامین‌کننده)", p.supplierName || "", [
+      ["تلفن", p.supplierPhone],
+      ...(p.supplierFields ?? []).map((f): [string, string] => [f.label, f.value]),
+    ])}
+    ${partyHtml("مشخصات خریدار", shopName, [
+      ["تلفن", s.storePhones?.[0]],
+      ["نشانی", s.storeAddress],
+    ])}
+  </div>
+  <div class="ledger">
+  <table class="items">
+    <colgroup><col style="width:6%"/><col/><col style="width:15%"/><col style="width:17%"/><col style="width:18%"/></colgroup>
+    <thead><tr><th>ردیف</th><th class="t-name">شرح کالا</th><th>مقدار</th><th>قیمت خرید واحد (${esc(cur)})</th><th>مبلغ کل (${esc(cur)})</th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="5">قلمی ثبت نشده است</td></tr>`}</tbody>
+  </table>
+  </div>
+  <section class="folio">
+    <div class="folio-side">
+      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)} ${esc(cur)}</div>` : ""}
+    </div>
+    <div class="totals">${totals}</div>
+  </section>
+  <div class="closing">
+    ${p.note ? `<div class="note"><h3>یادداشت</h3><p>${esc(p.note)}</p></div>` : ""}
+    <div class="signs">
+      <div class="sign"><span class="lbl">مهر و امضای فروشنده</span></div>
+      <div class="sign"><span class="lbl">امضای تحویل‌گیرنده</span></div>
+    </div>
+  </div>
+  <footer class="foot"><span class="mark">${esc(shopName)}</span><span>فاکتور خرید</span></footer>
+  </div></div>`;
+  return wrapInvoiceHtml({
+    title: `فاکتور خرید ${p.id.toUpperCase()}`,
+    inner,
+    paper,
+    mode,
+    fontSize: fs,
+    accent: DEFAULT_INVOICE_ACCENT,
+    compact,
+  });
 }
 
 // ─── HTML فیش حرارتی خرید ────────────────────────────────────────────────
 
-export function buildThermalPurchaseHTML(p: Purchase): string {
-  const date = formatJalaliDateTime(p.createdAt);
-  const shopName = p.shopName || "فروشگاه";
+export function buildThermalPurchaseHTML(
+  p: Purchase,
+  receipt: ReceiptSettings = normalizeReceiptSettings(settings.get().receipt),
+): string {
+  const t = purchaseTotals(p);
+  const sh = receipt.show;
   const fmt = formatAmount;
-  const rows = p.items
-    .map(
-      (it) => `
-      <div class="row">
-        <div class="name">${esc(it.name)}</div>
-        <div class="line"><span>${it.quantity.toLocaleString("fa-IR")} × ${fmt(it.buyPrice)}</span><span>${fmt(it.buyPrice * it.quantity)}</span></div>
-      </div>`,
+  const cur = currencyLabel();
+  const meta = [
+    sh.invoiceId ? receiptParts.kv("شماره", p.id.toUpperCase()) : "",
+    receiptParts.kv("تاریخ", formatJalaliDateTime(p.createdAt)),
+    p.supplierName ? receiptParts.kv("تامین‌کننده", p.supplierName) : "",
+    p.supplierPhone ? receiptParts.kv("تلفن", p.supplierPhone) : "",
+    ...(sh.customerFields
+      ? (p.supplierFields ?? []).map((f) => receiptParts.kv(f.label, f.value))
+      : []),
+    p.paymentMethod ? receiptParts.kv("پرداخت", PAYMENT_LABEL[p.paymentMethod]) : "",
+  ].join("");
+  const items = p.items
+    .map((it) =>
+      receiptParts.item({
+        name: it.name,
+        qty: formatQtyWithUnit(it.quantity, it.unit),
+        unitPrice: fmt(it.buyPrice),
+        total: fmt(purchaseLineTotal(it)),
+      }),
     )
     .join("");
-  return `<!DOCTYPE html>
-<html lang="fa" dir="rtl"><head>
-<meta charset="utf-8"/>
-<title>فاکتور خرید ${esc(p.id.toUpperCase())}</title>
-<style>
-  @page { size: 80mm auto; margin: 0; }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Vazirmatn,Tahoma,'Noto Naskh Arabic','Segoe UI',sans-serif;color:#000;direction:rtl;width:80mm;padding:6px 8px;font-size:12px;line-height:1.55}
-  .center{text-align:center}
-  .shop{font-weight:700;font-size:14px}
-  .muted{color:#444;font-size:10.5px}
-  .sep{border-top:1px dashed #000;margin:6px 0}
-  .meta{font-size:11px}
-  .meta div{display:flex;justify-content:space-between;gap:6px}
-  .row{padding:3px 0}
-  .name{font-weight:700}
-  .line{display:flex;justify-content:space-between;font-size:11px;color:#222}
-  .total{display:flex;justify-content:space-between;font-weight:700;font-size:13px;margin-top:4px}
-  .foot{font-size:10.5px;text-align:center;margin-top:6px}
-  .logo{display:block;margin:0 auto 4px;max-width:56mm;max-height:28mm;object-fit:contain}
-  @media print { body { width: 80mm; } }
-</style></head><body>
-${p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt="لوگو" />` : ""}
-<div class="center shop">${esc(shopName)}</div>
-<div class="center muted">فاکتور خرید</div>
-<div class="sep"></div>
-<div class="meta">
-  <div><span>شماره:</span><span>${esc(p.id.toUpperCase())}</span></div>
-  <div><span>تاریخ:</span><span>${esc(date)}</span></div>
-  ${p.supplierName ? `<div><span>تامین‌کننده:</span><span>${esc(p.supplierName)}</span></div>` : ""}
-  ${p.supplierPhone ? `<div><span>تلفن:</span><span>${esc(p.supplierPhone)}</span></div>` : ""}
-  ${p.paymentMethod ? `<div><span>پرداخت:</span><span>${PAYMENT_LABEL[p.paymentMethod]}</span></div>` : ""}
-</div>
-${p.note ? `<div class="sep"></div><div class="muted">یادداشت: ${esc(p.note)}</div>` : ""}
-<div class="sep"></div>
-${rows}
-<div class="sep"></div>
-<div class="total"><span>جمع کل</span><span>${fmt(p.total)} ${currencyLabel()}</span></div>
-${p.paidAmount != null ? `<div class="line"><span>پرداخت‌شده</span><span>${fmt(p.paidAmount)}</span></div>` : ""}
-${p.paymentMethod === "credit" && p.paidAmount != null ? `<div class="line"><span>مانده بدهی</span><span>${fmt(Math.max(0, p.total - (p.paidAmount || 0)))}</span></div>` : ""}
-<div class="foot">فاکتور خرید</div>
-</body></html>`;
+  const remaining = purchaseCreditRemaining(p);
+  const body = `
+  ${sh.logo && p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt=""/>` : ""}
+  <div class="c shop">${esc(p.shopName || "فروشگاه")}</div>
+  <div class="c"><span class="title">فاکتور خرید</span></div>
+  <hr class="b"/>
+  ${meta}
+  ${sh.notes && p.note ? `<hr/><div class="sub">یادداشت: ${esc(p.note)}</div>` : ""}
+  <hr/>
+  ${items || `<div class="c sub">قلمی ثبت نشده است</div>`}
+  <hr class="b"/>
+  ${t.discount > 0 ? receiptParts.kv("جمع اقلام", `${fmt(t.subtotal)} ${cur}`) + receiptParts.kv("تخفیف", `${fmt(t.discount)} ${cur}`) : ""}
+  ${receiptParts.total("جمع کل", `${fmt(t.total)} ${cur}`)}
+  ${p.paidAmount != null ? receiptParts.kv("پرداخت‌شده", `${fmt(p.paidAmount)} ${cur}`) : ""}
+  ${p.paymentMethod === "credit" && p.paidAmount != null ? receiptParts.kv("مانده بدهی", `${fmt(remaining)} ${cur}`) : ""}
+  <div class="cut">- - - - - - - -</div>`;
+  return receiptDocument({ title: `فاکتور خرید ${p.id.toUpperCase()}`, body, s: receipt });
 }
 
 // ─── متن اشتراک‌گذاری ────────────────────────────────────────────────────
@@ -173,10 +220,13 @@ function buildPurchaseShareText(p: Purchase): string {
     `─────────────────`,
     ...p.items.map(
       (item) =>
-        `• ${item.name}  ×${item.quantity}  =  ${formatAmount(purchaseLineTotal(item))} ${currencyLabel()}`,
+        `• ${item.name}  ×${formatQtyWithUnit(item.quantity, item.unit)}  =  ${formatAmount(purchaseLineTotal(item))} ${currencyLabel()}`,
     ),
     `─────────────────`,
-    `💰 جمع کل: ${formatAmount(p.total)} ${currencyLabel()}`,
+    purchaseTotals(p).discount > 0
+      ? `🏷️ تخفیف: ${formatAmount(purchaseTotals(p).discount)} ${currencyLabel()}`
+      : "",
+    `💰 جمع کل: ${formatAmount(purchaseTotals(p).total)} ${currencyLabel()}`,
   ].filter(Boolean);
   return lines.join("\n");
 }
@@ -195,7 +245,11 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
   const [sharingPdf, setSharingPdf] = useState(false);
 
   const handlePrint = async () => {
-    const html = buildPurchaseHTML(p, fontSize);
+    const html = buildPurchaseHTML(
+      p,
+      fontSize,
+      normalizePaperSize(settings.get().invoicePaperSize),
+    );
     const ok = await printHtml(html, `فاکتور خرید ${p.id.toUpperCase()}`);
     if (!ok) {
       alert(isAppShell() ? "چاپ سیستم در این نسخه اپ باز نشد." : OLD_APP_MESSAGE);
@@ -288,7 +342,7 @@ export function PurchaseActions({ p, size = "md", showLabels = false, fontSize =
         type="button"
         onClick={handleThermalPrint}
         className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""}`}
-        title="چاپ حرارتی ۸۰ میلی‌متر"
+        title="چاپ فیش (چاپگر حرارتی)"
       >
         <Receipt className={iconSize} />
         {showLabels && <span>چاپ حرارتی</span>}

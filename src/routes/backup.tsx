@@ -1,8 +1,15 @@
 import { AuthGuard } from "@/components/AuthGuard";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Layout } from "@/components/Layout";
 import { BackupSection } from "@/components/BackupDialog";
-import { DatabaseBackup, ShieldCheck, FileSpreadsheet, FileJson, FileText } from "lucide-react";
+import {
+  DatabaseBackup,
+  ShieldCheck,
+  FileSpreadsheet,
+  FileJson,
+  FileText,
+  Stethoscope,
+} from "lucide-react";
 
 export const Route = createFileRoute("/backup")({
   head: () => ({
@@ -67,6 +74,20 @@ function BackupPage() {
         </div>
 
         <BackupSection />
+
+        <Link
+          to="/data-health"
+          className="mt-4 flex items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm hover:bg-accent"
+        >
+          <Stethoscope className="h-5 w-5 shrink-0 text-primary" />
+          <span className="min-w-0">
+            <span className="block text-sm font-bold">سلامت داده‌ها</span>
+            <span className="mt-0.5 block text-[11px] leading-5 text-muted-foreground">
+              ناهماهنگی انبار، محصولات، فاکتورها و اتصال فاکتورها به مشتری را بررسی و آگاهانه اصلاح
+              کنید.
+            </span>
+          </span>
+        </Link>
       </Layout>
     </AuthGuard>
   );

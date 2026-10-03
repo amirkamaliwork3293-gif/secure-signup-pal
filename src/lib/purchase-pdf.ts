@@ -3,7 +3,8 @@
  */
 import { jsPDF } from "jspdf";
 import { formatNumber, formatAmount, currencyLabel, formatJalaliDate, PAYMENT_LABEL, type Purchase } from "@/lib/store";
-import { purchaseLineTotal } from "@/lib/invoice-math";
+import { purchaseLineTotal, purchaseTotals } from "@/lib/invoice-math";
+import { formatQtyWithUnit } from "@/lib/qty-format";
 
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
@@ -12,10 +13,10 @@ const MARGIN = 14 * SCALE;
 const FONT = "Vazirmatn, Tahoma, 'Segoe UI', sans-serif";
 
 const INK = "#111111";
-const MUTED = "#555555";
-const BORDER = "#bbbbbb";
+const MUTED = "#333333";
+const BORDER = "#555555";
 const HEAD_BG = "#f0f0f0";
-const ZEBRA_BG = "#fafafa";
+const ZEBRA_BG = "#ffffff";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -185,7 +186,7 @@ function drawRow(ctx: Ctx, y: number, i: number, item: Purchase["items"][number]
   ctx.textAlign = "center";
   ctx.fillText(formatNumber(i + 1), cols.idx.x - cols.idx.w / 2, cy);
   ctx.fillText(
-    formatNumber(item.quantity) + (item.unit && item.unit !== "عدد" ? ` ${item.unit}` : ""),
+    formatQtyWithUnit(item.quantity, item.unit),
     cols.qty.x - cols.qty.w / 2, cy,
   );
   ctx.fillText(formatAmount(item.buyPrice), cols.unitPrice.x - cols.unitPrice.w / 2, cy);
@@ -208,22 +209,28 @@ function drawTotal(ctx: Ctx, y: number, p: Purchase): number {
   ctx.fillStyle = INK;
   ctx.font = `700 ${3.8 * SCALE}px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText("جمع کل", PAGE_W - MARGIN - 2 * SCALE, cy);
+  // جمع از روی اقلام (همان purchaseTotals صفحه)؛ تخفیف کل اگر باشد کنار برچسب می‌آید
+  const t = purchaseTotals(p);
+  ctx.fillText(
+    t.discount > 0 ? `جمع کل (پس از ${formatAmount(t.discount)} تخفیف)` : "جمع کل",
+    PAGE_W - MARGIN - 2 * SCALE,
+    cy,
+  );
   ctx.textAlign = "center";
-  ctx.fillText(`${formatAmount(p.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
+  ctx.fillText(`${formatAmount(t.total)} ${currencyLabel()}`, cols.total.x - cols.total.w / 2, cy);
 
   return y + HEAD_H;
 }
 
 function drawFooter(ctx: Ctx, y: number, p: Purchase) {
   const shopName = p.shopName || "فروشگاه";
-  ctx.strokeStyle = "#dddddd";
+  ctx.strokeStyle = "#777777";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(MARGIN, y + 4 * SCALE);
   ctx.lineTo(PAGE_W - MARGIN, y + 4 * SCALE);
   ctx.stroke();
-  ctx.fillStyle = "#888888";
+  ctx.fillStyle = "#333333";
   ctx.font = `400 ${3.2 * SCALE}px ${FONT}`;
   ctx.textAlign = "center";
   ctx.fillText(`فاکتور خرید — ${shopName}`, PAGE_W / 2, y + 9 * SCALE);

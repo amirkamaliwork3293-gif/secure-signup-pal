@@ -16,6 +16,7 @@ import {
   type Invoice,
 } from "@/lib/store";
 import { invoiceTotals, lineTotal } from "@/lib/invoice-math";
+import { normalizeFieldLabel } from "@/lib/customer-fields";
 import { type PaperSize } from "@/lib/print";
 import { escapeHtml, safeCssColor } from "@/lib/html-escape";
 import {
@@ -48,7 +49,8 @@ export type TplFieldKey =
   | "shop.address"
   | "shop.phone"
   | "customer.name"
-  | "customer.phone";
+  | "customer.phone"
+  | "customer.fields";
 
 export type TplField = {
   id: string;
@@ -107,6 +109,7 @@ export const FIELD_CATALOG: { key: TplFieldKey; label: string; group: string }[]
   { key: "shop.phone", label: "تلفن فروشگاه", group: "فروشنده" },
   { key: "customer.name", label: "نام خریدار", group: "خریدار" },
   { key: "customer.phone", label: "تلفن خریدار", group: "خریدار" },
+  { key: "customer.fields", label: "اطلاعات تکمیلی خریدار (کد ملی، شرکت، …)", group: "خریدار" },
   { key: "invoice.id", label: "شماره فاکتور", group: "فاکتور" },
   { key: "invoice.date", label: "تاریخ", group: "فاکتور" },
   { key: "invoice.datetime", label: "تاریخ و ساعت", group: "فاکتور" },
@@ -300,8 +303,14 @@ export function resolveField(inv: Invoice, f: TplField): string {
   switch (f.key) {
     case "static":
       return f.value || "";
-    case "blank":
-      return "";
+    case "blank": {
+      // خانهٔ خالیِ هم‌عنوان با اطلاعات تکمیلی مشتری (مثلاً «کد ملی») از همان پر می‌شود
+      const k = normalizeFieldLabel(f.label);
+      const hit = k
+        ? inv.customerFields?.find((x) => normalizeFieldLabel(x.label) === k)
+        : undefined;
+      return hit?.value || "";
+    }
     case "invoice.id":
       return inv.id.toUpperCase();
     case "invoice.date":
@@ -330,6 +339,8 @@ export function resolveField(inv: Invoice, f: TplField): string {
       return c ? [c.firstName, c.lastName].filter(Boolean).join(" ") : "";
     case "customer.phone":
       return c?.phone || "";
+    case "customer.fields":
+      return (inv.customerFields ?? []).map((x) => `${x.label}: ${x.value}`).join("  ·  ");
     default:
       return "";
   }

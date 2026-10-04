@@ -3,13 +3,23 @@
  *
  * استراتژی: Network First, Cache Fallback
  *   ۱) همیشه اول شبکه (تا بعد از دیپلوی، نسخهٔ تازه دیده شود)
- *   ۲) فقط اگر شبکه واقعاً fail شود (نه کند، نه HTTP error) از کش
+ *   ۲) اگر شبکه واقعاً fail شود از کش
+ *   ۳) اگر سرور به‌جای برنامه خطای قطعی بدهد (5xx/402/429 — مثلاً Vercel
+ *      متوقف شده) فقط برای ناوبری سند و فایل‌های هش‌دار /assets/ از کش.
+ *      پاسخ serverFn و 404 مثل قبل دست‌نخورده برمی‌گردد.
+ *   ۴) اگر ناوبری سند NAV_TIMEOUT_MS طول بکشد (اتصال معلق) و پوستهٔ کش‌شده
+ *      باشد، همان نشان داده می‌شود؛ درخواست شبکه در پس‌زمینه ادامه می‌دهد
+ *      و کش را برای دفعهٔ بعد تازه می‌کند.
+ *   ۵) فایل‌های هش‌دار /assets/ اگر در کش باشند از کش (نام = محتوا؛
+ *      نسخهٔ کش‌شده دقیقاً همان فایل است). HTML همیشه Network First است.
+ *
+ * درخواست‌های داده به دامنهٔ دیگری می‌روند و این worker به آن‌ها دست نمی‌زند.
  *
  * ناوبری سند (باز شدن هر مسیر): هرگز به WebView «Webpage not available»
  * برنگردد — یا پوستهٔ کش‌شده یا HTML فارسی داخلی.
  *
  * این همان مشکلی را تکرار نمی‌کند که PWA قبلی را حذف کرد:
- *   - Cache First نیست
+ *   - برای HTML، Cache First نیست
  *   - روی سایت/مرورگر ثبت نمی‌شود (register فقط با isCapacitor)
  *   - کش نسخه‌دار است و با آپدیت SW کش قدیمی پاک می‌شود
  *   - خودِ اسکریپت SW با updateViaCache:'none' همیشه از شبکه چک می‌شود
@@ -18,6 +28,7 @@ const SHELL_CACHE_VERSION = "v1";
 const CACHE_NAME = "kamix-capacitor-shell-" + SHELL_CACHE_VERSION;
 const HEALTH_PARAM = "kamix-health";
 const SHELL_PATH = "/__kamix_app_shell__";
+const NAV_TIMEOUT_MS = 8000;
 
 const NAV_FALLBACK_HTML = `<!doctype html>
 <html lang="fa" dir="rtl">
@@ -175,14 +186,68 @@ function navigationFallbackResponse() {
   });
 }
 
-async function networkFirst(request, url) {
+/** پاسخ HTTP هست ولی سرور در دسترس نیست (توقف/سقف مصرف/خطای سرور). */
+function isServerOutage(response) {
+  if (!response) return false;
+  const status = response.status;
+  return status === 402 || status === 429 || status >= 500;
+}
+
+/** نام فایل هش‌دار است؛ نسخهٔ کش‌شده دقیقاً همان محتواست. */
+function isHashedAsset(url) {
+  return url.pathname.startsWith("/assets/");
+}
+
+const SLOW = Symbol("slow");
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(() => resolve(SLOW), ms));
+}
+
+async function fetchAndRemember(request, isNavigate) {
+  const fresh = await fetch(isNavigate ? new Request(request, { cache: "reload" }) : request);
+  if (fresh && fresh.ok) {
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, fresh.clone()).catch(() => {});
+    if (isNavigate) rememberShell(cache, fresh.clone()).catch(() => {});
+  }
+  return fresh;
+}
+
+async function networkFirst(request, url, keepAlive) {
   const isNavigate = isNavigationRequest(request);
-  try {
-    const fresh = await fetch(isNavigate ? new Request(request, { cache: "reload" }) : request);
-    if (fresh && fresh.ok) {
+  const hashed = isHashedAsset(url);
+  if (hashed) {
+    try {
       const cache = await caches.open(CACHE_NAME);
-      cache.put(request, fresh.clone()).catch(() => {});
-      if (isNavigate) rememberShell(cache, fresh.clone()).catch(() => {});
+      const hit = await cache.match(request, { ignoreSearch: true });
+      if (hit) return hit;
+    } catch {
+      /* کش در دسترس نیست — از شبکه */
+    }
+  }
+  try {
+    const network = fetchAndRemember(request, isNavigate);
+    let fresh;
+    if (isNavigate) {
+      const early = await Promise.race([network, delay(NAV_TIMEOUT_MS)]);
+      if (early === SLOW) {
+        const cached = await matchFromCache(request, url, true);
+        if (cached) {
+          // شبکه در پس‌زمینه ادامه می‌دهد تا کش برای دفعهٔ بعد تازه شود
+          keepAlive(network.catch(() => {}));
+          return cached;
+        }
+        fresh = await network;
+      } else {
+        fresh = early;
+      }
+    } else {
+      fresh = await network;
+    }
+    if (fresh && !fresh.ok && isServerOutage(fresh) && (isNavigate || hashed)) {
+      const cached = await matchFromCache(request, url, isNavigate);
+      if (cached) return cached;
     }
     return fresh;
   } catch {
@@ -202,5 +267,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (!shouldHandle(request, url)) return;
-  event.respondWith(networkFirst(request, url));
+  event.respondWith(
+    networkFirst(request, url, (promise) => {
+      try {
+        event.waitUntil(promise);
+      } catch {
+        /* noop */
+      }
+    }),
+  );
 });

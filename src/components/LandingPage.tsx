@@ -1,886 +1,609 @@
 /**
- * KAMIX landing page — shown only to web visitors who are not signed in
- * (AuthGuard decides; inside the Android app it is hidden by `html[data-app]`).
- *
- * Story: clear promise → who it is for → the three signature features with
- * self-playing demos → paper vs. KAMIX → everything else → data safety →
- * how to start → pricing → FAQ → closing CTA.
- *
- * Performance: the page stylesheet is loaded only when this component renders
- * (React-hoisted <link>); the animated demos are a lazy chunk mounted when the
- * visitor scrolls near them. CTA destinations are unchanged: /register,
- * /login, plan cards → /register.
+ * صفحه‌ی معرفی KAMIX — فقط برای بازدیدکنندگان وب (نه داخل اپلیکیشن).
+ * هویت بصری: پیشخوان مغازهٔ ایرانی (دفتر خط‌دار، فاکتور کاغذی، مهر ثبت)
+ * با رنگ primary موجود. عنصر امضادار: دموی زنده‌نمای «فاکتور با صدا».
  */
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  BarChart3,
-  Check,
-  ChevronDown,
-  Cloud,
-  Coffee,
-  Download,
-  Factory,
-  Fingerprint,
-  Gem,
-  GraduationCap,
-  HardDriveDownload,
-  Headphones,
-  Instagram,
-  Mail,
-  MessageCircle,
-  Mic,
-  Package,
-  Phone,
-  Receipt,
-  RefreshCw,
-  ScanLine,
-  Send,
-  ShieldCheck,
-  Shirt,
-  ShoppingBasket,
-  Smartphone,
-  Sparkles,
-  Store,
-  Users,
-  X,
-  type LucideIcon,
-} from "lucide-react";
 import { getPublicSettings } from "@/lib/auth.functions";
-import { DEFAULT_PLANS, effectivePrice, type PlansConfig } from "@/lib/plans";
+import { DEFAULT_PLANS, effectivePrice, isDiscountActive, type PlansConfig, type PlanConfig } from "@/lib/plans";
+import { PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
+import { formatToman } from "@/lib/store";
 import {
   DEFAULT_LANDING,
   loadLandingContent,
   videoEmbedUrl,
   type LandingContent,
 } from "@/lib/landing";
-import { APK_DOWNLOAD_URL } from "@/components/ApkDownloadButton";
-import { StoriesBar } from "@/components/StoriesBar";
-import { LANDING_TRUST } from "@/components/landing/config";
-import { LANDING_FAQ } from "@/components/landing/faq";
-import { HeroVisual } from "@/components/landing/HeroVisual";
-import { Mascot } from "@/components/landing/Mascot";
-import { PlanCard } from "@/components/landing/Pricing";
-import { PAID_PLANS, PLAN_PERKS, pickRecommendedPlan } from "@/components/landing/pricing-utils";
-import { KamixMark } from "@/components/landing/KamixMark";
 import {
-  faNum,
-  prefersReducedMotion,
-  scrollToId,
-  useCountUp,
-  useInView,
-  useRevealOnScroll,
-} from "@/components/landing/hooks";
-import landingCssUrl from "@/components/landing/landing.css?url";
+  Receipt,
+  ScanLine,
+  ArrowLeft,
+  ShieldCheck,
+  Smartphone,
+  BarChart3,
+  Users,
+  Package,
+  CheckCircle2,
+  Check,
+  Phone,
+  Instagram,
+  Send,
+  MessageCircle,
+  Mail,
+  Mic,
+  type LucideIcon,
+} from "lucide-react";
+import { LiveFeatureShowcase } from "@/components/LiveFeatureShowcase";
+import { StoriesBar } from "@/components/StoriesBar";
 
-const VoiceDemo = lazy(() =>
-  import("@/components/landing/demos").then((m) => ({ default: m.VoiceDemo })),
-);
-const ScanDemo = lazy(() =>
-  import("@/components/landing/demos").then((m) => ({ default: m.ScanDemo })),
-);
-const AssistantDemo = lazy(() =>
-  import("@/components/landing/demos").then((m) => ({ default: m.AssistantDemo })),
-);
+const FEATURE_ICONS = [Receipt, ScanLine, Package, BarChart3, Users, ShieldCheck];
+const PAID_PLANS: SubscriptionPlan[] = ["1month", "3month", "6month", "12month"];
 
-const DEMOS = { voice: VoiceDemo, scan: ScanDemo, assistant: AssistantDemo } as const;
-type DemoKind = keyof typeof DEMOS;
+const INVOICE_DEMO = [
+  { spoken: "۲ عدد پیراهن ۲۵۰ هزار تومان", name: "پیراهن مردانه", qty: "۲", amount: 250_000 },
+  { spoken: "یک شلوار جین ۴۲۰ هزار", name: "شلوار جین", qty: "۱", amount: 420_000 },
+  { spoken: "۳ تا جوراب ۶۰ هزار", name: "جوراب نخی", qty: "۳", amount: 60_000 },
+] as const;
 
-const NAV = [
-  { id: "voice", label: "امکانات ویژه" },
-  { id: "features", label: "همه امکانات" },
-  { id: "pricing", label: "قیمت‌ها" },
-  { id: "faq", label: "سؤالات" },
-];
+const BARCODE_BARS = [10, 22, 14, 26, 12, 24, 18, 11, 26, 15, 22, 10, 25, 13, 20, 26, 12, 18, 24, 11, 22, 16, 26, 10, 20, 14, 24, 12, 18, 26, 11, 22];
 
-const BUSINESSES: Array<{ icon: LucideIcon; label: string }> = [
-  { icon: ShoppingBasket, label: "سوپرمارکت" },
-  { icon: Shirt, label: "پوشاک" },
-  { icon: Smartphone, label: "موبایل‌فروشی" },
-  { icon: Coffee, label: "کافه و رستوران" },
-  { icon: Gem, label: "طلا و جواهر" },
-  { icon: GraduationCap, label: "آموزشگاه" },
-  { icon: Factory, label: "کارگاه تولیدی" },
-  { icon: Store, label: "هر فروشگاهی" },
-];
-
-const FEATURES: Array<{ icon: LucideIcon; title: string; body: string }> = [
-  {
-    icon: Receipt,
-    title: "فاکتور فروش و خرید",
-    body: "با تخفیف، چک و چاپ رسید. PDF فاکتور را برای مشتری بفرست.",
-  },
-  {
-    icon: Package,
-    title: "انبار و موجودی",
-    body: "با هر فروش و خرید خودش به‌روز می‌شود و کمبودها را نشانت می‌دهد.",
-  },
-  {
-    icon: Users,
-    title: "مشتریان و بدهکاران",
-    body: "مانده‌ی هر مشتری، و یادآوری سررسید بدهی‌ها و چک‌ها.",
-  },
-  {
-    icon: BarChart3,
-    title: "گزارش سود و فروش",
-    body: "سود و فروش روزانه، هفتگی و ماهانه، با تاریخ شمسی.",
-  },
-  {
-    icon: HardDriveDownload,
-    title: "خروجی و پشتیبان",
-    body: "هر وقت خواستی خروجی اکسل، PDF یا فایل پشتیبان کامل بگیر.",
-  },
-  {
-    icon: Store,
-    title: "ویترین آنلاین",
-    body: "صفحه‌ی معرفی فروشگاه و منوی دیجیتال با QR کد اختصاصی.",
-  },
-];
-
-const EXTRAS = [
-  "نرخ لحظه‌ای طلا و سکه",
-  "هنرجو و شهریه",
-  "تولید و فرمول",
-  "برنامه‌ی هفته و یادآوری",
-  "هزینه‌ها",
-  "جستجوی سریع",
-  "ورود کالا از اکسل",
-  "تغییر گروهی قیمت",
-];
-
-const BEFORE = [
-  "فاکتور را با دست می‌نویسی",
-  "آخر شب با ماشین‌حساب جمع می‌زنی",
-  "بدهی‌ها لابه‌لای دفتر گم می‌شوند",
-  "اگر دفتر گم شود، همه‌چیز رفته",
-];
-
-const AFTER = [
-  "فاکتور با چند لمس، یا فقط با صدا",
-  "سود و فروش هر لحظه جلوی چشمت",
-  "مانده‌ی هر مشتری، با یادآوری",
-  "اطلاعات روی حساب ابری‌ات می‌ماند",
-];
-
-const SECURITY: Array<{ icon: LucideIcon; title: string; body: string }> = [
-  {
-    icon: Cloud,
-    title: "نسخه‌ی ابری از حسابت",
-    body: "گوشی خراب یا گم شد؟ روی گوشی جدید وارد شو؛ همه‌چیز سر جایش است.",
-  },
-  {
-    icon: RefreshCw,
-    title: "همگام روی چند دستگاه",
-    body: "ثبت‌های دستگاه‌های مختلف با هم ادغام می‌شوند و چیزی پاک نمی‌شود.",
-  },
-  {
-    icon: Fingerprint,
-    title: "فقط مال خودت",
-    body: "دسترسی به اطلاعات هر حساب فقط برای صاحب همان حساب است.",
-  },
-  {
-    icon: HardDriveDownload,
-    title: "پشتیبان در دست خودت",
-    body: "هر زمان خروجی کامل بگیر و هر جا خواستی نگه دار.",
-  },
-];
-
-const STEPS: Array<{ title: string; body: string }> = [
-  { title: "ثبت‌نام کن", body: "نام کاربری، رمز و پلن دلخواهت را انتخاب کن." },
-  { title: "پرداخت کن", body: "کارت‌به‌کارت واریز کن و عکس رسید را بفرست." },
-  { title: "وارد شو", body: "بعد از تأیید پرداخت، با همان نام کاربری وارد می‌شوی." },
-  { title: "اولین فاکتور", body: "محصولاتت را اضافه کن و اولین فاکتور را بگو!" },
-];
-
-function supportLinks(c: LandingContent["contact"]) {
-  const out: Array<{ href: string; label: string; icon: LucideIcon; ltr?: boolean }> = [];
-  if (c.phone) {
-    out.push({
-      href: `tel:${c.phone.replace(/\s+/g, "")}`,
-      label: c.phone,
-      icon: Phone,
-      ltr: true,
-    });
-  }
-  if (c.whatsapp) {
-    out.push({
-      href: `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`,
-      label: "واتساپ",
-      icon: MessageCircle,
-    });
-  }
-  if (c.telegram) {
-    out.push({
-      href: c.telegram.startsWith("http")
-        ? c.telegram
-        : `https://t.me/${c.telegram.replace(/^@/, "")}`,
-      label: "تلگرام",
-      icon: Send,
-    });
-  }
-  if (c.instagram) {
-    out.push({
-      href: c.instagram.startsWith("http")
-        ? c.instagram
-        : `https://instagram.com/${c.instagram.replace(/^@/, "")}`,
-      label: "اینستاگرام",
-      icon: Instagram,
-    });
-  }
-  if (c.email) out.push({ href: `mailto:${c.email}`, label: c.email, icon: Mail, ltr: true });
-  return out;
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return "";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d} روز و ${h} ساعت`;
+  if (h > 0) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")} دقیقه`;
 }
 
-const FAQ_LD = JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: LANDING_FAQ.map((f) => ({
-    "@type": "Question",
-    name: f.q,
-    acceptedAnswer: { "@type": "Answer", text: f.a },
-  })),
-});
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
-const APP_LD = JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "KAMIX (کامیکس)",
-  applicationCategory: "BusinessApplication",
-  operatingSystem: "Android, Web",
-  inLanguage: "fa",
-  url: "https://kamixapp.ir/",
-  description:
-    "حسابداری فروشگاهی فارسی روی گوشی: فاکتور، انبار، مشتریان و گزارش سود؛ با ثبت فاکتور با صدا، اسکن بارکد با دوربین و دستیار هوشمند.",
-});
+function LandingDivider() {
+  return (
+    <div className="lp-divider" role="separator" aria-hidden="true">
+      <span className="lp-divider-line" />
+      <span className="lp-divider-mark">
+        <Receipt />
+      </span>
+      <span className="lp-divider-line" />
+    </div>
+  );
+}
+
+function KamixMark() {
+  const uid = `kx${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  return (
+    <svg viewBox="0 0 48 48" className="lp-head-mark" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${uid}-bg`} x1="10" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#9ec4ff" />
+          <stop offset="38%" stopColor="#4f8cff" />
+          <stop offset="72%" stopColor="#5a5bff" />
+          <stop offset="100%" stopColor="#7a4dff" />
+        </linearGradient>
+        <radialGradient id={`${uid}-shine`} cx="0.28" cy="0.2" r="0.78">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+          <stop offset="55%" stopColor="#ffffff" stopOpacity="0.08" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`${uid}-fold`} x1="30" y1="5" x2="41" y2="17" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#dbe7ff" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#31407a" stopOpacity="0.55" />
+        </linearGradient>
+        <mask id={`${uid}-cut`}>
+          <rect width="48" height="48" fill="black" />
+          <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill="white" />
+          <circle cx="8.5" cy="17.4" r="3.55" fill="black" />
+          <circle cx="8.5" cy="30.6" r="3.55" fill="black" />
+        </mask>
+      </defs>
+      <g mask={`url(#${uid}-cut)`}>
+        <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill={`url(#${uid}-bg)`} />
+        <rect x="8.5" y="5.5" width="32" height="37" rx="11.5" fill={`url(#${uid}-shine)`} />
+        <rect
+          x="10"
+          y="7"
+          width="29"
+          height="34"
+          rx="10"
+          fill="none"
+          stroke="#ffffff"
+          strokeOpacity="0.22"
+          strokeWidth="0.85"
+        />
+        <path
+          d="M19.1 14.1h3.7v6.35L31.15 14.1h4.35L25.2 23.05 35.85 33.7h-4.55L22.8 25.05v8.65h-3.7Z"
+          fill="#1a2744"
+          opacity="0.22"
+          transform="translate(0 0.65)"
+        />
+        <path
+          d="M19.1 14.1h3.7v6.35L31.15 14.1h4.35L25.2 23.05 35.85 33.7h-4.55L22.8 25.05v8.65h-3.7Z"
+          fill="#ffffff"
+        />
+        <g fill="#ffffff" fillOpacity="0.38">
+          <circle cx="12.45" cy="21.4" r="0.58" />
+          <circle cx="12.45" cy="24" r="0.58" />
+          <circle cx="12.45" cy="26.6" r="0.58" />
+        </g>
+        <path d="M32.6 5.5H40.5V13.6Z" fill={`url(#${uid}-fold)`} />
+        <path d="M32.6 5.5L40.5 13.6" stroke="#ffffff" strokeOpacity="0.4" strokeWidth="0.7" />
+      </g>
+    </svg>
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function useLandingReveal(dep: unknown) {
+  useEffect(() => {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(".landing-page .lp-reveal"));
+    if (nodes.length === 0) return;
+    if (prefersReducedMotion()) {
+      nodes.forEach((n) => n.classList.add("is-in"));
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            e.target.classList.add("is-in");
+            io.unobserve(e.target);
+          }
+        }
+      },
+      { threshold: 0.12, rootMargin: "0px 0px -36px 0px" },
+    );
+    nodes.forEach((n) => {
+      if (!n.classList.contains("is-in")) io.observe(n);
+    });
+    return () => io.disconnect();
+  }, [dep]);
+}
 
 export function LandingPage() {
-  const rootRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState<LandingContent>(DEFAULT_LANDING);
   const [plansCfg, setPlansCfg] = useState<PlansConfig>(DEFAULT_PLANS);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(Date.now());
   const [scrolled, setScrolled] = useState(false);
-  const [pastHero, setPastHero] = useState(false);
 
   useEffect(() => {
     let alive = true;
     loadLandingContent().then((c) => {
       if (alive) setContent(c);
     });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
     getPublicSettings()
       .then((data) => {
         if (alive) setPlansCfg(data.plans);
       })
       .catch(() => {
-        /* default plans stay visible */
+        /* پلن‌های پیش‌فرض نمایش داده می‌شوند */
       });
-    const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => {
       alive = false;
-      clearInterval(t);
     };
   }, []);
 
   useEffect(() => {
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const y = window.scrollY;
-        setScrolled(y > 8);
-        setPastHero(y > window.innerHeight * 0.9);
-      });
-    };
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 10);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const videos = content.media.filter((m) => m.type === "video");
-  useRevealOnScroll(rootRef, `${videos.length}:${content.stories.length}`);
+  useLandingReveal(`${content.features.length}:${videos.length}:${content.stories.length}`);
 
-  const socials = supportLinks(content.contact || {});
-  const supportHref = content.contact?.phone
-    ? `tel:${content.contact.phone.replace(/\s+/g, "")}`
-    : content.contact?.whatsapp
-      ? `https://wa.me/${content.contact.whatsapp.replace(/[^\d]/g, "")}`
+  const c = content.contact || {};
+  const socials: Array<{ href: string; label: string; icon: LucideIcon }> = [];
+  if (c.phone) socials.push({ href: `tel:${c.phone.replace(/\s+/g, "")}`, label: c.phone, icon: Phone });
+  if (c.whatsapp)
+    socials.push({
+      href: `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`,
+      label: "WhatsApp",
+      icon: MessageCircle,
+    });
+  if (c.telegram)
+    socials.push({
+      href: c.telegram.startsWith("http")
+        ? c.telegram
+        : `https://t.me/${c.telegram.replace(/^@/, "")}`,
+      label: "Telegram",
+      icon: Send,
+    });
+  if (c.instagram)
+    socials.push({
+      href: c.instagram.startsWith("http")
+        ? c.instagram
+        : `https://instagram.com/${c.instagram.replace(/^@/, "")}`,
+      label: "Instagram",
+      icon: Instagram,
+    });
+  if (c.email) socials.push({ href: `mailto:${c.email}`, label: c.email, icon: Mail });
+
+  const hasVideos = videos.length > 0;
+  const visiblePaidPlans = PAID_PLANS.filter((p) => plansCfg[p]?.enabled);
+  const hasPricing = visiblePaidPlans.length > 0;
+  const recommendedPlan: SubscriptionPlan | null =
+    visiblePaidPlans.length === 0
+      ? null
+      : visiblePaidPlans.reduce((best, p) => {
+          const bd = isDiscountActive(plansCfg[best], now) ? plansCfg[best].discount_percent : 0;
+          const pd = isDiscountActive(plansCfg[p], now) ? plansCfg[p].discount_percent : 0;
+          return pd > bd ? p : best;
+        }, visiblePaidPlans.includes("3month") ? "3month" : visiblePaidPlans[0]);
+
+  const quickLinks = [
+    hasPricing && { id: "pricing", label: "قیمت‌ها" },
+    hasVideos && { id: "videos", label: "ویدیوها" },
+    { id: "why-kamix", label: "امکانات" },
+    { id: "live-showcase", label: "نمایش زنده" },
+    socials.length > 0 && { id: "contact", label: "تماس" },
+  ].filter(Boolean) as { id: string; label: string }[];
+
+  const supportHref = c.phone
+    ? `tel:${c.phone.replace(/\s+/g, "")}`
+    : c.whatsapp
+      ? `https://wa.me/${c.whatsapp.replace(/[^\d]/g, "")}`
       : null;
 
-  const visiblePlans = PAID_PLANS.filter((p) => plansCfg[p]?.enabled);
-  const recommended = pickRecommendedPlan(visiblePlans, plansCfg, now);
-  const monthlyBase = visiblePlans.includes("1month") ? effectivePrice(plansCfg["1month"], now) : 0;
-  const customFeatures =
-    JSON.stringify(content.features) !== JSON.stringify(DEFAULT_LANDING.features)
-      ? content.features
-      : [];
-  const { activeBusinesses, testimonials, guarantee, supportHours } = LANDING_TRUST;
-
-  const go = (id: string) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    scrollToId(id);
-  };
-
   return (
-    <div ref={rootRef} dir="rtl" id="top" className="landing-page kx">
-      <link rel="stylesheet" href={landingCssUrl} precedence="default" />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: APP_LD }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: FAQ_LD }} />
-
-      <a href="#main" className="kx-skip" onClick={go("main")}>
-        رفتن به محتوای اصلی
-      </a>
-
-      {/* ── Header: calm and minimal — brand, a few links, login ─────── */}
-      <header className={`kx-header ${scrolled ? "is-scrolled" : ""}`}>
-        <div className="kx-wrap kx-header-in">
+    <div dir="rtl" id="top" className="landing-page min-h-screen bg-background text-foreground">
+      <header className={`lp-head pt-safe ${scrolled ? "is-scrolled" : ""}`}>
+        <div className="lp-head-inner">
           <a
             href="#top"
-            className="kx-brand"
-            aria-label={`${content.brand_name} — بازگشت به بالای صفحه`}
+            className="lp-head-brand"
+            aria-label={`${content.brand_name}، بازگشت به بالای صفحه`}
             onClick={(e) => {
               e.preventDefault();
               window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
             }}
           >
-            <KamixMark className="kx-brand-mark" />
-            <span className="kx-brand-name">{content.brand_name}</span>
+            <span className="lp-head-mark-wrap" aria-hidden="true">
+              <KamixMark />
+            </span>
+            <span className="lp-head-name">
+              <strong>{content.brand_name}</strong>
+              <small>حسابداری مغازه، از روی گوشی</small>
+            </span>
           </a>
 
-          <nav className="kx-nav" aria-label="بخش‌های صفحه">
-            {NAV.map((n) => (
-              <a key={n.id} href={`#${n.id}`} onClick={go(n.id)}>
-                {n.label}
-              </a>
-            ))}
-          </nav>
+          {quickLinks.length > 0 && (
+            <nav className="lp-head-nav" aria-label="بخش‌های صفحه">
+              {quickLinks.map((l) => (
+                <a
+                  key={l.id}
+                  href={`#${l.id}`}
+                  className="lp-head-link"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    scrollToSection(l.id);
+                  }}
+                >
+                  {l.label}
+                </a>
+              ))}
+            </nav>
+          )}
 
-          <div className="kx-header-actions">
-            <Link to="/login" preload={false} className="kx-btn kx-btn--soft kx-btn--sm">
+          <div className="lp-head-actions">
+            <p className="lp-head-hint">کمتر از ۲ دقیقه تا فاکتور اول</p>
+            <Link to="/login" preload={false} className="lp-head-login">
               ورود
             </Link>
-            <Link
-              to="/register"
-              preload={false}
-              className="kx-btn kx-btn--primary kx-btn--sm kx-only-desktop"
-            >
-              ثبت‌نام
+            <Link to="/register" preload={false} className="lp-head-cta lp-btn lp-btn-primary whitespace-nowrap">
+              <span className="hidden sm:inline">همین الان شروع کن</span>
+              <span className="sm:hidden">شروع کن</span>
+              <ArrowLeft className="h-4 w-4" />
             </Link>
           </div>
         </div>
+
+        {quickLinks.length > 0 && (
+          <nav className="lp-head-mobile" aria-label="میانبر بخش‌ها">
+            {quickLinks.map((l) => (
+              <a
+                key={l.id}
+                href={`#${l.id}`}
+                className="lp-head-chip"
+                onClick={(e) => {
+                  e.preventDefault();
+                  scrollToSection(l.id);
+                }}
+              >
+                {l.label}
+              </a>
+            ))}
+          </nav>
+        )}
       </header>
 
-      <main id="main">
-        {/* ── Hero ─────────────────────────────────────────────────────── */}
-        <section className="kx-hero" aria-labelledby="kx-hero-title">
-          <div className="kx-hero-bg" aria-hidden="true" />
-          <div className="kx-wrap kx-hero-in">
-            <div className="kx-hero-copy">
-              {activeBusinesses > 0 && (
-                <p className="kx-trust-pill kx-enter" style={{ animationDelay: "0.05s" }}>
-                  <span className="kx-trust-avatars" aria-hidden="true">
-                    <i />
-                    <i />
-                    <i />
+      <div className="overflow-x-clip">
+        {/* Hero — copy + live voice-invoice */}
+        <section className="lp-hero relative">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary/25 to-transparent" />
+          <div className="relative mx-auto max-w-6xl px-4 pb-12 pt-8 sm:pb-16 sm:pt-12">
+            <div className="lp-hero-grid">
+              <div className="lp-hero-titles">
+                <p className="lp-enter lp-enter-1 mb-3 inline-flex items-center gap-2 text-[13px] font-bold text-primary">
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-primary/10">
+                    <Mic className="h-3.5 w-3.5" />
                   </span>
-                  بیش از <b>{faNum(activeBusinesses)}</b> کسب‌وکار با KAMIX کار می‌کنند
+                  فاکتور را بگو — نه بنویس
                 </p>
-              )}
-              <h1
-                id="kx-hero-title"
-                className="kx-hero-title kx-enter"
-                style={{ animationDelay: "0.12s" }}
-              >
-                حسابداری مغازه،
-                <br />
-                <span className="kx-scribble">ساده</span> مثل پیام دادن
-              </h1>
-              <p className="kx-hero-lead kx-enter" style={{ animationDelay: "0.2s" }}>
-                فاکتور صادر کن، موجودی انبار را ببین و بدهی مشتری‌ها را پیگیری کن؛ همه از روی گوشی.
-                حتی می‌توانی فاکتور را <b>با صدا</b> ثبت کنی یا بارکد را <b>با دوربین گوشی</b>{" "}
-                بخوانی.
-              </p>
-              <div className="kx-hero-ctas kx-enter" style={{ animationDelay: "0.28s" }}>
-                <Link to="/register" preload={false} className="kx-btn kx-btn--primary kx-btn--lg">
-                  ثبت‌نام و شروع کار
-                  <ArrowLeft />
-                </Link>
-                <a
-                  href="#voice"
-                  className="kx-btn kx-btn--ghost kx-btn--lg kx-hide-xs"
-                  onClick={go("voice")}
-                >
-                  ببین چطور کار می‌کند
-                </a>
+                <h1 className="lp-enter lp-enter-2 lp-hero-title max-w-xl text-[1.7rem] font-extrabold leading-[1.35] sm:text-4xl lg:text-[2.65rem] lg:leading-[1.28]">
+                  <span className="lp-hero-title-line">راحتی کسب‌وکار</span>
+                  <span className="lp-hero-title-brand">با کامیکس</span>
+                </h1>
+                <p className="lp-enter lp-enter-2 mt-2 text-sm font-bold kamali-brand">{content.headline}</p>
               </div>
-              <p className="kx-hero-login kx-enter" style={{ animationDelay: "0.32s" }}>
-                قبلاً ثبت‌نام کرده‌ای؟{" "}
-                <Link to="/login" preload={false}>
-                  وارد شو
-                </Link>
-              </p>
-              <ul className="kx-assure kx-enter" style={{ animationDelay: "0.38s" }}>
-                <li>
-                  <Headphones /> پشتیبانی رایگان
-                </li>
-                <li>
-                  <Smartphone /> اپ اندروید و نسخه‌ی وب
-                </li>
-                <li>
-                  <ShieldCheck /> اطلاعات امن روی ابر
-                </li>
-              </ul>
-            </div>
-            <div className="kx-hero-visual kx-enter" style={{ animationDelay: "0.2s" }}>
-              <HeroVisual />
-            </div>
-          </div>
-        </section>
 
-        {/* ── Who it is for ─────────────────────────────────────────── */}
-        <section className="kx-for" aria-labelledby="kx-for-title">
-          <div className="kx-wrap">
-            <h2 id="kx-for-title" className="kx-for-title kx-reveal">
-              مناسب هر کسب‌وکاری که خرید و فروش دارد
-            </h2>
-            <ul className="kx-for-list kx-reveal">
-              {BUSINESSES.map((b) => {
-                const Icon = b.icon;
-                return (
-                  <li key={b.label}>
-                    <Icon aria-hidden="true" />
-                    {b.label}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </section>
-
-        {/* ── Signature features ─────────────────────────────────────── */}
-        <Showcase
-          id="voice"
-          tone="sky"
-          step="۱"
-          kicker="ثبت فاکتور با صدا"
-          icon={Mic}
-          title="فقط بگو چی فروختی؛ فاکتور آماده است."
-          lead="میکروفون را بزن و بگو «دو تا پیراهن مردانه». KAMIX کالا را از فهرست محصولاتت پیدا می‌کند، قیمت را می‌گذارد و جمع فاکتور را حساب می‌کند."
-          points={[
-            "عدد و مبلغ را به فارسی محاوره‌ای می‌فهمد",
-            "اگر چند کالای شبیه داشته باشی، از تو می‌پرسد",
-            "جایی که نمی‌شود حرف زد، همان جمله را تایپ کن",
-          ]}
-          demo="voice"
-        />
-
-        <Showcase
-          id="scan"
-          tone="mint"
-          reverse
-          step="۲"
-          kicker="اسکن بارکد با دوربین"
-          icon={ScanLine}
-          title="دوربین گوشی‌ات، بارکدخوان توست."
-          lead="بارکد کالا را جلوی دوربین بگیر؛ کالا با قیمتش همان لحظه به فاکتور اضافه می‌شود. دیگر لازم نیست دستگاه بارکدخوان بخری."
-          points={[
-            "بارکد کالا و QR کد را می‌خواند",
-            "اسکن پشت‌سرهم برای فاکتورهای چندقلمی",
-            "برای کالاهای بدون بارکد، برچسب بارکد بساز و چاپ کن",
-          ]}
-          demo="scan"
-        />
-
-        <Showcase
-          id="assistant"
-          tone="lavender"
-          step="۳"
-          kicker="دستیار هوشمند"
-          icon={Sparkles}
-          title="سؤال کن، فوری جواب بگیر."
-          lead="بپرس «امروز چقدر سود کردم؟» یا بگو «آقای شهریاری ۲۵۰ هزار تومان بدهکار است». دستیار از روی حساب خودت جواب می‌دهد یا کار را برایت ثبت می‌کند."
-          points={[
-            "سود، فروش، هزینه و پرفروش‌ترین کالا را می‌گوید",
-            "بدهی مشتری و یادآوری را با یک جمله ثبت می‌کند",
-            "جواب را از اطلاعات خودت حساب می‌کند، نه با حدس",
-          ]}
-          demo="assistant"
-        />
-
-        {/* ── Admin-managed stories & videos ─────────────────────────── */}
-        {content.stories.length > 0 && (
-          <section className="kx-section kx-section--tight" aria-label="استوری‌های KAMIX">
-            <StoriesBar stories={content.stories} />
-          </section>
-        )}
-
-        {videos.length > 0 && (
-          <section id="videos" className="kx-section" aria-labelledby="kx-videos-title">
-            <div className="kx-wrap">
-              <SectionHead kicker="ویدیو" title="KAMIX را در عمل ببین" id="kx-videos-title" />
-              <div className="kx-videos kx-reveal">
-                {videos.map((m, i) => {
-                  const embed = videoEmbedUrl(m.url);
-                  return (
-                    <figure key={i} className="kx-video">
-                      {embed ? (
-                        <iframe
-                          src={embed}
-                          title={m.caption || `ویدیوی معرفی ${i + 1}`}
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                          allowFullScreen
-                          loading="lazy"
-                        />
-                      ) : (
-                        <video
-                          src={m.url}
-                          poster={m.coverUrl}
-                          muted
-                          loop
-                          playsInline
-                          controls
-                          preload="none"
-                        />
-                      )}
-                      {m.caption && <figcaption>{m.caption}</figcaption>}
-                    </figure>
-                  );
-                })}
+              <div className="lp-hero-demo lp-enter lp-enter-demo">
+                <VoiceInvoiceDemo />
               </div>
-            </div>
-          </section>
-        )}
 
-        {/* ── Before / after ─────────────────────────────────────────── */}
-        <section className="kx-section" aria-labelledby="kx-ba-title">
-          <div className="kx-wrap">
-            <SectionHead
-              kicker="چرا KAMIX"
-              title="خداحافظ دفتر و ماشین‌حساب"
-              id="kx-ba-title"
-              lead="همان کارهای هر روز، فقط خیلی سریع‌تر و بدون اشتباه."
-            />
-            <div className="kx-ba kx-reveal">
-              <div className="kx-ba-card kx-ba-card--old">
-                <p className="kx-ba-tag">دفتر کاغذی و اکسل</p>
-                <ul>
-                  {BEFORE.map((t) => (
-                    <li key={t}>
-                      <X aria-hidden="true" />
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="kx-ba-arrow" aria-hidden="true">
-                <ArrowLeft />
-              </div>
-              <div className="kx-ba-card kx-ba-card--new">
-                <p className="kx-ba-tag">
-                  <KamixMark className="kx-ba-mark" /> با KAMIX
+              <div className="lp-hero-rest">
+                <p className="lp-enter lp-enter-3 lp-body mt-1 max-w-xl text-base font-semibold text-primary sm:text-lg">
+                  {content.subheadline}
                 </p>
-                <ul>
-                  {AFTER.map((t) => (
-                    <li key={t}>
-                      <Check aria-hidden="true" />
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
+                <p className="lp-enter lp-enter-3 lp-body mt-3 max-w-xl text-sm leading-8 text-muted-foreground sm:text-[15px]">
+                  {content.description}
+                </p>
 
-        {/* ── Everything else ────────────────────────────────────────── */}
-        <section
-          id="features"
-          className="kx-section kx-section--soft"
-          aria-labelledby="kx-features-title"
-        >
-          <div className="kx-wrap">
-            <SectionHead
-              kicker="همه در یک برنامه"
-              title="هر چیزی که مغازه‌ات لازم دارد"
-              id="kx-features-title"
-            />
-            <div className="kx-features">
-              {FEATURES.map((f) => {
-                const Icon = f.icon;
-                return (
-                  <article key={f.title} className="kx-feature kx-reveal">
-                    <span className="kx-feature-ic">
-                      <Icon />
-                    </span>
-                    <div>
-                      <h3>{f.title}</h3>
-                      <p>{f.body}</p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-            <div className="kx-extras kx-reveal">
-              <span className="kx-extras-label">و همچنین:</span>
-              {EXTRAS.map((e) => (
-                <span key={e} className="kx-extra">
-                  {e}
-                </span>
-              ))}
-              {customFeatures.map((f, i) => (
-                <span key={`c${i}`} className="kx-extra" title={f.description}>
-                  {f.title}
-                </span>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── Data safety + proof ─────────────────────────────────────── */}
-        <section id="security" className="kx-section kx-trust" aria-labelledby="kx-sec-title">
-          <div className="kx-wrap">
-            <div className="kx-trust-head kx-reveal">
-              <span className="kx-trust-icon" aria-hidden="true">
-                <ShieldCheck />
-              </span>
-              <h2 id="kx-sec-title">خیالت از اطلاعاتت راحت باشد</h2>
-              <p>
-                فروش و حساب مشتری‌ها سرمایه‌ی توست. KAMIX طوری ساخته شده که با خراب‌شدن گوشی یا کار
-                روی چند دستگاه، چیزی از دست نرود.
-              </p>
-            </div>
-            <div className="kx-trust-grid">
-              {SECURITY.map((s) => {
-                const Icon = s.icon;
-                return (
-                  <article key={s.title} className="kx-trust-card kx-reveal">
-                    <Icon aria-hidden="true" />
-                    <h3>{s.title}</h3>
-                    <p>{s.body}</p>
-                  </article>
-                );
-              })}
-            </div>
-            {activeBusinesses > 0 && <ActiveCounter target={activeBusinesses} />}
-          </div>
-        </section>
-
-        {/* ── How to start ───────────────────────────────────────────── */}
-        <section id="start" className="kx-section" aria-labelledby="kx-steps-title">
-          <div className="kx-wrap">
-            <SectionHead kicker="شروع کار" title="شروع در چهار قدم ساده" id="kx-steps-title" />
-            <ol className="kx-steps">
-              {STEPS.map((s, i) => (
-                <li key={s.title} className="kx-step kx-reveal">
-                  <span className="kx-step-n">{faNum(i + 1)}</span>
-                  <div>
-                    <h3>{s.title}</h3>
-                    <p>{s.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="kx-steps-cta kx-reveal">
-              <Link to="/register" preload={false} className="kx-btn kx-btn--primary kx-btn--lg">
-                همین الان ثبت‌نام کن
-                <ArrowLeft />
-              </Link>
-              <a href={APK_DOWNLOAD_URL} className="kx-btn kx-btn--ghost kx-btn--lg" download>
-                <Download />
-                دانلود اپ اندروید
-              </a>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Pricing ────────────────────────────────────────────────── */}
-        {visiblePlans.length > 0 && (
-          <section
-            id="pricing"
-            className="kx-section kx-pricing"
-            aria-labelledby="kx-pricing-title"
-          >
-            <div className="kx-wrap">
-              <SectionHead
-                kicker="قیمت‌ها"
-                title="قیمت روشن، بدون هزینه‌ی پنهان"
-                id="kx-pricing-title"
-                lead="همه‌ی امکانات در همه‌ی پلن‌ها هست؛ پلن‌ها فقط در مدت اعتبار فرق دارند."
-              />
-              <div className={`kx-plans kx-reveal kx-plans--${visiblePlans.length}`}>
-                {visiblePlans.map((p) => (
-                  <PlanCard
-                    key={p}
-                    plan={p}
-                    cfg={plansCfg[p]}
-                    recommended={p === recommended}
-                    now={now}
-                    monthlyBase={monthlyBase}
-                  />
-                ))}
-              </div>
-              <div className="kx-perks kx-reveal">
-                <b>همه‌ی پلن‌ها شامل:</b>
-                <ul>
-                  {PLAN_PERKS.map((perk) => (
-                    <li key={perk}>
-                      <Check aria-hidden="true" />
-                      {perk}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {guarantee && (
-                <div className="kx-guarantee kx-reveal">
-                  <ShieldCheck />
-                  <div>
-                    <b>{guarantee.title}</b>
-                    <p>{guarantee.body}</p>
-                  </div>
+                <div className="lp-enter lp-enter-4 mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                  <Link
+                    to="/register"
+                    preload={false}
+                    className="lp-btn lp-btn-primary inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-7 py-3.5 text-base font-extrabold text-primary-foreground shadow-elegant"
+                  >
+                    ثبت‌نام و شروع
+                    <ArrowLeft className="h-5 w-5" />
+                  </Link>
+                  <Link
+                    to="/login"
+                    preload={false}
+                    className="lp-btn inline-flex items-center justify-center gap-2 rounded-2xl border border-primary/35 bg-card px-7 py-3.5 text-base font-bold text-foreground hover:bg-accent"
+                  >
+                    قبلاً حساب دارم — ورود
+                  </Link>
                 </div>
-              )}
-              <p className="kx-pricing-note">
-                پرداخت کارت‌به‌کارت در صفحه‌ی ثبت‌نام · فعال‌سازی پس از تأیید رسید
-              </p>
-            </div>
-          </section>
-        )}
 
-        {/* ── Testimonials (only real, opt-in quotes from config) ────── */}
-        {testimonials.length > 0 && (
-          <section className="kx-section kx-section--soft" aria-labelledby="kx-voices-title">
-            <div className="kx-wrap">
-              <SectionHead
-                kicker="از زبان کاربران"
-                title="کسب‌وکارهایی که با KAMIX کار می‌کنند"
-                id="kx-voices-title"
-              />
-              <div className="kx-quotes">
-                {testimonials.map((t) => (
-                  <figure key={t.name} className="kx-quote kx-reveal">
-                    <blockquote>«{t.quote}»</blockquote>
-                    <figcaption>
-                      <b>{t.name}</b>
-                      <small>{t.business}</small>
-                    </figcaption>
-                  </figure>
-                ))}
+                <ul className="lp-enter lp-enter-4 lp-body mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                  <li className="inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-primary" /> همون گوشی مغازه‌ت کافیه
+                  </li>
+                  <li className="inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-primary" /> بارکد را با دوربین بزن
+                  </li>
+                  <li className="inline-flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4 text-primary" /> دفترت روی ابر هم می‌مونه
+                  </li>
+                </ul>
+
+                <div className="lp-enter lp-enter-4 mx-auto mt-6 flex max-w-xl items-start gap-3 rounded-2xl border border-dashed border-primary/35 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary sm:mx-0">
+                  <Smartphone className="mt-0.5 h-5 w-5 shrink-0" />
+                  <span className="lp-body leading-7">
+                    بعد از ثبت‌نام، لینک دانلود <strong>اپ اندروید KAMIX</strong> روی همین صفحه برات می‌آید — لازم نیست از قبل چیزی نصب کرده باشی.
+                  </span>
+                </div>
               </div>
             </div>
-          </section>
+          </div>
+        </section>
+
+        {content.stories.length > 0 && (
+          <>
+            <LandingDivider />
+            <StoriesBar stories={content.stories} />
+          </>
         )}
 
-        {/* ── FAQ ────────────────────────────────────────────────────── */}
-        <section id="faq" className="kx-section" aria-labelledby="kx-faq-title">
-          <div className="kx-wrap kx-faq-wrap">
-            <SectionHead kicker="سؤالات رایج" title="قبل از خرید بدان" id="kx-faq-title" />
-            <div className="kx-faq kx-reveal">
-              {LANDING_FAQ.map((f) => (
-                <details key={f.q} className="kx-faq-item">
-                  <summary>
-                    <span>{f.q}</span>
-                    <ChevronDown aria-hidden="true" />
-                  </summary>
-                  <p>{f.a}</p>
-                </details>
+        {hasVideos && (
+          <>
+            <LandingDivider />
+            <section id="videos" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
+            <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
+              از نزدیک ببین صندوق چطور جمع می‌شود
+            </h2>
+            <p className="lp-body mx-auto mt-2 max-w-xl text-center text-sm leading-7 text-muted-foreground">
+              ویدیوها روی آپارات یا یوتیوب هستند؛ اینجا چیزی برای دانلود سنگین نمی‌شود.
+            </p>
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {videos.map((m, i) => {
+                const embed = videoEmbedUrl(m.url);
+                return (
+                  <figure key={i} className="lp-card lp-video-frame group overflow-hidden rounded-2xl border border-border/70 transition">
+                    {embed ? (
+                      <iframe
+                        src={embed}
+                        title={m.caption || `ویدیوی معرفی ${i + 1}`}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                        allowFullScreen
+                        loading="lazy"
+                        className="aspect-video w-full border-0 bg-black"
+                      />
+                    ) : (
+                      <video
+                        src={m.url}
+                        poster={m.coverUrl}
+                        muted
+                        loop
+                        playsInline
+                        controls
+                        preload="metadata"
+                        className="aspect-video w-full bg-black object-cover"
+                      />
+                    )}
+                    {m.caption && (
+                      <figcaption className="lp-body px-4 py-3 text-center text-sm text-muted-foreground">
+                        {m.caption}
+                      </figcaption>
+                    )}
+                  </figure>
+                );
+              })}
+            </div>
+          </section>
+          </>
+        )}
+
+        <LandingDivider />
+
+        <section id="why-kamix" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
+          <h2 className="max-w-xl text-2xl font-extrabold tracking-tight sm:text-3xl">
+            دفتر کاغذی را بگذار کنار — کار روزانه همین‌هاست
+          </h2>
+          <p className="lp-body mt-2 max-w-xl text-sm leading-7 text-muted-foreground">
+            نه شعار مدیریت کسب‌وکار؛ همین کارهایی که هر روز پشت پیشخوان انجام می‌دهی.
+          </p>
+          <div className="lp-features mt-8">
+            {content.features.map((f, i) => {
+              const Icon = FEATURE_ICONS[i % FEATURE_ICONS.length];
+              const lead = i === 0;
+              return (
+                <article
+                  key={i}
+                  className={`lp-card rounded-2xl border border-border bg-card p-4 shadow-card transition sm:p-5 ${
+                    lead ? "lp-feature lp-feature--lead p-5 sm:p-7" : "lp-feature"
+                  }`}
+                >
+                  <div
+                    className={`mb-3 grid place-items-center rounded-xl bg-primary/10 text-primary ${
+                      lead ? "h-12 w-12" : "h-9 w-9 sm:h-10 sm:w-10"
+                    }`}
+                  >
+                    <Icon className={lead ? "h-6 w-6" : "h-4 w-4 sm:h-5 sm:w-5"} />
+                  </div>
+                  <h3 className={lead ? "text-xl font-extrabold sm:text-2xl" : "text-sm font-bold sm:text-base"}>
+                    {f.title}
+                  </h3>
+                  <p className={`lp-body mt-1.5 text-muted-foreground ${lead ? "text-sm leading-8 sm:text-[15px]" : "text-xs leading-6 sm:text-sm sm:leading-7"}`}>
+                    {f.description}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <LandingDivider />
+
+        <div className="lp-reveal">
+          <LiveFeatureShowcase />
+        </div>
+
+        {hasPricing && (
+          <>
+          <LandingDivider />
+          <section id="pricing" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 py-12">
+            <h2 className="text-center text-2xl font-extrabold tracking-tight sm:text-3xl">
+              خرید اشتراک با کمترین قیمت
+            </h2>
+            <p className="lp-body mx-auto mt-2 max-w-xl text-center text-sm leading-7 text-muted-foreground">
+              قیمت نهایی همان است که می‌بینی — بدون رقم پنهان. پرداخت که تمام شد، همان روز فروشت راه می‌افتد.
+            </p>
+
+            <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {visiblePaidPlans.map((p) => (
+                <PlanCard key={p} plan={p} cfg={plansCfg[p]} recommended={p === recommendedPlan} now={now} />
               ))}
             </div>
-          </div>
-        </section>
+          </section>
+          </>
+        )}
 
-        {/* ── Closing CTA ────────────────────────────────────────────── */}
-        <section className="kx-section kx-section--tight" aria-labelledby="kx-final-title">
-          <div className="kx-wrap">
-            <div className="kx-final kx-reveal">
-              <Mascot className="kx-final-mascot" />
-              <h2 id="kx-final-title">آماده‌ای حساب‌وکتاب مغازه را راحت کنی؟</h2>
-              <p>ثبت‌نام چند دقیقه طول می‌کشد و پشتیبانی رایگان در تمام مسیر کنارت است.</p>
-              <div className="kx-final-ctas">
-                <Link to="/register" preload={false} className="kx-btn kx-btn--white kx-btn--lg">
-                  ثبت‌نام در KAMIX
-                  <ArrowLeft />
-                </Link>
-                <Link
-                  to="/login"
-                  preload={false}
-                  className="kx-btn kx-btn--outline-light kx-btn--lg"
-                >
-                  ورود به حساب
-                </Link>
-              </div>
+        <LandingDivider />
+
+        <section className="lp-reveal mx-auto max-w-6xl px-4 pb-16">
+          <div className="lp-cta-slip rounded-3xl p-8 text-center text-primary-foreground sm:p-12">
+            <p className="relative text-[13px] font-bold opacity-90">فاکتور امروز هنوز باز است</p>
+            <h3 className="relative mt-2 text-2xl font-extrabold sm:text-3xl">
+              دفتر را ببند — از فردا با گوشی بفروش
+            </h3>
+            <p className="lp-body relative mx-auto mt-3 max-w-lg text-sm leading-7 opacity-90">
+              ساخت حساب کمتر از دو دقیقه طول می‌کشد. بعد از ثبت‌نام، لینک دانلود اپ اندروید هم همان‌جا نشان داده می‌شود.
+            </p>
+            <div className="relative mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <Link
+                to="/register"
+                preload={false}
+                className="lp-btn lp-btn-primary flex w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-background px-8 py-4 text-base font-extrabold text-primary sm:w-auto"
+              >
+                ثبت‌نام
+                <ArrowLeft className="h-5 w-5" />
+              </Link>
+              <Link
+                to="/login"
+                preload={false}
+                className="lp-btn flex w-full max-w-xs items-center justify-center rounded-2xl border border-primary-foreground/40 px-8 py-4 text-base font-bold text-primary-foreground transition hover:bg-primary-foreground/10 sm:w-auto"
+              >
+                ورود به حساب
+              </Link>
             </div>
           </div>
         </section>
-      </main>
 
-      {/* ── Footer ───────────────────────────────────────────────────── */}
-      <footer id="contact" className="kx-footer">
-        <div className="kx-wrap kx-footer-in">
-          <div className="kx-footer-brand">
-            <div className="kx-brand">
-              <KamixMark className="kx-brand-mark" />
-              <span className="kx-brand-name">{content.brand_name}</span>
-            </div>
-            <p>حسابداری فروشگاهی فارسی روی گوشی و وب.</p>
-          </div>
-          <nav className="kx-footer-col" aria-label="دسترسی سریع">
-            <b>دسترسی سریع</b>
-            <Link to="/register" preload={false}>
-              ثبت‌نام
-            </Link>
-            <Link to="/login" preload={false}>
-              ورود
-            </Link>
-            <a href="#pricing" onClick={go("pricing")}>
-              قیمت‌ها
-            </a>
-            <a href={APK_DOWNLOAD_URL} download>
-              دانلود اپ اندروید
-            </a>
-          </nav>
-          {socials.length > 0 && (
-            <div className="kx-footer-col">
-              <b>پشتیبانی و مشاوره خرید</b>
-              {supportHours && <small>{supportHours}</small>}
-              <div className="kx-socials">
-                {socials.map((s) => {
+        {socials.length > 0 && (
+          <>
+          <LandingDivider />
+          <section id="contact" className="lp-reveal mx-auto max-w-6xl scroll-mt-28 px-4 pb-14">
+            <div className="rounded-3xl border border-dashed border-primary/30 bg-card p-6 shadow-card sm:p-8">
+              <h3 className="text-center text-xl font-extrabold sm:text-2xl">سوال داری؟ مستقیم زنگ بزن</h3>
+              <p className="lp-body mx-auto mt-1 max-w-md text-center text-xs leading-7 text-muted-foreground sm:text-sm">
+                مثل پشت پیشخوان — مشاوره، خرید یا پشتیبانی، از همین راه‌ها به خودمان می‌رسی.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+                {socials.map((s, i) => {
                   const Icon = s.icon;
                   return (
                     <a
-                      key={s.href}
+                      key={i}
                       href={s.href}
                       target={s.href.startsWith("http") ? "_blank" : undefined}
                       rel="noopener noreferrer"
-                      dir={s.ltr ? "ltr" : undefined}
+                      dir="ltr"
+                      className="lp-card inline-flex items-center gap-2 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-semibold text-primary transition hover:bg-primary hover:text-primary-foreground"
                     >
-                      <Icon />
-                      <span>{s.label}</span>
+                      <Icon className="h-4 w-4" />
+                      <span className="max-w-[160px] truncate">{s.label}</span>
                     </a>
                   );
                 })}
               </div>
             </div>
-          )}
-        </div>
-        <div className="kx-wrap kx-footer-base">
-          © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
-        </div>
-      </footer>
+          </section>
+          </>
+        )}
 
-      {/* ── Mobile sticky CTA ────────────────────────────────────────── */}
-      <div className={`kx-sticky ${pastHero ? "is-on" : ""}`} aria-hidden={!pastHero}>
-        <Link
-          to="/register"
-          preload={false}
-          className="kx-btn kx-btn--primary"
-          tabIndex={pastHero ? 0 : -1}
-        >
-          ثبت‌نام و شروع کار
-          <ArrowLeft />
-        </Link>
+        <LandingDivider />
+
+        <section className="lp-reveal mx-auto max-w-6xl px-4 pb-10">
+          <ActiveUsersBadge />
+        </section>
+
+        <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
+          © {new Date().getFullYear()} KAMIX — همه‌ی حقوق محفوظ است.
+        </footer>
       </div>
 
       {supportHref && (
@@ -890,114 +613,324 @@ export function LandingPage() {
           rel={supportHref.startsWith("http") ? "noopener noreferrer" : undefined}
           aria-label="پشتیبانی رایگان"
           title="پشتیبانی رایگان"
-          className={`kx-support ${pastHero ? "is-raised" : ""}`}
+          className="fixed bottom-[calc(1rem+var(--safe-bottom))] left-4 z-40 h-14 w-14 rounded-full transition-transform duration-300 hover:scale-110 active:scale-95 sm:bottom-[calc(1.25rem+var(--safe-bottom))] sm:left-5"
         >
-          <Headphones />
+          <svg viewBox="0 0 64 64" className="h-full w-full drop-shadow-xl" role="img" aria-hidden="true">
+            <defs>
+              <linearGradient id="kx-sup-bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#4f8cff" />
+                <stop offset="55%" stopColor="#6a5cff" />
+                <stop offset="100%" stopColor="#a855f7" />
+              </linearGradient>
+              <radialGradient id="kx-sup-shine" cx="0.3" cy="0.22" r="0.7">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="32" cy="32" r="31" fill="url(#kx-sup-bg)" />
+            <circle cx="32" cy="32" r="31" fill="url(#kx-sup-shine)" />
+            <circle cx="32" cy="32" r="30" fill="none" stroke="#ffffff" strokeOpacity="0.45" strokeWidth="1.5" />
+            <path
+              d="M18 34v-3a14 14 0 0 1 28 0v3"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="4"
+              strokeLinecap="round"
+            />
+            <rect x="13.5" y="32" width="8" height="13" rx="4" fill="#ffffff" />
+            <rect x="42.5" y="32" width="8" height="13" rx="4" fill="#ffffff" />
+            <path
+              d="M46.5 45v2.5a5 5 0 0 1-5 5H36"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            <circle cx="33" cy="52.5" r="3.2" fill="#ffffff" />
+            <rect x="24" y="21" width="16" height="11" rx="5.5" fill="#ffffff" />
+            <circle cx="29" cy="26.5" r="1.4" fill="#6a5cff" />
+            <circle cx="32" cy="26.5" r="1.4" fill="#6a5cff" />
+            <circle cx="35" cy="26.5" r="1.4" fill="#6a5cff" />
+          </svg>
         </a>
       )}
     </div>
   );
 }
 
-function SectionHead({
-  kicker,
-  title,
-  lead,
-  id,
-}: {
-  kicker: string;
-  title: ReactNode;
-  lead?: string;
-  id: string;
-}) {
-  return (
-    <div className="kx-head kx-reveal">
-      <p className="kx-kicker">{kicker}</p>
-      <h2 id={id}>{title}</h2>
-      {lead && <p className="kx-lead">{lead}</p>}
-    </div>
-  );
-}
+function VoiceInvoiceDemo() {
+  const [typed, setTyped] = useState("");
+  const [rows, setRows] = useState(0);
+  const [stamp, setStamp] = useState(false);
+  const [listening, setListening] = useState(false);
+  const dateLabel = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString("fa-IR");
+    } catch {
+      return "—";
+    }
+  }, []);
 
-function Showcase({
-  id,
-  tone,
-  reverse = false,
-  step,
-  kicker,
-  icon: Icon,
-  title,
-  lead,
-  points,
-  demo,
-}: {
-  id: string;
-  tone: "sky" | "mint" | "lavender";
-  reverse?: boolean;
-  step: string;
-  kicker: string;
-  icon: LucideIcon;
-  title: string;
-  lead: string;
-  points: string[];
-  demo: DemoKind;
-}) {
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setTyped(INVOICE_DEMO[INVOICE_DEMO.length - 1].spoken);
+      setRows(INVOICE_DEMO.length);
+      setStamp(true);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId = 0;
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timeoutId = window.setTimeout(resolve, ms);
+      });
+
+    const run = async () => {
+      while (!cancelled) {
+        setTyped("");
+        setRows(0);
+        setStamp(false);
+        setListening(false);
+        await wait(450);
+        if (cancelled) return;
+        for (let i = 0; i < INVOICE_DEMO.length; i++) {
+          if (cancelled) return;
+          const text = INVOICE_DEMO[i].spoken;
+          setListening(true);
+          setTyped("");
+          for (let c = 0; c < text.length; c++) {
+            if (cancelled) return;
+            setTyped(text.slice(0, c + 1));
+            await wait(40);
+          }
+          setListening(false);
+          await wait(260);
+          if (cancelled) return;
+          setRows(i + 1);
+          await wait(720);
+        }
+        if (cancelled) return;
+        setStamp(true);
+        await wait(2800);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  const visible = INVOICE_DEMO.slice(0, rows);
+  const total = visible.reduce((sum, line) => sum + line.amount, 0);
+
   return (
-    <section id={id} className={`kx-show kx-show--${tone}`} aria-labelledby={`kx-${id}-title`}>
-      <div className={`kx-wrap kx-show-in ${reverse ? "is-reverse" : ""}`}>
-        <div className="kx-show-copy kx-reveal">
-          <p className="kx-show-kicker">
-            <span className="kx-show-step">{step}</span>
-            <Icon aria-hidden="true" />
-            {kicker}
-          </p>
-          <h2 id={`kx-${id}-title`}>{title}</h2>
-          <p className="kx-lead">{lead}</p>
-          <ul className="kx-points">
-            {points.map((p) => (
-              <li key={p}>
-                <Check aria-hidden="true" />
-                <span>{p}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="kx-show-demo kx-reveal">
-          <DemoSlot kind={demo} />
-        </div>
+    <div className="lp-demo mx-auto w-full max-w-[22.5rem]">
+      <p className="sr-only">
+        نمایش ازپیش‌تعریف‌شدهٔ صدور فاکتور با صدا: چند کالای نمونه گفته می‌شود و ردیف فاکتور اضافه می‌گردد.
+      </p>
+      <div aria-hidden="true">
+      <div className="lp-voice">
+        <span className={`lp-mic ${listening ? "is-on" : ""}`}>
+          <Mic className="h-3.5 w-3.5" />
+        </span>
+        <span className={`lp-wave ${listening ? "is-on" : ""}`} aria-hidden="true">
+          <span /><span /><span /><span /><span />
+        </span>
+        <span className="lp-spoken">
+          {typed || (rows === 0 && !listening ? "بگو چی فروختی…" : "")}
+          {listening && <span className="lp-caret" />}
+        </span>
       </div>
-    </section>
-  );
-}
 
-/** Mounts the lazy demo only when the visitor scrolls near it; fixed-size frame avoids layout shift. */
-function DemoSlot({ kind }: { kind: DemoKind }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const near = useInView(ref, { rootMargin: "600px 0px", once: true });
-  const Demo = DEMOS[kind];
-  return (
-    <div ref={ref} className={`kx-slot kx-slot--${kind}`}>
-      {near ? (
-        <Suspense fallback={<div className="kx-slot-poster" aria-hidden="true" />}>
-          <Demo />
-        </Suspense>
-      ) : (
-        <div className="kx-slot-poster" aria-hidden="true" />
-      )}
+      <div className="lp-receipt">
+        <span className="lp-receipt-fold" />
+        <div className="lp-receipt-head">
+          <div className="lp-receipt-shop">فروشگاه امید</div>
+          <div className="lp-receipt-meta">
+            <span>فاکتور فروش</span>
+            <span dir="ltr">{dateLabel} · ۱۴۰۳-۰۱۸۴</span>
+          </div>
+        </div>
+
+        {visible.length === 0 ? (
+          <div className="lp-receipt-empty">منتظر صدای فروشنده…</div>
+        ) : (
+          <div>
+            {visible.map((line) => (
+              <div key={line.name} className="lp-receipt-row">
+                <span>{line.name}</span>
+                <span className="text-[11px] opacity-60">× {line.qty}</span>
+                <span>{formatToman(line.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="lp-receipt-total">
+          <span>جمع</span>
+          <span>{formatToman(total)}</span>
+        </div>
+
+        <div className="lp-barcode" aria-hidden="true">
+          {BARCODE_BARS.map((h, i) => (
+            <i key={i} style={{ height: `${h}px` }} />
+          ))}
+        </div>
+
+        {stamp && (
+          <div className="lp-stamp">
+            <strong>ثبت شد</strong>
+            <small>KAMIX</small>
+          </div>
+        )}
+      </div>
+      </div>
     </div>
   );
 }
 
-function ActiveCounter({ target }: { target: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const seen = useInView(ref, { once: true });
-  const value = useCountUp(target, seen);
+function PlanCard({
+  plan, cfg, recommended, now,
+}: {
+  plan: SubscriptionPlan;
+  cfg: PlanConfig;
+  recommended: boolean;
+  now: number;
+}) {
+  const discounted = isDiscountActive(cfg, now);
+  const final = effectivePrice(cfg, now);
+  const remainingMs = cfg.discount_until ? new Date(cfg.discount_until).getTime() - now : Infinity;
+  const perks = [
+    "ثبت فاکتور نامحدود",
+    "ثبت فاکتور با صدا",
+    "اسکن کالا با دوربین موبایل",
+    "ساخت سایت تک‌صفحه‌ای فروشگاه",
+    "مدیریت انبار و محصولات",
+    "گزارش‌های فروش و سود",
+    "پشتیبانی رایگان",
+  ];
+
   return (
-    <div ref={ref} className="kx-counter kx-reveal">
-      <span className="kx-counter-num" dir="ltr">
-        +<b>{faNum(seen ? value : target)}</b>
+    <Link
+      to="/register"
+      preload={false}
+      className={`lp-plan lp-card group relative flex flex-col rounded-3xl border p-6 pt-9 text-center shadow-card transition-all duration-300 ${
+        recommended
+          ? "z-10 border-primary bg-[var(--lp-paper)] shadow-elegant ring-2 ring-primary/25 sm:scale-[1.04]"
+          : "border-border bg-card"
+      }`}
+    >
+      {recommended && (
+        <span className="lp-plan-stamp">پیشنهاد مغازه</span>
+      )}
+      {discounted && (
+        <span className="absolute -top-2 -right-2 rotate-[-8deg] rounded-sm border border-rose-400/80 bg-rose-50 px-2 py-1 text-[11px] font-extrabold text-rose-700 shadow-sm">
+          {cfg.discount_percent.toLocaleString("fa-IR")}٪ تخفیف
+        </span>
+      )}
+
+      <div className="text-lg font-extrabold">{PLAN_LABEL[plan]}</div>
+      <div className="lp-body mt-1 text-xs text-muted-foreground">
+        {PLAN_DURATION_LABEL[plan]} اعتبار
+      </div>
+
+      <div className="my-5">
+        {discounted && (
+          <div className="lp-body text-xs text-muted-foreground line-through">
+            {formatToman(cfg.price)}
+          </div>
+        )}
+        <div className="text-2xl font-black">{formatToman(final)}</div>
+        {discounted && isFinite(remainingMs) && remainingMs > 0 && (
+          <div dir="ltr" className="mt-1 text-[10px] text-rose-600">
+            {formatRemaining(remainingMs)} تا پایان تخفیف
+          </div>
+        )}
+      </div>
+
+      <ul className="lp-body mb-6 flex-1 space-y-2 text-right text-xs">
+        {perks.map((perk) => (
+          <li key={perk} className="flex items-center gap-2">
+            <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>{perk}</span>
+          </li>
+        ))}
+      </ul>
+
+      <span
+        className={`mt-auto flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition ${
+          recommended
+            ? "bg-primary text-primary-foreground group-hover:opacity-90"
+            : "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground"
+        }`}
+      >
+        شروع کنید
+        <ArrowLeft className="h-4 w-4" />
       </span>
-      <span>کسب‌وکار فعال به KAMIX اعتماد کرده‌اند</span>
+    </Link>
+  );
+}
+
+function ActiveUsersBadge() {
+  const targetCount = useMemo(() => {
+    const day = Math.floor(Date.now() / 86_400_000);
+    const seeded = ((day * 9301 + 49297) % 233280) / 233280;
+    return 5000 + Math.floor(seeded * 900);
+  }, []);
+  const [count, setCount] = useState(0);
+  const [countUpDone, setCountUpDone] = useState(false);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setCount(targetCount);
+      setCountUpDone(true);
+      return;
+    }
+    let frameId: number;
+    const duration = 1800;
+    const start = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.floor(eased * targetCount));
+      if (progress < 1) {
+        frameId = requestAnimationFrame(step);
+      } else {
+        setCountUpDone(true);
+      }
+    };
+    frameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frameId);
+  }, [targetCount]);
+
+  useEffect(() => {
+    if (!countUpDone) return;
+    const tick = () => {
+      setCount((c) => {
+        const next = c + Math.floor(Math.random() * 14) + 1;
+        return next > 6000 ? 5000 + Math.floor(Math.random() * 300) : next;
+      });
+    };
+    const id = setInterval(tick, 9000 + Math.random() * 9000);
+    return () => clearInterval(id);
+  }, [countUpDone]);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="inline-flex items-center gap-2.5 rounded-full border border-primary/20 bg-primary/5 px-5 py-2.5 shadow-card">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 motion-safe:animate-ping" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        </span>
+        <Users className="h-4 w-4 text-primary" />
+        <span className="text-sm font-extrabold tabular-nums text-foreground">
+          {count.toLocaleString("fa-IR")}
+        </span>
+        <span className="lp-body text-xs text-muted-foreground">فروشنده همین حالا با KAMIX کار می‌کنند</span>
+      </div>
     </div>
   );
 }

@@ -2,6 +2,20 @@
 
 Branch: `landing-page-redesign` (created from `claude/magical-shannon-v86oqc` @ `2f20fe4`) · Date: 2026-10-04
 
+## Revision 2 (2026-10-04) — calmer, clearer, friendlier
+
+Feedback on v1: too busy on mobile (especially the header), headline unclear («فاکتور را بگو، بارکد را نشان بده، حساب را بپرس»), theme not distinctive enough. Changes:
+
+- **Theme:** dark neon SaaS look replaced by a warm "porcelain" light theme (ivory `#fbfaf7`, deep-indigo ink `#1b1846`) with the KAMIX blue→violet brand gradient and a small honey accent (hand-drawn underline). Each signature feature sits on its own soft tinted panel (sky / mint / lavender); one deep-indigo section (data safety) gives rhythm.
+- **Mascot:** a friendly character drawn from the KAMIX mark itself (the receipt shape with the two side notches) with blinking eyes and a wave — in the hero ("بگو چی فروختی!"), as the assistant's avatar, and in the closing CTA. Pure SVG/CSS (`landing/Mascot.tsx`), no assets.
+- **Header:** mobile = logo + one «ورود» button (no hamburger, no second CTA); desktop = logo, 4 links, ورود, ثبت‌نام. Sign-up on mobile is the hero button and a sticky bottom bar.
+- **Copy rewritten for clarity:** hero «حسابداری مغازه، ساده مثل پیام دادن» + one plain sentence of what you get; feature titles say exactly what happens («فقط بگو چی فروختی؛ فاکتور آماده است.»، «دوربین گوشی‌ات، بارکدخوان توست.»، «سؤال کن، فوری جواب بگیر.»). Trust pill (2,000+ businesses) and three assurances (free support, Android + web, data safe in the cloud) right in the hero.
+- **Less clutter:** removed the module marquee, the dashboard mock and extra chips; comparison table → simple "before / with KAMIX" cards; features 9 → 6 short cards + "also included" tags; 3 bullets per showcase; pricing perks shown once under the plans instead of repeated on every card (2-column compact plan cards on phones); security cards 2-up on phones.
+- **New:** "who it is for" row (supermarket, clothing, mobile shop, café, gold, school, workshop, any shop).
+- Verified again at 360/390/768/1280/1920: no horizontal scroll, no page errors, CLS 0.005, reduced motion OK, CTAs unchanged (/register ×10, /login ×4, APK ×2). Bundle: landing chunk (AuthGuard) 16.7 kB gz (v1 18.5), landing.css 10.4 kB gz (v1 10.9), demos 3.4 kB gz lazy, global styles.css unchanged at 27.4 kB gz.
+
+The sections below describe v1; facts, placeholders and verification approach are unchanged.
+
 ## 1. What was built, and why
 
 The landing page (`src/components/LandingPage.tsx`, shown by `AuthGuard` to signed-out web visitors) was rebuilt from scratch. KAMIX has no free trial, so the page is designed to do what a trial would: **show the product working** and **remove every reason to hesitate before paying**.

@@ -4,25 +4,12 @@
  * Every card links to /register exactly as before.
  */
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { effectivePrice, isDiscountActive, type PlanConfig } from "@/lib/plans";
 import { PLAN_MONTHS } from "./pricing-utils";
 import { PLAN_DURATION_LABEL, PLAN_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { formatToman } from "@/lib/store";
 import { faNum } from "./hooks";
-
-/** Identical perk list for every plan — plans differ only in duration. */
-const PERKS = [
-  "فاکتور فروش و خرید نامحدود",
-  "ثبت فاکتور با صدا",
-  "اسکن بارکد با دوربین گوشی",
-  "دستیار هوشمند فارسی",
-  "انبار، مشتریان و بدهکاران",
-  "گزارش سود و خروجی PDF و اکسل",
-  "ساخت سایت تک‌صفحه‌ای فروشگاه",
-  "همگام‌سازی بین دستگاه‌ها",
-  "پشتیبانی رایگان",
-];
 
 function formatRemaining(ms: number): string {
   if (ms <= 0) return "";
@@ -77,7 +64,7 @@ export function PlanCard({
         {savingPct > 0 ? (
           <>
             <small>معادل ماهی {formatToman(perMonth)}</small>
-            <span className="kx-plan-save">{faNum(savingPct)}٪ صرفه‌جویی نسبت به ماهانه</span>
+            <span className="kx-plan-save">{faNum(savingPct)}٪ صرفه‌جویی</span>
           </>
         ) : (
           <small>{months > 1 ? `یک پرداخت برای ${faNum(months)} ماه` : "پرداخت یک‌باره"}</small>
@@ -86,15 +73,6 @@ export function PlanCard({
           <em>{formatRemaining(remainingMs)} تا پایان تخفیف</em>
         )}
       </div>
-
-      <ul className="kx-plan-perks">
-        {PERKS.map((perk) => (
-          <li key={perk}>
-            <Check />
-            <span>{perk}</span>
-          </li>
-        ))}
-      </ul>
 
       <span className="kx-plan-cta">
         انتخاب و ثبت‌نام

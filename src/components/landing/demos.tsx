@@ -16,12 +16,12 @@ import {
   PackageSearch,
   Receipt,
   ScanLine,
-  Sparkles,
   TrendingUp,
   UserRound,
   Zap,
 } from "lucide-react";
 import { BARCODE_PATTERN, useInView, useReducedMotion, useStepLoop } from "./hooks";
+import { Mascot } from "./Mascot";
 
 /* ─── Voice invoice ────────────────────────────────────────────────────────── */
 
@@ -266,8 +266,8 @@ export function AssistantDemo() {
       </p>
       <div aria-hidden="true" className="kx-assist">
         <div className="kx-assist-head">
-          <span className="kx-assist-orb">
-            <Sparkles />
+          <span className="kx-assist-avatar">
+            <Mascot wave={false} />
           </span>
           <span>
             <b>دستیار هوشمند KAMIX</b>

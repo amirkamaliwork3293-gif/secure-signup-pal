@@ -26,3 +26,16 @@ export function pickRecommendedPlan(
     plans.includes("3month") ? "3month" : plans[0],
   );
 }
+
+/** Identical perk list for every plan — plans differ only in duration. */
+export const PLAN_PERKS = [
+  "فاکتور فروش و خرید نامحدود",
+  "ثبت فاکتور با صدا",
+  "اسکن بارکد با دوربین گوشی",
+  "دستیار هوشمند فارسی",
+  "انبار، مشتریان و بدهکاران",
+  "گزارش سود و خروجی PDF و اکسل",
+  "ساخت سایت تک‌صفحه‌ای فروشگاه",
+  "همگام‌سازی بین دستگاه‌ها",
+  "پشتیبانی رایگان",
+];

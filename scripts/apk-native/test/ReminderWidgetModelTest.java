@@ -95,12 +95,34 @@ public class ReminderWidgetModelTest {
         eq("علی", v.rows.get(0).item.customer, "customer kept");
         eq("۰۰:۰۰", v.rows.get(0).clock, "row clock");
 
-        // پنهان موقت بعد از «انجام شد» — بر اساس شناسه + زمان (تکراری‌ها با زمان جدید پنهان نمی‌شوند)
-        Set<String> hidden = new HashSet<>();
-        hidden.add(ReminderWidgetModel.hiddenKey("noon", tehran("2026-10-07T12:30:00")));
-        hidden.add(ReminderWidgetModel.hiddenKey("evening", tehran("2026-10-01T18:00:00")));
-        v = ReminderWidgetModel.build(items, hidden, now, tz, 6);
-        eq(Arrays.asList("first", "exact", "evening", "late"), ids(v), "hidden by id+at only");
+        // انجام‌شده‌ها می‌مانند: تیک سبز و خط‌خورده، بعد از انجام‌نشده‌ها
+        Set<String> localDone = new HashSet<>();
+        localDone.add(ReminderWidgetModel.doneKey("noon", tehran("2026-10-07T12:30:00")));
+        // تیک محلی با زمان دیگر (تکراری‌ها) اثری ندارد
+        localDone.add(ReminderWidgetModel.doneKey("evening", tehran("2026-10-01T18:00:00")));
+        v = ReminderWidgetModel.build(items, localDone, now, tz, 6);
+        eq(Arrays.asList("first", "exact", "evening", "late", "noon"), ids(v), "done moved to end");
+        eq(4, v.total, "remaining count excludes done");
+        eq(1, v.doneCount, "done count");
+        eq(2, v.overdueCount, "done is never overdue");
+        ok(v.rows.get(4).done && !v.rows.get(4).overdue, "done row flags");
+        ok(!v.rows.get(0).done, "open row not done");
+
+        List<Item> withDone = new ArrayList<>(items);
+        withDone.add(new Item("appDone", "از برنامه", "", tehran("2026-10-07T08:00:00"), true));
+        withDone.add(new Item("oldDone", "دیروز", "", tehran("2026-10-06T08:00:00"), true));
+        v = ReminderWidgetModel.build(withDone, null, now, tz, 6);
+        eq(Arrays.asList("first", "noon", "exact", "evening", "late", "appDone"), ids(v), "app-done shown last, other days ignored");
+        eq(5, v.total, "app-done not counted as remaining");
+        v = ReminderWidgetModel.build(withDone, null, now, tz, 4);
+        eq(Arrays.asList("first", "noon", "exact"), ids(v), "open items get the rows first");
+        eq(3, v.more, "+N includes done");
+        v = ReminderWidgetModel.build(Arrays.asList(new Item("d", "تمام", "", now - 1, true)), null, now, tz, 4);
+        eq(0, v.total, "all done -> zero remaining");
+        eq(1, v.rows.size(), "all done still listed");
+        eq(tehran("2026-10-08T00:00:01"),
+                ReminderWidgetModel.nextRefreshAt(Arrays.asList(new Item("d", "", "", now + 60_000, true)), now, tz),
+                "done items do not schedule refresh");
 
         // سقف ردیف‌ها و «+N»
         v = ReminderWidgetModel.build(items, null, now, tz, 3);

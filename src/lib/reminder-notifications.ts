@@ -14,6 +14,8 @@ type KamaliRemindersBridge = {
   takeCompleted?: () => string;
   /** فقط APKهای جدید (ویجت صفحهٔ اصلی). APK قدیمی این متدها را ندارد. */
   syncWidget?: (json: string) => void;
+  /** نسخهٔ ویجت APK؛ ۲ به بعد یادآوری‌های انجام‌شده را خط‌خورده نشان می‌دهد. */
+  widgetVersion?: () => number;
   takeOpenRoute?: () => string;
   canPinWidget?: () => boolean;
   requestPinWidget?: () => boolean;
@@ -124,6 +126,8 @@ export type ReminderWidgetItem = {
   title: string;
   customer: string;
   at: number;
+  /** انجام‌شده — ویجت با تیک سبز و خط روی متن نشانش می‌دهد (APK قدیمی این فیلد را نادیده می‌گیرد). */
+  done: boolean;
 };
 
 export type ReminderWidgetPayload = {
@@ -144,6 +148,7 @@ export function widgetPayload(
   reminders: Reminder[],
   enabled: boolean,
   now = Date.now(),
+  includeDone = true,
 ): ReminderWidgetPayload {
   const from = now - WIDGET_PAST_WINDOW_MS;
   const to = now + WIDGET_FUTURE_WINDOW_MS;
@@ -153,7 +158,7 @@ export function widgetPayload(
           .filter(
             (r) =>
               !!r &&
-              !r.done &&
+              (includeDone || !r.done) &&
               typeof r.id === "string" &&
               r.id.length > 0 &&
               typeof r.dueAt === "number" &&
@@ -161,13 +166,15 @@ export function widgetPayload(
               r.dueAt >= from &&
               r.dueAt < to,
           )
-          .sort((a, b) => a.dueAt - b.dueAt)
+          // انجام‌نشده‌ها اول تا اگر سقف پر شد، کارهای باز حذف نشوند.
+          .sort((a, b) => Number(!!a.done) - Number(!!b.done) || a.dueAt - b.dueAt)
           .slice(0, MAX_WIDGET_ITEMS)
           .map((r) => ({
             id: r.id,
             title: clip(r.title, MAX_WIDGET_TITLE) || "یادآوری",
             customer: clip(r.customerName, MAX_WIDGET_CUSTOMER),
             at: r.dueAt,
+            done: !!r.done,
           }))
       : [];
   return { v: REMINDER_WIDGET_PAYLOAD_VERSION, enabled, generatedAt: now, items };
@@ -182,7 +189,14 @@ export function syncReminderWidget(
   try {
     const bridge = nativeBridge();
     if (!bridge || typeof bridge.syncWidget !== "function") return;
-    bridge.syncWidget(JSON.stringify(widgetPayload(reminders, enabled, now)));
+    // APK ویجتِ نسخهٔ ۱ فیلد done را نمی‌شناسد؛ برای آن انجام‌شده‌ها را نمی‌فرستیم تا باز به نظر نرسند.
+    let version = 1;
+    try {
+      if (typeof bridge.widgetVersion === "function") version = Number(bridge.widgetVersion()) || 1;
+    } catch {
+      version = 1;
+    }
+    bridge.syncWidget(JSON.stringify(widgetPayload(reminders, enabled, now, version >= 2)));
   } catch {
     /* native bridge must never break the web app */
   }

@@ -117,21 +117,39 @@ g.window = origWindow;
   assert.equal(p.v, 1);
   assert.equal(p.enabled, true);
   assert.equal(p.generatedAt, wNow);
-  // ترتیب زمانی؛ گذشتهٔ امروز می‌ماند؛ انجام‌شده، خیلی قدیمی، خیلی دور و نامعتبر نمی‌آیند؛ فردا برای عبور از نیمه‌شب می‌آید.
+  // انجام‌نشده‌ها به ترتیب زمانی، بعد انجام‌شده‌ها (برای تیک سبز و خط‌خوردگی)؛ گذشتهٔ امروز می‌ماند؛
+  // خیلی قدیمی، خیلی دور و نامعتبر نمی‌آیند؛ فردا برای عبور از نیمه‌شب می‌آید.
   assert.deepEqual(
     p.items.map((i) => i.id),
-    ["morning", "overdue", "evening", "tomorrow"],
+    ["morning", "overdue", "evening", "tomorrow", "doneToday"],
   );
   assert.deepEqual(p.items[0], {
     id: "morning",
     title: "صبح",
     customer: "علی",
     at: Date.parse("2026-10-07T00:00:00+03:30"),
+    done: false,
   });
+  assert.equal(p.items[4].done, true, "done flag sent");
+  assert.ok(p.items.slice(0, 4).every((i) => !i.done));
   assert.equal(p.items[1].title, "یادآوری", "empty title falls back");
   // حریم خصوصی: یادداشت هرگز به ویجت نمی‌رود
   assert.ok(!JSON.stringify(p).includes("یادداشت خصوصی"));
-  assert.deepEqual(Object.keys(p.items[2]).sort(), ["at", "customer", "id", "title"]);
+  assert.deepEqual(Object.keys(p.items[2]).sort(), ["at", "customer", "done", "id", "title"]);
+
+  // سقف پر: کارهای باز حذف نمی‌شوند، انجام‌شده‌ها اول کنار می‌روند
+  const capped = widgetPayload(
+    [
+      ...Array.from({ length: MAX_WIDGET_ITEMS }, (_, i) =>
+        reminder({ id: `d${i}`, title: "تمام", dueAt: wNow - i * 1_000, done: true }),
+      ),
+      reminder({ id: "open", title: "باز", dueAt: wNow + 1_000 }),
+    ],
+    true,
+    wNow,
+  );
+  assert.equal(capped.items.length, MAX_WIDGET_ITEMS);
+  assert.equal(capped.items[0].id, "open");
 
   // مستقل از منطقهٔ زمانی میزبان: پنجره نسبی است، پس همان نتیجه
   assert.deepEqual(widgetPayload(list, true, wNow), p);
@@ -202,10 +220,25 @@ g.window = origWindow;
     canPinWidget: () => true,
     requestPinWidget: () => true,
   };
+  // APK ویجت نسخهٔ ۱ (بدون widgetVersion): انجام‌شده‌ها فرستاده نمی‌شوند
   g.window = { KamaliReminders: bridge } as never;
   syncReminderNotifications(list, true, wNow);
   assert.deepEqual(JSON.parse(bridge.syncs[0]), futureNotificationPayloads(list, wNow));
-  assert.deepEqual(JSON.parse(bridge.widgets[0]), p);
+  assert.deepEqual(JSON.parse(bridge.widgets[0]), widgetPayload(list, true, wNow, false));
+  assert.ok(!JSON.parse(bridge.widgets[0]).items.some((i: { done: boolean }) => i.done));
+  // APK ویجت نسخهٔ ۲: انجام‌شده‌ها هم می‌آیند
+  (bridge as typeof bridge & { widgetVersion?: () => number }).widgetVersion = () => 2;
+  syncReminderNotifications(list, true, wNow);
+  assert.deepEqual(JSON.parse(bridge.widgets[1]), p);
+  // widgetVersion خراب → مثل نسخهٔ ۱
+  (bridge as typeof bridge & { widgetVersion?: () => number }).widgetVersion = () => {
+    throw new Error("boom");
+  };
+  syncReminderNotifications(list, true, wNow);
+  assert.deepEqual(JSON.parse(bridge.widgets[2]), widgetPayload(list, true, wNow, false));
+  bridge.syncs.splice(0);
+  bridge.widgets.splice(0);
+  syncReminderNotifications(list, true, wNow);
   syncReminderNotifications([], false, wNow);
   assert.deepEqual(JSON.parse(bridge.syncs[1]), []);
   assert.deepEqual(JSON.parse(bridge.widgets[1]).items, []);

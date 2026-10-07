@@ -27,23 +27,33 @@ public final class ReminderWidgetModel {
         public final String title;
         public final String customer;
         public final long at;
+        /** در برنامه «انجام شد» خورده است. */
+        public final boolean done;
 
         public Item(String id, String title, String customer, long at) {
+            this(id, title, customer, at, false);
+        }
+
+        public Item(String id, String title, String customer, long at, boolean done) {
             this.id = id == null ? "" : id;
             this.title = title == null ? "" : title;
             this.customer = customer == null ? "" : customer;
             this.at = at;
+            this.done = done;
         }
     }
 
     public static final class Row {
         public final Item item;
         public final boolean overdue;
+        /** انجام‌شده: تیک سبز و خط روی متن. */
+        public final boolean done;
         public final String clock;
 
-        Row(Item item, boolean overdue, String clock) {
+        Row(Item item, boolean overdue, boolean done, String clock) {
             this.item = item;
             this.overdue = overdue;
+            this.done = done;
             this.clock = clock;
         }
     }
@@ -52,14 +62,17 @@ public final class ReminderWidgetModel {
         /** همهٔ یادآوری‌های انجام‌نشدهٔ امروز. */
         public final int total;
         public final int overdueCount;
-        /** ردیف‌هایی که جا می‌شوند (گذشته‌ها اول، بعد به ترتیب ساعت). */
+        /** یادآوری‌های انجام‌شدهٔ امروز (با خط‌خوردگی نشان داده می‌شوند). */
+        public final int doneCount;
+        /** ردیف‌هایی که جا می‌شوند: اول انجام‌نشده‌ها به ترتیب ساعت، بعد انجام‌شده‌ها. */
         public final List<Row> rows;
         /** تعداد باقی‌مانده برای «+N یادآوری دیگر». */
         public final int more;
 
-        View(int total, int overdueCount, List<Row> rows, int more) {
+        View(int total, int overdueCount, int doneCount, List<Row> rows, int more) {
             this.total = total;
             this.overdueCount = overdueCount;
+            this.doneCount = doneCount;
             this.rows = rows;
             this.more = more;
         }
@@ -93,38 +106,42 @@ public final class ReminderWidgetModel {
 
     /**
      * ردیف‌های امروز. maxRows ردیف جا می‌شود؛ اگر همه جا نشوند، یک ردیف برای «+N» کنار گذاشته می‌شود.
+     * doneKeys: یادآوری‌هایی که از ویجت/نوتیف تیک خورده‌اند ولی برنامه هنوز اعمالشان نکرده.
      */
-    public static View build(List<Item> items, Set<String> hidden, long now, TimeZone tz, int maxRows) {
+    public static View build(List<Item> items, Set<String> doneKeys, long now, TimeZone tz, int maxRows) {
         long start = startOfDay(now, tz);
         long end = nextMidnight(now, tz);
-        List<Item> today = new ArrayList<>();
+        List<Item> open = new ArrayList<>();
+        List<Item> done = new ArrayList<>();
         if (items != null) {
             for (Item item : items) {
                 if (item == null || item.id.isEmpty()) continue;
                 if (item.at < start || item.at >= end) continue;
-                if (hidden != null && hidden.contains(hiddenKey(item.id, item.at))) continue;
-                today.add(item);
+                boolean isDone = item.done || (doneKeys != null && doneKeys.contains(doneKey(item.id, item.at)));
+                (isDone ? done : open).add(item);
             }
         }
-        Collections.sort(today, (a, b) -> Long.compare(a.at, b.at));
+        Collections.sort(open, (a, b) -> Long.compare(a.at, b.at));
+        Collections.sort(done, (a, b) -> Long.compare(a.at, b.at));
         int overdue = 0;
-        for (Item item : today) {
+        for (Item item : open) {
             if (item.at <= now) overdue++;
         }
-        int total = today.size();
+        int all = open.size() + done.size();
         int cap = Math.max(0, maxRows);
         // اگر همه جا نشوند یک ردیف برای «+N» کنار می‌رود، ولی دست‌کم یک یادآوری همیشه دیده شود.
-        int visible = total <= cap ? total : Math.min(total, Math.max(1, cap - 1));
+        int visible = all <= cap ? all : Math.min(all, Math.max(1, cap - 1));
         List<Row> rows = new ArrayList<>(visible);
         for (int i = 0; i < visible; i++) {
-            Item item = today.get(i);
-            rows.add(new Row(item, item.at <= now, clock(item.at, tz)));
+            boolean isDone = i >= open.size();
+            Item item = isDone ? done.get(i - open.size()) : open.get(i);
+            rows.add(new Row(item, !isDone && item.at <= now, isDone, clock(item.at, tz)));
         }
-        return new View(total, overdue, rows, total - visible);
+        return new View(open.size(), overdue, done.size(), rows, all - visible);
     }
 
-    /** کلید «پنهان موقت» یک یادآوری تا وقتی برنامه «انجام شد» را اعمال کند. */
-    public static String hiddenKey(String id, long at) {
+    /** کلید «تیک‌خوردهٔ محلی» یک یادآوری تا وقتی برنامه «انجام شد» را اعمال کند. */
+    public static String doneKey(String id, long at) {
         return id + "@" + at;
     }
 
@@ -135,7 +152,7 @@ public final class ReminderWidgetModel {
         long next = nextMidnight(now, tz);
         if (items != null) {
             for (Item item : items) {
-                if (item != null && item.at > now && item.at < next) next = item.at;
+                if (item != null && !item.done && item.at > now && item.at < next) next = item.at;
             }
         }
         return next + 1_000L;

@@ -42,6 +42,7 @@ WIDGET_RESOURCES = (
     "drawable/kamix_widget_bg.xml",
     "drawable/kamix_widget_circle.xml",
     "drawable/kamix_widget_circle_overdue.xml",
+    "drawable/kamix_widget_circle_done.xml",
     "values/kamix_widget_colors.xml",
     "values/kamix_widget_strings.xml",
     "values-night/kamix_widget_colors.xml",

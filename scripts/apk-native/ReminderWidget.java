@@ -7,8 +7,12 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.StrikethroughSpan;
 import android.view.View;
 import android.widget.RemoteViews;
 
@@ -38,7 +42,11 @@ public final class ReminderWidget {
     private static final String KEY_OPEN_ROUTE_AT = "open_route_at";
     public static final String OPEN_ROUTE = "/reminders";
     private static final long OPEN_ROUTE_TTL_MS = 2 * 60_000L;
-    private static final long HIDDEN_TTL_MS = 48 * 3_600_000L;
+    /**
+     * تیک محلی فقط پل کوتاهی است تا برنامه «انجام شد» را بگیرد و دوباره بفرستد (صف «انجام شد» خودش
+     * تا باز شدن برنامه می‌ماند). کوتاه است تا اگر کاربر در برنامه تیک را برداشت، ویجت هم زود درست شود.
+     */
+    private static final long HIDDEN_TTL_MS = 10 * 60_000L;
     private static final int MAX_ITEMS = 300;
     private static final int MAX_ROWS = 6;
     public static final String ACTION_REFRESH = "com.kamali.inventory.REMINDER_WIDGET_REFRESH";
@@ -102,8 +110,11 @@ public final class ReminderWidget {
                     out.put("title", obj.optString("title", ""));
                     out.put("customer", obj.optString("customer", ""));
                     out.put("at", at);
+                    boolean done = obj.optBoolean("done", false);
+                    out.put("done", done);
                     clean.put(out);
-                    present.add(ReminderWidgetModel.hiddenKey(id, at));
+                    // اگر برنامه خودش «انجام‌شده» فرستاده، تیک محلی دیگر لازم نیست.
+                    if (!done) present.add(ReminderWidgetModel.doneKey(id, at));
                 }
             }
             JSONObject stored = new JSONObject();
@@ -121,7 +132,7 @@ public final class ReminderWidget {
         }
     }
 
-    /** بعد از «انجام شد» (ویجت یا نوتیف) — تا برنامه اعمالش کند، ردیف پنهان می‌ماند. */
+    /** بعد از «انجام شد» (ویجت یا نوتیف) — ردیف فوراً تیک سبز و خط‌خورده می‌شود. */
     public static void onReminderDone(Context context, String id) {
         try {
             if (id == null || id.isEmpty()) return;
@@ -131,7 +142,7 @@ public final class ReminderWidget {
                 JSONObject hidden = parseObject(prefs.getString(KEY_HIDDEN, "{}"));
                 long now = System.currentTimeMillis();
                 for (ReminderWidgetModel.Item item : stored.items) {
-                    if (id.equals(item.id)) hidden.put(ReminderWidgetModel.hiddenKey(item.id, item.at), now);
+                    if (id.equals(item.id)) hidden.put(ReminderWidgetModel.doneKey(item.id, item.at), now);
                 }
                 prefs.edit().putString(KEY_HIDDEN, hidden.toString()).apply();
             }
@@ -189,15 +200,22 @@ public final class ReminderWidget {
             try {
                 Bundle options = manager.getAppWidgetOptions(widgetId);
                 if (options != null) {
-                    heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0);
-                    widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0);
+                    // عمودی: ارتفاع واقعی = MAX_HEIGHT و عرض = MIN_WIDTH؛ افقی برعکس.
+                    boolean landscape = context.getResources().getConfiguration().orientation
+                            == Configuration.ORIENTATION_LANDSCAPE;
+                    heightDp = options.getInt(landscape
+                            ? AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
+                            : AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0);
+                    widthDp = options.getInt(landscape
+                            ? AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH
+                            : AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0);
                 }
             } catch (Exception ignored) {
             }
             int maxRows = Math.min(MAX_ROWS, ReminderWidgetModel.rowsForHeight(heightDp));
             boolean compact = widthDp > 0 && widthDp < 200;
             ReminderWidgetModel.View view = ReminderWidgetModel.build(
-                    stored.items, hiddenKeys(context, stored), now, tz, maxRows);
+                    stored.items, localDoneKeys(context, stored), now, tz, maxRows);
 
             RemoteViews rv = new RemoteViews(context.getPackageName(), R.layout.kamix_widget_reminders);
             PendingIntent open = openAppIntent(context);
@@ -219,18 +237,26 @@ public final class ReminderWidget {
                 }
                 ReminderWidgetModel.Row row = view.rows.get(i);
                 rv.setViewVisibility(ROW_IDS[i], View.VISIBLE);
-                rv.setTextViewText(TITLE_IDS[i], row.item.title.isEmpty() ? "یادآوری" : row.item.title);
+                String title = row.item.title.isEmpty() ? "یادآوری" : row.item.title;
+                rv.setTextViewText(TITLE_IDS[i], row.done ? struck(title) : title);
+                rv.setTextColor(TITLE_IDS[i], color(context,
+                        row.done ? R.color.kamix_widget_muted : R.color.kamix_widget_text));
                 boolean showCustomer = !compact && !row.item.customer.isEmpty();
                 rv.setViewVisibility(CUSTOMER_IDS[i], showCustomer ? View.VISIBLE : View.GONE);
-                if (showCustomer) rv.setTextViewText(CUSTOMER_IDS[i], row.item.customer);
+                if (showCustomer) {
+                    rv.setTextViewText(CUSTOMER_IDS[i], row.done ? struck(row.item.customer) : row.item.customer);
+                }
                 rv.setTextViewText(TIME_IDS[i], row.clock);
                 rv.setTextColor(TIME_IDS[i], color(context,
                         row.overdue ? R.color.kamix_widget_overdue : R.color.kamix_widget_muted));
-                rv.setImageViewResource(CHECK_IDS[i],
-                        row.overdue ? R.drawable.kamix_widget_circle_overdue : R.drawable.kamix_widget_circle);
+                rv.setImageViewResource(CHECK_IDS[i], row.done
+                        ? R.drawable.kamix_widget_circle_done
+                        : row.overdue ? R.drawable.kamix_widget_circle_overdue : R.drawable.kamix_widget_circle);
                 rv.setOnClickPendingIntent(ROW_IDS[i], open);
                 // همان PendingIntent دکمهٔ «انجام شد» نوتیف — مسیر نوشتن جدیدی ساخته نمی‌شود.
-                rv.setOnClickPendingIntent(CHECK_AREA_IDS[i], ReminderScheduler.pendingDoneFor(context, row.item.id));
+                // برداشتن تیک فقط داخل برنامه است (ویجت مسیر نوشتن دیگری ندارد).
+                rv.setOnClickPendingIntent(CHECK_AREA_IDS[i],
+                        row.done ? open : ReminderScheduler.pendingDoneFor(context, row.item.id));
             }
 
             if (hasData && view.more > 0) {
@@ -244,7 +270,7 @@ public final class ReminderWidget {
             if (!hasData) {
                 rv.setViewVisibility(R.id.kamix_widget_empty, View.VISIBLE);
                 rv.setTextViewText(R.id.kamix_widget_empty, "برای دیدن یادآوری‌ها، کامیکس را باز کنید");
-            } else if (view.total == 0) {
+            } else if (view.total == 0 && view.doneCount == 0) {
                 rv.setViewVisibility(R.id.kamix_widget_empty, View.VISIBLE);
                 rv.setTextViewText(R.id.kamix_widget_empty, "امروز یادآوری نداری 🎉");
             } else {
@@ -326,14 +352,21 @@ public final class ReminderWidget {
                         obj.optString("id", ""),
                         obj.optString("title", ""),
                         obj.optString("customer", ""),
-                        obj.optLong("at", 0)));
+                        obj.optLong("at", 0),
+                        obj.optBoolean("done", false)));
             }
         } catch (Exception ignored) {
         }
         return stored;
     }
 
-    private static Set<String> hiddenKeys(Context context, Stored stored) {
+    private static CharSequence struck(String text) {
+        SpannableString out = new SpannableString(text);
+        out.setSpan(new StrikethroughSpan(), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return out;
+    }
+
+    private static Set<String> localDoneKeys(Context context, Stored stored) {
         Set<String> keys = new HashSet<>();
         try {
             JSONObject hidden = parseObject(prefs(context).getString(KEY_HIDDEN, "{}"));
@@ -346,7 +379,7 @@ public final class ReminderWidget {
             // هر چیزی که هنوز در صف «انجام شد» منتظر برنامه است هم پنهان بماند.
             Set<String> pending = ReminderScheduler.pendingDoneIds(context);
             for (ReminderWidgetModel.Item item : stored.items) {
-                if (pending.contains(item.id)) keys.add(ReminderWidgetModel.hiddenKey(item.id, item.at));
+                if (pending.contains(item.id)) keys.add(ReminderWidgetModel.doneKey(item.id, item.at));
             }
         } catch (Exception ignored) {
         }

@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/AuthContext";
 import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX, Stethoscope } from "lucide-react";
 import type { ReactNode } from "react";
@@ -13,7 +13,11 @@ import { ApkWelcomeDialog } from "@/components/ApkWelcomeDialog";
 import { BackupReminderDialog } from "@/components/BackupReminderDialog";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
 import { isAppSession, isSubscriptionReadOnly } from "@/lib/subscription-access";
-import { syncReminderNotifications, takeCompletedReminderIds } from "@/lib/reminder-notifications";
+import {
+  syncReminderNotifications,
+  takeCompletedReminderIds,
+  takeWidgetOpenRoute,
+} from "@/lib/reminder-notifications";
 import { useState, useEffect } from "react";
 
 const nav = [
@@ -43,6 +47,7 @@ const WRITE_NAV_PATHS = new Set(["/scan", "/voice", "/voice-products", "/quick-a
 
 export function Layout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const [appSettings] = settings.useAll();
   const shopName = appSettings.shopName || "کمالی";
   const visibleNav = nav.filter((item) => {
@@ -92,6 +97,15 @@ export function Layout({ children }: { children: ReactNode }) {
           /* نادیده */
         }
       }
+      // ویجت صفحهٔ اصلی (فقط APK جدید): ضربه روی ویجت → صفحهٔ یادآوری‌ها
+      const route = takeWidgetOpenRoute();
+      if (route) {
+        try {
+          void navigate({ to: route });
+        } catch {
+          /* نادیده */
+        }
+      }
     };
     apply();
     const poll = window.setInterval(apply, 2500);
@@ -103,7 +117,7 @@ export function Layout({ children }: { children: ReactNode }) {
       window.clearInterval(poll);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [loggedIn]);
+  }, [loggedIn, navigate]);
 
   return (
     <div

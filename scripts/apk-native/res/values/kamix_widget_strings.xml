@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kamix_widget_label">یادآوری‌های امروز</string>
+    <string name="kamix_widget_description">یادآوری‌های امروز کامیکس روی صفحهٔ اصلی</string>
+    <string name="kamix_widget_heading">یادآوری‌های امروز</string>
+    <string name="kamix_widget_mark_done">انجام شد</string>
+    <string name="kamix_widget_open_app">برای دیدن یادآوری‌ها، کامیکس را باز کنید</string>
+</resources>

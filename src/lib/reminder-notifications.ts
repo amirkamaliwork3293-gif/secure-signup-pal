@@ -12,6 +12,11 @@ export type ReminderNotificationPayload = {
 type KamaliRemindersBridge = {
   sync?: (json: string) => void;
   takeCompleted?: () => string;
+  /** فقط APKهای جدید (ویجت صفحهٔ اصلی). APK قدیمی این متدها را ندارد. */
+  syncWidget?: (json: string) => void;
+  takeOpenRoute?: () => string;
+  canPinWidget?: () => boolean;
+  requestPinWidget?: () => boolean;
 };
 
 function nativeBridge(): KamaliRemindersBridge | undefined {
@@ -86,11 +91,133 @@ export function syncReminderNotifications(
 ): void {
   try {
     const bridge = nativeBridge();
-    if (!bridge || typeof bridge.sync !== "function") return;
-    const payload = enabled ? futureNotificationPayloads(reminders, now) : [];
-    bridge.sync(JSON.stringify(payload));
+    if (bridge && typeof bridge.sync === "function") {
+      const payload = enabled ? futureNotificationPayloads(reminders, now) : [];
+      bridge.sync(JSON.stringify(payload));
+    }
   } catch {
     /* native bridge must never break the web app */
+  }
+  // جدا از زنگ‌ها: ویجت صفحهٔ اصلی (فقط APK جدید). خطای آن روی زنگ‌ها اثری ندارد.
+  syncReminderWidget(reminders, enabled, now);
+}
+
+// ─── ویجت «یادآوری‌های امروز» در صفحهٔ اصلی اندروید ─────────────────────────
+
+export const REMINDER_WIDGET_PAYLOAD_VERSION = 1;
+/** سقف آیتم‌های ارسالی به ویجت (ویجت حداکثر چند ردیف نشان می‌دهد و بقیه را «+N» می‌شمارد). */
+export const MAX_WIDGET_ITEMS = 300;
+/**
+ * پنجرهٔ زمانی ارسال: از ۳۶ ساعت پیش (تا یادآوری‌های گذشتهٔ امروز در هر منطقهٔ زمانی بیایند)
+ * تا ۸ روز بعد (تا ویجت بعد از نیمه‌شب بدون باز کردن برنامه هم فهرست روز جدید را داشته باشد).
+ * انتخاب دقیق «امروز» به وقت تهران در خود ویجت انجام می‌شود.
+ */
+export const WIDGET_PAST_WINDOW_MS = 36 * 3_600_000;
+export const WIDGET_FUTURE_WINDOW_MS = 8 * 86_400_000;
+const MAX_WIDGET_TITLE = 120;
+const MAX_WIDGET_CUSTOMER = 60;
+/** تنها مسیری که ویجت اجازه دارد برنامه را رویش باز کند. */
+export const REMINDER_WIDGET_ROUTE = "/reminders";
+
+export type ReminderWidgetItem = {
+  id: string;
+  title: string;
+  customer: string;
+  at: number;
+};
+
+export type ReminderWidgetPayload = {
+  v: number;
+  /** false یعنی کاربر وارد نشده یا بخش یادآوری خاموش است — ویجت چیزی نشان نمی‌دهد. */
+  enabled: boolean;
+  generatedAt: number;
+  items: ReminderWidgetItem[];
+};
+
+function clip(text: unknown, max: number): string {
+  const value = typeof text === "string" ? text.trim() : "";
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+/** داده‌ای که ویجت لازم دارد — فقط عنوان، نام مشتری و زمان (همان چیزی که نوتیف هم نشان می‌دهد). */
+export function widgetPayload(
+  reminders: Reminder[],
+  enabled: boolean,
+  now = Date.now(),
+): ReminderWidgetPayload {
+  const from = now - WIDGET_PAST_WINDOW_MS;
+  const to = now + WIDGET_FUTURE_WINDOW_MS;
+  const items =
+    enabled && Array.isArray(reminders)
+      ? reminders
+          .filter(
+            (r) =>
+              !!r &&
+              !r.done &&
+              typeof r.id === "string" &&
+              r.id.length > 0 &&
+              typeof r.dueAt === "number" &&
+              Number.isFinite(r.dueAt) &&
+              r.dueAt >= from &&
+              r.dueAt < to,
+          )
+          .sort((a, b) => a.dueAt - b.dueAt)
+          .slice(0, MAX_WIDGET_ITEMS)
+          .map((r) => ({
+            id: r.id,
+            title: clip(r.title, MAX_WIDGET_TITLE) || "یادآوری",
+            customer: clip(r.customerName, MAX_WIDGET_CUSTOMER),
+            at: r.dueAt,
+          }))
+      : [];
+  return { v: REMINDER_WIDGET_PAYLOAD_VERSION, enabled, generatedAt: now, items };
+}
+
+/** No-op روی سایت و APK قدیمی. روی APK جدید دادهٔ ویجت را جداگانه می‌فرستد. */
+export function syncReminderWidget(
+  reminders: Reminder[],
+  enabled: boolean,
+  now = Date.now(),
+): void {
+  try {
+    const bridge = nativeBridge();
+    if (!bridge || typeof bridge.syncWidget !== "function") return;
+    bridge.syncWidget(JSON.stringify(widgetPayload(reminders, enabled, now)));
+  } catch {
+    /* native bridge must never break the web app */
+  }
+}
+
+/** اگر کاربر روی ویجت زده باشد، یک‌بار «/reminders» برمی‌گرداند؛ وگرنه null. */
+export function takeWidgetOpenRoute(): typeof REMINDER_WIDGET_ROUTE | null {
+  try {
+    const bridge = nativeBridge();
+    if (!bridge || typeof bridge.takeOpenRoute !== "function") return null;
+    return bridge.takeOpenRoute() === REMINDER_WIDGET_ROUTE ? REMINDER_WIDGET_ROUTE : null;
+  } catch {
+    return null;
+  }
+}
+
+/** فقط APK جدید روی اندروید ۸+ با لانچری که «افزودن ویجت از داخل برنامه» را پشتیبانی کند. */
+export function canRequestReminderWidget(): boolean {
+  try {
+    const bridge = nativeBridge();
+    if (!bridge || typeof bridge.canPinWidget !== "function") return false;
+    return bridge.canPinWidget() === true;
+  } catch {
+    return false;
+  }
+}
+
+/** پنجرهٔ سیستمی «افزودن ویجت به صفحهٔ اصلی» را باز می‌کند. */
+export function requestReminderWidget(): boolean {
+  try {
+    const bridge = nativeBridge();
+    if (!bridge || typeof bridge.requestPinWidget !== "function") return false;
+    return bridge.requestPinWidget() === true;
+  } catch {
+    return false;
   }
 }
 

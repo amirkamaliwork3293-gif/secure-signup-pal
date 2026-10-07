@@ -26,9 +26,34 @@ def copy_java(dest: Path) -> None:
         "ReminderAlarmReceiver.java",
         "ReminderBootReceiver.java",
         "ReminderRingtone.java",
+        "ReminderWidget.java",
+        "ReminderWidgetModel.java",
+        "ReminderWidgetOpenActivity.java",
+        "ReminderWidgetProvider.java",
     ):
         shutil.copyfile(ROOT / name, dest / name)
         print(f"copied {name}")
+
+
+# منابع ویجت «یادآوری‌های امروز». همه با پیشوند kamix_widget_ تا با منابع Capacitor تداخل نکنند.
+WIDGET_RESOURCES = (
+    "layout/kamix_widget_reminders.xml",
+    "xml/kamix_widget_reminders_info.xml",
+    "drawable/kamix_widget_bg.xml",
+    "drawable/kamix_widget_circle.xml",
+    "drawable/kamix_widget_circle_overdue.xml",
+    "values/kamix_widget_colors.xml",
+    "values/kamix_widget_strings.xml",
+    "values-night/kamix_widget_colors.xml",
+)
+
+
+def copy_resources(res_dir: Path) -> None:
+    for rel in WIDGET_RESOURCES:
+        target = res_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "res" / rel, target)
+        print(f"copied res/{rel}")
 
 
 def patch_manifest(path: Path) -> None:
@@ -69,6 +94,39 @@ def patch_manifest(path: Path) -> None:
         if "</application>" not in text:
             raise SystemExit("AndroidManifest.xml missing </application>")
         text = text.replace("</application>", receivers + "    </application>", 1)
+
+    widget = """
+        <receiver
+            android:name=".ReminderWidgetProvider"
+            android:exported="false"
+            android:label="@string/kamix_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.kamali.inventory.REMINDER_WIDGET_REFRESH" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/kamix_widget_reminders_info" />
+        </receiver>
+        <activity
+            android:name=".ReminderWidgetOpenActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+"""
+    if "ReminderWidgetProvider" not in text:
+        if "</application>" not in text:
+            raise SystemExit("AndroidManifest.xml missing </application>")
+        text = text.replace("</application>", widget + "    </application>", 1)
 
     path.write_text(text, encoding="utf-8")
     print("patched AndroidManifest.xml")
@@ -157,6 +215,7 @@ def patch_gradle(path: Path) -> None:
 def main() -> None:
     dest = java_dir()
     copy_java(dest)
+    copy_resources(ANDROID_ROOT / "app" / "src" / "main" / "res")
     patch_manifest(ANDROID_ROOT / "app" / "src" / "main" / "AndroidManifest.xml")
     patch_main_activity(dest / "MainActivity.java")
     patch_gradle(ANDROID_ROOT / "app" / "build.gradle")

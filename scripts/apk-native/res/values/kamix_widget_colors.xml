@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="kamix_widget_bg">#FFFFFF</color>
+    <color name="kamix_widget_primary">#0072D5</color>
+    <color name="kamix_widget_text">#0F172A</color>
+    <color name="kamix_widget_muted">#64748B</color>
+    <color name="kamix_widget_divider">#E2E8F0</color>
+    <color name="kamix_widget_overdue">#DC2626</color>
+</resources>

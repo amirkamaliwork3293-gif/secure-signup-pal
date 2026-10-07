@@ -63,6 +63,12 @@ public class ReminderJsBridge {
         }
     }
 
+    /** ۲: ویجت یادآوری‌های انجام‌شده را با تیک سبز و خط‌خورده نشان می‌دهد (فیلد done). */
+    @JavascriptInterface
+    public int widgetVersion() {
+        return 2;
+    }
+
     /** یک‌بار مصرف: «/reminders» اگر برنامه از روی ویجت باز شده باشد. */
     @JavascriptInterface
     public String takeOpenRoute() {

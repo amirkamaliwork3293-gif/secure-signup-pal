@@ -17,6 +17,7 @@ import {
   formatJalaliDateTime,
   formatChequeDue,
   currencyLabel,
+  amountInDisplayUnit,
   PAYMENT_LABEL,
   invoiceDocumentTitle,
   type Invoice,
@@ -29,7 +30,6 @@ import {
   qtyWithUnit,
   DEFAULT_INVOICE_ACCENT,
 } from "@/lib/invoice-document";
-import { amountToPersianWords } from "@/lib/amount-words";
 
 const SCALE = 6;
 const PAGE_W = 210 * SCALE;
@@ -287,11 +287,7 @@ function metaItems(inv: Invoice): MetaItem[] {
   if (due) out.push({ k: "سررسید چک", v: formatChequeDue(due) });
   if (inv.paymentMethod) out.push({ k: "نوع پرداخت", v: PAYMENT_LABEL[inv.paymentMethod] });
   out.push({ k: "تعداد اقلام", v: formatNumber(inv.items.length) });
-  out.push(
-    t.remaining > 0
-      ? { k: "وضعیت", v: "دارای مانده", tone: "due" }
-      : { k: "وضعیت", v: "تسویه شده", tone: "ok" },
-  );
+  if (t.remaining > 0) out.push({ k: "وضعیت", v: "دارای مانده", tone: "due" });
   return out;
 }
 
@@ -473,16 +469,11 @@ const TOTALS_W = 82 * SCALE;
 
 function payWordsLines(inv: Invoice): string[] {
   const t = invoiceTotals(inv);
-  const words = amountToPersianWords(t.total);
+  const words = amountInDisplayUnit(t.total).wordsText;
   if (!words) return [];
   const ctx = measurer();
   ctx.font = `400 ${3 * SCALE}px ${FONT}`;
-  return wrapText(
-    ctx,
-    `مبلغ به حروف: ${words} ${currencyLabel()}`,
-    INNER_W - TOTALS_W - 12 * SCALE,
-    4,
-  );
+  return wrapText(ctx, `مبلغ به حروف: ${words}`, INNER_W - TOTALS_W - 12 * SCALE, 4);
 }
 
 function folioHeight(inv: Invoice): number {
@@ -494,7 +485,6 @@ function folioHeight(inv: Invoice): number {
 
 function drawFolio(ctx: Ctx, y: number, inv: Invoice): number {
   const all = invoiceAmountLines(inv);
-  const settled = all.some((l) => l.kind === "grand") && !all.some((l) => l.kind === "due");
   const h = folioHeight(inv);
   const tx = MARGIN;
   // کادر جمع‌ها (سمت چپ)
@@ -524,7 +514,7 @@ function drawFolio(ctx: Ctx, y: number, inv: Invoice): number {
     ly += rh;
   });
 
-  // مبلغ به حروف و مهر تسویه (سمت راست)
+  // مبلغ به حروف (سمت راست)
   const words = payWordsLines(inv);
   const wx = tx + TOTALS_W + 6 * SCALE;
   const ww = PAGE_W - MARGIN - wx;
@@ -537,16 +527,6 @@ function drawFolio(ctx: Ctx, y: number, inv: Invoice): number {
     words.forEach((line, i) =>
       ctx.fillText(line, PAGE_W - MARGIN - 3 * SCALE, y + 4.4 * SCALE + i * 4.6 * SCALE),
     );
-    if (settled) {
-      const sy = y + wh + 3 * SCALE;
-      ctx.font = `700 ${3.4 * SCALE}px ${FONT}`;
-      const label = "تسویه شد";
-      const lw = ctx.measureText(label).width + 8 * SCALE;
-      box(ctx, PAGE_W - MARGIN - lw, sy, lw, 8 * SCALE, { stroke: P.success, width: 2.2 });
-      ctx.textAlign = "center";
-      ctx.fillStyle = P.success;
-      ctx.fillText(label, PAGE_W - MARGIN - lw / 2, sy + 4 * SCALE);
-    }
   }
   return y + h;
 }

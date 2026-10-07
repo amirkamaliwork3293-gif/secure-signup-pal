@@ -16,6 +16,7 @@ import {
   formatAmount,
   formatNumber,
   currencyLabel,
+  amountInDisplayUnit,
   formatJalaliDate,
   formatJalaliDateTime,
   PAYMENT_LABEL,
@@ -28,7 +29,6 @@ import {
 import { invoiceTotals, lineTotal, invoiceCheques, chequeLineLabel } from "@/lib/invoice-math";
 import { type PaperSize } from "@/lib/print";
 import { escapeHtml } from "@/lib/html-escape";
-import { amountToPersianWords } from "@/lib/amount-words";
 import {
   normalizeReceiptSettings,
   printFontFaceCss,
@@ -555,16 +555,14 @@ export function invoiceFooterHtml(inv: Invoice): string {
  */
 export function invoicePayCardHtml(inv: Invoice): string {
   const lines = invoiceAmountLines(inv);
-  const settled = lines.some((l) => l.kind === "grand") && !lines.some((l) => l.kind === "due");
-  const words = amountToPersianWords(invoiceTotals(inv).total);
+  const words = amountInDisplayUnit(invoiceTotals(inv).total).wordsText;
   const row = (l: AmountLine) =>
     l.kind === "grand"
       ? `<div class="grand"><span class="grand-k">${esc(l.label)}</span><span class="grand-v">${esc(l.amount)}<span class="cur">${esc(l.currency)}</span></span></div>`
       : `<div class="pay-row${l.kind === "due" ? " due" : ""}"><span class="k">${esc(l.label)}</span><span class="v">${esc(l.value)}</span></div>`;
   return `<section class="folio">
     <div class="folio-side">
-      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)} ${esc(currencyLabel())}</div>` : ""}
-      ${settled ? `<div class="seal">تسویه شد</div>` : ""}
+      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)}</div>` : ""}
     </div>
     <div class="totals">${lines.map(row).join("")}</div>
   </section>`;
@@ -584,11 +582,7 @@ function metaStripHtml(inv: Invoice): string {
   if (dueDate) items.push({ k: "سررسید چک", v: esc(formatChequeDue(dueDate)) });
   if (inv.paymentMethod) items.push({ k: "نوع پرداخت", v: esc(PAYMENT_LABEL[inv.paymentMethod]) });
   items.push({ k: "تعداد اقلام", v: inv.items.length.toLocaleString("fa-IR") });
-  items.push(
-    t.remaining > 0
-      ? { k: "وضعیت", v: "دارای مانده", tone: "due" }
-      : { k: "وضعیت", v: "تسویه شده", tone: "ok" },
-  );
+  if (t.remaining > 0) items.push({ k: "وضعیت", v: "دارای مانده", tone: "due" });
   return `<section class="facts">${items
     .map(
       (it) =>
@@ -717,6 +711,7 @@ export function buildThermalInvoiceHTML(
   const amountLines = invoiceAmountLines(inv);
   const grand = amountLines.find((l) => l.kind === "grand");
   const t = invoiceTotals(inv);
+  const words = amountInDisplayUnit(t.total).wordsText;
   // شماره تلفن جدا (LTR) تا در متن راست‌به‌چپ وارونه نشود
   const contact = [
     inv.shopAddress ? esc(inv.shopAddress) : "",
@@ -768,7 +763,7 @@ export function buildThermalInvoiceHTML(
   ${items || `<div class="c sub">قلمی ثبت نشده است</div>`}
   <hr class="b"/>
   ${lines}
-  ${sh.amountWords && grand ? `<div class="words">به حروف: ${esc(amountToPersianWords(t.total))} ${esc(currencyLabel())}</div>` : ""}
+  ${sh.amountWords && grand && words ? `<div class="words">به حروف: ${esc(words)}</div>` : ""}
   ${sh.thanks && s.footerText.trim() ? `<div class="foot">${esc(s.footerText.trim())}</div>` : ""}
   <div class="cut">- - - - - - - -</div>`;
   return receiptDocument({ title: `فیش ${inv.id.toUpperCase()}`, body, s });

@@ -26,6 +26,8 @@ import {
   isManualInvoiceItem,
   customerAmbiguity,
   productStockHint,
+  accounts,
+  invoiceReceivedNow,
   type Customer,
   type CustomerInfo,
   type PaymentMethod,
@@ -38,6 +40,7 @@ import {
   invoiceTotals,
   withSyncedChequeFields,
   invoiceCheques,
+  invoiceCustomerDebt,
 } from "@/lib/invoice-math";
 import { checkoutFields, normalizeTemplate, type InvoiceTemplate } from "@/lib/invoice-template";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
@@ -58,8 +61,12 @@ import {
   Package,
   UserCheck,
   NotebookPen,
+  Check,
+  AlertCircle,
+  Landmark,
 } from "lucide-react";
 import { InvoiceActions } from "@/components/InvoiceActions";
+import { MoneyInput } from "@/components/MoneyInput";
 import { InvoiceSavedDialog } from "@/components/InvoiceSavedDialog";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
@@ -147,7 +154,26 @@ export function InvoiceWorkspace() {
   // اطلاعات تکمیلی مشتری روی همین فاکتور (از فیلدهای سنجاق‌شده پر می‌شود)
   const [partyFields, setPartyFields] = useState<InvoicePartyField[]>(inv.customerFields ?? []);
   const [saveFieldsToProfile, setSaveFieldsToProfile] = useState(false);
+  const [accountsList] = accounts.useAll();
+  // حساب انتخاب‌شده فقط اگر هنوز وجود داشته باشد (حساب حذف‌شده انتخاب نمی‌ماند)
+  const [depositAccountIdRaw, setDepositAccountId] = useState<string>(inv.accountId ?? "");
+  const depositAccountId = accountsList.some((a) => a.id === depositAccountIdRaw)
+    ? depositAccountIdRaw
+    : "";
+  // روی تب فاکتور هم نوشته می‌شود تا با جابه‌جایی بین تب‌ها گم نشود
+  const pickDepositAccount = (id: string) => {
+    setDepositAccountId(id);
+    setInv((prev) => ({ ...prev, accountId: id || undefined }));
+  };
   const [ambiguous, setAmbiguous] = useState<Customer[] | null>(null);
+  // انتخاب از بین چند مشتری هم‌نام: برای ثبت فاکتور یا برای «ذخیره اطلاعات مشتری»
+  const [ambiguousFor, setAmbiguousFor] = useState<"checkout" | "save">("checkout");
+  const [customerSaveState, setCustomerSaveState] = useState<"idle" | "saved" | "error">("idle");
+  useEffect(() => {
+    if (customerSaveState === "idle") return;
+    const t = setTimeout(() => setCustomerSaveState("idle"), 2400);
+    return () => clearTimeout(t);
+  }, [customerSaveState]);
   const [stockNotice, setStockNotice] = useState<StockAddResult | null>(null);
 
   // ── منبع واحد اعداد این صفحه ───────────────────────────────────────────────
@@ -200,6 +226,8 @@ export function InvoiceWorkspace() {
     notes: notes.trim() ? notes.trim() : undefined,
   };
   const totals = invoiceTotals(draftInvoice);
+  // واریز به حساب/کارت: فقط مبلغی که همین حالا دریافت شده (نه بخش نسیه یا چک)
+  const receivedNow = invoiceReceivedNow(draftInvoice);
 
   // Sync local customer form whenever the active tab changes
   useEffect(() => {
@@ -222,6 +250,7 @@ export function InvoiceWorkspace() {
       setCheques([]);
     }
     setNotes(inv.notes ?? "");
+    setDepositAccountId(inv.accountId ?? "");
     setPartyFields(inv.customerFields ?? []);
     setSaveFieldsToProfile(false);
     setShowCustomer(
@@ -348,6 +377,7 @@ export function InvoiceWorkspace() {
         const candidates = customerAmbiguity(customer);
         if (candidates.length > 0) {
           setAmbiguous(candidates);
+          setAmbiguousFor("checkout");
           return;
         }
         const found = customers.findOrCreate(customer);
@@ -397,14 +427,16 @@ export function InvoiceWorkspace() {
       shopLogoUrl: appSettings.logoUrl || undefined,
       paidAmount: paymentMethod === "credit" || paymentMethod === "check" ? paid : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
+      accountId: depositAccountId || undefined,
       ...chequePayload,
     };
     const saved = invoice.archive(finalInv);
     if (!invoice.getHistory().some((h) => h.id === saved.id)) return;
-    // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک
+    // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک + هر مانده‌ی
+    // نسیه‌ای که نه نقد داده شده نه چک (قبلاً این مانده در حساب مشتری ثبت نمی‌شد)
+    const debt = invoiceCustomerDebt(saved);
     let linked = null as ReturnType<typeof customers.findOrCreate>;
     if (paymentMethod === "credit") {
-      const debt = Math.max(0, baseTotal - paid);
       if (debt > 0)
         linked = customers.recordInvoiceDebt(customer, saved, {
           amount: debt,
@@ -412,8 +444,8 @@ export function InvoiceWorkspace() {
         });
       else if (hasCustomer) linked = customers.findOrCreate(customer);
     } else if (paymentMethod === "check") {
-      if (chk > 0)
-        linked = customers.recordInvoiceDebt(customer, saved, { amount: chk, note: "چک دریافتی" });
+      if (debt > 0)
+        linked = customers.recordInvoiceDebt(customer, saved, { amount: debt, note: "چک دریافتی" });
       else if (hasCustomer) linked = customers.findOrCreate(customer);
       scheduleChequeReminders(saved, customerLabel);
     } else if (hasCustomer) {
@@ -436,6 +468,7 @@ export function InvoiceWorkspace() {
     setPaidAmount(0);
     setCheques([]);
     setNotes("");
+    setDepositAccountId("");
     setCustomerQ("");
     setShowCustomer(false);
     setCustomFields({});
@@ -443,8 +476,59 @@ export function InvoiceWorkspace() {
     setDoneInv(saved);
   };
 
-  const saveCustomer = () => {
-    setInv((prev) => ({ ...prev, customer, customerFields: cleanInvoiceFields(partyFields) }));
+  /**
+   * «ذخیره اطلاعات مشتری»: اطلاعات روی همین فاکتور می‌نشیند و مشتری در «مشتریان»
+   * ثبت می‌شود — با همان منطق تطبیق ثبت فاکتور (شناسه → تلفن → نام)، پس مشتری
+   * تکراری ساخته نمی‌شود و اگر چند مشتری بخوانند، از کاربر پرسیده می‌شود.
+   * اطلاعات مشتری موجود بازنویسی نمی‌شود (فقط تلفنِ خالی تکمیل می‌شود).
+   */
+  const saveCustomer = (picked?: Customer | "new") => {
+    if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
+    let next: CustomerInfo = customer;
+    try {
+      const hasInfo = !!(next.firstName?.trim() || next.lastName?.trim() || next.phone?.trim());
+      if (hasInfo && !next.customerId) {
+        if (picked && picked !== "new") {
+          next = {
+            firstName: picked.firstName,
+            lastName: picked.lastName,
+            phone: next.phone?.trim() || picked.phone,
+            customerId: picked.id,
+          };
+        } else if (picked === "new") {
+          const created = customers.add({
+            firstName: next.firstName?.trim() || next.phone?.trim() || "مشتری",
+            lastName: next.lastName?.trim() || undefined,
+            phone: next.phone?.trim() || undefined,
+          });
+          next = { ...next, customerId: created.id };
+        } else {
+          const candidates = customerAmbiguity(next);
+          if (candidates.length > 0) {
+            setAmbiguous(candidates);
+            setAmbiguousFor("save");
+            return;
+          }
+          const found = customers.findOrCreate(next);
+          if (found) next = { ...next, customerId: found.id };
+        }
+      }
+      // ذخیره واقعاً انجام شده؟ (مثلاً نوشتن در حالت فقط‌خواندنی رد می‌شود)
+      if (next.customerId && !customers.getAll().some((c) => c.id === next.customerId)) {
+        throw new Error("customer not saved");
+      }
+      setCustomer(next);
+      setInv((prev) => ({
+        ...prev,
+        customer: next,
+        customerFields: cleanInvoiceFields(partyFields),
+      }));
+      setCustomerSaveState(hasInfo ? "saved" : "idle");
+    } catch (err) {
+      console.error("[invoice] saving customer failed", err);
+      setCustomerSaveState("error");
+    }
   };
 
   const addFromSearch = (productId: string) => {
@@ -937,10 +1021,30 @@ export function InvoiceWorkspace() {
             onSaveToProfileChange={setSaveFieldsToProfile}
           />
           <button
-            onClick={saveCustomer}
-            className="mt-2 w-full rounded-xl bg-primary/10 py-2 text-xs font-medium text-primary"
+            type="button"
+            onClick={() => saveCustomer()}
+            aria-live="polite"
+            className={`mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition-colors duration-300 ${
+              customerSaveState === "saved"
+                ? "bg-success text-success-foreground"
+                : customerSaveState === "error"
+                  ? "bg-destructive text-destructive-foreground"
+                  : "bg-primary/10 text-primary"
+            }`}
           >
-            ذخیره اطلاعات مشتری
+            {customerSaveState === "saved" ? (
+              <>
+                <Check className="h-4 w-4 animate-in zoom-in-50 duration-300" />
+                ذخیره شد
+              </>
+            ) : customerSaveState === "error" ? (
+              <>
+                <AlertCircle className="h-4 w-4" />
+                ذخیره نشد — دوباره تلاش کنید
+              </>
+            ) : (
+              "ذخیره اطلاعات مشتری"
+            )}
           </button>
         </div>
       )}
@@ -1177,13 +1281,10 @@ export function InvoiceWorkspace() {
             <label className="block text-[11px] font-medium text-muted-foreground">
               مبلغ پرداخت‌شده نقد (اختیاری) — بقیه نسیه ثبت می‌شود
             </label>
-            <input
-              value={paidAmount ? formatNumber(paidAmount) : ""}
-              onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
-              placeholder="۰"
-              inputMode="numeric"
-              dir="ltr"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            <MoneyInput
+              value={paidAmount}
+              onChange={setPaidAmount}
+              ariaLabel="مبلغ پرداخت‌شده نقد"
             />
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
@@ -1204,14 +1305,7 @@ export function InvoiceWorkspace() {
               <label className="block text-[11px] font-medium text-muted-foreground">
                 مبلغ نقدی (اختیاری)
               </label>
-              <input
-                value={paidAmount ? formatNumber(paidAmount) : ""}
-                onChange={(e) => setPaidAmount(parseNumberInput(e.target.value))}
-                placeholder="۰"
-                inputMode="numeric"
-                dir="ltr"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-              />
+              <MoneyInput value={paidAmount} onChange={setPaidAmount} ariaLabel="مبلغ نقدی" />
             </div>
             <ChequeEditor
               cheques={cheques}
@@ -1229,6 +1323,50 @@ export function InvoiceWorkspace() {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {/* واریز به حساب/کارت (اختیاری) — فقط اگر کاربر حساب/کارتی تعریف کرده باشد */}
+        {accountsList.length > 0 && inv.items.length > 0 && (
+          <div className="mt-3 rounded-xl border border-dashed border-border bg-background/50 p-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              <Landmark className="h-3.5 w-3.5" />
+              واریز به کارت (اختیاری)
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => pickDepositAccount("")}
+                className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                  depositAccountId === ""
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                بدون واریز
+              </button>
+              {accountsList.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => pickDepositAccount(a.id)}
+                  className={`rounded-full px-3 py-1.5 text-[11px] transition ${
+                    depositAccountId === a.id
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                  }`}
+                >
+                  {a.name}
+                </button>
+              ))}
+            </div>
+            {depositAccountId && (
+              <div className="mt-1.5 text-[10px] leading-5 text-muted-foreground">
+                {receivedNow > 0
+                  ? `${formatToman(receivedNow)} (فقط مبلغ پرداخت‌شده) به موجودی این حساب اضافه می‌شود.`
+                  : "این فاکتور مبلغ پرداخت‌شده‌ای ندارد؛ چیزی به حساب واریز نمی‌شود."}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1512,7 +1650,8 @@ export function InvoiceWorkspace() {
           onCancel={() => setAmbiguous(null)}
           onPick={(c) => {
             setAmbiguous(null);
-            checkout(c);
+            if (ambiguousFor === "save") saveCustomer(c);
+            else checkout(c);
           }}
         />
       )}

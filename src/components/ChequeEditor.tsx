@@ -1,8 +1,10 @@
 import { Plus, Trash2, Landmark, CalendarClock } from "lucide-react";
 import { JalaliDateSelect } from "@/components/JalaliPickers";
+import { MoneyInput } from "@/components/MoneyInput";
 import {
   cryptoId,
   formatNumber,
+  formatAmount,
   formatToman,
   parseNumberInput,
   toJalaliInputFromDue,
@@ -106,13 +108,12 @@ export function ChequeEditor({
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="mb-1 block text-[11px] text-muted-foreground">مبلغ چک</span>
-                  <input
-                    value={c.amount ? formatNumber(c.amount) : ""}
-                    onChange={(e) => update(c.id, { amount: parseNumberInput(e.target.value) })}
-                    placeholder={leftover > 0 && c.amount <= 0 ? formatNumber(leftover) : "۰"}
-                    inputMode="numeric"
-                    dir="ltr"
-                    className={INPUT}
+                  {/* مبلغ در واحد نمایش (تومان/ریال)؛ ذخیره همیشه تومان */}
+                  <MoneyInput
+                    value={c.amount}
+                    onChange={(amount) => update(c.id, { amount })}
+                    placeholder={leftover > 0 && c.amount <= 0 ? formatAmount(leftover) : "۰"}
+                    ariaLabel="مبلغ چک"
                   />
                 </label>
                 <label className="block">

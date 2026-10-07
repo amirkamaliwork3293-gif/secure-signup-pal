@@ -237,3 +237,15 @@ export function invoiceTotals(inv: Invoice): InvoiceTotals {
     remaining: deferred ? Math.max(0, total - paid - checkAmount) : 0,
   };
 }
+
+/**
+ * بدهی‌ای که یک فاکتور فروش در حساب مشتری می‌سازد (تراکنش «debt» با invoiceId).
+ * نسیه و چک: جمع کل − پرداخت نقدی. چک تا وصول بدهی مشتری حساب می‌شود و بخشی
+ * که نه نقد داده شده نه چک (مانده‌ی نسیه)، هم بدهی است. نقد و کارت: صفر.
+ * پرداخت‌های بعدی مشتری جدا (تراکنش «payment») ثبت می‌شوند، نه روی فاکتور.
+ */
+export function invoiceCustomerDebt(inv: Invoice): number {
+  if (inv.paymentMethod !== "credit" && inv.paymentMethod !== "check") return 0;
+  const t = invoiceTotals(inv);
+  return Math.max(0, t.total - t.paid);
+}

@@ -15,6 +15,7 @@ import {
   PAYMENT_LABEL,
   formatAmount,
   currencyLabel,
+  amountInDisplayUnit,
 } from "@/lib/store";
 import {
   printHtml,
@@ -45,7 +46,6 @@ import {
   wrapInvoiceHtml,
   type InvoiceHtmlMode,
 } from "@/lib/invoice-document";
-import { amountToPersianWords } from "@/lib/amount-words";
 import type { PaperSize } from "@/lib/print";
 
 // ─── HTML فاکتور خرید (A4) ──────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export function buildPurchaseHTML(
       ? row("مانده بدهی به تامین‌کننده", `${formatAmount(remaining)} ${cur}`, " due")
       : "",
   ].join("");
-  const words = amountToPersianWords(t.total);
+  const words = amountInDisplayUnit(t.total).wordsText;
   const inner = `<div class="sheet"><div class="doc">
   ${head}
   <section class="facts">
@@ -135,7 +135,7 @@ export function buildPurchaseHTML(
   </div>
   <section class="folio">
     <div class="folio-side">
-      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)} ${esc(cur)}</div>` : ""}
+      ${words ? `<div class="pay-words"><b>مبلغ به حروف:</b> ${esc(words)}</div>` : ""}
     </div>
     <div class="totals">${totals}</div>
   </section>

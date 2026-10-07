@@ -935,7 +935,13 @@ function AccountsPanel() {
                           )}
                           <span className="min-w-0 truncate">
                             {formatJalaliDate(t.at)}
-                            {t.note ? ` — ${t.note}` : t.expenseId ? " — هزینه" : ""}
+                            {t.note
+                              ? ` — ${t.note}`
+                              : t.expenseId
+                                ? " — هزینه"
+                                : t.invoiceId
+                                  ? " — فاکتور فروش"
+                                  : ""}
                           </span>
                         </span>
                         <span className="flex shrink-0 items-center gap-1.5">
@@ -949,7 +955,7 @@ function AccountsPanel() {
                             {t.type === "deposit" ? "+" : "−"}
                             {formatToman(t.amount)}
                           </span>
-                          {!t.expenseId && (
+                          {!t.expenseId && !t.invoiceId && (
                             <button
                               onClick={() => {
                                 setEditingTx(t);

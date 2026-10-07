@@ -40,6 +40,7 @@ import {
   type Product,
   type PaymentMethod,
   type StockAddResult,
+  currencyLabel,
 } from "@/lib/store";
 import { useAuth } from "@/lib/AuthContext";
 import { authUserId } from "@/lib/subscription-access";
@@ -50,6 +51,7 @@ import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { openExternal, shareText, toIntlPhone, telHref } from "@/lib/openExternal";
 import { isWebView } from "@/lib/isWebView";
 import { JalaliDateSelect } from "@/components/JalaliPickers";
+import { MoneyInput } from "@/components/MoneyInput";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
 import { InvoiceActions } from "@/components/InvoiceActions";
 import { PurchaseActions } from "@/components/PurchaseActions";
@@ -145,6 +147,7 @@ function CustomersPageInner() {
   const [showCampaign, setShowCampaign] = useState(false);
   const [showDebtFollowup, setShowDebtFollowup] = useState(false);
   const [detailTarget, setDetailTarget] = useState<Customer | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<Customer | null>(null);
   const [contactsBusy, setContactsBusy] = useState(false);
   const [contactsMsg, setContactsMsg] = useState<string | null>(null);
@@ -261,11 +264,8 @@ function CustomersPageInner() {
     return { debtors, creditors, settled };
   }, [filtered, filter, searchQ, sortBy]);
 
-  const removeCustomer = (c: Customer) => {
-    if (!confirm(`حساب «${customerFullName(c)}» حذف شود؟ تمام سوابق بدهی و پرداخت پاک می‌شود.`))
-      return;
-    customers.remove(c.id);
-  };
+  // حذف مشتری همیشه از دیالوگ تأیید می‌گذرد؛ حذف واقعی فقط customers.remove (با tombstone همگام‌سازی)
+  const removeCustomer = (c: Customer) => setDeleteTarget(c);
 
   // افزودن مشتری از مخاطبین گوشی. توجه: Contact Picker API فقط در مرورگر (عمدتاً
   // کروم اندروید) پشتیبانی می‌شود و داخل اپلیکیشن اندروید (WebView) در دسترس
@@ -730,6 +730,19 @@ function CustomersPageInner() {
         />
       )}
 
+      {deleteTarget && (
+        <DeleteCustomerDialog
+          customer={customers.getAll().find((c) => c.id === deleteTarget.id) ?? deleteTarget}
+          invoiceCount={docs.byCustomer.get(deleteTarget.id)?.invoices.length ?? 0}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            customers.remove(deleteTarget.id);
+            if (detailTarget?.id === deleteTarget.id) setDetailTarget(null);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
+
       {editTarget && (
         <CustomerModal
           initial={editTarget}
@@ -790,10 +803,7 @@ function CustomersPageInner() {
             setEditTarget(detailTarget);
             setDetailTarget(null);
           }}
-          onDelete={() => {
-            removeCustomer(detailTarget);
-            setDetailTarget(null);
-          }}
+          onDelete={() => removeCustomer(detailTarget)}
           onRemindDebt={() => {
             setReminderTarget(detailTarget);
             setDetailTarget(null);
@@ -1117,6 +1127,76 @@ function CustomerModal({
   );
 }
 
+// ─── تأیید حذف مشتری ────────────────────────────────────────────────────────
+
+/**
+ * فقط خود مشتری و دفتر بدهی/پرداختش حذف می‌شود؛ فاکتورهای فروش و خرید در
+ * «تاریخچه» می‌مانند. اگر مانده‌ی حساب صفر نیست، هشدار پررنگ نمایش داده می‌شود.
+ */
+function DeleteCustomerDialog({
+  customer,
+  invoiceCount,
+  onCancel,
+  onConfirm,
+}: {
+  customer: Customer;
+  invoiceCount: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const balance = customerBalance(customer);
+  const name = customerFullName(customer) || "این مشتری";
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-end justify-center bg-foreground/40 p-0 sm:items-center sm:p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="حذف مشتری"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="w-full max-w-sm space-y-3 rounded-t-3xl border border-border bg-card p-5 shadow-elegant sm:rounded-3xl">
+        <h3 className="flex items-center gap-2 text-base font-bold text-destructive">
+          <Trash2 className="h-5 w-5" />
+          حذف مشتری «{name}»
+        </h3>
+        {balance !== 0 && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs font-semibold leading-6 text-destructive">
+            {balance > 0
+              ? `این مشتری ${formatToman(balance)} به شما بدهکار است.`
+              : `این مشتری ${formatToman(-balance)} از شما طلبکار است.`}{" "}
+            با حذف، این مانده و تمام سوابق بدهی و پرداخت او پاک می‌شود.
+          </div>
+        )}
+        <p className="text-xs leading-6 text-muted-foreground">
+          {balance === 0 && "سوابق بدهی و پرداخت این مشتری پاک می‌شود. "}
+          {invoiceCount > 0
+            ? `${formatNumber(invoiceCount)} فاکتور این مشتری حذف نمی‌شود و در «تاریخچه» می‌ماند.`
+            : "فاکتورهای ثبت‌شده دست نمی‌خورند."}{" "}
+          این کار قابل بازگشت نیست.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl border border-border py-2.5 text-sm font-medium"
+          >
+            انصراف
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-xl bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground"
+          >
+            بله، حذف شود
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── مودال ثبت بدهی / پرداخت ────────────────────────────────────────────────
 
 function TxModal({
@@ -1195,18 +1275,16 @@ function TxModal({
         <form onSubmit={submit} className="space-y-3">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              مبلغ (تومان)
+              مبلغ ({currencyLabel()})
             </label>
-            <input
-              value={amount ? formatNumber(parseNumberInput(amount)) : ""}
-              onChange={(e) => {
-                const n = parseNumberInput(e.target.value);
-                setAmount(n ? String(n) : "");
-              }}
-              inputMode="numeric"
-              autoFocus
+            {/* ورود در واحد نمایش (تومان/ریال)؛ amount همیشه تومان می‌ماند */}
+            <MoneyInput
+              value={parseNumberInput(amount)}
+              onChange={(n) => setAmount(n ? String(n) : "")}
               placeholder="۱۰۰٬۰۰۰"
-              className={inputCls}
+              showUnit={false}
+              className="rounded-xl py-1"
+              ariaLabel="مبلغ"
             />
           </div>
           {!isDebt && balance > 0 && (
@@ -1434,17 +1512,15 @@ function QuickEntryModal({
 
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              مبلغ (تومان) *
+              مبلغ ({currencyLabel()}) *
             </label>
-            <input
-              value={amount ? formatNumber(parseNumberInput(amount)) : ""}
-              onChange={(e) => {
-                const n = parseNumberInput(e.target.value);
-                setAmount(n ? String(n) : "");
-              }}
-              inputMode="numeric"
+            <MoneyInput
+              value={parseNumberInput(amount)}
+              onChange={(n) => setAmount(n ? String(n) : "")}
               placeholder="۱۰۰٬۰۰۰"
-              className={inputCls}
+              showUnit={false}
+              className="rounded-xl py-1"
+              ariaLabel="مبلغ"
             />
           </div>
 
@@ -2409,13 +2485,12 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
             </div>
             {paymentMethod === "credit" && (
               <div className="mt-2">
-                <input
-                  value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
+                <MoneyInput
+                  value={parseNumberInput(paidAmount)}
+                  onChange={(n) => setPaidAmount(n ? String(n) : "")}
                   placeholder="مبلغ پرداخت نقدی (اختیاری)"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className={inputCls}
+                  className="rounded-xl py-1"
+                  ariaLabel="مبلغ پرداخت نقدی"
                 />
                 {debt > 0 && (
                   <p className="mt-1 text-[11px] text-destructive">

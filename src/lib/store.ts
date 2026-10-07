@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
+import { invoiceCustomerDebt, invoiceTotals, purchaseTotals } from "@/lib/invoice-math";
 import { namesReferToSamePerson, phonesLikelySame } from "@/lib/search";
 import {
   mergeOpenInvoiceBoard,
@@ -41,6 +41,7 @@ import {
   purchaseUnitCostInProductUnit,
 } from "@/lib/stock-moves";
 import { roundQty } from "@/lib/units";
+import { amountToPersianWords } from "@/lib/amount-words";
 import { coerceProductNumbers, type HealthFix } from "@/lib/data-health";
 import type { CustomerField, InvoicePartyField } from "@/lib/customer-fields";
 import type { ReceiptSettings } from "@/lib/receipt";
@@ -276,6 +277,11 @@ export type Invoice = {
    * عکس لحظهٔ صدور؛ ویرایش بعدی پروندهٔ مشتری این فاکتور را عوض نمی‌کند.
    */
   customerFields?: InvoicePartyField[];
+  /**
+   * (اختیاری) حساب/کارتی که پول دریافتیِ همین فاکتور به آن واریز شده — فقط مبلغ
+   * واقعاً پرداخت‌شده (نقد/کارت)، نه بخش نسیه یا چک. فاکتورهای قدیمی ندارند.
+   */
+  accountId?: string;
 };
 
 /** عنوان نمایشی سند فاکتور (چاپ / پیش‌نمایش / PDF) */
@@ -2333,6 +2339,7 @@ export const invoice = {
     }
     write(HISTORY_KEY, [stamped, ...hist]);
     addIdToSet(CLOSED_OPEN_IDS_KEY, stamped.id);
+    if (stamped.accountId) syncInvoiceAccountTx(stamped);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
     const b = readBoard();
     const filtered = b.open.filter((i) => i.id !== stamped.id);
@@ -2355,10 +2362,12 @@ export const invoice = {
     if (prev && inventoryTrackingEnabled()) reconcileStockForInvoiceEdit(prev.items, updated.items);
     // مثل archive: مبالغ همیشه از روی اقلام و تخفیفِ ویرایش‌شده بازمحاسبه می‌شوند
     const fixed = recalc(updated);
-    write(
+    const ok = write(
       HISTORY_KEY,
       hist.map((inv) => (inv.id === updated.id ? fixed : inv)),
     );
+    // واریز به حساب/کارت همین فاکتور با مبلغ و تاریخ جدید هماهنگ می‌شود
+    if (ok && prev && (prev.accountId || fixed.accountId)) syncInvoiceAccountTx(fixed);
   },
   /**
    * حذف فاکتور از تاریخچه. اگر opts.restock=true باشد، کالاهای همان فاکتور به
@@ -2372,10 +2381,11 @@ export const invoice = {
     if (opts?.restock && target && inventoryTrackingEnabled()) {
       reconcileStockForInvoiceEdit(target.items, []);
     }
-    write(
+    const ok = write(
       HISTORY_KEY,
       hist.filter((inv) => inv.id !== id),
     );
+    if (ok) removeInvoiceAccountTx(id);
   },
 };
 
@@ -2653,6 +2663,60 @@ function syncExpenseAccountTx(e: Expense) {
   write(ACCOUNT_TXS_KEY, txs);
 }
 
+/** مبلغی از فاکتور فروش که همان لحظه واقعاً دریافت شده: نقد/کارت = کل، نسیه/چک = پرداخت نقدی */
+export function invoiceReceivedNow(inv: Invoice): number {
+  const t = invoiceTotals(inv);
+  const method = inv.paymentMethod ?? "cash";
+  return method === "credit" || method === "check" ? t.paid : t.total;
+}
+
+/**
+ * فاکتور فروشی که حساب/کارت واریز دارد: حداکثر یک تراکنش «واریز» با invoiceId.
+ * مثل هزینه‌ها: با ویرایش فاکتور همان واریز به‌روز و با حذف فاکتور یا برداشتن
+ * حساب، حذف می‌شود تا موجودی حساب هیچ‌وقت دوبار زیاد نشود. اگر واریز فعلی
+ * درست است، دست نمی‌خورد (بدون نوشتن اضافه).
+ */
+function syncInvoiceAccountTx(inv: Invoice) {
+  const all = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
+  const mine = all.filter((t) => t.invoiceId === inv.id);
+  const amount = Math.max(0, Math.round(invoiceReceivedNow(inv)));
+  const accountOk =
+    !!inv.accountId && read<Account[]>(ACCOUNTS_KEY, []).some((a) => a.id === inv.accountId);
+  const want = accountOk && amount > 0;
+  const at = inv.createdAt || Date.now();
+  if (
+    want &&
+    mine.length === 1 &&
+    mine[0].accountId === inv.accountId &&
+    mine[0].type === "deposit" &&
+    mine[0].amount === amount &&
+    mine[0].at === at
+  ) {
+    return;
+  }
+  if (!want && mine.length === 0) return;
+  const txs = all.filter((t) => t.invoiceId !== inv.id);
+  if (want) {
+    txs.unshift({
+      id: cryptoId(),
+      accountId: inv.accountId!,
+      type: "deposit",
+      amount,
+      note: `فاکتور فروش ${inv.id.toUpperCase()}`,
+      at,
+      invoiceId: inv.id,
+      createdAt: Date.now(),
+    });
+  }
+  write(ACCOUNT_TXS_KEY, txs);
+}
+
+function removeInvoiceAccountTx(invoiceId: string) {
+  const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
+  const next = txs.filter((t) => t.invoiceId !== invoiceId);
+  if (next.length !== txs.length) write(ACCOUNT_TXS_KEY, next);
+}
+
 function removeExpenseAccountTx(expenseId: string) {
   const txs = read<AccountTx[]>(ACCOUNT_TXS_KEY, []);
   const next = txs.filter((t) => t.expenseId !== expenseId);
@@ -2906,6 +2970,8 @@ export type AccountTx = {
   at: number;
   /** اگر این تراکنش خودکار از یک هزینه ساخته شده باشد، شناسه‌ی آن هزینه */
   expenseId?: string;
+  /** اگر این واریز خودکار از یک فاکتور فروش ساخته شده باشد، شناسه‌ی آن فاکتور */
+  invoiceId?: string;
   createdAt: number;
 };
 
@@ -3221,6 +3287,78 @@ export const customers = {
       list.map((c) => (c.id === target.id ? { ...c, txs: [tx, ...c.txs] } : c)),
     );
     return { ...target, txs: [tx, ...target.txs] };
+  },
+
+  /** مشتری‌ای که بدهی ثبت‌شده‌ی این فاکتور در دفترش است، با مبلغ همان بدهی */
+  invoiceDebtOf: (invoiceId: string): { customer: Customer; amount: number } | null => {
+    for (const c of read<Customer[]>(CUSTOMERS_KEY, [])) {
+      const own = c.txs.filter((t) => t.type === "debt" && t.invoiceId === invoiceId);
+      if (own.length) return { customer: c, amount: own.reduce((s, t) => s + t.amount, 0) };
+    }
+    return null;
+  },
+
+  /**
+   * ویرایش فاکتور فروش ثبت‌شده: بدهی همان فاکتور در دفتر مشتری با مبلغ جدید
+   * (invoiceCustomerDebt) جایگزین می‌شود. فقط وقتی مبلغ بدهی واقعاً عوض شده کاری
+   * انجام می‌شود. اگر فاکتور قبلاً بدهی داشته ولی کاربر آن تراکنش را دستی حذف
+   * کرده، دوباره ساخته نمی‌شود. پرداخت‌های مشتری دست نمی‌خورند.
+   * خروجی: شناسه‌ی مشتری‌ای که بدهی در دفترش است (اگر تازه وصل شده باشد).
+   */
+  syncInvoiceDebt: (prev: Invoice, next: Invoice): string | undefined => {
+    const oldDebt = invoiceCustomerDebt(prev);
+    const newDebt = invoiceCustomerDebt(next);
+    if (oldDebt === newDebt) return undefined;
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    const isOwn = (t: CustomerTx) => t.type === "debt" && t.invoiceId === next.id;
+    const holder = list.find((c) => c.txs.some(isOwn));
+    if (holder) {
+      const old = holder.txs.find(isOwn)!;
+      const others = holder.txs.filter((t) => !isOwn(t));
+      // شناسه‌ی تازه: تراکنش قبلی با tombstone حذف می‌شود تا دستگاه دیگر مبلغ کهنه را برنگرداند
+      const txs =
+        newDebt > 0
+          ? [
+              {
+                ...old,
+                id: cryptoId(),
+                amount: newDebt,
+                at: next.createdAt || old.at,
+                note: next.paymentMethod === "check" ? "چک دریافتی" : "فاکتور نسیه",
+              },
+              ...others,
+            ]
+          : others;
+      const updated: Customer = { ...holder, txs };
+      if (customerBalance(updated) <= 0) updated.settlementDate = undefined;
+      write(
+        CUSTOMERS_KEY,
+        list.map((c) => (c.id === holder.id ? updated : c)),
+      );
+      return holder.id;
+    }
+    if (oldDebt > 0 || newDebt <= 0 || !next.customer) return undefined;
+    // فاکتور نقد/کارت که نسیه یا چک شد: بدهی تازه برای همان مشتری
+    const linked = customers.recordInvoiceDebt(next.customer, next, {
+      amount: newDebt,
+      note: next.paymentMethod === "check" ? "چک دریافتی" : "فاکتور نسیه",
+    });
+    return linked?.id;
+  },
+
+  /** حذف فاکتور فروش: بدهی ثبت‌شده‌ی همان فاکتور از دفتر مشتری برداشته می‌شود */
+  clearInvoiceDebt: (invoiceId: string) => {
+    const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    let changed = false;
+    const next = list.map((c) => {
+      const txs = c.txs.filter((t) => !(t.type === "debt" && t.invoiceId === invoiceId));
+      if (txs.length === c.txs.length) return c;
+      changed = true;
+      const updated: Customer = { ...c, txs };
+      if (customerBalance(updated) <= 0) updated.settlementDate = undefined;
+      return updated;
+    });
+    if (changed) write(CUSTOMERS_KEY, next);
   },
 
   /**
@@ -3991,6 +4129,28 @@ export function formatAmount(n: number): string {
 /** نمایش کامل مبلغ با برچسب واحد، بر اساس انتخاب کاربر در تنظیمات */
 export function formatToman(n: number): string {
   return formatAmount(n) + " " + currencyLabel();
+}
+
+/**
+ * مبلغ ذخیره‌شده (تومان) در واحد نمایش: عدد، حروف و برچسب واحد — هر سه از همان
+ * یک عدد. «مبلغ به حروف» همه‌جا (چاپ، PDF، فیش، فاکتور خرید) باید از همین تابع
+ * بیاید تا در حالت ریال، حروف ۱۰ برابر کوچک‌تر از عدد نشود.
+ * wordsText: «حروف + واحد» آماده‌ی چاپ (برای مبلغ نامعتبر/خیلی بزرگ، رشته‌ی خالی).
+ */
+export function amountInDisplayUnit(
+  toman: number,
+  unit: CurrencyUnit = getCurrencyUnit(),
+): { digits: string; words: string; label: string; wordsText: string } {
+  const n = Number(toman) || 0;
+  const display = unit === "rial" ? n * 10 : n;
+  const label = unit === "rial" ? "ریال" : "تومان";
+  const words = amountToPersianWords(display);
+  return {
+    digits: formatNumber(display),
+    words,
+    label,
+    wordsText: words ? `${words} ${label}` : "",
+  };
 }
 
 /**

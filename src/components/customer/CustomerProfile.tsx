@@ -174,6 +174,14 @@ export function CustomerProfile({
             >
               <Pencil className="h-4 w-4" />
             </button>
+            <button
+              onClick={onDelete}
+              aria-label="حذف مشتری"
+              title="حذف مشتری"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
 
           {/* اقدامات سریع */}

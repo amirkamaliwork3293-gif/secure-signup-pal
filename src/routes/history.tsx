@@ -29,6 +29,8 @@ import {
   evaluateInvoiceStockAdd,
   invoiceProductQty,
   isManualInvoiceItem,
+  customers,
+  customerFullName,
   type Invoice,
   type InvoiceItem,
   type Product,
@@ -40,6 +42,7 @@ import {
   lineTotal,
   invoiceCheques,
   withSyncedChequeFields,
+  invoiceCustomerDebt,
 } from "@/lib/invoice-math";
 import { filterAndRankSearch, personNameSearchFields } from "@/lib/search";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
@@ -178,6 +181,9 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(initialInv.createdAt));
   const [dateErr, setDateErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // حذف فاکتور نسیه/چک: بدهی همان فاکتور در حساب مشتری هم برداشته شود؟ (پیش‌فرض بله)
+  const [removeDebt, setRemoveDebt] = useState(true);
+  const debtOnDelete = confirmDelete ? customers.invoiceDebtOf(saved.id) : null;
   // افزودن کالای دلخواه (خارج از فهرست محصولات) هنگام ویرایش فاکتور
   const [showManual, setShowManual] = useState(false);
   const [manualName, setManualName] = useState("");
@@ -228,9 +234,28 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
       setDateErr("تاریخ نامعتبر است. تاریخ را دوباره انتخاب کنید.");
       return;
     }
+    const candidate = recalc(withSyncedChequeFields({ ...draft, createdAt: newCreatedAt }));
+    const c = candidate.customer;
+    if (
+      invoiceCustomerDebt(saved) === 0 &&
+      invoiceCustomerDebt(candidate) > 0 &&
+      !customers.invoiceDebtOf(candidate.id) &&
+      !(c?.customerId || c?.firstName?.trim() || c?.lastName?.trim() || c?.phone?.trim())
+    ) {
+      alert(
+        "برای فاکتور نسیه یا چک، نام یا تلفن مشتری را وارد کنید تا بدهی او در بخش «مشتریان» ثبت شود.",
+      );
+      return;
+    }
     try {
-      const updated = recalc(withSyncedChequeFields({ ...draft, createdAt: newCreatedAt }));
+      let updated = candidate;
       invoice.updateHistory(updated);
+      // بدهی همین فاکتور در دفتر مشتری با مبلغ جدید هماهنگ می‌شود (بدون دوباره‌شماری)
+      const linkedId = customers.syncInvoiceDebt(saved, updated);
+      if (linkedId && updated.customer && updated.customer.customerId !== linkedId) {
+        updated = { ...updated, customer: { ...updated.customer, customerId: linkedId } };
+        invoice.updateHistory(updated);
+      }
       setSaved(updated);
       setDraft(updated);
       setEditing(false);
@@ -243,6 +268,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setRemoveDebt(true);
     setConfirmDelete(true);
   };
 
@@ -837,11 +863,32 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
             <p className="text-xs leading-6 text-muted-foreground">
               می‌خواهید کالاهای این فاکتور به موجودی انبار برگردند؟
             </p>
+            {saved.accountId && (
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                واریز این فاکتور به حساب/کارت هم برداشته می‌شود.
+              </p>
+            )}
+            {debtOnDelete && (
+              <label className="flex items-start gap-2 rounded-xl border border-border bg-background p-2.5 text-xs leading-6">
+                <input
+                  type="checkbox"
+                  checked={removeDebt}
+                  onChange={(e) => setRemoveDebt(e.target.checked)}
+                  className="mt-1.5 h-4 w-4 shrink-0 accent-primary"
+                />
+                <span>
+                  بدهی این فاکتور ({formatToman(debtOnDelete.amount)}) از حساب «
+                  {customerFullName(debtOnDelete.customer) || "مشتری"}» هم حذف شود. پرداخت‌های
+                  ثبت‌شده‌ی مشتری دست نمی‌خورند.
+                </span>
+              </label>
+            )}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 invoice.deleteFromHistory(saved.id, { restock: true });
+                if (debtOnDelete && removeDebt) customers.clearInvoiceDebt(saved.id);
                 setConfirmDelete(false);
               }}
               className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground"
@@ -853,6 +900,7 @@ function InvoiceCard({ inv: initialInv }: { inv: Invoice }) {
               onClick={(e) => {
                 e.stopPropagation();
                 invoice.deleteFromHistory(saved.id);
+                if (debtOnDelete && removeDebt) customers.clearInvoiceDebt(saved.id);
                 setConfirmDelete(false);
               }}
               className="w-full rounded-xl border border-destructive/40 py-2.5 text-sm font-medium text-destructive"

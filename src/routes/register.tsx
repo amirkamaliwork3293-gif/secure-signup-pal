@@ -398,7 +398,8 @@ function RegisterPage() {
         <div className="relative rg-panel">
           <div className="rg-banner">
             <Smartphone className="h-4 w-4" />
-            پس از ثبت‌نام، لینک دانلود برنامه برای شما ارسال می‌شود.
+            منتظر لینک نمانید؛ بلافاصله بعد از تکمیل ثبت‌نام، دکمه‌ی دانلود اپلیکیشن همین‌جا نمایش
+            داده می‌شود.
           </div>
 
           <section className="rg-section">

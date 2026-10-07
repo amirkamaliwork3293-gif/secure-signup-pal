@@ -890,15 +890,24 @@ function AddReminderWidgetButton() {
   }, []);
   if (!available) return null;
   return (
-    <button
-      type="button"
-      onClick={() => setRequested(requestReminderWidget())}
-      className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-[12px] font-semibold text-primary hover:bg-primary/10"
-    >
-      <LayoutGrid className="h-4 w-4" />
-      {requested
-        ? "ویجت را روی صفحهٔ گوشی تأیید کنید"
-        : "افزودن ویجت «یادآوری‌های امروز» به صفحهٔ گوشی"}
-    </button>
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setRequested(requestReminderWidget() || true)}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-[12px] font-semibold text-primary hover:bg-primary/10"
+      >
+        <LayoutGrid className="h-4 w-4" />
+        افزودن ویجت «یادآوری‌های امروز» به صفحهٔ گوشی
+      </button>
+      {requested && (
+        // بعضی لانچرها (مثل شیائومی/پوکو) درخواست را بی‌صدا نادیده می‌گیرند؛ راه دستی همیشه کار می‌کند.
+        <div className="mt-2 rounded-2xl border border-border bg-card px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          اگر پنجره‌ای باز نشد: روی جای خالی صفحهٔ گوشی انگشت را نگه دارید ← «ویجت‌ها» ← «کامیکس» ←
+          «یادآوری‌های امروز» را روی صفحه بکشید. در شیائومی و پوکو اگر دکمهٔ بالا کار نکرد، از
+          تنظیمات گوشی ← برنامه‌ها ← کامیکس ← «مجوزهای دیگر»، گزینهٔ «میانبرهای صفحهٔ اصلی» را روشن
+          کنید.
+        </div>
+      )}
+    </div>
   );
 }

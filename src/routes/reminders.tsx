@@ -41,8 +41,10 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarDays,
+  LayoutGrid,
 } from "lucide-react";
 import { openExternal, telHref } from "@/lib/openExternal";
+import { canRequestReminderWidget, requestReminderWidget } from "@/lib/reminder-notifications";
 import { DebtContactDialog } from "@/components/DebtContactDialog";
 import { z } from "zod";
 
@@ -239,6 +241,8 @@ function RemindersPageInner() {
           </div>
         </div>
       </header>
+
+      <AddReminderWidgetButton />
 
       <div className="mb-3 grid grid-cols-3 gap-1.5 rounded-2xl bg-muted/70 p-1">
         {(
@@ -874,5 +878,27 @@ function RemindersPage() {
     <AuthGuard>
       <RemindersPageInner />
     </AuthGuard>
+  );
+}
+
+/** فقط در APK جدید روی اندروید ۸+؛ در سایت و APK قدیمی هیچ چیزی نشان نمی‌دهد. */
+function AddReminderWidgetButton() {
+  const [available, setAvailable] = useState(false);
+  const [requested, setRequested] = useState(false);
+  useEffect(() => {
+    setAvailable(canRequestReminderWidget());
+  }, []);
+  if (!available) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => setRequested(requestReminderWidget())}
+      className="mb-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 px-3 py-2 text-[12px] font-semibold text-primary hover:bg-primary/10"
+    >
+      <LayoutGrid className="h-4 w-4" />
+      {requested
+        ? "ویجت را روی صفحهٔ گوشی تأیید کنید"
+        : "افزودن ویجت «یادآوری‌های امروز» به صفحهٔ گوشی"}
+    </button>
   );
 }

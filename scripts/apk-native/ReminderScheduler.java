@@ -119,6 +119,26 @@ public class ReminderScheduler {
             if (manager != null) manager.cancel(id.hashCode());
         } catch (Exception ignored) {
         }
+        // ویجت صفحهٔ اصلی: ردیف انجام‌شده فوراً کنار برود (فقط نمایش؛ صف بالا تنها مسیر نوشتن است).
+        try {
+            ReminderWidget.onReminderDone(context, id);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** فقط‌خواندنی: شناسه‌هایی که «انجام شد» خورده‌اند و برنامه هنوز برنداشته (برای ویجت). */
+    public static java.util.Set<String> pendingDoneIds(Context context) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        try {
+            JSONArray array = new JSONArray(
+                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_DONE, "[]"));
+            for (int i = 0; i < array.length(); i++) {
+                String id = array.optString(i, "");
+                if (!id.isEmpty()) ids.add(id);
+            }
+        } catch (Exception ignored) {
+        }
+        return ids;
     }
 
     public static synchronized String takeCompletedJson(Context context) {

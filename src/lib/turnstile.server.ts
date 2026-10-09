@@ -9,6 +9,7 @@ import {
 } from "@/lib/turnstile";
 
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const VERIFY_TIMEOUT_MS = 6_000;
 
 export function getTurnstileSiteKey(): string {
   return (
@@ -49,17 +50,27 @@ export async function assertTurnstileToken(token: unknown): Promise<void> {
     body.set("remoteip", ip);
   }
 
-  let json: { success?: boolean; hostname?: string };
-  try {
-    const res = await fetch(VERIFY_URL, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    json = (await res.json()) as { success?: boolean; hostname?: string };
-  } catch {
-    throw new Error(TURNSTILE_UNAVAILABLE_ERROR);
+  // idempotency_key اجازه می‌دهد همان توکن یک‌بارمصرف دوباره بررسی شود؛ اگر
+  // پاسخ کلادفلر در راه گم شود، تلاش دوم به‌جای «توکن تکراری» همان نتیجه‌ی
+  // اول را می‌گیرد. قطعی لحظه‌ای شبکه دیگر ثبت‌نام کاربر را خراب نمی‌کند.
+  body.set("idempotency_key", crypto.randomUUID());
+
+  let json: { success?: boolean; hostname?: string } | null = null;
+  for (let attempt = 0; attempt < 2 && !json; attempt++) {
+    try {
+      const res = await fetch(VERIFY_URL, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
+      });
+      if (res.status >= 500) continue;
+      json = (await res.json()) as { success?: boolean; hostname?: string };
+    } catch {
+      // timeout / خطای شبکه — یک بار دیگر تلاش می‌شود
+    }
   }
+  if (!json) throw new Error(TURNSTILE_UNAVAILABLE_ERROR);
 
   if (!json?.success) throw new Error(TURNSTILE_FAILED_ERROR);
   if (json.hostname && !isTurnstileHostnameAllowed(json.hostname)) {

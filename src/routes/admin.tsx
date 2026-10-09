@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SignupRequest, type UserProfile, type SubscriptionPlan } from "@/lib/supabase";
 import { formatJalaliDate, formatJalaliDateTime } from "@/lib/store";
@@ -139,8 +139,26 @@ function AdminPage() {
     catch (e: any) { alert(e?.message); }
     setActing(null);
   };
+  // نام کاربرانی که حسابشان همین حالا فعال است — درخواست «در انتظار» آن‌ها
+  // یعنی حساب خودکار فعال شده و فقط پرداخت باید بررسی شود.
+  const activeUsernames = useMemo(
+    () => new Set(users.filter((u) => u.status === "active").map((u) => u.username?.toLowerCase())),
+    [users],
+  );
   const handleReject = async (id: string) => {
-    if (!confirm("درخواست رد شود؟")) return;
+    const req = requests.find((r) => r.id === id);
+    const isLive =
+      req &&
+      (req as any).request_type !== "renewal" &&
+      activeUsernames.has(req.username?.toLowerCase());
+    if (
+      !confirm(
+        isLive
+          ? "این حساب الان فعال است. با رد درخواست، حساب کاربر غیرفعال می‌شود. ادامه می‌دهید؟"
+          : "درخواست رد شود؟",
+      )
+    )
+      return;
     setActing(id);
     try { await reject({ data: { id } }); await fetchAll(); }
     catch (e: any) { alert(e?.message); }
@@ -268,6 +286,7 @@ function AdminPage() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 phones={phones}
+                activeUsernames={activeUsernames}
               />
             )}
             {tab === "resets" && (
@@ -316,13 +335,14 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 }
 
 function RequestsTab({
-  requests, acting, onApprove, onReject, phones,
+  requests, acting, onApprove, onReject, phones, activeUsernames,
 }: {
   requests: SignupRequest[];
   acting: string | null;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   phones: Record<string, string | null>;
+  activeUsernames: Set<string | undefined>;
 }) {
   const [messageTarget, setMessageTarget] = useState<SignupRequest | null>(null);
   const [searchQ, setSearchQ] = useState("");
@@ -375,6 +395,8 @@ function RequestsTab({
         const cfg = plansCfg[r.plan];
         const price = cfg ? effectivePrice(cfg, Date.now()) : 0;
         const isRenewal = (r as any).request_type === "renewal";
+        const isLive =
+          r.status === "pending" && !isRenewal && activeUsernames.has(r.username?.toLowerCase());
         return (
           <li key={r.id} className="rounded-2xl border border-border bg-card p-4">
             <div className="flex items-start justify-between gap-3">
@@ -416,9 +438,16 @@ function RequestsTab({
                     </span>
                   )}
                 </div>
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  ⚠️ قبل از تایید، مبلغ رسید را با مبلغ پلن انتخابی مقایسه کنید.
-                </div>
+                {isLive ? (
+                  <div className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                    ⚡ حساب این کاربر خودکار فعال شده است. رسید را بررسی کنید: «تایید پرداخت» را بزنید
+                    یا اگر پرداخت معتبر نیست «رد و غیرفعال‌سازی».
+                  </div>
+                ) : (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    ⚠️ قبل از تایید، مبلغ رسید را با مبلغ پلن انتخابی مقایسه کنید.
+                  </div>
+                )}
               </div>
               <StatusBadge status={r.status} />
             </div>
@@ -451,7 +480,7 @@ function RequestsTab({
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600 py-2 text-xs font-semibold text-white disabled:opacity-60"
                 >
                   {isActing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                  تایید کاربر
+                  {isLive ? "تایید پرداخت" : "تایید کاربر"}
                 </button>
                 <button
                   onClick={() => onReject(r.id)}
@@ -459,7 +488,7 @@ function RequestsTab({
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-destructive/10 py-2 text-xs font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-60"
                 >
                   <X className="h-3.5 w-3.5" />
-                  رد درخواست
+                  {isLive ? "رد و غیرفعال‌سازی" : "رد درخواست"}
                 </button>
               </div>
             )}

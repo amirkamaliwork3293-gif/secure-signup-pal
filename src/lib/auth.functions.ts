@@ -30,6 +30,7 @@ import {
   publicSignupProfileError,
   shouldRetrySignupWithoutOptionalColumns,
   shouldReuseExistingAuthUser,
+  SIGNUP_RETRY_LATER,
   stripSignupColumn,
 } from "@/lib/signup-errors";
 import {
@@ -402,6 +403,34 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const username = data.username;
     const ip = clientIp();
     const caps = signupRateCaps(isTurnstileConfigured());
+    const phone = data.phone?.trim() || null;
+
+    // بررسی‌های فقط-خواندنی (پلن، یوزرنیم تکراری، درخواست‌های این شماره) هم‌زمان
+    // با سقف نرخ شروع می‌شوند تا کاربر چند رفت‌وبرگشت پشت‌سرهم به دیتابیس را
+    // منتظر نماند. نتیجه‌ی آن‌ها فقط **بعد از** عبور از سقف نرخ استفاده می‌شود؛
+    // پس ترتیب امنیتی (اول سقف نرخ، بعد پاسخ دادن) دست‌نخورده است.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const checksP = Promise.all([
+      loadPlansConfig(supabaseAdmin),
+      supabaseAdmin.from("profiles").select("id").eq("username", username).maybeSingle(),
+      supabaseAdmin
+        .from("signup_requests")
+        .select("id, status")
+        .eq("username", username)
+        .in("status", ["pending", "approved"])
+        .limit(1)
+        .maybeSingle(),
+      phone
+        ? supabaseAdmin
+            .from("signup_requests")
+            .select("id", { count: "exact", head: true })
+            .eq("phone", phone)
+            .eq("status", "pending")
+            .gte("created_at", since)
+        : Promise.resolve(null),
+    ]);
+    // اگر سقف نرخ خطا بدهد، رد شدن این Promise نباید «unhandled» شود.
+    checksP.catch(() => {});
 
     // دو لایه سقف: هر IP (شبکه‌های ایران اغلب CGNAT هستند پس سقف را کمی باز
     // می‌گذاریم) + سقف سراسری که جلوی سیل ۳۰۰تایی از IPهای مختلف را می‌گیرد.
@@ -431,24 +460,22 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const adminUser = getAdminUsername().toLowerCase();
     if (adminUser && username === adminUser) throw new Error(TAKEN);
 
+    let checks: Awaited<typeof checksP>;
+    try {
+      checks = await checksP;
+    } catch {
+      throw new Error(SIGNUP_RETRY_LATER);
+    }
+    const [plansCfg, profileRes, reqRes, phoneRes] = checks;
+
     // Enforce plan enabled flag (admins can disable plans for new signups)
-    const plansCfg = await loadPlansConfig(supabaseAdmin);
     if (!plansCfg[data.plan]?.enabled) throw new Error("این پلن در حال حاضر غیرفعال است.");
 
     // Check username not already taken (profile or pending request)
-    const { data: existingProfile } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .eq("username", username)
-      .maybeSingle();
-    if (existingProfile) throw new Error("این یوزرنیم قبلاً ثبت شده است.");
+    const existingProfile = profileRes.data;
+    if (existingProfile) throw new Error(TAKEN);
 
-    const { data: existingReq } = await supabaseAdmin
-      .from("signup_requests")
-      .select("id, status")
-      .eq("username", username)
-      .in("status", ["pending", "approved"])
-      .maybeSingle();
+    const existingReq = reqRes.data;
     if (existingReq) {
       throw new Error(
         existingReq.status === "pending"
@@ -457,22 +484,11 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       );
     }
 
-    // Create the auth user up front with the chosen password (profile stays pending)
-    const phone = data.phone?.trim() || null;
-
-    if (phone) {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { count, error: phoneErr } = await supabaseAdmin
-        .from("signup_requests")
-        .select("id", { count: "exact", head: true })
-        .eq("phone", phone)
-        .eq("status", "pending")
-        .gte("created_at", since);
-      if (!phoneErr && (count ?? 0) >= 3) {
-        throw new Error("با این شماره موبایل درخواست‌های زیادی در انتظار است. لطفاً کمی بعد تلاش کنید.");
-      }
+    if (phoneRes && !phoneRes.error && (phoneRes.count ?? 0) >= 3) {
+      throw new Error("با این شماره موبایل امروز چند حساب ساخته شده است. لطفاً فردا دوباره تلاش کنید یا با پشتیبانی تماس بگیرید.");
     }
 
+    // Create the auth user up front with the chosen password
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email: toEmail(username),
       password: data.password,
@@ -483,16 +499,30 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     // حساب موجود را هرگز با رمز فرم جدید بازنویسی نکن — بعد از نفوذ، رمز کاربران
     // نباید خودکار عوض شود. اگر یوزرنیم تکراری است فقط همان پیام را بده.
     let userId = created?.user?.id as string | undefined;
+    // فعال‌سازی خودکار فقط وقتی مجاز است که مطمئن باشیم رمز این حساب همان رمزی
+    // است که کاربر الان وارد کرده — وگرنه پیام «با رمز خودتان وارد شوید» دروغ است.
+    let passwordVerified = Boolean(userId);
     if (!userId) {
       if (shouldReuseExistingAuthUser(createErr?.message, Boolean(existingProfile))) {
         const leftover = await findAuthUserByUsername(supabaseAdmin, username);
         if (leftover?.id) {
           userId = leftover.id;
+          // حساب نیمه‌کاره از تلاش قبلی: فقط اگر رمز فعلی با آن بخواند همان
+          // شخص است و می‌توان فعالش کرد. رمز حساب هرگز عوض نمی‌شود.
+          try {
+            await serverSignIn(toEmail(username), data.password);
+            passwordVerified = true;
+          } catch {
+            passwordVerified = false;
+          }
         }
       }
       if (!userId) throw new Error(publicSignupCreateUserError(createErr?.message));
     }
 
+    // پروفایل ابتدا pending ساخته می‌شود و فقط بعد از اینکه درخواست برای بررسی
+    // پرداخت در پنل مدیر ثبت شد، فعال می‌شود — هیچ حساب فعالی بدون رکورد قابل
+    // بررسی برای مدیر ساخته نمی‌شود.
     const { error: profileErr } = await supabaseAdmin.from("profiles").insert({
       id: userId,
       username,
@@ -505,11 +535,6 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       // حساب را پاک نکن — تلاش بعد همان کاربر را ادامه می‌دهد و رمز ثابت می‌ماند.
       throw new Error(publicSignupProfileError(profileErr.message));
     }
-
-    // کوئری PostgREST Promise نیست — `.catch` روی insert وجود ندارد و ثبت‌نام را می‌خواباند.
-    await settleQuery(
-      supabaseAdmin.from("user_roles").insert({ user_id: userId, role: "user" }),
-    );
 
     // Try inserting with the optional columns; if one doesn't exist yet (migration
     // pending), fall back to inserting without them so registration never fails.
@@ -531,20 +556,30 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     if (data.receipt_note) optional.receipt_note = data.receipt_note;
     if (ip && ip !== "unknown") optional.client_ip = ip.slice(0, 80);
 
-    let payload: Record<string, unknown> = { ...requestBase, ...optional };
-    let result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
-
-    for (let attempt = 0; attempt < 6 && result.error; attempt++) {
-      const missing = missingSignupColumnFromError(result.error.message);
-      if (missing && missing in payload) {
-        payload = stripSignupColumn(payload, missing);
-      } else if (shouldRetrySignupWithoutOptionalColumns(result.error.message)) {
-        payload = { first_name: requestBase.first_name, last_name: requestBase.last_name, username, plan: requestBase.plan };
-      } else {
-        break;
+    const insertRequest = async () => {
+      let payload: Record<string, unknown> = { ...requestBase, ...optional };
+      let result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
+      for (let attempt = 0; attempt < 6 && result.error; attempt++) {
+        const missing = missingSignupColumnFromError(result.error.message);
+        if (missing && missing in payload) {
+          payload = stripSignupColumn(payload, missing);
+        } else if (shouldRetrySignupWithoutOptionalColumns(result.error.message)) {
+          payload = { first_name: requestBase.first_name, last_name: requestBase.last_name, username, plan: requestBase.plan };
+        } else {
+          break;
+        }
+        result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
       }
-      result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
-    }
+      return result;
+    };
+
+    // نقش کاربر و رکورد درخواست به هم وابسته نیستند — هم‌زمان نوشته می‌شوند.
+    // کوئری PostgREST Promise نیست — `.catch` روی insert وجود ندارد و ثبت‌نام را می‌خواباند.
+    const [, result] = await Promise.all([
+      settleQuery(supabaseAdmin.from("user_roles").insert({ user_id: userId, role: "user" })),
+      insertRequest(),
+    ]);
+
     if (result.error) {
       const { data: existingRow } = await supabaseAdmin
         .from("signup_requests")
@@ -553,12 +588,35 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (existingRow?.id) return { id: existingRow.id };
-      // پروفایل pending ساخته شده — درخواست را رد نکن و حساب را حذف نکن.
-      return { id: userId };
+      // درخواستی برای بررسی مدیر ثبت نشد — حساب pending می‌ماند تا مدیر دستی
+      // رسیدگی کند (رد نمی‌کنیم و حساب را حذف نمی‌کنیم).
+      return { id: existingRow?.id ?? userId, approved: false };
     }
 
-    return { id: result.data.id };
+    // ── فعال‌سازی فوری: کاربر بلافاصله با یوزرنیم و رمز خودش وارد می‌شود.
+    // درخواست در پنل مدیر «در انتظار» می‌ماند تا پرداخت بررسی شود؛ اگر مدیر
+    // آن را رد کند، حساب غیرفعال می‌شود (rejectSignupRequest).
+    // فقط از pending به active — هیچ وضعیت دیگری (مثلاً rejected) بازنویسی نمی‌شود.
+    let approved = false;
+    if (passwordVerified) {
+      const start = new Date();
+      const end = new Date(start.getTime() + planDurationMs(plansCfg, data.plan));
+      const { data: activated, error: actErr } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          plan: data.plan,
+          status: "active",
+          start_date: start.toISOString(),
+          end_date: end.toISOString(),
+        })
+        .eq("id", userId)
+        .eq("status", "pending")
+        .select("id");
+      if (actErr) console.error("[signup] auto-activation failed", actErr.message);
+      approved = !actErr && Array.isArray(activated) && activated.length > 0;
+    }
+
+    return { id: result.data.id, approved };
   });
 
 // ─── Public: check request status (for set-password page) ────────────────────
@@ -936,7 +994,7 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
 
     const { data: req } = await supabaseAdmin
       .from("signup_requests")
-      .select("id, username")
+      .select("id, username, status, request_type")
       .eq("id", data.id)
       .maybeSingle();
 
@@ -946,13 +1004,18 @@ export const rejectSignupRequest = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
 
-    // اگر حساب در انتظار از قبل ساخته شده، رد هم بشود
-    if (req?.username) {
+    // اگر حساب این درخواست از قبل ساخته شده، رد هم بشود. ثبت‌نام‌های جدید
+    // بلافاصله فعال می‌شوند و درخواستشان برای بررسی پرداخت «در انتظار» می‌ماند؛
+    // رد چنین درخواستی (مثلاً رسید جعلی) حساب فعال را هم غیرفعال می‌کند.
+    // درخواست تمدید هرگز حساب موجود را غیرفعال نمی‌کند.
+    if (req?.username && (req as any).request_type !== "renewal") {
+      const revocable: ("pending" | "active")[] =
+        req.status === "pending" ? ["pending", "active"] : ["pending"];
       await supabaseAdmin
         .from("profiles")
         .update({ status: "rejected" })
         .eq("username", req.username)
-        .eq("status", "pending");
+        .in("status", revocable);
     }
 
     // رسید و رمز موقت پس از رد هم لازم نیستند

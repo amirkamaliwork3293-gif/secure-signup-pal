@@ -105,11 +105,13 @@ export async function enforceRateLimit(
   message = GENERIC_RATE_MESSAGE,
 ): Promise<void> {
   const bucket = `${scope}:${identifier}`.slice(0, 200);
-  const { data, error } = await admin.rpc("check_rate_limit", {
-    _bucket: bucket,
-    _max: max,
-    _window_seconds: windowSeconds,
-  });
+  const args = { _bucket: bucket, _max: max, _window_seconds: windowSeconds };
+  let { data, error } = await admin.rpc("check_rate_limit", args);
+  // یک قطعی لحظه‌ای دیتابیس نباید به کاربر عادی پیام «سقف پر شده» نشان دهد —
+  // یک بار دیگر تلاش می‌شود. اگر باز هم خطا بود، مثل قبل fail-closed است.
+  if (error && !isRateLimitInfraMissing(error)) {
+    ({ data, error } = await admin.rpc("check_rate_limit", args));
+  }
   if (error) {
     if (isRateLimitInfraMissing(error)) {
       console.error("[rate-limit] RPC missing — using in-memory fallback", error);

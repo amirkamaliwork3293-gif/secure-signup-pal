@@ -131,6 +131,8 @@ function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  // true یعنی حساب همان لحظه فعال شد و کاربر می‌تواند فوراً وارد شود
+  const [approved, setApproved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
@@ -277,24 +279,27 @@ function RegisterPage() {
           .toLowerCase()
           .replace(/[^a-z0-9]/g, "");
         const ext = ALLOWED_EXT.includes(rawExt) ? rawExt : "jpg";
-        const signed = await signReceiptUpload({
-          data: { username: usernameField, ext, kind: "signup" },
-        });
-        const { error: upErr } = await supabase.storage
-          .from("receipts")
-          .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
-            // نوع محتوا همیشه تصویری تثبیت می‌شود. اگر مرورگر نوع را خالی یا
-            // غیرتصویری گزارش کند، image/jpeg جایگزین می‌شود تا هیچ فایلی
-            // به‌عنوان HTML از دامنه‌ی استوریج سرو نشود.
-            contentType: receiptFile.type?.startsWith("image/") ? receiptFile.type : "image/jpeg",
-            upsert: false,
+        try {
+          const signed = await signReceiptUpload({
+            data: { username: usernameField, ext, kind: "signup" },
           });
-        setUploading(false);
-        if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
-        path = signed.path;
+          const { error: upErr } = await supabase.storage
+            .from("receipts")
+            .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
+              // نوع محتوا همیشه تصویری تثبیت می‌شود. اگر مرورگر نوع را خالی یا
+              // غیرتصویری گزارش کند، image/jpeg جایگزین می‌شود تا هیچ فایلی
+              // به‌عنوان HTML از دامنه‌ی استوریج سرو نشود.
+              contentType: receiptFile.type?.startsWith("image/") ? receiptFile.type : "image/jpeg",
+              upsert: false,
+            });
+          if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+          path = signed.path;
+        } finally {
+          setUploading(false);
+        }
       }
 
-      await submit({
+      const res = await submit({
         data: {
           first_name: firstName,
           last_name: lastName,
@@ -311,6 +316,7 @@ function RegisterPage() {
         },
       });
       markPendingOnboarding(usernameField);
+      setApproved(Boolean((res as { approved?: boolean } | null)?.approved));
       setSuccess(true);
     } catch (e: unknown) {
       setTurnstileToken("");
@@ -356,21 +362,44 @@ function RegisterPage() {
           <div className="rg-success-mark">
             <Check className="h-7 w-7" />
           </div>
-          <h1>ثبت‌نام شما انجام شد</h1>
-          <p>
-            حساب شما با یوزرنیم{" "}
-            <strong dir="ltr" className="inline-block text-foreground">
-              {usernameField.toLowerCase()}
-            </strong>{" "}
-            ساخته شد و در انتظار تایید مدیر است.
-          </p>
-          <div className="mt-3 text-right">
-            <CredentialsHint>
-              یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد می‌شوید.
-            </CredentialsHint>
-          </div>
+          {approved ? (
+            <>
+              <h1>{firstName.trim() ? `${firstName.trim()} عزیز، خوش آمدید!` : "خوش آمدید!"}</h1>
+              <p>
+                ثبت‌نام شما با موفقیت انجام شد و حسابتان تایید و فعال است. هم‌اکنون می‌توانید با
+                یوزرنیم{" "}
+                <strong dir="ltr" className="inline-block text-foreground">
+                  {usernameField.trim().toLowerCase()}
+                </strong>{" "}
+                و رمز عبوری که خودتان انتخاب کردید وارد شوید.
+              </p>
+              <div className="mt-3 text-right">
+                <CredentialsHint>
+                  یوزرنیم و رمز عبور را در جای امنی یادداشت کنید؛ برای ورود در اپلیکیشن و سایت به
+                  آن‌ها نیاز دارید.
+                </CredentialsHint>
+              </div>
+            </>
+          ) : (
+            <>
+              <h1>ثبت‌نام شما انجام شد</h1>
+              <p>
+                حساب شما با یوزرنیم{" "}
+                <strong dir="ltr" className="inline-block text-foreground">
+                  {usernameField.trim().toLowerCase()}
+                </strong>{" "}
+                ساخته شد و در انتظار تایید مدیر است.
+              </p>
+              <div className="mt-3 text-right">
+                <CredentialsHint>
+                  یوزرنیم و رمز عبور را در گوشی ذخیره کنید. بعد از تایید، با همین مشخصات وارد
+                  می‌شوید.
+                </CredentialsHint>
+              </div>
+            </>
+          )}
           <Link to="/login" className="rg-success-go">
-            رفتن به صفحه ورود
+            {approved ? "ورود به حساب کاربری" : "رفتن به صفحه ورود"}
             <ArrowRight className="h-4 w-4 rotate-180" />
           </Link>
           <div className="mt-6 rounded-2xl border-2 border-primary/40 bg-gradient-to-br from-primary/10 to-primary/5 p-4 shadow-elegant">
@@ -459,7 +488,7 @@ function RegisterPage() {
                 </label>
               </div>
 
-              {/* انتخاب رمز عبور همان ابتدا — پس از تایید مدیر، ورود فوری */}
+              {/* انتخاب رمز عبور همان ابتدا — ورود فوری پس از ثبت درخواست */}
               <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <div>
                   <label className="rg-label" htmlFor="rg-pass">
@@ -524,7 +553,8 @@ function RegisterPage() {
                 </div>
               )}
               <CredentialsHint>
-                یوزرنیم و رمز را جای امنی ذخیره کنید؛ بعد از تایید مدیر با همین‌ها وارد می‌شوید.
+                یوزرنیم و رمز را جای امنی ذخیره کنید؛ بلافاصله بعد از ثبت درخواست با همین‌ها وارد
+                می‌شوید.
               </CredentialsHint>
             </div>
           </section>

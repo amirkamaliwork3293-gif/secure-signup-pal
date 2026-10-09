@@ -1,13 +1,13 @@
 /**
  * InvoiceActions.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * عملیات فاکتور: مشاهده، پرینت (A4/حرارتی)، اشتراک PDF و پیام به مشتری.
+ * عملیات فاکتور: مشاهده، پرینت (A4/حرارتی)، فیش به‌صورت عکس، اشتراک PDF و پیام به مشتری.
  * HTML سند فاکتور در ‎@/lib/invoice-document‎ ساخته می‌شود.
  */
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
+import { Eye, Printer, Share2, Receipt, FileDown, MessageSquare, ImageDown } from "lucide-react";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
 import type { Invoice } from "@/lib/store";
@@ -46,6 +46,7 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const template = appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined;
   const paper = normalizePaperSize(appSettings.invoicePaperSize);
   const [sharingPdf, setSharingPdf] = useState(false);
+  const [makingImage, setMakingImage] = useState(false);
   const [messaging, setMessaging] = useState(false);
   const [paperMenu, setPaperMenu] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -84,6 +85,65 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
       }
     } finally {
       setPrinting(false);
+    }
+  };
+
+  /**
+   * فیش به‌صورت عکس PNG — برای مینی‌پرینترهای بلوتوثی (فوممو و…) که فقط از
+   * برنامهٔ خودشان (مثل Print Master) چاپ می‌کنند. فقط خواندنی؛ داده‌ای تغییر نمی‌کند.
+   */
+  const handleReceiptImage = async () => {
+    if (makingImage) return;
+    setMakingImage(true);
+    try {
+      const { buildReceiptImageDataUrl } = await import("@/lib/receipt-image");
+      const dataUrl = await buildReceiptImageDataUrl(buildThermalInvoiceHTML(inv));
+      // نام لاتین: بعضی برنامه‌های پرینتر نام فایل فارسی را باز نمی‌کنند
+      const filename = `receipt-${inv.id.toUpperCase()}.png`;
+
+      if (canNativeFileShare() || isNativeApp()) {
+        const ok = await saveBase64File(dataUrl, filename, "image/png");
+        if (!ok) {
+          alert(
+            isAppShell()
+              ? "ذخیره عکس در این نسخه اپ پشتیبانی نمی‌شود. لطفاً نسخه جدید APK را از سایت نصب کنید."
+              : OLD_APP_MESSAGE,
+          );
+        }
+        return;
+      }
+
+      if (isAppShell()) {
+        alert(
+          "در این نسخه اپ نمی‌توان عکس را ذخیره کرد. لطفاً نسخه جدید APK را از سایت نصب کنید یا از سایت در مرورگر استفاده کنید.",
+        );
+        return;
+      }
+
+      const bin = atob(dataUrl.split(",")[1] ?? "");
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "image/png" });
+      const file = new File([blob], filename, { type: "image/png" });
+      const nav = navigator as Navigator & {
+        canShare?: (data?: { files?: File[] }) => boolean;
+        share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+      };
+      if (nav.canShare?.({ files: [file] }) && nav.share) {
+        try {
+          await nav.share({ files: [file], title: filename });
+          return;
+        } catch (e) {
+          // کاربر پنجره اشتراک را بست — کاری لازم نیست
+          if ((e as { name?: string })?.name === "AbortError") return;
+        }
+      }
+      downloadBlob(blob, filename);
+    } catch (e) {
+      console.error("[InvoiceActions] receipt image failed", e);
+      alert("ساخت عکس فیش ناموفق بود. لطفاً دوباره تلاش کنید یا از «چاپ حرارتی» استفاده کنید.");
+    } finally {
+      setMakingImage(false);
     }
   };
 
@@ -194,6 +254,17 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         >
           <Receipt className={iconSize} />
           {showLabels && <span>چاپ حرارتی</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleReceiptImage}
+          disabled={makingImage}
+          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
+          title="فیش به‌صورت عکس (برای مینی‌پرینتر بلوتوثی مثل فوممو — در برنامه پرینتر چاپ کنید)"
+        >
+          <ImageDown className={iconSize} />
+          {showLabels && <span>{makingImage ? "در حال ساخت…" : "فیش عکس"}</span>}
         </button>
 
         <button

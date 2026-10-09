@@ -8,7 +8,7 @@ import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } fro
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import { TurnstileWidget } from "@/components/TurnstileWidget";
-import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
+import { toJalaliInputDate } from "@/lib/store";
 import { markPendingOnboarding } from "@/lib/onboarding";
 import {
   clientTurnstileSiteKey,
@@ -147,7 +147,7 @@ function RegisterPage() {
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
-  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
+  const [receiptTime, setReceiptTime] = useState("");
   const [honeypot, setHoneypot] = useState("");
   const formStartedAt = useRef(Date.now());
   const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
@@ -248,6 +248,10 @@ function RegisterPage() {
     }
     if (password !== password2) {
       setError("تکرار رمز عبور مطابقت ندارد.");
+      return;
+    }
+    if (!receiptFile && receiptRef.trim() && !receiptTime.trim()) {
+      setError("ساعت و دقیقه‌ی دقیق واریز را انتخاب کنید تا مدیر بتواند تراکنش را تطبیق دهد.");
       return;
     }
     const note = receiptNote(receiptRef, receiptDate, receiptTime);
@@ -757,7 +761,7 @@ function RegisterPage() {
                   </div>
                   <div>
                     <label className="rg-label">ساعت و دقیقه واریز (الزامی)</label>
-                    <TimeSelect value={receiptTime} onChange={setReceiptTime} />
+                    <TimeSelect value={receiptTime} onChange={setReceiptTime} required />
                   </div>
                 </div>
               </details>

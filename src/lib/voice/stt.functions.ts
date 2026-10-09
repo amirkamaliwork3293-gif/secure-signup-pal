@@ -4,6 +4,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   clientIp,
   enforceRateLimit,
+  isPaymentPending,
+  PAYMENT_PENDING_FEATURE_MESSAGE,
   requireActiveSubscription,
 } from "@/lib/rate-limit.server";
 
@@ -53,6 +55,10 @@ export const transcribeAudio = createServerFn({ method: "POST" })
     // رونویسی صدا کلید پولی مصرف می‌کند: اشتراک فعال + سقف نرخ سخت‌گیرانه.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await requireActiveSubscription(context.supabase, context.userId);
+    // حساب تازه‌ای که پرداختش هنوز تایید نشده از کلید پولی استفاده نمی‌کند.
+    if (await isPaymentPending(supabaseAdmin, context.userId, context.claims)) {
+      return { ok: false, error: PAYMENT_PENDING_FEATURE_MESSAGE };
+    }
     await enforceRateLimit(supabaseAdmin, "stt", context.userId, 100, 3600);
     await enforceRateLimit(supabaseAdmin, "stt-ip", clientIp(), 200, 3600);
 

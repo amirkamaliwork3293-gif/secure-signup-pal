@@ -7,7 +7,7 @@ import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
 import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
-import { toJalaliInputDate, toJalaliInputTime } from "@/lib/store";
+import { toJalaliInputDate } from "@/lib/store";
 import { Receipt, Loader2, Copy, Check, CreditCard, Upload, X, ArrowRight, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/renew")({
@@ -36,7 +36,7 @@ function RenewPage() {
   // جایگزین متنی رسید — برای کاربرانی که نمی‌توانند/نمی‌خواهند عکس آپلود کنند
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
-  const [receiptTime, setReceiptTime] = useState(() => toJalaliInputTime(Date.now()));
+  const [receiptTime, setReceiptTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -110,6 +110,10 @@ function RenewPage() {
   const handleSubmit = async () => {
     setError("");
     if (!visiblePlans.includes(plan)) { setError("لطفاً یکی از پلن‌های فعال را انتخاب کنید."); return; }
+    if (!receiptFile && receiptRef.trim() && !receiptTime.trim()) {
+      setError("ساعت و دقیقه‌ی دقیق واریز را انتخاب کنید تا مدیر بتواند تراکنش را تطبیق دهد.");
+      return;
+    }
     const note = receiptNote(receiptRef, receiptDate, receiptTime);
     if (!receiptFile && !note) {
       setError("لطفاً عکس رسید پرداخت را آپلود کنید یا کد پیگیری، تاریخ و ساعت دقیق واریز را بنویسید.");
@@ -338,7 +342,7 @@ function RenewPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">ساعت و دقیقه واریز (الزامی)</label>
-                <TimeSelect value={receiptTime} onChange={setReceiptTime} />
+                <TimeSelect value={receiptTime} onChange={setReceiptTime} required />
               </div>
             </div>
           </div>

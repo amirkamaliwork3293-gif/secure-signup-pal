@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   clientIp,
   enforceRateLimit,
+  isPaymentPending,
   requireActiveSubscription,
 } from "@/lib/rate-limit.server";
 
@@ -50,6 +51,11 @@ export const parseVoiceInvoiceLLM = createServerFn({ method: "POST" })
     // این تابع کلید پولی ANTHROPIC را مصرف می‌کند — فقط اشتراک فعال، با سقف نرخ.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await requireActiveSubscription(context.supabase, context.userId);
+    // حساب تازه‌ای که پرداختش هنوز تایید نشده از کلید پولی استفاده نمی‌کند؛
+    // کلاینت بی‌سروصدا با تحلیل‌گر محلی ادامه می‌دهد.
+    if (await isPaymentPending(supabaseAdmin, context.userId, context.claims)) {
+      return { available: false };
+    }
     await enforceRateLimit(supabaseAdmin, "llm-invoice", context.userId, 60, 3600);
     await enforceRateLimit(supabaseAdmin, "llm-invoice-ip", clientIp(), 120, 3600);
 
@@ -136,6 +142,9 @@ export const parseVoiceProductLLM = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<LlmParseProductResult> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await requireActiveSubscription(context.supabase, context.userId);
+    if (await isPaymentPending(supabaseAdmin, context.userId, context.claims)) {
+      return { available: false };
+    }
     await enforceRateLimit(supabaseAdmin, "llm-product", context.userId, 60, 3600);
     await enforceRateLimit(supabaseAdmin, "llm-product-ip", clientIp(), 120, 3600);
 

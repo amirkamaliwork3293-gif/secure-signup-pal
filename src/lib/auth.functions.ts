@@ -11,6 +11,7 @@ import {
   clientIp,
   enforceRateLimit,
   isLockedOut,
+  tryConsumeRateLimit,
 } from "@/lib/rate-limit.server";
 import {
   SIGNUP_RATE_MESSAGE,
@@ -111,6 +112,48 @@ async function ctEqual(a: string, b: string): Promise<boolean> {
   let r = 0;
   for (let i = 0; i < va.length; i++) r |= va[i]! ^ vb[i]!;
   return r === 0;
+}
+
+/**
+ * پشتیبان متن رسید (کد پیگیری + تاریخ و ساعت واریز) وقتی ستون receipt_note در
+ * دیتابیس وجود ندارد و insert بدون آن انجام شده. متن در app_metadata کاربر
+ * (غیرقابل‌ویرایش توسط خود کاربر) با کلید شناسه‌ی درخواست ذخیره می‌شود و پنل
+ * مدیر از همان‌جا نمایش می‌دهد. هرگز throw نمی‌کند — ثبت درخواست نباید بشکند.
+ */
+/**
+ * تنها مسیر نوشتن app_metadata کاربر (پرچم پرداخت، متن رسید پشتیبان).
+ * عمداً فقط app_metadata را می‌پذیرد — رمز، ایمیل یا هیچ فیلد دیگری از اینجا
+ * قابل تغییر نیست (scripts/test-signup-errors.mjs این را بررسی می‌کند).
+ */
+async function updateAuthAppMetadata(
+  supabaseAdmin: any,
+  userId: string,
+  appMetadata: Record<string, unknown>,
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    app_metadata: appMetadata,
+  });
+  return { error: error ?? null };
+}
+
+const RECEIPT_NOTES_KEY = "receipt_notes";
+async function stashReceiptNote(supabaseAdmin: any, userId: string, requestId: string, note: string) {
+  console.error("[receipt] receipt_note column missing — storing note on auth user", requestId);
+  try {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const prev = data?.user?.app_metadata?.[RECEIPT_NOTES_KEY];
+    const notes: Record<string, string> =
+      prev && typeof prev === "object" && !Array.isArray(prev) ? { ...prev } : {};
+    notes[requestId] = note.slice(0, 500);
+    // فقط ۵ مورد آخر — توکن ورود کاربر نباید بی‌دلیل بزرگ شود
+    const trimmed = Object.fromEntries(Object.entries(notes).slice(-5));
+    const { error } = await updateAuthAppMetadata(supabaseAdmin, userId, {
+      [RECEIPT_NOTES_KEY]: trimmed,
+    });
+    if (error) console.error("[receipt] stash failed", error.message);
+  } catch (e) {
+    console.error("[receipt] stash failed", e);
+  }
 }
 
 function toEmail(username: string) {
@@ -324,6 +367,15 @@ async function loadPlansConfig(admin: any): Promise<PlansConfig> {
   return normalizePlans((data as any)?.plans);
 }
 
+// سقف روزانه‌ی فعال‌سازی خودکار ثبت‌نام. با متغیر محیطی قابل تغییر است.
+function envInt(name: string, fallback: number): number {
+  const n = Number.parseInt(process.env[name] || "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+// (هنگام درخواست خوانده می‌شود، نه هنگام بارگذاری ماژول — env روی Worker دیرتر آماده می‌شود)
+const autoActivateIpPerDay = () => envInt("AUTO_ACTIVATE_IP_PER_DAY", 3);
+const autoActivateGlobalPerDay = () => envInt("AUTO_ACTIVATE_GLOBAL_PER_DAY", 40);
+
 function planDurationMs(cfg: PlansConfig, plan: Plan): number {
   const minutes = cfg[plan]?.duration_minutes ?? DEFAULT_PLANS[plan].duration_minutes;
   return Math.max(1, Math.floor(minutes)) * 60 * 1000;
@@ -495,6 +547,10 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       email_confirm: true,
       // Store phone in user_metadata so it's always accessible without a schema change
       user_metadata: { username, first_name: data.first_name.trim(), last_name: data.last_name.trim(), phone },
+      // پرچم «پرداخت هنوز توسط مدیر تایید نشده» — فقط در app_metadata که خود
+      // کاربر نمی‌تواند تغییرش دهد. تا تایید مدیر، قابلیت‌های پولی (هوش مصنوعی)
+      // برای این حساب بسته است؛ بقیه‌ی برنامه کامل در دسترس است.
+      app_metadata: { payment_pending: true },
     });
     // حساب موجود را هرگز با رمز فرم جدید بازنویسی نکن — بعد از نفوذ، رمز کاربران
     // نباید خودکار عوض شود. اگر یوزرنیم تکراری است فقط همان پیام را بده.
@@ -570,12 +626,12 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         }
         result = await supabaseAdmin.from("signup_requests").insert(payload as any).select("id").single();
       }
-      return result;
+      return { result, savedNote: "receipt_note" in payload };
     };
 
     // نقش کاربر و رکورد درخواست به هم وابسته نیستند — هم‌زمان نوشته می‌شوند.
     // کوئری PostgREST Promise نیست — `.catch` روی insert وجود ندارد و ثبت‌نام را می‌خواباند.
-    const [, result] = await Promise.all([
+    const [, { result, savedNote }] = await Promise.all([
       settleQuery(supabaseAdmin.from("user_roles").insert({ user_id: userId, role: "user" })),
       insertRequest(),
     ]);
@@ -597,8 +653,46 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     // درخواست در پنل مدیر «در انتظار» می‌ماند تا پرداخت بررسی شود؛ اگر مدیر
     // آن را رد کند، حساب غیرفعال می‌شود (rejectSignupRequest).
     // فقط از pending به active — هیچ وضعیت دیگری (مثلاً rejected) بازنویسی نمی‌شود.
+    // اگر ستون receipt_note در دیتابیس نبود، متن رسید (کد پیگیری، تاریخ و ساعت
+    // واریز) بی‌صدا حذف می‌شد و مدیر چیزی نمی‌دید. حالا در app_metadata حساب
+    // نگه داشته می‌شود و پنل مدیر از همان‌جا نمایش می‌دهد.
+    if (data.receipt_note && !savedNote) {
+      await stashReceiptNote(supabaseAdmin, userId, result.data.id, data.receipt_note);
+    }
+    // حساب نیمه‌کاره‌ی قبلی پرچم را از createUser نگرفته — قبل از فعال‌سازی اضافه شود.
+    let flagOk = Boolean(created?.user?.id);
+    if (!flagOk) {
+      const { error: metaErr } = await updateAuthAppMetadata(supabaseAdmin, userId, {
+        payment_pending: true,
+      });
+      if (metaErr) console.error("[signup] payment_pending flag failed", metaErr.message);
+      else flagOk = true;
+    }
+
+    // سقف فعال‌سازی خودکار: فقط چند ثبت‌نام اول در روز (از هر IP و در کل سایت)
+    // خودکار فعال می‌شوند. بقیه مثل قبل ثبت می‌شوند و منتظر تایید مدیر می‌مانند —
+    // ساختن انبوه حساب با رسید جعلی دیگر حساب فعال تحویل نمی‌دهد.
+    // سقف IP اول چک می‌شود تا یک IP پرکار سهمیه‌ی سراسری را نسوزاند.
+    const canAutoActivate =
+      passwordVerified &&
+      flagOk &&
+      (await tryConsumeRateLimit(
+        supabaseAdmin,
+        "auto-activate-ip",
+        ip,
+        autoActivateIpPerDay(),
+        86400,
+      )) &&
+      (await tryConsumeRateLimit(
+        supabaseAdmin,
+        "auto-activate-global",
+        "all",
+        autoActivateGlobalPerDay(),
+        86400,
+      ));
+
     let approved = false;
-    if (passwordVerified) {
+    if (canAutoActivate) {
       const start = new Date();
       const end = new Date(start.getTime() + planDurationMs(plansCfg, data.plan));
       const { data: activated, error: actErr } = await supabaseAdmin
@@ -889,6 +983,23 @@ async function clearTempPassword(_supabaseAdmin: unknown, _requestId: string) {
   // ponytail: no-op after temp_password removal; drop with the admin UI cleanup
 }
 
+/**
+ * پاک‌کردن کلیدهای app_metadata (مثلاً پرچم «پرداخت تایید نشده»). فقط اگر کلید واقعاً وجود داشته باشد به‌روزرسانی انجام می‌شود، پس
+ * برای کاربران قدیمی هیچ تغییری نمی‌دهد. خطا پرتاب می‌شود تا فراخوان تصمیم بگیرد.
+ */
+async function clearAuthMetaKeys(supabaseAdmin: any, userId: string, keys: string[]) {
+  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+  // حساب auth وجود ندارد (پروفایل قدیمی) — چیزی برای پاک کردن نیست؛ تایید نباید گیر کند.
+  if (error && !/not.?found/i.test(String(error.message ?? ""))) throw new Error(error.message);
+  if (!data?.user) return;
+  const meta = (data.user.app_metadata ?? {}) as Record<string, unknown>;
+  const present = keys.filter((k) => meta[k] != null);
+  if (present.length === 0) return;
+  const patch = Object.fromEntries(present.map((k) => [k, null]));
+  const { error: upErr } = await updateAuthAppMetadata(supabaseAdmin, userId, patch);
+  if (upErr) throw new Error(upErr.message);
+}
+
 export const approveSignupRequest = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { id: string }) => {
@@ -905,6 +1016,19 @@ export const approveSignupRequest = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .maybeSingle();
     if (reqErr || !req) throw new Error(reqErr?.message || "درخواست یافت نشد.");
+
+    // تایید پرداخت = برداشتن پرچم «پرداخت تایید نشده» از حساب. قبل از تغییر
+    // وضعیت درخواست انجام می‌شود تا اگر شکست خورد، مدیر بتواند دوباره بزند.
+    if ((req as any).request_type !== "renewal") {
+      const { data: owner } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("username", req.username)
+        .maybeSingle();
+      if (owner?.id) {
+        await clearAuthMetaKeys(supabaseAdmin, owner.id, ["payment_pending"]);
+      }
+    }
 
     const { error } = await supabaseAdmin
       .from("signup_requests")
@@ -1100,6 +1224,10 @@ export const extendUserSubscription = createServerFn({ method: "POST" })
       const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", data.user_id);
       if (error) throw new Error(error.message);
     }
+    // تمدید دستی توسط مدیر یعنی پرداخت تایید شده — قفل قابلیت‌های پولی برداشته شود.
+    await clearAuthMetaKeys(supabaseAdmin, data.user_id, ["payment_pending"]).catch((e) =>
+      console.error("[extend] clearing payment_pending failed", e),
+    );
     await auditLog(supabaseAdmin, {
       actor_id: context.userId, action: "subscription_extended", target: data.user_id,
       detail: { plan: data.plan },
@@ -1379,6 +1507,74 @@ function isImageBytes(b: Uint8Array): boolean {
 // ─── Admin: fetch signup requests enriched with phone from user_metadata ──────
 // Works even before the phone column migration is applied — phone is always
 // stored in auth user_metadata when a user registers.
+/**
+ * متن رسیدهایی که به‌خاطر نبودن ستون receipt_note در app_metadata کاربر ذخیره
+ * شده‌اند (stashReceiptNote) را به ردیف درخواست برمی‌گرداند تا مدیر کد پیگیری و
+ * تاریخ/ساعت واریز را ببیند. فقط ردیف‌های اخیر/در انتظار بررسی می‌شوند و اگر
+ * ستون وجود دارد فقط ردیف‌هایی که نه عکس دارند نه متن (یعنی متنشان گم شده).
+ * فقط‌خواندنی است و هیچ چیزی را تغییر نمی‌دهد؛ خطا نادیده گرفته می‌شود.
+ */
+async function fillStashedReceiptNotes(supabaseAdmin: any, requests: Record<string, unknown>[]) {
+  try {
+    const hasNoteColumn = requests.length > 0 && "receipt_note" in requests[0]!;
+    const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const targets = requests
+      .filter((r) => {
+        if (r.receipt_note) return false;
+        if (r.plan === "trial") return false;
+        if (hasNoteColumn && r.receipt_url) return false;
+        const created = new Date(String(r.created_at ?? "")).getTime();
+        return r.status === "pending" || (Number.isFinite(created) && created >= since);
+      })
+      .slice(0, 40);
+    if (targets.length === 0) return;
+
+    const usernames = [
+      ...new Set(
+        targets
+          .filter((r) => r.request_type !== "renewal")
+          .map((r) => String(r.username ?? "").toLowerCase())
+          .filter(Boolean),
+      ),
+    ];
+    const idByUsername = new Map<string, string>();
+    if (usernames.length > 0) {
+      const { data: profs } = await supabaseAdmin
+        .from("profiles")
+        .select("id, username")
+        .in("username", usernames);
+      for (const p of (profs ?? []) as { id: string; username: string }[]) {
+        idByUsername.set(String(p.username).toLowerCase(), p.id);
+      }
+    }
+    const ownerOf = (r: Record<string, unknown>) =>
+      r.request_type === "renewal"
+        ? (r.target_user_id as string | null) || null
+        : idByUsername.get(String(r.username ?? "").toLowerCase()) || null;
+
+    const ownerIds = [...new Set(targets.map(ownerOf).filter(Boolean))] as string[];
+    const notesByOwner = new Map<string, Record<string, unknown>>();
+    await Promise.all(
+      ownerIds.map(async (id) => {
+        try {
+          const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+          const notes = data?.user?.app_metadata?.[RECEIPT_NOTES_KEY];
+          if (notes && typeof notes === "object") notesByOwner.set(id, notes);
+        } catch {
+          /* نمایش متن پشتیبان حیاتی نیست */
+        }
+      }),
+    );
+    for (const r of targets) {
+      const owner = ownerOf(r);
+      const note = owner ? notesByOwner.get(owner)?.[String(r.id)] : null;
+      if (typeof note === "string" && note) r.receipt_note = note;
+    }
+  } catch (e) {
+    console.error("[admin] fillStashedReceiptNotes failed", e);
+  }
+}
+
 export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -1386,6 +1582,7 @@ export const adminGetRequestsWithPhone = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const requests = await listAllSignupRequests(supabaseAdmin);
+    await fillStashedReceiptNotes(supabaseAdmin, requests);
 
     return requests.map((r: Record<string, unknown>) => ({
       ...r,
@@ -1813,7 +2010,9 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
 
     // اگر ستون receipt_note هنوز مهاجرت نشده، بدون آن دوباره تلاش کن تا
     // درخواست تمدید کاربر هرگز به‌خاطر مهاجرت انجام‌نشده شکست نخورد.
+    let noteMissing = false;
     if (note && /receipt_note/i.test(result.error?.message || "")) {
+      noteMissing = true;
       result = await supabaseAdmin
         .from("signup_requests")
         .insert(renewalBase as any)
@@ -1821,6 +2020,9 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
         .single();
     }
     if (result.error) throw new Error(result.error.message);
+    if (note && noteMissing) {
+      await stashReceiptNote(supabaseAdmin, context.userId, result.data.id, note);
+    }
     return { id: result.data.id };
   });
 

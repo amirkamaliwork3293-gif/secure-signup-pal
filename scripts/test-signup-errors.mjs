@@ -84,9 +84,17 @@ assert.match(signupHandler, /findAuthUserByUsername/);
 const pwUpdates = [...authSrc.matchAll(/updateUserById/g)];
 assert.equal(
   pwUpdates.length,
-  2,
-  `فقط ورود ادمین (رمز تصادفی نشست) و ریست دستی ادمین باید رمز را عوض کنند، got ${pwUpdates.length}`,
+  3,
+  `فقط ورود ادمین (رمز تصادفی نشست)، ریست دستی ادمین و helper تک‌منظوره‌ی app_metadata مجازند، got ${pwUpdates.length}`,
 );
+// helper app_metadata هرگز نباید رمز یا فیلد دیگری را بنویسد
+const metaHelper = authSrc.slice(
+  authSrc.indexOf("async function updateAuthAppMetadata"),
+  authSrc.indexOf('const RECEIPT_NOTES_KEY'),
+);
+assert.ok(metaHelper.includes("updateUserById"), "helper app_metadata پیدا نشد");
+assert.doesNotMatch(metaHelper, /password|email|user_metadata/, "helper app_metadata فقط باید app_metadata بنویسد");
+assert.match(metaHelper, /\{\s*app_metadata: appMetadata,\s*\}/);
 assert.match(authSrc, /adminResetUserPassword/);
 assert.match(authSrc, /sessionPass/);
 

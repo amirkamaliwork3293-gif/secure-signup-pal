@@ -2,7 +2,7 @@
  * JalaliPickers.tsx — انتخابگرهای تاریخ و ساعت شمسی
  * به‌جای تایپ دستی «۱۴۰۴/۰۵/۱۵»، کاربر سال/ماه/روز را انتخاب می‌کند.
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toJalali, jalaliMonthLength, parseJalaliInput, JMONTHS_LONG } from "@/lib/store";
 
 const SELECT =
@@ -88,24 +88,70 @@ export function JalaliDateSelect({
 }
 
 /** مقدار به‌صورت «HH:MM» */
-export function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function TimeSelect({
+  value,
+  onChange,
+  required = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  /**
+   * اگر true باشد، تا وقتی کاربر خودش ساعت و دقیقه را انتخاب نکرده، مقدار خالی
+   * می‌ماند (گزینه‌ی «ساعت»/«دقیقه» نمایش داده می‌شود) — به‌جای اینکه بی‌صدا
+   * ساعت فعلی جایگزین شود. برای ساعت دقیق واریز رسید استفاده می‌شود.
+   */
+  required?: boolean;
+}) {
   const m = /^(\d{1,2}):(\d{1,2})$/.exec(value.trim());
   const now = new Date();
-  const h = m ? +m[1] : now.getHours();
-  const min = m ? +m[2] : now.getMinutes();
-  const set = (p: { h?: number; min?: number }) =>
-    onChange(`${pad2(p.h ?? h)}:${pad2(p.min ?? min)}`);
+  // انتخاب نیمه‌کاره (فقط ساعت یا فقط دقیقه) تا کامل شدن، محلی نگه داشته می‌شود
+  const [partial, setPartial] = useState<{ h: number | null; min: number | null }>({
+    h: null,
+    min: null,
+  });
+  const emptyMode = required && !m;
+  const h = m ? +m[1] : emptyMode ? partial.h : now.getHours();
+  const min = m ? +m[2] : emptyMode ? partial.min : now.getMinutes();
+  const set = (p: { h?: number; min?: number }) => {
+    const nh = p.h ?? h;
+    const nm = p.min ?? min;
+    if (nh == null || nm == null) {
+      setPartial({ h: nh, min: nm });
+      return;
+    }
+    onChange(`${pad2(nh)}:${pad2(nm)}`);
+  };
 
   return (
     <div className="grid grid-cols-2 gap-1.5" dir="ltr">
-      <select className={SELECT} value={h} onChange={(e) => set({ h: +e.target.value })}>
+      <select
+        className={SELECT}
+        value={h ?? ""}
+        aria-label="ساعت"
+        onChange={(e) => e.target.value !== "" && set({ h: +e.target.value })}
+      >
+        {h == null && (
+          <option value="" disabled>
+            ساعت
+          </option>
+        )}
         {Array.from({ length: 24 }, (_, i) => i).map((x) => (
           <option key={x} value={x}>
             {pad2(x)}
           </option>
         ))}
       </select>
-      <select className={SELECT} value={min} onChange={(e) => set({ min: +e.target.value })}>
+      <select
+        className={SELECT}
+        value={min ?? ""}
+        aria-label="دقیقه"
+        onChange={(e) => e.target.value !== "" && set({ min: +e.target.value })}
+      >
+        {min == null && (
+          <option value="" disabled>
+            دقیقه
+          </option>
+        )}
         {Array.from({ length: 60 }, (_, i) => i).map((x) => (
           <option key={x} value={x}>
             {pad2(x)}

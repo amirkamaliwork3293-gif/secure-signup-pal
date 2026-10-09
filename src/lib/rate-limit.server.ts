@@ -198,3 +198,52 @@ export async function requireActiveSubscription(
   }
   if (data !== true) throw new Error("این قابلیت به اشتراک فعال نیاز دارد.");
 }
+
+/**
+ * مثل enforceRateLimit یک واحد از سهمیه مصرف می‌کند، ولی به‌جای پرتاب خطا
+ * فقط true/false برمی‌گرداند. برای تصمیم‌های «نرم» (مثلاً فعال‌سازی خودکار)
+ * که رد شدنشان نباید جریان کاربر را بشکند. هر خطایی = false (سمت امن).
+ */
+export async function tryConsumeRateLimit(
+  admin: Admin,
+  scope: string,
+  identifier: string,
+  max: number,
+  windowSeconds: number,
+): Promise<boolean> {
+  try {
+    await enforceRateLimit(admin, scope, identifier, max, windowSeconds);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * آیا پرداخت این حساب هنوز توسط مدیر تایید نشده است؟
+ *
+ * فقط حساب‌هایی که با «فعال‌سازی خودکار» ساخته شده‌اند پرچم
+ * app_metadata.payment_pending دارند (app_metadata را خود کاربر نمی‌تواند
+ * تغییر دهد). برای بقیه‌ی کاربران هیچ کوئری اضافه‌ای اجرا نمی‌شود. اگر توکن
+ * پرچم را دارد، وضعیت زنده از سرور خوانده می‌شود تا کاربری که همین الان تایید
+ * شده، منتظر تازه شدن توکن نماند. خطا در خواندن = در انتظار (سمت امن).
+ */
+export async function isPaymentPending(
+  admin: Admin,
+  userId: string,
+  claims: unknown,
+): Promise<boolean> {
+  const flag = (claims as { app_metadata?: { payment_pending?: unknown } } | null)?.app_metadata
+    ?.payment_pending;
+  if (flag !== true) return false;
+  try {
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+    if (error || !data?.user) return true;
+    return data.user.app_metadata?.payment_pending === true;
+  } catch {
+    return true;
+  }
+}
+
+export const PAYMENT_PENDING_FEATURE_MESSAGE =
+  "این قابلیت پس از تایید پرداخت توسط مدیر فعال می‌شود. بقیه‌ی امکانات برنامه همین حالا در دسترس شماست.";

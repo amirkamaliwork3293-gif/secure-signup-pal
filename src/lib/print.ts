@@ -400,16 +400,15 @@ async function waitForFonts(doc: Document | null | undefined, timeoutMs: number)
 const PX_TO_MM = 25.4 / 96;
 
 /**
- * فیش را در یک قاب پنهان با عرض واقعی کاغذ می‌چیند، ارتفاع محتوا را اندازه می‌گیرد
- * و ‎@page‎ را به «عرض × ارتفاع دقیق» تبدیل می‌کند (یک صفحهٔ بلند بدون برش).
- * اگر اندازه‌گیری ممکن نبود، همان HTML (با ارتفاع پیش‌فرض) برمی‌گردد.
+ * ارتفاع واقعی محتوای فیش (پیکسل CSS) در قابی پنهان با عرض واقعی کاغذ.
+ * اگر اندازه‌گیری ممکن نبود ۰ برمی‌گردد.
  */
-export function prepareReceiptHtml(html: string): Promise<string> {
+export function measureReceiptHeightPx(html: string): Promise<number> {
   return new Promise((resolve) => {
-    if (typeof document === "undefined") return resolve(html);
+    if (typeof document === "undefined") return resolve(0);
     const paper = Number(html.match(/data-kamix-receipt="([\d.]+)"/)?.[1]) || 80;
     let done = false;
-    const finish = (out: string) => {
+    const finish = (h: number) => {
       if (done) return;
       done = true;
       try {
@@ -417,7 +416,7 @@ export function prepareReceiptHtml(html: string): Promise<string> {
       } catch {
         /* ignore */
       }
-      resolve(out);
+      resolve(h);
     };
     const frame = document.createElement("iframe");
     frame.setAttribute("title", "receipt-measure");
@@ -431,23 +430,35 @@ export function prepareReceiptHtml(html: string): Promise<string> {
       visibility: "hidden",
     });
     frame.onload = () => {
+      // Chrome/WebView هنگام افزودن قاب یک load برای about:blank هم می‌فرستد. قبلاً همان
+      // صفحهٔ خالی اندازه گرفته می‌شد (~۲۷ میلی‌متر) و فیش به تکه‌های ۲۷ میلی‌متری روی
+      // صفحه‌های جدا شکسته می‌شد. فقط سند خود فیش اندازه گرفته شود.
+      if (!frame.contentDocument?.documentElement?.hasAttribute(RECEIPT_MARK)) return;
       void waitForFonts(frame.contentDocument, 2500).then(() => {
         try {
           const doc = frame.contentDocument;
           // ارتفاع واقعی محتوا (نه ارتفاع قاب): پایین‌ترین لبهٔ ظرف فیش
           const box = doc?.querySelector(".r") ?? doc?.body;
-          const h = box ? Math.ceil(box.getBoundingClientRect().bottom) : 0;
-          if (!h) return finish(html);
-          finish(withReceiptPageHeight(html, Math.ceil(h * PX_TO_MM) + 2));
+          finish(box ? Math.ceil(box.getBoundingClientRect().bottom) : 0);
         } catch {
-          finish(html);
+          finish(0);
         }
       });
     };
     document.body.appendChild(frame);
     frame.srcdoc = html;
-    setTimeout(() => finish(html), 5000);
+    setTimeout(() => finish(0), 5000);
   });
+}
+
+/**
+ * ‎@page‎ فیش را به «عرض × ارتفاع دقیق محتوا» تبدیل می‌کند (یک صفحهٔ بلند بدون برش).
+ * اگر اندازه‌گیری ممکن نبود، همان HTML (با ارتفاع پیش‌فرض) برمی‌گردد.
+ */
+export async function prepareReceiptHtml(html: string): Promise<string> {
+  const h = await measureReceiptHeightPx(html);
+  if (!h) return html;
+  return withReceiptPageHeight(html, Math.ceil(h * PX_TO_MM) + 2);
 }
 
 let fontDataCache: Record<string, string> | null = null;

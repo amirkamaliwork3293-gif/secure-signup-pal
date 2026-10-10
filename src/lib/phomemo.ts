@@ -1,0 +1,221 @@
+/**
+ * phomemo.ts — چاپ مستقیم روی مینی‌پرینترهای فوممو (M110 / M120 / M220) با بلوتوث مرورگر
+ *
+ * آزمایشی است و فقط در صفحهٔ ‎/printer-test‎ استفاده می‌شود؛ به هیچ داده‌ای دست نمی‌زند.
+ *
+ * پروتکل (از روی ضبط بستهٔ برنامهٔ رسمی؛ مستند رسمی ندارد — phomemo-tools):
+ *   سرعت       1b 4e 0d <1..5>
+ *   غلظت       1b 4e 04 <1..15>
+ *   نوع کاغذ   1f 11 <0a فاصله‌دار | 0b پیوسته | 26 نشانه‌دار>
+ *   تصویر      1d 76 30 00 <بایت هر خط LE16> <تعداد خط LE16> <داده: ۱ = سیاه، بیت پرارزش اول>
+ *   پایان      1f f0 05 00   1f f0 03 00
+ * کل فیش در «یک» فرمان تصویر فرستاده می‌شود: M220 هر فرمان تصویر را یک چاپ جدا حساب
+ * می‌کند و بین آن‌ها حدود ۶ میلی‌متر فاصله می‌اندازد.
+ * بلوتوث: سرویس 0xff00، نوشتن روی 0xff02.
+ */
+
+export type PhomemoMedia = "continuous" | "gap";
+
+export type PhomemoJobOptions = {
+  /** غلظت چاپ ۱ تا ۱۵ */
+  density: number;
+  /** سرعت چاپ ۱ (آهسته) تا ۵ (تند) */
+  speed: number;
+  media: PhomemoMedia;
+};
+
+const MEDIA_CODE: Record<PhomemoMedia, number> = { gap: 0x0a, continuous: 0x0b };
+
+const clampInt = (n: number, lo: number, hi: number) =>
+  Math.min(hi, Math.max(lo, Math.round(Number.isFinite(n) ? n : lo)));
+
+/**
+ * پیکسل‌های canvas (RGBA) → بیت‌های چاپ: هر خط به بایت کامل گرد می‌شود،
+ * ۱ = نقطهٔ سیاه، بیت پرارزش = نقطهٔ چپ.
+ */
+export function packBitmap(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold = 170,
+): { bits: Uint8Array; widthBytes: number } {
+  const widthBytes = Math.ceil(width / 8);
+  const bits = new Uint8Array(widthBytes * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const a = rgba[i + 3] / 255;
+      const lum = (0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2]) * a + 255 * (1 - a);
+      if (lum < threshold) bits[y * widthBytes + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+  }
+  return { bits, widthBytes };
+}
+
+/** دستورهای کامل یک چاپ: تنظیمات + یک تصویر + پایان */
+export function buildPhomemoJob(
+  bits: Uint8Array,
+  widthBytes: number,
+  lines: number,
+  opts: PhomemoJobOptions,
+): Uint8Array {
+  if (widthBytes < 1 || widthBytes > 0xffff) throw new Error("invalid width");
+  if (lines < 1 || lines > 0xffff) throw new Error("image too long");
+  if (bits.length !== widthBytes * lines) throw new Error("bitmap size mismatch");
+  const header = [
+    0x1b,
+    0x4e,
+    0x0d,
+    clampInt(opts.speed, 1, 5),
+    0x1b,
+    0x4e,
+    0x04,
+    clampInt(opts.density, 1, 15),
+    0x1f,
+    0x11,
+    MEDIA_CODE[opts.media],
+    0x1d,
+    0x76,
+    0x30,
+    0x00,
+    widthBytes & 0xff,
+    widthBytes >> 8,
+    lines & 0xff,
+    lines >> 8,
+  ];
+  const footer = [0x1f, 0xf0, 0x05, 0x00, 0x1f, 0xf0, 0x03, 0x00];
+  const out = new Uint8Array(header.length + bits.length + footer.length);
+  out.set(header, 0);
+  out.set(bits, header.length);
+  out.set(footer, header.length + bits.length);
+  return out;
+}
+
+// ─── بلوتوث مرورگر (Web Bluetooth) — حداقل تایپ‌های لازم ─────────────────────
+
+type BtCharacteristic = {
+  uuid: string;
+  properties: { write: boolean; writeWithoutResponse: boolean };
+  writeValueWithResponse?: (v: Uint8Array) => Promise<void>;
+  writeValueWithoutResponse?: (v: Uint8Array) => Promise<void>;
+  writeValue?: (v: Uint8Array) => Promise<void>;
+};
+type BtService = {
+  uuid: string;
+  getCharacteristic: (id: number | string) => Promise<BtCharacteristic>;
+  getCharacteristics: () => Promise<BtCharacteristic[]>;
+};
+type BtServer = {
+  connected: boolean;
+  connect: () => Promise<BtServer>;
+  disconnect: () => void;
+  getPrimaryService: (id: number | string) => Promise<BtService>;
+  getPrimaryServices: () => Promise<BtService[]>;
+};
+type BtDevice = { name?: string; gatt?: BtServer };
+type BtApi = {
+  requestDevice: (o: {
+    acceptAllDevices?: boolean;
+    optionalServices?: (number | string)[];
+  }) => Promise<BtDevice>;
+};
+
+export function bluetoothAvailable(): boolean {
+  return typeof navigator !== "undefined" && !!(navigator as { bluetooth?: BtApi }).bluetooth;
+}
+
+export type PhomemoConnection = {
+  name: string;
+  /** کد سرویس/مشخصه‌ای که برای نوشتن پیدا شد (برای گزارش) */
+  via: string;
+  canWriteWithoutResponse: boolean;
+  write: (data: Uint8Array, withResponse: boolean) => Promise<void>;
+  disconnect: () => void;
+  isConnected: () => boolean;
+};
+
+/** سرویس‌های رایج پرینترهای حرارتی بلوتوثی؛ فوممو = ff00 */
+const KNOWN_SERVICES: (number | string)[] = [0xff00, 0x18f0, 0xae30, 0xfee7, 0xff10];
+
+/**
+ * پنجرهٔ انتخاب دستگاه بلوتوث را باز می‌کند و به پرینتر وصل می‌شود.
+ * باید از داخل کلیک کاربر صدا زده شود.
+ */
+export async function connectPhomemo(log: (msg: string) => void): Promise<PhomemoConnection> {
+  const bt = (navigator as { bluetooth?: BtApi }).bluetooth;
+  if (!bt) throw new Error("no-bluetooth");
+  const device = await bt.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: KNOWN_SERVICES,
+  });
+  const name = device.name || "بدون نام";
+  log(`دستگاه انتخاب شد: ${name}`);
+  if (!device.gatt) throw new Error("no-gatt");
+  const server = await device.gatt.connect();
+  log("اتصال بلوتوث برقرار شد");
+
+  let ch: BtCharacteristic | null = null;
+  let via = "";
+  try {
+    const svc = await server.getPrimaryService(0xff00);
+    ch = await svc.getCharacteristic(0xff02);
+    via = "ff00/ff02";
+  } catch {
+    log("سرویس استاندارد فوممو (ff00) پیدا نشد؛ جست‌وجوی سرویس‌های دیگر…");
+    for (const svc of await server.getPrimaryServices()) {
+      for (const c of await svc.getCharacteristics()) {
+        log(`  سرویس ${svc.uuid} — مشخصه ${c.uuid}`);
+        if (!ch && (c.properties.write || c.properties.writeWithoutResponse)) {
+          ch = c;
+          via = `${svc.uuid} / ${c.uuid}`;
+        }
+      }
+    }
+  }
+  if (!ch) {
+    server.disconnect();
+    throw new Error("no-writable-characteristic");
+  }
+  log(`مسیر ارسال: ${via}`);
+  const target = ch;
+  return {
+    name,
+    via,
+    canWriteWithoutResponse: !!target.properties.writeWithoutResponse,
+    write: async (data, withResponse) => {
+      if (
+        !withResponse &&
+        target.writeValueWithoutResponse &&
+        target.properties.writeWithoutResponse
+      )
+        return target.writeValueWithoutResponse(data);
+      if (target.writeValueWithResponse) return target.writeValueWithResponse(data);
+      if (target.writeValue) return target.writeValue(data);
+      throw new Error("characteristic not writable");
+    },
+    disconnect: () => {
+      try {
+        server.disconnect();
+      } catch {
+        /* ignore */
+      }
+    },
+    isConnected: () => server.connected,
+  };
+}
+
+/** ارسال تکه‌تکه با مکث کوتاه تا حافظهٔ پرینتر سرریز نشود */
+export async function sendToPrinter(
+  conn: PhomemoConnection,
+  data: Uint8Array,
+  opts: { chunk: number; delayMs: number; withResponse: boolean },
+  onProgress?: (sent: number, total: number) => void,
+): Promise<void> {
+  const chunk = clampInt(opts.chunk, 20, 512);
+  for (let i = 0; i < data.length; i += chunk) {
+    if (!conn.isConnected()) throw new Error("disconnected");
+    await conn.write(data.subarray(i, Math.min(i + chunk, data.length)), opts.withResponse);
+    onProgress?.(Math.min(i + chunk, data.length), data.length);
+    if (opts.delayMs > 0) await new Promise((r) => setTimeout(r, opts.delayMs));
+  }
+}

@@ -24,6 +24,7 @@ import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MenuRouteImport } from './routes/menu'
 import { Route as MenuQrRouteImport } from './routes/menu-qr'
+import { Route as PrinterTestRouteImport } from './routes/printer-test'
 import { Route as ProductionRouteImport } from './routes/production'
 import { Route as ProductsRouteImport } from './routes/products'
 import { Route as PurchasesRouteImport } from './routes/purchases'
@@ -116,6 +117,11 @@ const MenuRoute = MenuRouteImport.update({
 const MenuQrRoute = MenuQrRouteImport.update({
   id: '/menu-qr',
   path: '/menu-qr',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrinterTestRoute = PrinterTestRouteImport.update({
+  id: '/printer-test',
+  path: '/printer-test',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProductionRoute = ProductionRouteImport.update({
@@ -225,6 +231,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/printer-test': typeof PrinterTestRoute
   '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
@@ -260,6 +267,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/printer-test': typeof PrinterTestRoute
   '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
@@ -296,6 +304,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/menu': typeof MenuRoute
   '/menu-qr': typeof MenuQrRoute
+  '/printer-test': typeof PrinterTestRoute
   '/production': typeof ProductionRoute
   '/products': typeof ProductsRoute
   '/purchases': typeof PurchasesRoute
@@ -333,6 +342,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/printer-test'
     | '/production'
     | '/products'
     | '/purchases'
@@ -368,6 +378,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/printer-test'
     | '/production'
     | '/products'
     | '/purchases'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/menu'
     | '/menu-qr'
+    | '/printer-test'
     | '/production'
     | '/products'
     | '/purchases'
@@ -439,6 +451,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MenuRoute: typeof MenuRoute
   MenuQrRoute: typeof MenuQrRoute
+  PrinterTestRoute: typeof PrinterTestRoute
   ProductionRoute: typeof ProductionRoute
   ProductsRoute: typeof ProductsRoute
   PurchasesRoute: typeof PurchasesRoute
@@ -564,6 +577,13 @@ declare module '@tanstack/react-router' {
       path: '/menu-qr'
       fullPath: '/menu-qr'
       preLoaderRoute: typeof MenuQrRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/printer-test': {
+      id: '/printer-test'
+      path: '/printer-test'
+      fullPath: '/printer-test'
+      preLoaderRoute: typeof PrinterTestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/production': {
@@ -711,6 +731,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MenuRoute: MenuRoute,
   MenuQrRoute: MenuQrRoute,
+  PrinterTestRoute: PrinterTestRoute,
   ProductionRoute: ProductionRoute,
   ProductsRoute: ProductsRoute,
   PurchasesRoute: PurchasesRoute,

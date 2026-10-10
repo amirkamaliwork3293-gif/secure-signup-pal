@@ -232,15 +232,15 @@ export function receiptCss(s: ReceiptSettings): string {
   ${s.splitA4 ? ".kv,.tot,.foot,.words{break-inside:avoid;page-break-inside:avoid}" : ""}
   /* برگه‌های A4 (PDF/برنامهٔ چاپگر): فضا و خط برش لازم نیست و تنها روی یک برگهٔ اضافه می‌افتاد */
   ${s.splitA4 ? ".r{padding-bottom:2mm}.cut{display:none}" : ""}
-  .tb{width:100%;table-layout:fixed;border-collapse:collapse;font-size:${Math.round(fs * 0.95)}px;line-height:1.35}
+  .tb{width:100%;table-layout:fixed;border-collapse:collapse;font-size:${receiptTableFontPx(fs)}px;line-height:1.35}
   .tb thead{display:table-header-group}
-  .tb th{font-weight:900;font-size:${Math.max(9, Math.round(fs * 0.8))}px;padding:0.5mm 0.4mm;border-bottom:1.5px solid #000;white-space:nowrap;text-align:center}
+  .tb th{font-weight:900;font-size:${Math.max(9, Math.round(fs * 0.85))}px;padding:0.5mm 0.4mm;border-bottom:1.5px solid #000;white-space:nowrap;text-align:center}
   .tb td{padding:0.7mm 0.6mm;border-bottom:1px dotted #000;vertical-align:top;text-align:center}
   .tb tr{break-inside:avoid;page-break-inside:avoid}
   .tb tbody tr:last-child td{border-bottom:0}
   .tb .n{text-align:right}
   .tb td.n{font-weight:700;word-break:break-word;overflow-wrap:anywhere}
-  .tb td.t{text-align:left;word-break:keep-all;overflow-wrap:normal;direction:ltr}
+  .tb td.t{text-align:left;white-space:nowrap;direction:ltr}
   .tb th.t{text-align:left}
   .tb td.t{font-weight:900}
   .tb .u{display:block;font-weight:400;font-size:${Math.max(9, Math.round(fs * 0.8))}px}
@@ -281,6 +281,14 @@ export const receiptParts = {
 
 export type ReceiptItemRow = Parameters<typeof receiptParts.item>[0];
 
+/** قلم جدول کالاها — کمی درشت‌تر از قلم پایهٔ فیش تا نام و مبلغ بزرگ و خوانا باشند */
+export function receiptTableFontPx(baseFontPx: number): number {
+  return Math.round(baseFontPx * 1.15);
+}
+/** پهنای تقریبی هر رقم/جداکنندهٔ فارسی در وزیرمتن سیاه (نسبت به اندازهٔ قلم) */
+const AMOUNT_CHAR_EM = 0.63;
+const AMOUNT_COL_MAX_PCT = 46;
+
 /** آیا این فیش با این تعداد کالا جدولی چاپ می‌شود؟ */
 export function receiptUsesTable(s: ReceiptSettings, count: number): boolean {
   if (s.itemLayout === "table") return count > 0;
@@ -295,19 +303,24 @@ export function receiptUsesTable(s: ReceiptSettings, count: number): boolean {
  */
 export function receiptItemsHtml(rows: ReceiptItemRow[], s: ReceiptSettings): string {
   if (!receiptUsesTable(s, rows.length)) return rows.map((r) => receiptParts.item(r)).join("");
-  // عرض ستون «مبلغ» از روی بلندترین مبلغ همین فیش: هر رقم/جداکننده ≈ ۰٫۶۳ قلم (وزیرمتن سیاه)
-  const fontPx = Math.round(s.fontPx * 0.95);
+  // ستون «مبلغ» به‌اندازهٔ بلندترین مبلغ همین فیش (هر رقم/جداکننده ≈ ۰٫۶۳ قلم وزیرمتن سیاه)
+  const fontPx = receiptTableFontPx(s.fontPx);
   const longest = Math.max(...rows.map((r) => r.total.length), 1);
-  const totalMm = (longest * 0.63 * fontPx * 25.4) / 96 + 2;
-  const totalPct = Math.min(48, Math.max(22, Math.ceil((totalMm / s.printableMm) * 100)));
+  const mmFor = (px: number) => (longest * AMOUNT_CHAR_EM * px * 25.4) / 96;
+  const totalPct = Math.min(
+    AMOUNT_COL_MAX_PCT,
+    Math.max(22, Math.ceil(((mmFor(fontPx) + 2) / s.printableMm) * 100)),
+  );
+  // مبلغ‌های خیلی بلند: فقط قلم همین ستون کوچک می‌شود تا یک‌خطی و جدا بماند (بقیهٔ فیش درشت)
+  const roomMm = (totalPct / 100) * s.printableMm - 2;
+  const amountEm = Math.min(1, Math.max(0.6, roomMm / mmFor(fontPx)));
+  const amountStyle = amountEm < 1 ? ` style="font-size:${amountEm.toFixed(2)}em"` : "";
   const qtyPct = s.printableMm < 60 ? 17 : 14;
   const cols = [`${100 - qtyPct - totalPct}%`, `${qtyPct}%`, `${totalPct}%`];
-  // مبلغ‌های خیلی بلند فقط سر جداکنندهٔ هزارگان می‌شکنند، نه وسط رقم‌ها
-  const amount = (v: string) => esc(v).replace(/([٬,])/g, "$1<wbr>");
   const body = rows
     .map(
       (r) =>
-        `<tr><td class="n">${esc(r.name)}${r.tag ? `<span class="u">${esc(r.tag)}</span>` : ""}</td><td class="q">${esc(r.qty)}</td><td class="t">${amount(r.total)}</td></tr>`,
+        `<tr><td class="n">${esc(r.name)}${r.tag ? `<span class="u">${esc(r.tag)}</span>` : ""}</td><td class="q">${esc(r.qty)}</td><td class="t"${amountStyle}>${esc(r.total)}</td></tr>`,
     )
     .join("");
   return `<table class="tb"><colgroup>${cols.map((w) => `<col style="width:${w}"/>`).join("")}</colgroup><thead><tr><th class="n">کالا</th><th class="q">تعداد</th><th class="t">مبلغ</th></tr></thead><tbody>${body}</tbody></table>`;

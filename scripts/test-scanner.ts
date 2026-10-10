@@ -1,723 +1,693 @@
 /**
- * تست اسکنر بارکد — هندسه، دروازهٔ پذیرش، رتبه‌بندی لنز، و دیکود واقعی.
+ * تست اسکنر بارکد — منطق خالص + شبیه‌سازی کامل پایپ‌لاین روی فریم دوربین مصنوعی.
  * اجرا: npx --yes tsx --tsconfig tsconfig.json scripts/test-scanner.ts
  *
- * دیکود با همان تابع پروداکشن (`decodePixels`) و همان تنظیمات (`READER_OPTIONS`)
- * انجام می‌شود. بارکدها اینجا ساخته و به پیکسل خام RGBA تبدیل می‌شوند — همان
- * شکل ورودی که در مرورگر از `ImageData` می‌آید. هیچ دادهٔ کاربری خوانده یا
- * نوشته نمی‌شود.
+ * بخش شبیه‌سازی دقیقاً همان کد پروداکشن را اجرا می‌کند: `planCrop` و `PASS_CYCLE`
+ * (کدام ناحیه با چه اندازه‌ای)، `decodePixels` و `READER_OPTIONS` (zxing)، و
+ * `Consensus` (پذیرش). فقط «دوربین» مصنوعی است: بارکد با bwip-js/qrcode ساخته و
+ * با اندازه، چرخش، معکوس و تاری مختلف روی یک فریم ۱۰۸۰p نویزدار گذاشته می‌شود.
+ * هیچ دادهٔ کاربری خوانده یا نوشته نمی‌شود.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import bwipjs from "bwip-js/node";
+import { PNG } from "pngjs";
 import QRCode from "qrcode";
 import { prepareZXingModule } from "zxing-wasm/reader";
 
 import {
-  BASE_RETICLE,
-  MAX_DECODE_PIXELS,
-  coverMappedRect,
-  cropSourceRect,
-  fitDecodeSize,
-  insetScanCrop,
-  objectFitCoverVisible,
-  reticleRect,
-} from "../src/features/scanner/geometry.ts";
-import {
-  needsConfirmation,
-  normalizeOutputFormat,
-  READER_FORMATS,
-} from "../src/features/scanner/formats.ts";
-import {
+  Consensus,
   CONFIRM_WINDOW_MS,
-  REPEAT_SUPPRESS_MS,
-  acceptScan,
-  initialAcceptState,
-} from "../src/features/scanner/accept.ts";
+  EXCLUSIVE_MS,
+  MIN_REPEAT_MS,
+  REARM_GAP_MS,
+  identityKey,
+  needsConfirmation,
+} from "../src/features/barcode-scanner/consensus.ts";
 import {
-  looksLikeFrontCamera,
-  preferredInitialZoom,
-  rankRearCameras,
-  shouldReusePrimedCamera,
-} from "../src/features/scanner/camera-select.ts";
+  expandUpcE,
+  fromNativeFormat,
+  fromZxingFormat,
+  isPlausible,
+  isValidGtin,
+} from "../src/features/barcode-scanner/formats.ts";
 import {
-  NATIVE_HANG_LIMIT,
-  nativeDetectBudgetMs,
-  nativeHitFromCodes,
-  nextNativeHangState,
-  raceTimeout,
-} from "../src/features/scanner/native.ts";
-import { isBlankRgba, sampledRgbaVariance } from "../src/features/scanner/pixels.ts";
+  PASS_CYCLE,
+  clampRect,
+  insideAimZone,
+  outputPointToVideo,
+  outputSize,
+  planCrop,
+  videoPointToView,
+  visibleVideoRect,
+  type CropPlan,
+} from "../src/features/barcode-scanner/geometry.ts";
 import {
-  LEGACY_SCANNER_FLAGS,
-  SCANNER_FLAG_DEFAULTS,
-  SCANNER_STORAGE_KEY,
-  parseScannerOverride,
-  readExperimentalPreference,
-  resolveScannerFlags,
-  writeExperimentalPreference,
-  type ScannerStorage,
-} from "../src/features/scanner/flags.ts";
+  initialZoom,
+  isFrontLens,
+  labelsAreInformative,
+  rankRearLenses,
+  zoomSteps,
+} from "../src/features/barcode-scanner/lens.ts";
+import { WedgeBuffer, keyToChar } from "../src/features/barcode-scanner/keyboard-wedge.ts";
+import { pickNativeHit, withTimeout } from "../src/features/barcode-scanner/engines/native.ts";
 import {
-  DIAG_TAP_COUNT,
-  DIAG_TAP_WINDOW_MS,
-  averageMs,
-  describeUserAgent,
-  formatDiagnosticsReport,
-  pushDecodeSample,
-  registerDiagnosticsTap,
-  type ScannerDiagnostics,
-} from "../src/features/scanner/diagnostics.ts";
-import { decodePixels, type Pixels } from "../src/features/scanner/decoder/zxing.ts";
-import {
-  findProductByCode,
-  normalizeScannedCode,
-  scannedCodeCandidates,
-  scannedCodesMatch,
-} from "../src/lib/barcode-match.ts";
+  isBlankFrame,
+  sampledLumaVariance,
+} from "../src/features/barcode-scanner/frame-grabber.ts";
+import { decodePixels, type Pixels } from "../src/features/barcode-scanner/engines/zxing-core.ts";
+import { findProductByCode } from "../src/lib/barcode-match.ts";
 
-// wasm را از فایل محلی می‌دهیم تا تست به شبکه/CDN وابسته نباشد.
 prepareZXingModule({
   overrides: { wasmBinary: readFileSync("node_modules/zxing-wasm/dist/reader/zxing_reader.wasm") },
   fireImmediately: false,
 });
 
-/* --------------------------------------------------------------- هندسه */
-
-{
-  const r = reticleRect(1);
-  assert.equal(r.w, BASE_RETICLE.w);
-  assert.ok(Math.abs(r.x * 2 + r.w - 1) < 1e-9, "کادر باید افقی وسط باشد");
-  assert.ok(Math.abs(r.y * 2 + r.h - 1) < 1e-9, "کادر باید عمودی وسط باشد");
-
-  // ضریب‌های افراطی نباید از فریم بیرون بزنند.
-  for (const scale of [0.01, 0.4, 1, 1.4, 99]) {
-    const q = reticleRect(scale);
-    assert.ok(q.x >= 0 && q.y >= 0, `x/y منفی در scale=${scale}`);
-    assert.ok(q.x + q.w <= 1 + 1e-9, `عرض از فریم بیرون زد در scale=${scale}`);
-    assert.ok(q.y + q.h <= 1 + 1e-9, `ارتفاع از فریم بیرون زد در scale=${scale}`);
+let passed = 0;
+async function test(name: string, fn: () => void | Promise<void>) {
+  try {
+    await fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (err) {
+    console.error(`  ✗ ${name}`);
+    throw err;
   }
+}
 
-  // مستطیل منبع همیشه داخل مرز ویدیو می‌ماند.
-  for (const [vw, vh] of [
-    [1920, 1080],
-    [1280, 720],
-    [640, 480],
-    [1, 1],
+console.log("\nفرمت‌ها");
+
+await test("رقم کنترلی GTIN", () => {
+  assert.ok(isValidGtin("5901234123457"));
+  assert.ok(isValidGtin("96385074"));
+  assert.ok(isValidGtin("012345678905"));
+  assert.ok(!isValidGtin("5901234123458"));
+  assert.ok(!isValidGtin("59012341234"));
+  assert.ok(!isValidGtin("abc"));
+});
+
+await test("بسط UPC-E", () => {
+  assert.equal(expandUpcE("01234565"), "012345000065");
+  assert.ok(isPlausible("upce", "01234565"));
+  assert.ok(isPlausible("upce", "0012345000065"));
+  assert.ok(!isPlausible("upce", "01234564"));
+});
+
+await test("نگاشت نام فرمت دو موتور", () => {
+  assert.equal(fromZxingFormat("EAN13"), "ean13");
+  assert.equal(fromZxingFormat("Code128"), "code128");
+  assert.equal(fromZxingFormat("QRCode"), "qr");
+  assert.equal(fromZxingFormat("Nope"), "unknown");
+  assert.equal(fromNativeFormat("ean_13"), "ean13");
+  assert.equal(fromNativeFormat("qr_code"), "qr");
+  assert.equal(fromNativeFormat("itf"), "itf");
+});
+
+await test("خوانش نامعقول رد می‌شود", () => {
+  assert.ok(!isPlausible("ean13", "5901234123458"), "رقم کنترلی غلط");
+  assert.ok(!isPlausible("itf", "12345"), "ITF طول فرد");
+  assert.ok(!isPlausible("code39", "A"), "CODE-39 خیلی کوتاه");
+  assert.ok(!isPlausible("qr", ""), "خالی");
+  assert.ok(isPlausible("code128", "PABC234XYZ"));
+});
+
+console.log("\nدروازهٔ پذیرش");
+
+await test("فرمت قوی با یک خوانش؛ تکرار تا وقتی در دید است رد می‌شود", () => {
+  const c = new Consensus();
+  const r = { text: "5901234123457", format: "ean13" as const, source: "native" as const };
+  assert.equal(c.offer(r, 0).kind, "accept");
+  // بارکد جلوی دوربین مانده: هر ۳۳ms دوباره خوانده می‌شود، حتی تا ۵ ثانیه.
+  for (let t = 33; t < 5000; t += 33) assert.equal(c.offer(r, t).kind, "repeat", `t=${t}`);
+  // از دید خارج شد و برگشت → دوباره پذیرفته می‌شود (اسکن کالای دوم از همان نوع).
+  assert.equal(c.offer(r, 5000 + REARM_GAP_MS).kind, "accept");
+});
+
+await test("دو بار سریع پشت‌سرهم پذیرفته نمی‌شود", () => {
+  const c = new Consensus();
+  const r = { text: "5901234123457", format: "ean13" as const, source: "native" as const };
+  assert.equal(c.offer(r, 0).kind, "accept");
+  // حتی اگر از دید رفته باشد، قبل از MIN_REPEAT_MS نه.
+  assert.equal(c.offer(r, MIN_REPEAT_MS - 50).kind, "repeat");
+});
+
+await test("کد متفاوت به محض خروج کد قبلی از دید پذیرفته می‌شود", () => {
+  const c = new Consensus();
+  assert.equal(
+    c.offer({ text: "5901234123457", format: "ean13", source: "zxing", lineCount: 3 }, 0).kind,
+    "accept",
+  );
+  assert.equal(
+    c.offer({ text: "96385074", format: "ean8", source: "zxing", lineCount: 3 }, EXCLUSIVE_MS).kind,
+    "accept",
+  );
+});
+
+await test("فرمت ضعیف دو خوانش یکسان در پنجره لازم دارد", () => {
+  const c = new Consensus();
+  const r = { text: "ABC-123", format: "code39" as const, source: "zxing" as const, lineCount: 5 };
+  assert.equal(c.offer(r, 0).kind, "pending");
+  assert.equal(c.offer({ ...r, text: "ABC-128" }, 30).kind, "pending", "متن متفاوت تأیید نمی‌کند");
+  assert.equal(c.offer(r, 60).kind, "accept");
+
+  const late = new Consensus();
+  assert.equal(late.offer(r, 0).kind, "pending");
+  assert.equal(late.offer(r, CONFIRM_WINDOW_MS + 1).kind, "pending", "خارج از پنجره، شمارش از نو");
+  assert.equal(late.offer(r, CONFIRM_WINDOW_MS + 30).kind, "accept");
+});
+
+await test("خوانش تک‌خطی zxing تأیید دوم لازم دارد؛ موتور دیگر هم تأیید می‌کند", () => {
+  assert.ok(needsConfirmation({ text: "x", format: "ean13", source: "zxing", lineCount: 1 }));
+  assert.ok(!needsConfirmation({ text: "x", format: "ean13", source: "zxing", lineCount: 2 }));
+  assert.ok(!needsConfirmation({ text: "x", format: "qr", source: "zxing", lineCount: 0 }));
+  const c = new Consensus();
+  assert.equal(
+    c.offer({ text: "5901234123457", format: "ean13", source: "zxing", lineCount: 1 }, 0).kind,
+    "pending",
+  );
+  assert.equal(
+    c.offer({ text: "5901234123457", format: "ean13", source: "native" }, 20).kind,
+    "accept",
+  );
+});
+
+await test("دو بارکد هم‌زمان در دید: هرکدام حداکثر یک بار، نه تناوب بی‌پایان", () => {
+  const c = new Consensus();
+  const a = { text: "4006381333931", format: "ean13" as const, source: "native" as const };
+  const b = {
+    text: "5901234123457",
+    format: "ean13" as const,
+    source: "zxing" as const,
+    lineCount: 3,
+  };
+  let accepted = 0;
+  // دو موتور یکی در میان دو کد متفاوت را می‌بینند، ۱۰ ثانیه.
+  for (let t = 0; t < 10_000; t += 33) {
+    if (c.offer((t / 33) % 2 === 0 ? a : b, t).kind === "accept") accepted++;
+  }
+  assert.equal(accepted, 1, "تا وقتی کد اول در دید است، کد دوم پذیرفته نمی‌شود");
+});
+
+await test("کالای بعدی بعد از خارج شدن کالای قبلی از دید پذیرفته می‌شود", () => {
+  const c = new Consensus();
+  const a = { text: "4006381333931", format: "ean13" as const, source: "native" as const };
+  const b = { text: "5901234123457", format: "ean13" as const, source: "native" as const };
+  assert.equal(c.offer(a, 0).kind, "accept");
+  assert.equal(c.offer(a, 100).kind, "repeat");
+  assert.equal(c.offer(b, 150).kind, "busy", "a هنوز در دید است");
+  assert.equal(c.offer(b, 100 + EXCLUSIVE_MS).kind, "accept");
+  // برگشت به a بعد از خروج b از دید.
+  assert.equal(c.offer(a, 100 + EXCLUSIVE_MS + REARM_GAP_MS + 400).kind, "accept");
+});
+
+await test("UPC-A دوازده‌رقمی و سیزده‌رقمی یک کالا هستند", () => {
+  assert.equal(identityKey("upca", "012345678905"), identityKey("ean13", "0012345678905"));
+  const c = new Consensus();
+  assert.equal(
+    c.offer({ text: "012345678905", format: "upca", source: "native" }, 0).kind,
+    "accept",
+  );
+  assert.equal(
+    c.offer({ text: "0012345678905", format: "ean13", source: "zxing", lineCount: 4 }, 30).kind,
+    "repeat",
+  );
+});
+
+await test("بارکدخوان سخت‌افزاری: هر اسکن پذیرفته می‌شود حتی تکراری", () => {
+  const c = new Consensus();
+  const r = { text: "PABC234XYZ", format: "unknown" as const, source: "keyboard" as const };
+  assert.equal(c.offer(r, 0).kind, "accept");
+  assert.equal(c.offer(r, 10).kind, "accept");
+});
+
+await test("کاراکترهای کنترلی و پیشوند symbology حذف می‌شوند", () => {
+  const c = new Consensus();
+  const v = c.offer({ text: "]C1PABC\x1d234", format: "code128", source: "native" }, 0);
+  assert.equal(v.kind, "accept");
+  assert.equal(v.kind === "accept" && v.code, "PABC234");
+});
+
+console.log("\nهندسه");
+
+await test("ناحیهٔ دیده‌شده با object-fit: cover", () => {
+  const v = visibleVideoRect({ width: 1920, height: 1080 }, { width: 400, height: 300 });
+  assert.equal(v.height, 1080);
+  assert.equal(v.width, 1440);
+  assert.equal(v.x, 240);
+  const p = visibleVideoRect({ width: 1080, height: 1920 }, { width: 400, height: 300 });
+  assert.equal(p.width, 1080);
+  assert.equal(p.height, 810);
+});
+
+await test("برش‌ها همیشه داخل فریم‌اند و نسبت ابعاد حفظ می‌شود", () => {
+  for (const video of [
+    { width: 1920, height: 1080 },
+    { width: 1080, height: 1920 },
+    { width: 640, height: 480 },
+    { width: 4032, height: 3024 },
   ]) {
-    const c = cropSourceRect(vw, vh, reticleRect(1.4));
-    assert.ok(c.sx >= 0 && c.sy >= 0, "مبدأ منفی");
-    assert.ok(c.sx + c.sw <= vw, `sw از ${vw} بیرون زد`);
-    assert.ok(c.sy + c.sh <= vh, `sh از ${vh} بیرون زد`);
-    assert.ok(c.sw >= 1 && c.sh >= 1, "اندازهٔ صفر");
+    for (const pass of ["focus", "wide", "micro"] as const) {
+      for (const main of [false, true]) {
+        const plan = planCrop(pass, video, { width: 360, height: 270 }, main)!;
+        const s = plan.source;
+        assert.ok(
+          s.x >= 0 && s.y >= 0 && s.x + s.width <= video.width && s.y + s.height <= video.height,
+        );
+        const ratioIn = s.width / s.height;
+        const ratioOut = plan.output.width / plan.output.height;
+        assert.ok(Math.abs(ratioIn - ratioOut) / ratioIn < 0.02, `${pass} نسبت کشیده شد`);
+        assert.ok(Math.max(plan.output.width, plan.output.height) <= (main ? 720 : 1280));
+      }
+    }
   }
+  assert.equal(planCrop("focus", { width: 0, height: 0 }, { width: 1, height: 1 }, false), null);
+  assert.deepEqual(clampRect({ x: -5, y: -5, width: 20, height: 20 }, { width: 10, height: 10 }), {
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+  });
+  assert.deepEqual(outputSize({ width: 200, height: 100 }, 1000, 1), { width: 200, height: 100 });
+  assert.deepEqual(outputSize({ width: 200, height: 100 }, 1000, 2), { width: 400, height: 200 });
+});
 
-  // نسبت تصویر باید حفظ شود — باگ اصلی نسخهٔ قبل همین بود.
-  const big = fitDecodeSize(1497, 497);
-  assert.ok(big.dw * big.dh <= MAX_DECODE_PIXELS, "از سقف پیکسل رد شد");
-  assert.ok(Math.abs(big.dw / big.dh - 1497 / 497) < 0.02, "نسبت تصویر کشیده شد");
+await test("نگاشت نقطه: خروجی برش → ویدیو → صفحه", () => {
+  const video = { width: 1920, height: 1080 };
+  const view = { width: 400, height: 300 };
+  const plan = planCrop("focus", video, view, false)!;
+  const center = outputPointToVideo({ x: plan.output.width / 2, y: plan.output.height / 2 }, plan);
+  const onScreen = videoPointToView(center, video, view);
+  assert.ok(Math.abs(onScreen.x - 0.5) < 0.01 && Math.abs(onScreen.y - 0.5) < 0.01);
+});
 
-  // هرگز بزرگ‌نمایی نمی‌کند.
-  const small = fitDecodeSize(320, 120);
-  assert.deepEqual(small, { dw: 320, dh: 120 });
-
-  const parent = reticleRect(1);
-  const inner = insetScanCrop(parent, 0.62);
-  assert.ok(inner.w < parent.w && inner.h < parent.h);
-  assert.ok(Math.abs(inner.x + inner.w / 2 - (parent.x + parent.w / 2)) < 1e-9);
-  const clamped = insetScanCrop(parent, 0.1);
-  assert.ok(clamped.w / parent.w >= 0.3 - 1e-9);
-
-  // ۱۶:۹ داخل ظرف ۴:۳ با object-fit:cover از دو طرف بریده می‌شود.
-  const vis = objectFitCoverVisible(1920, 1080, 400, 300);
-  assert.ok(Math.abs(vis.sh - 1080) < 1e-6, "ارتفاع کامل دیده می‌شود");
-  assert.ok(vis.sw < 1920 && vis.sx > 0, "عرض بریده می‌شود");
-  const mapped = coverMappedRect(1920, 1080, 400, 300, reticleRect(1));
-  const naive = cropSourceRect(1920, 1080, reticleRect(1));
-  assert.ok(mapped.sw < naive.sw, "کادر cover نباید کل عرض خام را بگیرد");
-  assert.ok(mapped.sx > naive.sx);
-  assert.equal(mapped.sx + mapped.sw <= 1920, true);
-  assert.equal(mapped.sy + mapped.sh <= 1080, true);
-
-  // بدون اندازهٔ نمایش، همان کراپ خام.
-  assert.deepEqual(
-    coverMappedRect(1280, 720, 0, 0, reticleRect(1)),
-    cropSourceRect(1280, 720, reticleRect(1)),
-  );
-
-  console.log("  ok - هندسهٔ کادر");
-}
-
-/* ------------------------------------------------ فرمت‌ها و دروازهٔ پذیرش */
-
-{
-  assert.ok(READER_FORMATS.includes("Code128"), "CODE-128 لازم است (کد تولیدی اپ)");
-  assert.ok(READER_FORMATS.includes("EAN-13"), "EAN-13 لازم است");
-
-  // خروجی zxing خط تیره ندارد: EAN13 نه EAN-13.
-  for (const f of ["QRCode", "DataMatrix", "EAN13", "EAN8", "UPCA", "UPCE", "Code128"]) {
-    assert.equal(needsConfirmation(f), false, `${f} باید فوری پذیرفته شود`);
-  }
-  for (const f of ["Code39", "ITF", "Codabar", ""]) {
-    assert.equal(needsConfirmation(f), true, `${f} باید تأیید دوم بخواهد`);
-  }
-
-  // نام BarcodeDetector بومی باید به خروجی zxing نگاشته شود.
-  assert.equal(normalizeOutputFormat("ean_13"), "EAN13");
-  assert.equal(normalizeOutputFormat("code_128"), "Code128");
-  assert.equal(normalizeOutputFormat("qr_code"), "QRCode");
-  assert.equal(needsConfirmation("ean_13"), false, "EAN بومی نباید تأیید دوم بخواهد");
-  assert.equal(needsConfirmation("code_39"), true);
-
-  // فرمت خودتأییدشونده: یک خوانش کافی است.
-  const a = acceptScan(initialAcceptState, "6260001234567", "EAN13", 1000);
-  assert.equal(a.emit, "6260001234567");
-
-  // نام بومی هم فوری پذیرفته شود — وگرنه روی A55 «هیچ واکنشی» دیده می‌شد.
-  const nativeFmt = acceptScan(initialAcceptState, "6260001234567", "ean_13", 1000);
-  assert.equal(nativeFmt.emit, "6260001234567");
-
-  // همان کد بلافاصله بعدش emit نمی‌شود...
-  const b = acceptScan(a.state, "6260001234567", "EAN13", 1000 + REPEAT_SUPPRESS_MS - 1);
-  assert.equal(b.emit, null, "تکرار در پنجرهٔ سرکوب نباید emit شود");
-  // ...ولی بعد از پنجره دوباره می‌شود (کاربر می‌خواهد دو عدد از یک کالا بزند).
-  const c = acceptScan(b.state, "6260001234567", "EAN13", 1000 + REPEAT_SUPPRESS_MS + 1);
-  assert.equal(c.emit, "6260001234567");
-
-  // کد متفاوت فوراً رد نمی‌شود.
-  const d = acceptScan(a.state, "PABC234XYZ", "Code128", 1010);
-  assert.equal(d.emit, "PABC234XYZ");
-
-  // CODE-39: خوانش اول فقط pending می‌شود، خوانش دومِ یکسان پذیرفته می‌شود.
-  const e1 = acceptScan(initialAcceptState, "ABC-123", "Code39", 2000);
-  assert.equal(e1.emit, null, "خوانش اول CODE-39 نباید پذیرفته شود");
-  const e2 = acceptScan(e1.state, "ABC-123", "Code39", 2100);
-  assert.equal(e2.emit, "ABC-123", "خوانش دوم یکسان باید پذیرفته شود");
-
-  // تأییدِ بیات نباید بپذیرد.
-  const f1 = acceptScan(initialAcceptState, "ABC-123", "Code39", 3000);
-  const f2 = acceptScan(f1.state, "ABC-123", "Code39", 3000 + CONFIRM_WINDOW_MS + 1);
-  assert.equal(f2.emit, null, "تأیید بعد از پنجره نباید پذیرفته شود");
-
-  // دو خوانش متفاوت پشت سر هم نباید همدیگر را تأیید کنند.
-  const g1 = acceptScan(initialAcceptState, "ABC-123", "Code39", 4000);
-  const g2 = acceptScan(g1.state, "XYZ-999", "Code39", 4050);
-  assert.equal(g2.emit, null, "خوانش متناقض نباید پذیرفته شود");
-
-  // UPC-A و همان کد با صفر پیشوند یک کالا هستند (منطق مشترک barcode-match).
-  const h1 = acceptScan(initialAcceptState, "0012345678905", "EAN13", 5000);
-  assert.equal(h1.emit, "0012345678905");
-  const h2 = acceptScan(h1.state, "012345678905", "EAN13", 5100);
-  assert.equal(h2.emit, null, "UPC-A با/بدون صفر پیشوند باید یکی شمرده شود");
-
-  // ورودی خالی یا فقط کاراکتر کنترلی هیچ‌وقت emit نمی‌شود.
-  for (const junk of ["", "   ", String.fromCharCode(0, 1, 31)]) {
-    assert.equal(acceptScan(initialAcceptState, junk, "QRCode", 6000).emit, null);
-  }
-
-  console.log("  ok - فرمت‌ها و دروازهٔ پذیرش");
-}
-
-/* ------------------------------------------------ تطبیق کد با محصول ذخیره‌شده */
-
-// `barcode-match.ts` با `store.ts` مشترک است و در این بازنویسی **تغییر نکرده**.
-// این پوشش از `scripts/test-scanner-engine.ts` حذف‌شده منتقل شده تا با رفتن آن
-// فایل، لایهٔ جست‌وجوی محصول بی‌تست نماند.
-{
-  assert.equal(normalizeScannedCode("  6261234567890  "), "6261234567890");
-  assert.equal(normalizeScannedCode("]C1626123"), "626123", "پیشوند AIM باید حذف شود");
-  assert.equal(
-    normalizeScannedCode("A" + String.fromCharCode(29) + "B"),
-    "AB",
-    "کاراکتر کنترلی باید حذف شود",
-  );
-
-  const upc = scannedCodeCandidates("123456789012");
-  assert.ok(upc.includes("123456789012"));
-  assert.ok(upc.includes("0123456789012"), "UPC-A باید معادل EAN-13 با صفر پیشوند باشد");
+await test("ناحیهٔ هدف: بارکد بیرون از کادر نادیده گرفته می‌شود", () => {
+  assert.ok(insideAimZone([]));
   assert.ok(
-    scannedCodeCandidates("0123456789012").includes("123456789012"),
-    "EAN-13 با صفر باید UPC-A را هم پیدا کند",
-  );
-
-  assert.equal(scannedCodesMatch("0123456789012", "123456789012"), true);
-  assert.equal(scannedCodesMatch("PABC123", "PABC123"), true);
-  assert.equal(scannedCodesMatch("PABC123", "PABC124"), false);
-
-  const list = [
-    { id: "1", code: "PXYZ23456" },
-    { id: "2", code: "6261234567890" },
-    { id: "3", code: "123456789012" },
-  ];
-  assert.equal(findProductByCode(list, "PXYZ23456")?.id, "1");
-  assert.equal(findProductByCode(list, "6261234567890")?.id, "2");
-  assert.equal(
-    findProductByCode(list, "0123456789012")?.id,
-    "3",
-    "EAN-13 با صفر → UPC-A ذخیره‌شده",
-  );
-  assert.equal(findProductByCode(list, "  626-1234567890")?.id, "2");
-  assert.equal(findProductByCode(list, ""), undefined);
-  assert.equal(findProductByCode(list, "no-such"), undefined);
-
-  console.log("  ok - تطبیق کد با محصول ذخیره‌شده");
-}
-
-/* ----------------------------------------------------- رتبه‌بندی لنز عقب */
-
-{
-  const vi = (deviceId: string, label: string) => ({ deviceId, label, kind: "videoinput" });
-
-  // الگوی رایج اندروید.
-  assert.deepEqual(
-    rankRearCameras([vi("f", "camera2 1, facing front"), vi("b", "camera2 0, facing back")]),
-    ["b", "f"],
-    "دوربین عقب باید اول باشد",
-  );
-
-  // الگوی گوشی چنددوربینه — لنز اصلی عقب باید بر ultra-wide و macro مقدم شود.
-  const multi = rankRearCameras([
-    vi("uw", "Back Ultra Wide Camera"),
-    vi("main", "Back Camera"),
-    vi("tele", "Back Telephoto Camera"),
-    vi("front", "Front Camera"),
-    vi("depth", "Back Depth Camera"),
-  ]);
-  assert.equal(multi[0], "main", "لنز اصلی عقب باید اول باشد");
-  assert.ok(multi.indexOf("uw") < multi.indexOf("front"), "ultra-wide بهتر از دوربین جلو است");
-  assert.equal(multi[multi.length - 1], "front", "دوربین جلو باید آخر باشد");
-  assert.ok(multi.indexOf("depth") < multi.indexOf("front"), "depth هنوز عقب است");
-
-  // میکروفون و ورودی غیرویدیویی نباید وارد فهرست شوند.
-  assert.deepEqual(
-    rankRearCameras([
-      { deviceId: "mic", label: "Microphone", kind: "audioinput" },
-      vi("cam", "camera2 0, facing back"),
+    insideAimZone([
+      { x: 0.4, y: 0.45 },
+      { x: 0.6, y: 0.55 },
     ]),
-    ["cam"],
   );
-
-  // لیبل خالی (WebView بدون مجوز): ترتیب شمارش حفظ می‌شود، ایندکس ۰ اول.
-  assert.deepEqual(rankRearCameras([vi("a", ""), vi("b", ""), vi("c", "")]), ["a", "b", "c"]);
-
-  // لیبل فارسی — گوشی‌های عرضه‌شده در بازار ایران (پوشش منتقل‌شده از تست قبلی).
-  assert.equal(rankRearCameras([vi("f", "دوربین جلو"), vi("r", "دوربین پشت")])[0], "r");
-  assert.equal(rankRearCameras([vi("f", "دوربین سلفی"), vi("r", "دوربین خلفی")])[0], "r");
-  assert.equal(rankRearCameras([vi("f", "دوربین جلو"), vi("r", "دوربین عقب")])[0], "r");
-
-  // فهرست خالی نباید بترکاند.
-  assert.deepEqual(rankRearCameras([]), []);
-
-  // facingMode مقدم بر لیبل است.
-  assert.equal(looksLikeFrontCamera("user", "Back Camera"), true);
-  assert.equal(looksLikeFrontCamera("environment", "Front Camera"), false);
-  assert.equal(looksLikeFrontCamera(undefined, "Front Camera"), true);
-  assert.equal(looksLikeFrontCamera(undefined, "camera2 0, facing back"), false);
-
-  // facingMode:environment روی سامسونگ اغلب ultra-wide را باز می‌کند — نباید نگه داشته شود.
-  assert.equal(shouldReusePrimedCamera("uw", ["main", "uw", "front"]), false);
-  assert.equal(shouldReusePrimedCamera("main", ["main", "uw"]), true);
-  assert.equal(shouldReusePrimedCamera("x", []), true, "بدون enumerate همان استریم بماند");
-  assert.equal(shouldReusePrimedCamera(undefined, ["main"]), false);
-
-  assert.equal(preferredInitialZoom(0.6, 8), 1.6, "زوم شروع نباید ultra-wide باشد");
-  assert.equal(preferredInitialZoom(1, 1), 1);
-  assert.equal(preferredInitialZoom(2, 8), 2);
-  assert.ok(preferredInitialZoom(1, 1.3) <= 1.3);
-
-  console.log("  ok - رتبه‌بندی لنز عقب");
-}
-
-/* ------------------------------------- فریم سیاه و آویزان شدن Native */
-
-{
-  const black = new Uint8ClampedArray(64 * 64 * 4);
-  assert.equal(isBlankRgba(black), true, "فریم سیاه باید مرده شمرده شود");
-  assert.equal(sampledRgbaVariance(black), 0);
-
-  const white = new Uint8ClampedArray(64 * 64 * 4).fill(255);
-  assert.equal(isBlankRgba(white), false, "فریم سفید یک صحنه است نه فریم مردهٔ GPU");
-
-  const barcodeLike = new Uint8ClampedArray(64 * 64 * 4).fill(255);
-  for (let x = 0; x < 64; x += 2) {
-    for (let y = 0; y < 64; y++) {
-      const o = (y * 64 + x) * 4;
-      barcodeLike[o] = barcodeLike[o + 1] = barcodeLike[o + 2] = 0;
-    }
-  }
-  assert.equal(isBlankRgba(barcodeLike), false, "میله‌های بارکد نباید مرده شمرده شوند");
-
-  assert.equal(nativeDetectBudgetMs(0), 4000);
-  assert.equal(nativeDetectBudgetMs(2), 4000);
-  assert.equal(nativeDetectBudgetMs(3), 1000);
-  assert.equal(NATIVE_HANG_LIMIT, 2);
-  assert.deepEqual(nextNativeHangState(true, 0), { hangCount: 1, disable: false });
-  assert.deepEqual(nextNativeHangState(true, 1), { hangCount: 2, disable: true });
-  assert.deepEqual(nextNativeHangState(false, 1), { hangCount: 0, disable: false });
-
-  const hit = nativeHitFromCodes([{ rawValue: "6260001234567", format: "ean_13" }]);
-  assert.equal(hit?.text, "6260001234567");
-  assert.equal(hit?.format, "EAN13");
-  assert.equal(nativeHitFromCodes([{ rawValue: "  ", format: "qr_code" }]), null);
-
-  const fast = await raceTimeout(Promise.resolve("ok"), 200, "fallback");
-  assert.equal(fast.value, "ok");
-  assert.equal(fast.timedOut, false);
-  const hung = await raceTimeout(new Promise<string>(() => {}), 30, "fallback");
-  assert.equal(hung.value, "fallback");
-  assert.equal(hung.timedOut, true);
-  const rejected = await raceTimeout(Promise.reject(new Error("gum")), 200, "fallback");
-  assert.equal(rejected.value, "fallback");
-  assert.equal(rejected.timedOut, false, "reject نباید به‌عنوان تایم‌اوت Native شمرده شود");
-
-  console.log("  ok - فریم سیاه و سیاست آویزان شدن Native");
-}
-
-/* ------------------------------------------------- فلگ‌ها و کلید خاموشی */
-
-{
-  // `?scanner=legacy` تنها راه برگشت فوری به پایپ‌لاین قبلی است.
-  assert.equal(parseScannerOverride("?scanner=legacy"), "legacy");
-  assert.equal(parseScannerOverride("scanner=legacy"), "legacy");
-  assert.equal(parseScannerOverride("?a=1&scanner=LEGACY&b=2"), "legacy");
-  assert.equal(parseScannerOverride("?scanner=%20legacy%20"), "legacy");
-
-  // هر چیز دیگری نباید چیزی را خاموش کند.
-  for (const s of ["", null, undefined, "?scanner=", "?scanner=new", "?legacy=1", "?x=y"]) {
-    assert.equal(parseScannerOverride(s), null, `نباید legacy شود: ${String(s)}`);
-  }
-
-  // حالت legacy همه‌چیز را خاموش می‌کند، حتی اگر کاربر حالت آزمایشی را ذخیره کرده باشد.
-  const legacy = resolveScannerFlags({ override: "legacy", experimentalPreference: true });
-  assert.deepEqual(legacy, LEGACY_SCANNER_FLAGS);
-  assert.equal(legacy.legacy, true);
-  assert.equal(legacy.diagnostics, false);
-  assert.equal(legacy.photoFallback, false);
-  assert.equal(legacy.rescueMode, false);
-  assert.equal(legacy.experimental, false);
-
-  // پیش‌فرض: حالت آزمایشی خاموش است — مرحلهٔ ۲ نباید خودبه‌خود روشن شود.
-  const plain = resolveScannerFlags({ override: null, experimentalPreference: false });
-  assert.equal(plain.legacy, false);
-  assert.equal(plain.experimental, false, "حالت آزمایشی باید پیش‌فرض خاموش باشد");
-  assert.equal(plain.diagnostics, SCANNER_FLAG_DEFAULTS.DIAGNOSTICS);
-
-  const opted = resolveScannerFlags({ override: null, experimentalPreference: true });
-  assert.equal(opted.experimental, true, "کلید کاربر باید حالت آزمایشی را روشن کند");
-
-  // ذخیره‌سازی: تنها یک کلید، و خاموش‌کردن آن را پاک می‌کند.
-  const store = new Map<string, string>();
-  const fake: ScannerStorage = {
-    getItem: (k) => store.get(k) ?? null,
-    setItem: (k, v) => void store.set(k, v),
-    removeItem: (k) => void store.delete(k),
-  };
-  assert.equal(readExperimentalPreference(fake), false);
-  writeExperimentalPreference(true, fake);
-  assert.deepEqual([...store.keys()], [SCANNER_STORAGE_KEY], "فقط یک کلید مجاز است");
-  assert.equal(readExperimentalPreference(fake), true);
-  writeExperimentalPreference(false, fake);
-  assert.equal(store.size, 0, "خاموش‌کردن باید کلید را پاک کند");
-  assert.equal(readExperimentalPreference(fake), false);
-
-  // مقدار ناشناخته یعنی خاموش.
-  store.set(SCANNER_STORAGE_KEY, "yes");
-  assert.equal(readExperimentalPreference(fake), false);
-  store.clear();
-
-  // حالت ناشناس/کوکی مسدود: هر دو تابع باید بی‌صدا رد شوند، نه throw.
-  const hostile: ScannerStorage = {
-    getItem: () => {
-      throw new Error("blocked");
-    },
-    setItem: () => {
-      throw new Error("blocked");
-    },
-    removeItem: () => {
-      throw new Error("blocked");
-    },
-  };
-  assert.equal(readExperimentalPreference(hostile), false);
-  writeExperimentalPreference(true, hostile);
-  writeExperimentalPreference(false, hostile);
-  assert.equal(readExperimentalPreference(null), false, "بدون ذخیره‌سازی هم نباید بترکد");
-
-  console.log("  ok - فلگ‌ها و کلید خاموشی");
-}
-
-/* ------------------------------------------------------- پنل تشخیصی */
-
-{
-  // پنج ضربهٔ پشت سر هم باز می‌کند و شمارش را صفر می‌کند.
-  let taps: number[] = [];
-  let opened = false;
-  for (let i = 0; i < DIAG_TAP_COUNT; i++) {
-    const r = registerDiagnosticsTap(taps, 1000 + i * 100);
-    taps = r.taps;
-    opened = r.open;
-  }
-  assert.equal(opened, true, `${DIAG_TAP_COUNT} ضربهٔ سریع باید پنل را باز کند`);
-  assert.deepEqual(taps, [], "بعد از باز شدن، شمارش باید صفر شود");
-
-  // چهار ضربه کافی نیست.
-  let few: number[] = [];
-  for (let i = 0; i < DIAG_TAP_COUNT - 1; i++) {
-    few = registerDiagnosticsTap(few, 2000 + i * 100).taps;
-  }
-  assert.equal(few.length, DIAG_TAP_COUNT - 1);
-
-  // ضربه‌های پراکنده (بیرون از پنجره) نباید روی هم جمع شوند.
-  let slow: number[] = [];
-  let slowOpen = false;
-  for (let i = 0; i < 10; i++) {
-    const r = registerDiagnosticsTap(slow, i * (DIAG_TAP_WINDOW_MS + 500));
-    slow = r.taps;
-    slowOpen = slowOpen || r.open;
-  }
-  assert.equal(slowOpen, false, "لمس‌های پراکنده نباید پنل را باز کنند");
-  assert.equal(slow.length, 1);
-
-  // میانگین زمان دیکود روی پنجرهٔ لغزان.
-  assert.equal(averageMs([]), 0);
-  assert.equal(averageMs([10, 20, 30]), 20);
-  assert.equal(averageMs([1, 2]), 1.5);
-  let samples: number[] = [];
-  for (let i = 1; i <= 40; i++) samples = pushDecodeSample(samples, i, 5);
-  assert.deepEqual(samples, [36, 37, 38, 39, 40], "فقط نمونه‌های آخر باید بمانند");
-  assert.deepEqual(pushDecodeSample([1, 2], Number.NaN, 5), [1, 2], "NaN نباید ثبت شود");
-  assert.deepEqual(pushDecodeSample([1, 2], -3, 5), [1, 2], "زمان منفی نباید ثبت شود");
-
-  // شناسایی مرورگر/WebView — نسخهٔ WebView سیستمی مهم‌ترین عدد گزارش است.
-  const a55 = describeUserAgent(
-    "Mozilla/5.0 (Linux; Android 14; SM-A556E Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.81 Mobile Safari/537.36",
-  );
-  assert.equal(a55.webView, true, "WebView باید تشخیص داده شود");
-  assert.equal(a55.browser, "Android WebView");
-  assert.equal(a55.chromium, "131.0.6778.81");
-  assert.equal(a55.android, "14");
-
-  const samsungBrowser = describeUserAgent(
-    "Mozilla/5.0 (Linux; Android 14; SM-A556E) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/27.0 Chrome/125.0.0.0 Mobile Safari/537.36",
-  );
-  assert.equal(samsungBrowser.browser, "Samsung Internet", "سامسونگ اینترنت هم Chrome/ دارد");
-  assert.equal(samsungBrowser.version, "27.0");
-  assert.equal(samsungBrowser.chromium, "125.0.0.0");
-  assert.equal(samsungBrowser.webView, false);
-
-  const chrome = describeUserAgent(
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-  );
-  assert.equal(chrome.browser, "Chrome");
-  assert.equal(chrome.android, "13");
-
-  const safari = describeUserAgent(
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-  );
-  assert.equal(safari.browser, "Safari");
-  assert.equal(safari.version, "17.4");
-
-  assert.deepEqual(describeUserAgent(""), {
-    browser: "",
-    version: "",
-    chromium: "",
-    android: "",
-    webView: false,
-  });
-  assert.equal(describeUserAgent(null).browser, "");
-
-  // گزارش: همهٔ عددهای لازم برای عیب‌یابی از راه دور باید داخلش باشند.
-  const snapshot: ScannerDiagnostics = {
-    phase: "running",
-    error: null,
-    engine: "worker",
-    nativeActive: true,
-    barcodeDetectorPresent: true,
-    videoWidth: 1280,
-    videoHeight: 720,
-    track: {
-      label: "camera2 0, facing back",
-      width: 1280,
-      height: 720,
-      frameRate: 30,
-      zoom: 1.6,
-      focusMode: "continuous",
-      facingMode: "environment",
-    },
-    framePath: "canvas",
-    blankFrames: 4,
-    decodeSamples: 30,
-    avgDecodeMs: 18.4,
-    fps: 24,
-    msSinceLastDecode: 6200,
-    lastDecodeFormat: "EAN13",
-    rescue: "off",
-    cameraCount: 3,
-    cameraIndex: 0,
-    flags: resolveScannerFlags({ override: null, experimentalPreference: false }),
-  };
-  const report = formatDiagnosticsReport(snapshot, {
-    userAgent: "Mozilla/5.0 (Linux; Android 14; SM-A556E; wv) Chrome/131.0.6778.81",
-    nowIso: "2026-01-01T00:00:00.000Z",
-  });
-  for (const needle of [
-    "1280x720",
-    "path=canvas",
-    "blank=4",
-    "avg=18.4ms",
-    "6.2s ago",
-    "EAN13",
-    "rescue: off",
-    "BarcodeDetector=yes",
-    "legacy=no",
-    "experimental=no",
-    "camera: 1/3",
-    "webview=yes",
-    "android=14",
-  ]) {
-    assert.ok(report.includes(needle), `گزارش باید «${needle}» را داشته باشد`);
-  }
   assert.ok(
-    formatDiagnosticsReport(
-      { ...snapshot, msSinceLastDecode: null, lastDecodeFormat: null, track: null },
-      { userAgent: "", nowIso: "2026-01-01T00:00:00.000Z" },
-    ).includes("lastDecode: never"),
-    "نبودِ خوانش باید صریح گزارش شود",
+    insideAimZone([
+      { x: -0.2, y: 0.3 },
+      { x: 1.2, y: 0.7 },
+    ]),
+    "بارکد بزرگ بیرون‌زده، مرکزش داخل",
   );
+  assert.ok(
+    !insideAimZone([
+      { x: 0.4, y: 0.02 },
+      { x: 0.6, y: 0.1 },
+    ]),
+    "کالای بالای کادر",
+  );
+  assert.ok(
+    !insideAimZone([
+      { x: 0.0, y: 0.5 },
+      { x: 0.01, y: 0.55 },
+    ]),
+    "لبهٔ چپ تصویر",
+  );
+});
 
-  console.log("  ok - پنل تشخیصی (ژست، میانگین دیکود، شناسایی مرورگر، گزارش)");
-}
+console.log("\nانتخاب لنز و زوم");
 
-/* ----------------------------------------------- دیکود واقعی، رفت‌وبرگشت */
-
-/** میله‌های یک بارکد خطی را به پیکسل خام RGBA تبدیل می‌کند. */
-function rasterizeLinear(sbs: number[], { scale = 3, height = 90, quiet = 30 } = {}): Pixels {
-  const modules = sbs.reduce((a, b) => a + b, 0);
-  const width = modules * scale + quiet * 2;
-  const data = new Uint8ClampedArray(width * height * 4).fill(255);
-  let x = quiet;
-  let dark = true;
-  for (const run of sbs) {
-    const w = run * scale;
-    if (dark) {
-      for (let px = x; px < x + w; px++) {
-        for (let y = 0; y < height; y++) {
-          const o = (y * width + px) * 4;
-          data[o] = data[o + 1] = data[o + 2] = 0;
-        }
-      }
-    }
-    x += w;
-    dark = !dark;
-  }
-  return { data, width, height };
-}
-
-function rasterizeQr(text: string, { scale = 4, quiet = 16 } = {}): Pixels {
-  const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
-  const n = qr.modules.size;
-  const bits = qr.modules.data;
-  const width = n * scale + quiet * 2;
-  const height = width;
-  const data = new Uint8ClampedArray(width * height * 4).fill(255);
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (!bits[r * n + c]) continue;
-      for (let dy = 0; dy < scale; dy++) {
-        for (let dx = 0; dx < scale; dx++) {
-          const o = ((quiet + r * scale + dy) * width + (quiet + c * scale + dx)) * 4;
-          data[o] = data[o + 1] = data[o + 2] = 0;
-        }
-      }
-    }
-  }
-  return { data, width, height };
-}
-
-function linear(bcid: string, text: string, opts?: { scale?: number; height?: number }): Pixels {
-  const [{ sbs }] = bwipjs.raw({ bcid, text, includetext: false }) as Array<{ sbs: number[] }>;
-  return rasterizeLinear(sbs, opts);
-}
-
-{
-  // هر فرمتی که کاربران واقعی به آن تکیه دارند. `expect` شکلی است که zxing
-  // برمی‌گرداند — تطبیق با کد ذخیره‌شده کار `barcode-match.ts` است.
-  const cases: Array<{ name: string; px: Pixels; expect: string; format: string }> = [
-    // کدِ تولیدی خودِ اپ: generateUniqueCode → "P" + ۹ کاراکتر، چاپ‌شده به CODE-128.
-    {
-      name: "CODE-128 (کد اپ)",
-      px: linear("code128", "PABC234XYZ"),
-      expect: "PABC234XYZ",
-      format: "Code128",
-    },
-    {
-      name: "CODE-128 (عددی)",
-      px: linear("code128", "123456789012"),
-      expect: "123456789012",
-      format: "Code128",
-    },
-    {
-      name: "EAN-13",
-      px: linear("ean13", "6260001234567"),
-      expect: "6260001234567",
-      format: "EAN13",
-    },
-    { name: "EAN-8", px: linear("ean8", "20886509"), expect: "20886509", format: "EAN8" },
-    // zxing برای UPC-A مقدار ۱۳رقمی با صفر پیشوند می‌دهد.
-    { name: "UPC-A", px: linear("upca", "012345678905"), expect: "0012345678905", format: "EAN13" },
-    { name: "UPC-E", px: linear("upce", "04252614"), expect: "0042100005264", format: "UPCE" },
-    { name: "CODE-39", px: linear("code39", "ABC-123"), expect: "ABC-123", format: "Code39" },
-    {
-      name: "ITF",
-      px: linear("interleaved2of5", "1234567895"),
-      expect: "1234567895",
-      format: "ITF",
-    },
-    { name: "QR (کد اپ)", px: rasterizeQr("PABC234XYZ"), expect: "PABC234XYZ", format: "QRCode" },
-    {
-      name: "QR (فارسی)",
-      px: rasterizeQr("کالای شماره ۱۲۳"),
-      expect: "کالای شماره ۱۲۳",
-      format: "QRCode",
-    },
+await test("لنز اصلی عقب اول؛ جلو حذف؛ فوق‌عریض/تله عقب", () => {
+  const android = [
+    { deviceId: "f", label: "camera2 1, facing front" },
+    { deviceId: "uw", label: "camera2 2, facing back" },
+    { deviceId: "main", label: "camera2 0, facing back" },
   ];
-
-  for (const c of cases) {
-    const hit = await decodePixels(c.px);
-    assert.ok(hit, `${c.name} خوانده نشد`);
-    assert.equal(hit.text, c.expect, `${c.name}: متن اشتباه`);
-    assert.equal(hit.format, c.format, `${c.name}: فرمت اشتباه`);
-    console.log(`  ok - ${c.name} -> ${hit.text} (${hit.format})`);
-  }
-}
-
-/* ---------------------------------------- نبودِ خوانش اشتباه (false read) */
-
-{
-  const blank: Pixels = {
-    data: new Uint8ClampedArray(800 * 300 * 4).fill(255),
-    width: 800,
-    height: 300,
-  };
-  assert.equal(await decodePixels(blank), null, "فریم سفید نباید چیزی بخواند");
-
-  // نویز قطعی (بدون Math.random تا تست پایدار بماند).
-  const noise: Pixels = { data: new Uint8ClampedArray(800 * 300 * 4), width: 800, height: 300 };
-  let seed = 12345;
-  for (let i = 0; i < noise.data.length; i += 4) {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    const v = (seed >> 16) & 0xff;
-    noise.data[i] = noise.data[i + 1] = noise.data[i + 2] = v;
-    noise.data[i + 3] = 255;
-  }
-  assert.equal(await decodePixels(noise), null, "فریم نویز نباید چیزی بخواند");
-
-  // فریم خیلی کوچک باید بدون صدا زدن wasm رد شود.
-  assert.equal(
-    await decodePixels({ data: new Uint8ClampedArray(8 * 8 * 4), width: 8, height: 8 }),
-    null,
+  assert.equal(rankRearLenses(android)[0].deviceId, "main");
+  assert.ok(!rankRearLenses(android).some((l) => l.deviceId === "f"));
+  const ios = [
+    { deviceId: "uw", label: "Back Ultra Wide Camera" },
+    { deviceId: "tele", label: "Back Telephoto Camera" },
+    { deviceId: "main", label: "Back Camera" },
+    { deviceId: "front", label: "Front Camera" },
+    { deviceId: "triple", label: "Back Triple Camera" },
+  ];
+  const ranked = rankRearLenses(ios).map((l) => l.deviceId);
+  assert.equal(ranked[0], "main");
+  assert.ok(ranked.indexOf("uw") > ranked.indexOf("triple"));
+  assert.ok(isFrontLens("Front Camera") && !isFrontLens("Back Camera"));
+  assert.ok(
+    !labelsAreInformative([
+      { deviceId: "a", label: "" },
+      { deviceId: "b", label: "" },
+    ]),
   );
+});
 
-  console.log("  ok - فریم سفید/نویز/خیلی‌کوچک هیچ خوانشی تولید نمی‌کند");
+await test("زوم شروع و پله‌ها", () => {
+  assert.equal(initialZoom(null), null);
+  assert.equal(initialZoom({ min: 1, max: 1.5 }), null, "وب‌کم با زوم کم دست نمی‌خورد");
+  assert.equal(initialZoom({ min: 1, max: 8 }), 1.5);
+  assert.deepEqual(zoomSteps({ min: 1, max: 4 }), [1, 1.5, 2, 3]);
+  assert.deepEqual(zoomSteps({ min: 0.6, max: 2 }), [0.6, 1, 1.5, 2]);
+  assert.deepEqual(zoomSteps(null), []);
+});
+
+console.log("\nبارکدخوان سخت‌افزاری");
+
+await test("کیبورد فارسی: کاراکتر از کلید فیزیکی بازسازی می‌شود", () => {
+  assert.equal(keyToChar({ key: "ش", code: "KeyA", shiftKey: false }), "a");
+  assert.equal(keyToChar({ key: "ؤ", code: "KeyA", shiftKey: true }), "A");
+  assert.equal(keyToChar({ key: "۵", code: "Digit5" }), "5");
+  assert.equal(keyToChar({ key: "٣", code: "" }), "3");
+  assert.equal(keyToChar({ key: "7", code: "Numpad7" }), "7");
+  assert.equal(keyToChar({ key: "-", code: "Minus" }), "-");
+  assert.equal(keyToChar({ key: "Shift", code: "ShiftLeft" }), null);
+  assert.equal(keyToChar({ key: "c", code: "KeyC", ctrlKey: true }), null);
+});
+
+await test("تایپ ماشینی پذیرفته، تایپ انسانی رد می‌شود", () => {
+  const fast = new WedgeBuffer();
+  "5901234123457".split("").forEach((ch, i) => fast.push(ch, i * 8));
+  assert.deepEqual(fast.terminate(13 * 8), { code: "5901234123457" });
+
+  const human = new WedgeBuffer();
+  "123456".split("").forEach((ch, i) => human.push(ch, i * 140));
+  assert.equal(human.terminate(6 * 140), null);
+
+  const noEnter = new WedgeBuffer();
+  "PABC234XYZ".split("").forEach((ch, i) => noEnter.push(ch, i * 10));
+  assert.deepEqual(noEnter.flushIdle(), { code: "PABC234XYZ" });
+
+  const shortNoEnter = new WedgeBuffer();
+  "12".split("").forEach((ch, i) => shortNoEnter.push(ch, i * 10));
+  assert.equal(shortNoEnter.flushIdle(), null);
+});
+
+console.log("\nموتور بومی و فریم");
+
+await test("pickNativeHit و withTimeout", async () => {
+  assert.equal(pickNativeHit(null), null);
+  assert.equal(pickNativeHit([{ rawValue: "", format: "qr_code" }]), null);
+  const hit = pickNativeHit([
+    { rawValue: "5901234123457", format: "ean_13", cornerPoints: [{ x: 1, y: 2 }] },
+  ]);
+  assert.deepEqual(hit, { text: "5901234123457", format: "ean13", corners: [{ x: 1, y: 2 }] });
+  assert.equal(await withTimeout(new Promise(() => {}), 10), "timeout");
+  assert.equal(await withTimeout(Promise.resolve(5), 1000), 5);
+});
+
+await test("تشخیص فریم سیاه (باگ کپی canvas سامسونگ)", () => {
+  const black = new Uint8ClampedArray(640 * 480 * 4);
+  assert.ok(isBlankFrame(black));
+  const noisy = new Uint8ClampedArray(640 * 480 * 4).map((_, i) => (i * 2654435761) % 251);
+  assert.ok(!isBlankFrame(noisy));
+  assert.ok(sampledLumaVariance(noisy) > 100);
+});
+
+/* ─────────────────────── شبیه‌سازی پایپ‌لاین روی فریم مصنوعی ─────────────────────── */
+
+type Rgba = { data: Uint8ClampedArray; width: number; height: number };
+
+function pngToRgba(buf: Buffer): Rgba {
+  const png = PNG.sync.read(buf);
+  return { data: new Uint8ClampedArray(png.data), width: png.width, height: png.height };
 }
 
-console.log("scanner: ok");
+async function barcode(
+  bcid: string,
+  text: string,
+  scale: number,
+  extra: Record<string, unknown> = {},
+) {
+  const opts: Record<string, unknown> = {
+    bcid,
+    text,
+    scale,
+    height: 14,
+    paddingwidth: 6,
+    paddingheight: 4,
+    backgroundcolor: "FFFFFF",
+    includetext: false,
+    ...extra,
+  };
+  // `undefined` یعنی «پیش‌فرض bwip» (کدهای دوبعدی ارتفاع ثابت ندارند).
+  for (const k of Object.keys(opts)) if (opts[k] === undefined) delete opts[k];
+  const png = await bwipjs.toBuffer(opts as Parameters<typeof bwipjs.toBuffer>[0]);
+  return pngToRgba(png);
+}
+
+async function qr(text: string, moduleSize: number): Promise<Rgba> {
+  const buf = await QRCode.toBuffer(text, {
+    scale: moduleSize,
+    margin: 2,
+    errorCorrectionLevel: "M",
+  });
+  return pngToRgba(buf);
+}
+
+function rotate90(img: Rgba): Rgba {
+  const out = new Uint8ClampedArray(img.data.length);
+  for (let y = 0; y < img.height; y++)
+    for (let x = 0; x < img.width; x++) {
+      const src = (y * img.width + x) * 4;
+      const dst = (x * img.height + (img.height - 1 - y)) * 4;
+      out.set(img.data.subarray(src, src + 4), dst);
+    }
+  return { data: out, width: img.height, height: img.width };
+}
+
+function invert(img: Rgba): Rgba {
+  const out = new Uint8ClampedArray(img.data);
+  for (let i = 0; i < out.length; i += 4) {
+    out[i] = 255 - out[i];
+    out[i + 1] = 255 - out[i + 1];
+    out[i + 2] = 255 - out[i + 2];
+  }
+  return { ...img, data: out };
+}
+
+/** تاری جعبه‌ای افقی/عمودی؛ شبیه‌سازی فوکوس ناقص یا لرزش دست. */
+function blur(img: Rgba, radius: number): Rgba {
+  let cur = img.data;
+  for (const horizontal of [true, false]) {
+    const out = new Uint8ClampedArray(cur.length);
+    for (let y = 0; y < img.height; y++)
+      for (let x = 0; x < img.width; x++)
+        for (let c = 0; c < 3; c++) {
+          let sum = 0;
+          let n = 0;
+          for (let k = -radius; k <= radius; k++) {
+            const xx = horizontal ? x + k : x;
+            const yy = horizontal ? y : y + k;
+            if (xx < 0 || yy < 0 || xx >= img.width || yy >= img.height) continue;
+            sum += cur[(yy * img.width + xx) * 4 + c];
+            n++;
+          }
+          out[(y * img.width + x) * 4 + c] = sum / n;
+        }
+    for (let i = 3; i < out.length; i += 4) out[i] = 255;
+    cur = out;
+  }
+  return { ...img, data: cur };
+}
+
+/** فریم ۱۰۸۰p با زمینهٔ نویزدار (شبیه سطح میز/قفسه) و بارکد در موقعیت داده‌شده. */
+function cameraFrame(
+  sticker: Rgba,
+  cx = 0.5,
+  cy = 0.5,
+  video = { width: 1920, height: 1080 },
+): Rgba {
+  const { width, height } = video;
+  const data = new Uint8ClampedArray(width * height * 4);
+  let seed = 12345;
+  for (let i = 0; i < data.length; i += 4) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const v = 105 + (seed % 40);
+    data[i] = v;
+    data[i + 1] = v - 6;
+    data[i + 2] = v - 12;
+    data[i + 3] = 255;
+  }
+  const ox = Math.round(cx * width - sticker.width / 2);
+  const oy = Math.round(cy * height - sticker.height / 2);
+  for (let y = 0; y < sticker.height; y++) {
+    const fy = oy + y;
+    if (fy < 0 || fy >= height) continue;
+    for (let x = 0; x < sticker.width; x++) {
+      const fx = ox + x;
+      if (fx < 0 || fx >= width) continue;
+      const s = (y * sticker.width + x) * 4;
+      const d = (fy * width + fx) * 4;
+      data[d] = sticker.data[s];
+      data[d + 1] = sticker.data[s + 1];
+      data[d + 2] = sticker.data[s + 2];
+    }
+  }
+  return { data, width, height };
+}
+
+/** همان کاری که canvas.drawImage با imageSmoothing انجام می‌دهد (درون‌یابی دوخطی). */
+function crop(frame: Rgba, plan: CropPlan): Pixels {
+  const { source, output } = plan;
+  const out = new Uint8ClampedArray(output.width * output.height * 4);
+  const sx = source.width / output.width;
+  const sy = source.height / output.height;
+  for (let y = 0; y < output.height; y++) {
+    const fy = Math.min(frame.height - 1.001, Math.max(0, source.y + (y + 0.5) * sy - 0.5));
+    const y0 = Math.floor(fy);
+    const ty = fy - y0;
+    for (let x = 0; x < output.width; x++) {
+      const fx = Math.min(frame.width - 1.001, Math.max(0, source.x + (x + 0.5) * sx - 0.5));
+      const x0 = Math.floor(fx);
+      const tx = fx - x0;
+      const i00 = (y0 * frame.width + x0) * 4;
+      const i10 = i00 + 4;
+      const i01 = i00 + frame.width * 4;
+      const i11 = i01 + 4;
+      const o = (y * output.width + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const top = frame.data[i00 + c] * (1 - tx) + frame.data[i10 + c] * tx;
+        const bottom = frame.data[i01 + c] * (1 - tx) + frame.data[i11 + c] * tx;
+        out[o + c] = top * (1 - ty) + bottom * ty;
+      }
+      out[o + 3] = 255;
+    }
+  }
+  return { data: out, width: output.width, height: output.height };
+}
+
+const VIEW = { width: 400, height: 300 };
+const decodeTimes: number[] = [];
+
+/**
+ * یک «دوربین» ثابت را با همان چرخهٔ پاس پروداکشن اسکن می‌کند تا Consensus کد را
+ * بپذیرد. تعداد فریم لازم را برمی‌گرداند (هر فریم ≈ ۳۳ms).
+ */
+async function scanUntilAccepted(frame: Rgba, maxFrames = 8) {
+  const consensus = new Consensus();
+  for (let i = 0; i < maxFrames; i++) {
+    const pass = PASS_CYCLE[i % PASS_CYCLE.length];
+    const plan = planCrop(pass, frame, VIEW, false);
+    if (!plan) continue;
+    const px = crop(frame, plan);
+    const t0 = performance.now();
+    const hit = await decodePixels(px, plan.mode);
+    decodeTimes.push(performance.now() - t0);
+    if (!hit) continue;
+    const verdict = consensus.offer(
+      { text: hit.text, format: hit.format, source: "zxing", lineCount: hit.lineCount },
+      i * 33,
+    );
+    if (verdict.kind === "accept")
+      return { code: verdict.code, format: verdict.format, frames: i + 1, pass };
+  }
+  return null;
+}
+
+async function expectScan(
+  name: string,
+  sticker: Rgba,
+  expected: string,
+  opts: { cx?: number; cy?: number; maxFrames?: number } = {},
+) {
+  await test(name, async () => {
+    const frame = cameraFrame(sticker, opts.cx, opts.cy);
+    const res = await scanUntilAccepted(frame, opts.maxFrames ?? 8);
+    assert.ok(res, `خوانده نشد (اندازهٔ بارکد ${sticker.width}×${sticker.height})`);
+    assert.equal(res.code, expected);
+    console.log(
+      `      ${sticker.width}×${sticker.height}px → ${res.frames} فریم (پاس ${res.pass})`,
+    );
+  });
+}
+
+console.log("\nشبیه‌سازی پایپ‌لاین کامل (فریم ۱۰۸۰p، نمای ۴:۳)");
+
+// اندازه‌ها از بسیار ریز (مدول ۱ پیکسل، بارکد دور) تا بسیار بزرگ (بیرون‌زده از کادر).
+await expectScan(
+  "EAN-13 بسیار ریز (مدول ۱px)",
+  await barcode("ean13", "590123412345", 1),
+  "5901234123457",
+);
+await expectScan(
+  "EAN-13 ریز (مدول ۲px)",
+  await barcode("ean13", "590123412345", 2),
+  "5901234123457",
+);
+await expectScan("EAN-13 معمولی", await barcode("ean13", "626000000001", 5), "6260000000019");
+await expectScan(
+  "EAN-13 بسیار بزرگ (بیرون از کادر)",
+  await barcode("ean13", "590123412345", 15),
+  "5901234123457",
+);
+await expectScan(
+  "EAN-13 عمودی (۹۰ درجه)",
+  rotate90(await barcode("ean13", "590123412345", 4)),
+  "5901234123457",
+);
+await expectScan("EAN-13 تار", blur(await barcode("ean13", "590123412345", 4), 2), "5901234123457");
+await expectScan(
+  "EAN-13 خارج از مرکز کادر",
+  await barcode("ean13", "590123412345", 3),
+  "5901234123457",
+  {
+    cx: 0.72,
+    cy: 0.3,
+  },
+);
+await expectScan("EAN-8", await barcode("ean8", "9638507", 3), "96385074");
+await expectScan("UPC-A", await barcode("upca", "01234567890", 3), "0012345678905");
+await expectScan(
+  "CODE-128 کد تولیدی اپ (ریز)",
+  await barcode("code128", "PABC234XYZ", 1),
+  "PABC234XYZ",
+);
+await expectScan("CODE-128 کد تولیدی اپ", await barcode("code128", "PABC234XYZ", 3), "PABC234XYZ");
+await expectScan(
+  "CODE-128 لیبل معکوس (روشن روی تیره)",
+  invert(await barcode("code128", "INV-0042", 3)),
+  "INV-0042",
+  {
+    maxFrames: 16,
+  },
+);
+await expectScan("CODE-39 (تأیید دوم)", await barcode("code39", "ABC-123", 3), "ABC-123");
+// استاندارد ITF حاشیهٔ سفید ≥۱۰ مدول می‌خواهد؛ بدون آن هیچ خواننده‌ای نمی‌خواند.
+await expectScan(
+  "ITF (تأیید دوم)",
+  await barcode("interleaved2of5", "12345678", 3, { paddingwidth: 12 }),
+  "12345678",
+);
+await expectScan("QR ریز", await qr("PABC234XYZ", 2), "PABC234XYZ");
+await expectScan("QR بزرگ", await qr("https://example.com/p/123", 18), "https://example.com/p/123");
+await expectScan(
+  "DataMatrix",
+  await barcode("datamatrix", "DM-1234", 4, { height: undefined }),
+  "DM-1234",
+);
+await expectScan(
+  "PDF417",
+  await barcode("pdf417", "PDF417-TEST", 2, { height: undefined }),
+  "PDF417-TEST",
+);
+
+await test("فریم بدون بارکد: هیچ خوانش کاذبی پذیرفته نمی‌شود", async () => {
+  const empty = cameraFrame({ data: new Uint8ClampedArray(4).fill(120), width: 1, height: 1 });
+  assert.equal(await scanUntilAccepted(empty, 8), null);
+});
+
+await test("تطبیق کد اسکن‌شده با محصول ذخیره‌شده (بدون تغییر رفتار)", () => {
+  const list = [
+    { id: "a", code: "012345678905" },
+    { id: "b", code: "PABC234XYZ" },
+    { id: "c", code: "5901234123457" },
+  ];
+  assert.equal(findProductByCode(list, "0012345678905")?.id, "a", "UPC-A سیزده‌رقمی zxing");
+  assert.equal(findProductByCode(list, "PABC234XYZ")?.id, "b");
+  assert.equal(findProductByCode(list, "5901234123457")?.id, "c");
+});
+
+const sorted = [...decodeTimes].sort((a, b) => a - b);
+const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
+console.log(
+  `\n${passed} تست موفق. زمان دیکود zxing (Node): میانه ${median.toFixed(1)}ms، p95 ${p95.toFixed(1)}ms`,
+);

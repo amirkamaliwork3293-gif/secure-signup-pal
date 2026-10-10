@@ -126,6 +126,54 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
 const A4_RATIO = 297 / 210;
 
 /**
+ * ارتفاع برگه برای «تقسیم به برگه‌های A4»: هر برگه حداکثر به نسبت A4 (تا در A4
+ * تمام‌عرض جا شود)، همهٔ برگه‌ها هم‌اندازه و تا جای ممکن کوتاه تا ته فیش کاغذ خالی
+ * نماند و برگهٔ خالی اضافه درست نشود.
+ *
+ * blocksMm: بالا و پایین بخش‌های نشکن فیش (ردیف‌ها، جمع‌ها…) به ترتیب، به میلی‌متر —
+ * مرورگر فقط بین این بخش‌ها برگه را می‌شکند؛ همین شکستن اینجا شبیه‌سازی می‌شود.
+ */
+export function splitPageHeightMm(
+  paperMm: number,
+  heightMm: number,
+  blocksMm?: [number, number][],
+): number {
+  const maxH = Math.floor(paperMm * A4_RATIO);
+  if (heightMm <= maxH) return heightMm;
+  if (!blocksMm?.length) {
+    // بدون اندازهٔ بخش‌ها: برگه‌های مساوی با جای اضافه حدود یک ردیف کالا
+    const pages = Math.ceil(heightMm / maxH);
+    return Math.min(maxH, Math.ceil(heightMm / pages + paperMm * 0.15));
+  }
+  // بخش انتهایی (فضای برش) هم نشکن حساب می‌شود تا تنها روی برگهٔ تازه نیفتد
+  const last = blocksMm[blocksMm.length - 1][1];
+  const blocks = last < heightMm ? [...blocksMm, [last, heightMm] as [number, number]] : blocksMm;
+  const pagesFor = (pageH: number) => {
+    let start = 0;
+    let pages = 1;
+    for (const [top, bottom] of blocks) {
+      if (bottom - start > pageH && top > start) {
+        pages++;
+        start = top;
+      }
+    }
+    return pages;
+  };
+  const target = pagesFor(maxH);
+  let lo = heightMm / target;
+  let hi = maxH;
+  if (pagesFor(lo) > target) {
+    for (let i = 0; i < 30; i++) {
+      const mid = (lo + hi) / 2;
+      if (pagesFor(mid) <= target) hi = mid;
+      else lo = mid;
+    }
+  } else hi = lo;
+  // ۱ میلی‌متر حاشیهٔ اطمینان برای گرد شدن اندازه‌ها در موتور چاپ
+  return Math.min(maxH, Math.ceil(hi + 1));
+}
+
+/**
  * اندازه‌های واقعی چاپ با اعمال «اندازهٔ فیش». در ۱۰۰٪ همان شیء بدون تغییر برمی‌گردد
  * تا خروجی کاربرانی که این تنظیم را دست نزده‌اند دقیقاً مثل قبل بماند.
  */
@@ -211,7 +259,7 @@ export function receiptCss(s: ReceiptSettings): string {
   .words{font-size:${Math.max(9, Math.round(fs * 0.85))}px;margin-top:1mm}
   .foot{margin-top:2.5mm;text-align:center;font-weight:700}
   .cut{margin-top:3mm;text-align:center;font-size:9px;letter-spacing:2px}
-  ${s.splitA4 ? ".kv,.tot,.foot,.words{break-inside:avoid;page-break-inside:avoid}" : ""}
+  ${s.splitA4 ? ".r>*{break-inside:avoid;page-break-inside:avoid}" : ""}
   `;
 }
 
@@ -299,12 +347,15 @@ export function buildReceiptCalibrationHTML(s: ReceiptSettings, shopName = "فر
  * ‎@page‎ فیش را به «عرض کاغذ × ارتفاع واقعی محتوا» تبدیل می‌کند (یک برگ بلند، بدون برش).
  * ارتفاع از اندازه‌گیری محتوا می‌آید (print.ts)؛ اگر عدد نامعتبر بود HTML دست نمی‌خورد.
  */
-export function withReceiptPageHeight(html: string, heightMm: number): string {
+export function withReceiptPageHeight(
+  html: string,
+  heightMm: number,
+  blocksMm?: [number, number][],
+): string {
   if (!Number.isFinite(heightMm) || heightMm <= 0) return html;
   const paper = Number(html.match(/data-kamix-receipt="([\d.]+)"/)?.[1]) || 80;
   let h = Math.min(5000, Math.ceil(heightMm));
-  // تقسیم به برگه‌های A4: هر برگه حداکثر به نسبت A4 تا در A4 تمام‌عرض جا شود
-  if (/data-split-a4="1"/.test(html)) h = Math.min(h, Math.floor(paper * A4_RATIO));
+  if (/data-split-a4="1"/.test(html)) h = splitPageHeightMm(paper, h, blocksMm);
   return html.replace(
     /@page\s*\{\s*size:\s*[\d.]+mm\s+[\d.]+mm;/i,
     `@page { size: ${paper}mm ${h}mm;`,

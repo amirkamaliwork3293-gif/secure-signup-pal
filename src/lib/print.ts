@@ -399,16 +399,19 @@ async function waitForFonts(doc: Document | null | undefined, timeoutMs: number)
 
 const PX_TO_MM = 25.4 / 96;
 
+type ReceiptLayout = { heightPx: number; blocksPx: [number, number][] };
+
 /**
- * ارتفاع واقعی محتوای فیش (پیکسل CSS) در قابی پنهان با عرض واقعی کاغذ.
- * اگر اندازه‌گیری ممکن نبود ۰ برمی‌گردد.
+ * ارتفاع واقعی محتوای فیش (پیکسل CSS) در قابی پنهان با عرض واقعی کاغذ، به‌همراه
+ * بالا/پایین هر بخش فیش (برای شکستن برگه بین بخش‌ها). اگر ممکن نبود ارتفاع ۰ است.
  */
-export function measureReceiptHeightPx(html: string): Promise<number> {
+export function measureReceiptLayout(html: string): Promise<ReceiptLayout> {
+  const none: ReceiptLayout = { heightPx: 0, blocksPx: [] };
   return new Promise((resolve) => {
-    if (typeof document === "undefined") return resolve(0);
+    if (typeof document === "undefined") return resolve(none);
     const paper = Number(html.match(/data-kamix-receipt="([\d.]+)"/)?.[1]) || 80;
     let done = false;
-    const finish = (h: number) => {
+    const finish = (out: ReceiptLayout) => {
       if (done) return;
       done = true;
       try {
@@ -416,7 +419,7 @@ export function measureReceiptHeightPx(html: string): Promise<number> {
       } catch {
         /* ignore */
       }
-      resolve(h);
+      resolve(out);
     };
     const frame = document.createElement("iframe");
     frame.setAttribute("title", "receipt-measure");
@@ -439,15 +442,20 @@ export function measureReceiptHeightPx(html: string): Promise<number> {
           const doc = frame.contentDocument;
           // ارتفاع واقعی محتوا (نه ارتفاع قاب): پایین‌ترین لبهٔ ظرف فیش
           const box = doc?.querySelector(".r") ?? doc?.body;
-          finish(box ? Math.ceil(box.getBoundingClientRect().bottom) : 0);
+          if (!box) return finish(none);
+          const blocksPx = Array.from(box.children)
+            .map((el) => el.getBoundingClientRect())
+            .filter((r) => r.height > 0)
+            .map((r) => [r.top, r.bottom] as [number, number]);
+          finish({ heightPx: Math.ceil(box.getBoundingClientRect().bottom), blocksPx });
         } catch {
-          finish(0);
+          finish(none);
         }
       });
     };
     document.body.appendChild(frame);
     frame.srcdoc = html;
-    setTimeout(() => finish(0), 5000);
+    setTimeout(() => finish(none), 5000);
   });
 }
 
@@ -456,9 +464,10 @@ export function measureReceiptHeightPx(html: string): Promise<number> {
  * اگر اندازه‌گیری ممکن نبود، همان HTML (با ارتفاع پیش‌فرض) برمی‌گردد.
  */
 export async function prepareReceiptHtml(html: string): Promise<string> {
-  const h = await measureReceiptHeightPx(html);
-  if (!h) return html;
-  return withReceiptPageHeight(html, Math.ceil(h * PX_TO_MM) + 2);
+  const { heightPx, blocksPx } = await measureReceiptLayout(html);
+  if (!heightPx) return html;
+  const blocksMm = blocksPx.map(([t, b]) => [t * PX_TO_MM, b * PX_TO_MM] as [number, number]);
+  return withReceiptPageHeight(html, Math.ceil(heightPx * PX_TO_MM) + 2, blocksMm);
 }
 
 let fontDataCache: Record<string, string> | null = null;

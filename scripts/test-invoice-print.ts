@@ -24,6 +24,7 @@ import {
   normalizeReceiptSettings,
   receiptDocument,
   receiptPageWidthMm,
+  splitPageHeightMm,
   withReceiptPageHeight,
 } from "../src/lib/receipt.ts";
 import type { Invoice } from "../src/lib/store.ts";
@@ -164,8 +165,30 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
     s: normalizeReceiptSettings({ splitA4: true, scalePct: 250 }),
   });
   // 200mm wide → A4-shaped pages are 282mm tall (200 × 297/210)
-  assert.ok(withReceiptPageHeight(split, 900).includes("size: 200mm 282mm"), "long → A4 pages");
+  // 900mm → 4 equal pages of 900/4 + 30mm slack = 255mm (≤ A4-shaped 282mm), no blank tail
+  assert.ok(withReceiptPageHeight(split, 900).includes("size: 200mm 255mm"), "long → equal pages");
+  assert.ok(withReceiptPageHeight(split, 300).includes("size: 200mm 180mm"), "2 pages of 150+30");
+  assert.ok(withReceiptPageHeight(split, 282).includes("size: 200mm 282mm"), "fits → one page");
   assert.ok(withReceiptPageHeight(split, 150).includes("size: 200mm 150mm"), "short → own height");
+  // with measured rows: equal pages just tall enough, rows never cut, no extra blank page
+  const rows: [number, number][] = [];
+  for (let y = 5; y + 40 <= 430; y += 42) rows.push([y, y + 40]);
+  const pageH = splitPageHeightMm(200, 440, rows);
+  assert.ok(pageH <= 282, "page stays A4-shaped");
+  const pagesUsed = (p: number) => {
+    let start = 0;
+    let n = 1;
+    for (const [t, b] of [...rows, [rows[rows.length - 1][1], 440] as [number, number]]) {
+      if (b - start > p && t > start) {
+        n++;
+        start = t;
+      }
+    }
+    return n;
+  };
+  assert.equal(pagesUsed(pageH), 2, "440mm of 40mm rows → exactly 2 pages");
+  assert.ok(pageH < 282 && pageH >= 220, `tight equal pages (got ${pageH})`);
+  assert.equal(splitPageHeightMm(200, 250, rows), 250, "fits on one page → own height");
   assert.equal(
     buildReceiptCalibrationHTML(normalizeReceiptSettings({ splitA4: true })).includes(
       "data-split-a4",

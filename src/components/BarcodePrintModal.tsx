@@ -235,12 +235,29 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
               {formatNumber(metrics.pageH)} میلی‌متر می‌شود ({formatNumber(layout.cols)} ستون ×{" "}
               {formatNumber(layout.rows)} ردیف). در پنجره چاپ مقیاس را ۱۰۰٪، حاشیه را هیچ، و اندازه
               کاغذ را همین مقدار بگذارید. برای رول حرارتی معمولاً ردیف را ۱ بگذارید.
+              <span className="mt-1 block font-medium text-foreground">
+                برای PDF در برنامهٔ پرینتر (مثل Print Master که اندازه را به اینچ می‌گیرد): Width ={" "}
+                <span dir="ltr">{(metrics.pageW / 25.4).toFixed(2)}</span> و Height ={" "}
+                <span dir="ltr">{(metrics.pageH / 25.4).toFixed(2)}</span> اینچ، نوع کاغذ مطابق رول
+                (برچسب فاصله‌دار = Cut Label).
+              </span>
+              {metrics.pageW > 75 && (
+                <span className="mt-1 block text-amber-700">
+                  عرض صفحه ({formatNumber(metrics.pageW)} میلی‌متر) از عرض چاپ بیشتر لیبل‌زن‌های
+                  کوچک (حدود ۷۵ میلی‌متر) بیشتر است و ریز چاپ می‌شود؛ تعداد ستون را ۱ کنید.
+                </span>
+              )}
             </p>
           ) : (
             <p className="rounded-xl bg-primary/5 p-2 text-[11px] leading-5 text-muted-foreground">
               هر صفحه دقیقاً {formatNumber(layout.cols)} ستون و {formatNumber(layout.rows)} ردیف چاپ
               می‌شود ({formatNumber(metrics.perPage)} لیبل در صفحه). اندازه لیبل را خودتان به
               میلی‌متر تعیین کنید.
+              <span className="mt-1 block font-medium text-foreground">
+                پرینتر لیبل‌زن دارید (مثل فوممو)؟ گزینهٔ «پرینتر لیبل‌زن» را بزنید تا هر برچسب یک
+                صفحهٔ PDF هم‌اندازهٔ خودش شود. PDF این حالت برگهٔ A4 است و روی لیبل‌زن بسیار ریز چاپ
+                می‌شود.
+              </span>
             </p>
           )}
 

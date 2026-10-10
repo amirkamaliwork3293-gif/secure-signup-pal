@@ -148,6 +148,33 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   assert.ok(buildReceiptCalibrationHTML(big).includes('data-kamix-receipt="80"'));
 }
 
+// ── split into A4-shaped pages (splitA4) ──
+{
+  assert.equal(d.splitA4, false, "off by default");
+  assert.equal(normalizeReceiptSettings({ splitA4: "yes" }).splitA4, false);
+  const legacy = { ...DEFAULT_RECEIPT } as Partial<typeof DEFAULT_RECEIPT>;
+  delete legacy.splitA4;
+  const plain = receiptDocument({ title: "t", body: "b", s: normalizeReceiptSettings(legacy) });
+  assert.equal(plain.includes("data-split-a4"), false, "off → no marker");
+  assert.ok(withReceiptPageHeight(plain, 900).includes("size: 80mm 900mm"), "off → one long page");
+
+  const split = receiptDocument({
+    title: "t",
+    body: "b",
+    s: normalizeReceiptSettings({ splitA4: true, scalePct: 250 }),
+  });
+  // 200mm wide → A4-shaped pages are 282mm tall (200 × 297/210)
+  assert.ok(withReceiptPageHeight(split, 900).includes("size: 200mm 282mm"), "long → A4 pages");
+  assert.ok(withReceiptPageHeight(split, 150).includes("size: 200mm 150mm"), "short → own height");
+  assert.equal(
+    buildReceiptCalibrationHTML(normalizeReceiptSettings({ splitA4: true })).includes(
+      "data-split-a4",
+    ),
+    false,
+    "calibration never split",
+  );
+}
+
 // ── receipt document ──
 const r = buildThermalInvoiceHTML(inv, d);
 assert.equal(/size:\s*80mm\s+auto/.test(r), false, "no invalid `size: 80mm auto`");

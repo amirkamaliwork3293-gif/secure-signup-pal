@@ -48,6 +48,12 @@ export type ReceiptSettings = {
    * فیش در برنامهٔ چاپگر (مثلاً PDF در Print Master) ریز یا درشت درمی‌آید. ۱۰۰ = بدون تغییر.
    */
   scalePct: number;
+  /**
+   * فیش بلند روی چند برگه با نسبت A4 چاپ شود (به‌جای یک برگهٔ بلند). «ذخیره PDF»
+   * اندروید و برنامهٔ چاپگر هر برگه را در یک A4 جا می‌دهند؛ برگهٔ بلند کل فیش را ریز
+   * می‌کرد. با این گزینه اندازهٔ نوشته‌ها به تعداد کالا بستگی ندارد.
+   */
+  splitA4: boolean;
 };
 
 export const RECEIPT_PRESETS = [
@@ -75,6 +81,7 @@ export const DEFAULT_RECEIPT: ReceiptSettings = {
   },
   footerText: "با تشکر از خرید شما",
   scalePct: 100,
+  splitA4: false,
 };
 
 export const RECEIPT_SCALE_MIN = 50;
@@ -111,8 +118,12 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
     scalePct: Math.round(
       clamp(r.scalePct, RECEIPT_SCALE_MIN, RECEIPT_SCALE_MAX, DEFAULT_RECEIPT.scalePct),
     ),
+    splitA4: typeof r.splitA4 === "boolean" ? r.splitA4 : DEFAULT_RECEIPT.splitA4,
   };
 }
+
+/** نسبت ارتفاع به عرض برگهٔ A4 */
+const A4_RATIO = 297 / 210;
 
 /**
  * اندازه‌های واقعی چاپ با اعمال «اندازهٔ فیش». در ۱۰۰٪ همان شیء بدون تغییر برمی‌گردد
@@ -200,13 +211,14 @@ export function receiptCss(s: ReceiptSettings): string {
   .words{font-size:${Math.max(9, Math.round(fs * 0.85))}px;margin-top:1mm}
   .foot{margin-top:2.5mm;text-align:center;font-weight:700}
   .cut{margin-top:3mm;text-align:center;font-size:9px;letter-spacing:2px}
+  ${s.splitA4 ? ".kv,.tot,.foot,.words{break-inside:avoid;page-break-inside:avoid}" : ""}
   `;
 }
 
 export function receiptDocument(opts: { title: string; body: string; s: ReceiptSettings }): string {
   const s = scaledReceipt(opts.s);
   return `<!DOCTYPE html>
-<html lang="fa" dir="rtl" ${RECEIPT_MARK}="${s.paperMm}" data-feed="${s.feedMm}"><head>
+<html lang="fa" dir="rtl" ${RECEIPT_MARK}="${s.paperMm}" data-feed="${s.feedMm}"${s.splitA4 ? ' data-split-a4="1"' : ""}><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(opts.title)}</title>
@@ -276,7 +288,11 @@ export function buildReceiptCalibrationHTML(s: ReceiptSettings, shopName = "فر
   <div class="foot">پایان چاپ آزمایشی</div>
   <div class="cut">- - - - - - - - - -</div>`;
   // خط‌کش میلی‌متری با اندازهٔ واقعی چاپ می‌شود — اندازهٔ فیش روی آن اعمال نمی‌شود
-  return receiptDocument({ title: "چاپ آزمایشی فیش", body, s: { ...s, scalePct: 100 } });
+  return receiptDocument({
+    title: "چاپ آزمایشی فیش",
+    body,
+    s: { ...s, scalePct: 100, splitA4: false },
+  });
 }
 
 /**
@@ -286,7 +302,9 @@ export function buildReceiptCalibrationHTML(s: ReceiptSettings, shopName = "فر
 export function withReceiptPageHeight(html: string, heightMm: number): string {
   if (!Number.isFinite(heightMm) || heightMm <= 0) return html;
   const paper = Number(html.match(/data-kamix-receipt="([\d.]+)"/)?.[1]) || 80;
-  const h = Math.min(5000, Math.ceil(heightMm));
+  let h = Math.min(5000, Math.ceil(heightMm));
+  // تقسیم به برگه‌های A4: هر برگه حداکثر به نسبت A4 تا در A4 تمام‌عرض جا شود
+  if (/data-split-a4="1"/.test(html)) h = Math.min(h, Math.floor(paper * A4_RATIO));
   return html.replace(
     /@page\s*\{\s*size:\s*[\d.]+mm\s+[\d.]+mm;/i,
     `@page { size: ${paper}mm ${h}mm;`,

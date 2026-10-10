@@ -2155,29 +2155,41 @@ html[data-app="1"] .landing-page {
   .lfs-tab-bar { display: none; }
 }
 
-/* ─── Scanner Zoom Slider ─────────────────────────────────────────────────── */
-.zoom-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: white;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  cursor: pointer;
-  transition: transform 0.1s;
+/* ─── اسکنر بارکد (src/features/barcode-scanner) ─────────────────────────── */
+.bcs-laser {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  top: 50%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgb(248 113 113) 15%, rgb(248 113 113) 85%, transparent);
+  box-shadow: 0 0 10px 2px rgb(248 113 113 / 0.55);
+  animation: bcs-laser-sweep 1.6s ease-in-out infinite alternate;
 }
-.zoom-slider::-webkit-slider-thumb:active {
-  transform: scale(1.25);
+@keyframes bcs-laser-sweep {
+  from { top: 14%; opacity: 0.75; }
+  to { top: 86%; opacity: 1; }
 }
-.zoom-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: white;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-  border: none;
-  cursor: pointer;
+.bcs-focus {
+  transform: translate(-50%, -50%);
+  animation: bcs-focus-in 0.7s ease-out forwards;
+}
+@keyframes bcs-focus-in {
+  0% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+  30% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+.bcs-pop {
+  animation: bcs-pop-in 0.18s ease-out;
+}
+@keyframes bcs-pop-in {
+  from { transform: translateY(6px) scale(0.96); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bcs-laser, .bcs-focus, .bcs-pop { animation: none; }
+  .bcs-laser { top: 50%; }
 }
 
 /* ─── دکمه انتخاب عکس رسید (ثبت‌نام / تمدید) ─────────────────────────────── */

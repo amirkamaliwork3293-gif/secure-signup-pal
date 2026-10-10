@@ -115,7 +115,26 @@ assert.equal(d.paperMm, 80);
 assert.equal(d.printableMm, 72);
 const small = normalizeReceiptSettings({ paperMm: 58 });
 assert.equal(small.printableMm, 48);
-assert.equal(small.fontPx, 11);
+assert.equal(small.fontPx, 12, "58mm auto font");
+
+// ── automatic font: as large as the printable width allows ──
+assert.equal(d.fontMode, "auto");
+assert.equal(d.fontPx, 17, "80mm (72 printable) → 17px");
+assert.equal(
+  normalizeReceiptSettings({ fontPx: 13 }).fontMode,
+  "auto",
+  "old untouched default → auto",
+);
+assert.equal(normalizeReceiptSettings({ paperMm: 58, fontPx: 11 }).fontMode, "auto");
+const manual = normalizeReceiptSettings({ fontPx: 15 });
+assert.equal(manual.fontMode, "manual", "a size the user chose is kept");
+assert.equal(manual.fontPx, 15);
+assert.equal(normalizeReceiptSettings({ fontMode: "manual", fontPx: 13 }).fontPx, 13);
+assert.equal(
+  normalizeReceiptSettings({ fontMode: "auto", fontPx: 9 }).fontPx,
+  17,
+  "auto ignores stored size",
+);
 const junk = normalizeReceiptSettings({
   paperMm: "x",
   printableMm: 999,
@@ -138,13 +157,13 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   delete legacy.scalePct;
   assert.equal(
     receiptDocument({ title: "t", body: "b", s: normalizeReceiptSettings(legacy) }),
-    receiptDocument({ title: "t", body: "b", s: { ...DEFAULT_RECEIPT } }),
+    receiptDocument({ title: "t", body: "b", s: normalizeReceiptSettings({ ...DEFAULT_RECEIPT }) }),
   );
   const big = normalizeReceiptSettings({ scalePct: 200 });
   const html = receiptDocument({ title: "t", body: "b", s: big });
   assert.ok(html.includes('data-kamix-receipt="160"'), "page width scales");
   assert.ok(html.includes("width:144mm"), "printable width scales");
-  assert.ok(html.includes("font-size:26px"), "font scales");
+  assert.ok(html.includes("font-size:34px"), "font scales");
   assert.equal(receiptPageWidthMm(big), 160);
   // calibration ruler always prints at real size
   assert.ok(buildReceiptCalibrationHTML(big).includes('data-kamix-receipt="80"'));
@@ -174,7 +193,7 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   );
   assert.ok(many.includes('<th class="t">مبلغ</th>'));
   const widths = (h: string) => [...h.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
-  assert.deepEqual(widths(many), [62, 14, 24], "short amounts: name gets most of the row");
+  assert.deepEqual(widths(many), [61, 12, 27], "short amounts: name gets most of the row");
   assert.ok(!many.includes('em"'), "short amounts keep full size");
   const big = receiptItemsHtml(
     rows(8).map((r) => ({ ...r, total: "۱۲۳٬۴۵۶٬۷۸۹٬۰۰۰" })),
@@ -182,7 +201,7 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   );
   const [nameW, , totalW] = widths(big);
   assert.ok(
-    totalW > 24 && totalW <= 46 && nameW + 14 + totalW === 100,
+    totalW > 27 && totalW <= 46 && nameW + 12 + totalW === 100,
     "long amounts widen the column",
   );
   assert.ok(!big.includes("<wbr>"), "amounts never break");
@@ -204,7 +223,7 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   assert.equal(receiptItemsHtml([], d), "", "no items → empty (caller shows placeholder)");
   const narrow = receiptItemsHtml(rows(8), normalizeReceiptSettings({ paperMm: 58 }));
   assert.ok(!narrow.includes(">فی<") && !narrow.includes("فی "), "58mm: no unit price either");
-  assert.equal(widths(narrow)[1], 17, "58mm: wider qty share");
+  assert.equal(widths(narrow)[1], 16, "58mm: wider qty share");
   // settings saved before this option → auto
   const legacy = { ...DEFAULT_RECEIPT } as Partial<typeof DEFAULT_RECEIPT>;
   delete legacy.itemLayout;

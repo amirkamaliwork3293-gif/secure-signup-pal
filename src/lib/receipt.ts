@@ -34,8 +34,13 @@ export type ReceiptSettings = {
   printableMm: number;
   /** فاصلهٔ داخلی از دو طرف ناحیهٔ چاپ (میلی‌متر) */
   sideMarginMm: number;
-  /** اندازهٔ قلم پایه (پیکسل CSS) */
+  /** اندازهٔ قلم پایه (پیکسل CSS) — در حالت «خودکار» از روی عرض قابل چاپ حساب می‌شود */
   fontPx: number;
+  /**
+   * auto = قلم تا جای ممکن درشت، متناسب با عرض قابل چاپ (۸۰←۱۷، ۵۸←۱۲)
+   * manual = همان اندازه‌ای که کاربر خودش گذاشته
+   */
+  fontMode: "auto" | "manual";
   /** همهٔ نوشته‌ها پررنگ (برای چاپگرهای کم‌حرارت) */
   boldText: boolean;
   /** فضای خالی انتهای فیش برای برش (میلی‌متر) */
@@ -76,6 +81,7 @@ export const DEFAULT_RECEIPT: ReceiptSettings = {
   printableMm: 72,
   sideMarginMm: 1,
   fontPx: 13,
+  fontMode: "auto",
   boldText: false,
   feedMm: 12,
   show: {
@@ -109,6 +115,15 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
   const paperMm = clamp(r.paperMm, 40, 120, DEFAULT_RECEIPT.paperMm);
   const presetPrintable = paperMm <= 60 ? 48 : paperMm - 8;
   const printableMm = clamp(r.printableMm, 30, paperMm, Math.min(paperMm, presetPrintable));
+  // تنظیمات ذخیره‌شده پیش از «قلم خودکار»: اگر قلم همان پیش‌فرض قدیمی بود یعنی کاربر دستش
+  // نزده → خودکار؛ اگر عدد دیگری گذاشته بود، همان را نگه می‌داریم.
+  const legacyDefaultFont = paperMm <= 60 ? 11 : DEFAULT_RECEIPT.fontPx;
+  const fontMode: ReceiptSettings["fontMode"] =
+    r.fontMode === "auto" || r.fontMode === "manual"
+      ? r.fontMode
+      : r.fontPx === undefined || Number(r.fontPx) === legacyDefaultFont
+        ? "auto"
+        : "manual";
   const show = { ...DEFAULT_RECEIPT.show };
   if (r.show && typeof r.show === "object") {
     for (const k of Object.keys(show) as (keyof ReceiptShow)[]) {
@@ -120,7 +135,9 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
     paperMm,
     printableMm,
     sideMarginMm: clamp(r.sideMarginMm, 0, 10, DEFAULT_RECEIPT.sideMarginMm),
-    fontPx: clamp(r.fontPx, 9, 20, paperMm <= 60 ? 11 : DEFAULT_RECEIPT.fontPx),
+    fontPx:
+      fontMode === "auto" ? autoFontPx(printableMm) : clamp(r.fontPx, 9, 20, legacyDefaultFont),
+    fontMode,
     boldText: typeof r.boldText === "boolean" ? r.boldText : DEFAULT_RECEIPT.boldText,
     feedMm: clamp(r.feedMm, 0, 40, DEFAULT_RECEIPT.feedMm),
     show,
@@ -162,6 +179,14 @@ export function scaledReceipt(s: ReceiptSettings): ReceiptSettings {
 /** عرض صفحهٔ فیش (میلی‌متر) پس از اعمال اندازه — برای قاب پیش‌نمایش */
 export function receiptPageWidthMm(s: ReceiptSettings): number {
   return scaledReceipt(s).paperMm;
+}
+
+/**
+ * قلم خودکار: تا جای ممکن درشت، متناسب با عرض قابل چاپ — هر میلی‌متر ≈ ۰٫۲۴ پیکسل قلم
+ * (۷۲ میلی‌متر → ۱۷، ۴۸ میلی‌متر → ۱۲). ردیف‌هایی که جا نشوند به خط بعد می‌روند، نه روی هم.
+ */
+export function autoFontPx(printableMm: number): number {
+  return Math.min(20, Math.max(11, Math.round(printableMm * 0.24)));
 }
 
 /** نشانه‌ای که print.ts با آن فیش را می‌شناسد و ارتفاع صفحه را اندازه می‌گیرد */
@@ -208,14 +233,15 @@ export function receiptCss(s: ReceiptSettings): string {
   .logo{display:block;margin:0 auto 1.5mm;max-width:70%;max-height:22mm;object-fit:contain;filter:grayscale(1) contrast(1.4)}
   hr{border:0;border-top:1px dashed #000;margin:1.6mm 0}
   hr.b{border-top:2px solid #000}
-  .kv{display:flex;justify-content:space-between;gap:2mm;align-items:baseline}
+  .kv{display:flex;justify-content:space-between;gap:0 2mm;align-items:baseline}
   .kv > span:first-child{flex:0 0 auto}
   .kv > span:last-child{text-align:left;min-width:0;word-break:break-word;overflow-wrap:anywhere;font-weight:700;unicode-bidi:plaintext}
   .ltr{direction:ltr;unicode-bidi:isolate;display:inline-block}
   .it{padding:0.8mm 0;border-bottom:1px dotted #000;break-inside:avoid;page-break-inside:avoid}
   .it:last-child{border-bottom:0}
   .it .n{font-weight:700;word-break:break-word;overflow-wrap:anywhere}
-  .it .q{display:flex;justify-content:space-between;gap:2mm;align-items:baseline}
+  .it .q{display:flex;flex-wrap:wrap;justify-content:space-between;gap:0 2mm;align-items:baseline}
+  .it .q b{margin-inline-start:auto}
   .it .q b{font-weight:900;white-space:nowrap}
   .tag{font-size:${Math.max(9, Math.round(fs * 0.85))}px}
   s{text-decoration:line-through}
@@ -281,9 +307,12 @@ export const receiptParts = {
 
 export type ReceiptItemRow = Parameters<typeof receiptParts.item>[0];
 
-/** قلم جدول کالاها — کمی درشت‌تر از قلم پایهٔ فیش تا نام و مبلغ بزرگ و خوانا باشند */
+/**
+ * قلم جدول کالاها — هم‌اندازهٔ قلم پایهٔ فیش (که خودش متناسب با عرض کاغذ درشت است)؛
+ * درشت‌تر از این، ستون نام را آن‌قدر باریک می‌کرد که نام‌ها چندخطی می‌شدند.
+ */
 export function receiptTableFontPx(baseFontPx: number): number {
-  return Math.round(baseFontPx * 1.15);
+  return Math.round(baseFontPx);
 }
 /** پهنای تقریبی هر رقم/جداکنندهٔ فارسی در وزیرمتن سیاه (نسبت به اندازهٔ قلم) */
 const AMOUNT_CHAR_EM = 0.63;
@@ -315,7 +344,7 @@ export function receiptItemsHtml(rows: ReceiptItemRow[], s: ReceiptSettings): st
   const roomMm = (totalPct / 100) * s.printableMm - 2;
   const amountEm = Math.min(1, Math.max(0.6, roomMm / mmFor(fontPx)));
   const amountStyle = amountEm < 1 ? ` style="font-size:${amountEm.toFixed(2)}em"` : "";
-  const qtyPct = s.printableMm < 60 ? 17 : 14;
+  const qtyPct = s.printableMm < 60 ? 16 : 12;
   const cols = [`${100 - qtyPct - totalPct}%`, `${qtyPct}%`, `${totalPct}%`];
   const body = rows
     .map(

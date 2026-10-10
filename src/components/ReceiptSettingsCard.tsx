@@ -153,7 +153,7 @@ export function ReceiptSettingsCard() {
               save({
                 paperMm: p.paperMm,
                 printableMm: p.printableMm,
-                fontPx: p.paperMm <= 60 ? 11 : 13,
+                fontMode: "auto",
               })
             }
             className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
@@ -195,14 +195,25 @@ export function ReceiptSettingsCard() {
           unit="mm"
           onChange={(sideMarginMm) => save({ sideMarginMm })}
         />
-        <Stepper
-          label="اندازهٔ قلم"
-          value={s.fontPx}
-          step={1}
-          min={9}
-          max={20}
-          onChange={(fontPx) => save({ fontPx })}
-        />
+        <div className="space-y-1">
+          <Stepper
+            label={s.fontMode === "auto" ? "اندازهٔ قلم (خودکار)" : "اندازهٔ قلم"}
+            value={s.fontPx}
+            step={1}
+            min={9}
+            max={20}
+            onChange={(fontPx) => save({ fontPx, fontMode: "manual" })}
+          />
+          {s.fontMode === "manual" && (
+            <button
+              type="button"
+              onClick={() => save({ fontMode: "auto" })}
+              className="text-[10px] text-primary underline"
+            >
+              بازگشت به قلم خودکار (تا جای ممکن درشت، متناسب با عرض کاغذ)
+            </button>
+          )}
+        </div>
         <Stepper
           label="فضای خالی برای برش"
           value={s.feedMm}

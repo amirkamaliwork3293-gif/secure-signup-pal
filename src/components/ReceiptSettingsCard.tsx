@@ -4,8 +4,11 @@ import { settings, emptyInvoice, recalc, type Invoice } from "@/lib/store";
 import {
   DEFAULT_RECEIPT,
   RECEIPT_PRESETS,
+  RECEIPT_SCALE_MAX,
+  RECEIPT_SCALE_MIN,
   buildReceiptCalibrationHTML,
   normalizeReceiptSettings,
+  receiptPageWidthMm,
   type ReceiptSettings,
   type ReceiptShow,
 } from "@/lib/receipt";
@@ -135,9 +138,8 @@ export function ReceiptSettingsCard() {
         آزمایشی» بگیرید و عرض قابل چاپ را مطابق خط‌کش تنظیم کنید.
       </p>
       <p className="text-[11px] leading-5 text-muted-foreground">
-        مینی‌پرینتر بلوتوثی (مثل فوممو M220) دارید؟ در فاکتور «فیش PDF» را بزنید و فایل را در برنامه
-        پرینتر (مثلاً Print Master) باز کنید؛ نوع کاغذ را «پیوسته» بگذارید. عرض فیش PDF همان «عرض
-        قابل چاپ» است — اگر نوشته‌ها ریز بود آن را به عرض چاپ پرینترتان نزدیک کنید.
+        اگر فیش در برنامهٔ چاپگر (مثلاً PDF در Print Master) ریز یا درشت چاپ می‌شود، «اندازهٔ کل
+        فیش» را کم یا زیاد کنید تا به اندازهٔ دلخواه برسید.
       </p>
 
       <div className="flex flex-wrap gap-1.5">
@@ -208,6 +210,15 @@ export function ReceiptSettingsCard() {
           unit="mm"
           onChange={(feedMm) => save({ feedMm })}
         />
+        <Stepper
+          label="اندازهٔ کل فیش"
+          value={s.scalePct}
+          step={10}
+          min={RECEIPT_SCALE_MIN}
+          max={RECEIPT_SCALE_MAX}
+          unit="٪"
+          onChange={(scalePct) => save({ scalePct })}
+        />
         <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs">
           همهٔ نوشته‌ها پررنگ (چاپگر کم‌رنگ)
           <input
@@ -274,7 +285,7 @@ export function ReceiptSettingsCard() {
             title="پیش‌نمایش فیش"
             srcDoc={preview}
             className="mx-auto block bg-white shadow-md"
-            style={{ width: `${s.paperMm}mm`, height: 520 }}
+            style={{ width: `${receiptPageWidthMm(s)}mm`, height: 520 }}
           />
           <button
             type="button"

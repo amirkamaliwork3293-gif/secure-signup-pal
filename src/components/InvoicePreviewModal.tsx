@@ -17,7 +17,7 @@ import {
 } from "@/lib/print";
 import { buildInvoiceHTML, type InvoiceTemplate } from "@/lib/invoice-template";
 import { buildThermalInvoiceHTML, buildShareText } from "@/lib/invoice-document";
-import { normalizeReceiptSettings } from "@/lib/receipt";
+import { normalizeReceiptSettings, receiptPageWidthMm } from "@/lib/receipt";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 
 type Props = {
@@ -134,7 +134,7 @@ export function InvoicePreviewModal({ inv, onClose, heading, allowSend = false }
               srcDoc={receiptHtml}
               className="mx-auto block bg-white shadow-md"
               style={{
-                width: `${receiptSettings.paperMm}mm`,
+                width: `${receiptPageWidthMm(receiptSettings)}mm`,
                 height: "min(72vh, 980px)",
                 zoom: Math.max(zoom, 1.15),
                 minHeight: 520,

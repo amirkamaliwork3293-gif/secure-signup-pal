@@ -43,6 +43,11 @@ export type ReceiptSettings = {
   show: ReceiptShow;
   /** متن پایین فیش */
   footerText: string;
+  /**
+   * اندازهٔ کل فیش (درصد) — عرض، قلم و فاصله‌ها با هم بزرگ/کوچک می‌شوند. برای وقتی که
+   * فیش در برنامهٔ چاپگر (مثلاً PDF در Print Master) ریز یا درشت درمی‌آید. ۱۰۰ = بدون تغییر.
+   */
+  scalePct: number;
 };
 
 export const RECEIPT_PRESETS = [
@@ -69,7 +74,11 @@ export const DEFAULT_RECEIPT: ReceiptSettings = {
     thanks: true,
   },
   footerText: "با تشکر از خرید شما",
+  scalePct: 100,
 };
+
+export const RECEIPT_SCALE_MIN = 50;
+export const RECEIPT_SCALE_MAX = 300;
 
 const clamp = (n: unknown, lo: number, hi: number, d: number) => {
   const v = Number(n);
@@ -99,7 +108,34 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
     show,
     footerText:
       typeof r.footerText === "string" ? r.footerText.slice(0, 200) : DEFAULT_RECEIPT.footerText,
+    scalePct: Math.round(
+      clamp(r.scalePct, RECEIPT_SCALE_MIN, RECEIPT_SCALE_MAX, DEFAULT_RECEIPT.scalePct),
+    ),
   };
+}
+
+/**
+ * اندازه‌های واقعی چاپ با اعمال «اندازهٔ فیش». در ۱۰۰٪ همان شیء بدون تغییر برمی‌گردد
+ * تا خروجی کاربرانی که این تنظیم را دست نزده‌اند دقیقاً مثل قبل بماند.
+ */
+export function scaledReceipt(s: ReceiptSettings): ReceiptSettings {
+  const pct = Number.isFinite(s.scalePct) ? s.scalePct : 100;
+  if (pct === 100) return s;
+  const k = pct / 100;
+  const r1 = (n: number) => Math.round(n * k * 10) / 10;
+  return {
+    ...s,
+    paperMm: r1(s.paperMm),
+    printableMm: r1(s.printableMm),
+    sideMarginMm: r1(s.sideMarginMm),
+    feedMm: r1(s.feedMm),
+    fontPx: r1(s.fontPx),
+  };
+}
+
+/** عرض صفحهٔ فیش (میلی‌متر) پس از اعمال اندازه — برای قاب پیش‌نمایش */
+export function receiptPageWidthMm(s: ReceiptSettings): number {
+  return scaledReceipt(s).paperMm;
 }
 
 /** نشانه‌ای که print.ts با آن فیش را می‌شناسد و ارتفاع صفحه را اندازه می‌گیرد */
@@ -168,12 +204,13 @@ export function receiptCss(s: ReceiptSettings): string {
 }
 
 export function receiptDocument(opts: { title: string; body: string; s: ReceiptSettings }): string {
+  const s = scaledReceipt(opts.s);
   return `<!DOCTYPE html>
-<html lang="fa" dir="rtl" ${RECEIPT_MARK}="${opts.s.paperMm}" data-feed="${opts.s.feedMm}"><head>
+<html lang="fa" dir="rtl" ${RECEIPT_MARK}="${s.paperMm}" data-feed="${s.feedMm}"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${esc(opts.title)}</title>
-<style>${receiptCss(opts.s)}</style>
+<style>${receiptCss(s)}</style>
 </head><body><div class="r">${opts.body}</div></body></html>`;
 }
 
@@ -238,7 +275,8 @@ export function buildReceiptCalibrationHTML(s: ReceiptSettings, shopName = "فر
   <p class="sub c">۰۱۲۳۴۵۶۷۸۹ — ABCDEFGHIJ abcdefghij</p>
   <div class="foot">پایان چاپ آزمایشی</div>
   <div class="cut">- - - - - - - - - -</div>`;
-  return receiptDocument({ title: "چاپ آزمایشی فیش", body, s });
+  // خط‌کش میلی‌متری با اندازهٔ واقعی چاپ می‌شود — اندازهٔ فیش روی آن اعمال نمی‌شود
+  return receiptDocument({ title: "چاپ آزمایشی فیش", body, s: { ...s, scalePct: 100 } });
 }
 
 /**

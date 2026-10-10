@@ -1,13 +1,13 @@
 /**
  * InvoiceActions.tsx
  * ─────────────────────────────────────────────────────────────────────────────
- * عملیات فاکتور: مشاهده، پرینت (A4/حرارتی)، فیش PDF (مینی‌پرینتر)، اشتراک PDF و پیام به مشتری.
+ * عملیات فاکتور: مشاهده، پرینت (A4/حرارتی)، اشتراک PDF و پیام به مشتری.
  * HTML سند فاکتور در ‎@/lib/invoice-document‎ ساخته می‌شود.
  */
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, Printer, Share2, Receipt, FileDown, FileText, MessageSquare } from "lucide-react";
+import { Eye, Printer, Share2, Receipt, FileDown, MessageSquare } from "lucide-react";
 import { InvoiceMessageDialog } from "@/components/InvoiceMessageDialog";
 import { InvoicePreviewModal } from "@/components/InvoicePreviewModal";
 import type { Invoice } from "@/lib/store";
@@ -26,8 +26,6 @@ import {
 } from "@/lib/print";
 import { buildInvoiceHTML, type InvoiceTemplate } from "@/lib/invoice-template";
 import { buildThermalInvoiceHTML, buildShareText } from "@/lib/invoice-document";
-import { normalizeReceiptSettings } from "@/lib/receipt";
-import type { jsPDF } from "jspdf";
 import { shareText } from "@/lib/openExternal";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -48,7 +46,6 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
   const template = appSettings.invoiceTemplate as Partial<InvoiceTemplate> | undefined;
   const paper = normalizePaperSize(appSettings.invoicePaperSize);
   const [sharingPdf, setSharingPdf] = useState(false);
-  const [makingReceiptPdf, setMakingReceiptPdf] = useState(false);
   const [messaging, setMessaging] = useState(false);
   const [paperMenu, setPaperMenu] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -97,76 +94,48 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
       const { buildInvoicePdf } = await import("@/lib/invoice-pdf");
       const pdf = await buildInvoicePdf(inv);
       const filename = `${invoiceDocumentTitle(inv)}-${inv.id.toUpperCase()}.pdf`;
-      await deliverPdf(pdf, filename);
+
+      if (canNativeFileShare() || isNativeApp()) {
+        const dataUri = pdf.output("datauristring");
+        const ok = await saveBase64File(dataUri, filename, "application/pdf");
+        if (!ok) {
+          alert(
+            isAppShell()
+              ? "ذخیره فایل در این نسخه اپ پشتیبانی نمی‌شود. از پرینت یا پیش‌نمایش استفاده کنید."
+              : OLD_APP_MESSAGE,
+          );
+        }
+        return;
+      }
+
+      if (isAppShell()) {
+        alert(
+          "در اپ نمی‌توان فایل را با لینک دانلود گرفت چون از برنامه خارج می‌شوید. از دکمه پرینت استفاده کنید.",
+        );
+        return;
+      }
+
+      const blob = pdf.output("blob") as Blob;
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const nav = navigator as Navigator & {
+        canShare?: (data?: { files?: File[] }) => boolean;
+        share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
+      };
+      if (nav.canShare?.({ files: [file] }) && nav.share) {
+        try {
+          await nav.share({ files: [file], title: filename });
+          return;
+        } catch {
+          /* کاربر لغو کرد — به دانلود ساده برمی‌گردیم */
+        }
+      }
+      downloadBlob(blob, filename);
     } catch (e) {
       console.error("[InvoiceActions] share pdf failed", e);
       alert("ساخت یا ارسال فایل PDF ناموفق بود.");
     } finally {
       setSharingPdf(false);
     }
-  };
-
-  /**
-   * فیش PDF هم‌اندازهٔ خود فیش — برای مینی‌پرینترهای بلوتوثی (فوممو M220 و…) که
-   * فقط از برنامهٔ خودشان (Print Master) چاپ می‌کنند. عرض صفحه = «عرض قابل چاپ»
-   * تنظیمات فیش، بدون حاشیهٔ کاغذ، تا برنامهٔ پرینتر آن را تمام‌عرض چاپ کند.
-   * فقط خواندنی؛ داده‌ای تغییر نمی‌کند.
-   */
-  const handleReceiptPdf = async () => {
-    if (makingReceiptPdf) return;
-    setMakingReceiptPdf(true);
-    try {
-      const { buildReceiptPdf } = await import("@/lib/receipt-pdf");
-      const s = normalizeReceiptSettings(appSettings.receipt);
-      const html = buildThermalInvoiceHTML(inv, { ...s, paperMm: s.printableMm });
-      const pdf = await buildReceiptPdf(html);
-      // نام لاتین: بعضی برنامه‌های پرینتر نام فایل فارسی را باز نمی‌کنند
-      await deliverPdf(pdf, `receipt-${inv.id.toUpperCase()}.pdf`);
-    } catch (e) {
-      console.error("[InvoiceActions] receipt pdf failed", e);
-      alert("ساخت فیش PDF ناموفق بود. لطفاً دوباره تلاش کنید.");
-    } finally {
-      setMakingReceiptPdf(false);
-    }
-  };
-
-  /** وب: اشتراک یا دانلود — اپ: ذخیره + پنجرهٔ اشتراک اندروید */
-  const deliverPdf = async (pdf: jsPDF, filename: string) => {
-    if (canNativeFileShare() || isNativeApp()) {
-      const dataUri = pdf.output("datauristring");
-      const ok = await saveBase64File(dataUri, filename, "application/pdf");
-      if (!ok) {
-        alert(
-          isAppShell()
-            ? "ذخیره فایل در این نسخه اپ پشتیبانی نمی‌شود. از پرینت یا پیش‌نمایش استفاده کنید."
-            : OLD_APP_MESSAGE,
-        );
-      }
-      return;
-    }
-
-    if (isAppShell()) {
-      alert(
-        "در اپ نمی‌توان فایل را با لینک دانلود گرفت چون از برنامه خارج می‌شوید. از دکمه پرینت استفاده کنید.",
-      );
-      return;
-    }
-
-    const blob = pdf.output("blob") as Blob;
-    const file = new File([blob], filename, { type: "application/pdf" });
-    const nav = navigator as Navigator & {
-      canShare?: (data?: { files?: File[] }) => boolean;
-      share?: (data: { files?: File[]; title?: string; text?: string }) => Promise<void>;
-    };
-    if (nav.canShare?.({ files: [file] }) && nav.share) {
-      try {
-        await nav.share({ files: [file], title: filename });
-        return;
-      } catch {
-        /* کاربر لغو کرد — به دانلود ساده برمی‌گردیم */
-      }
-    }
-    downloadBlob(blob, filename);
   };
 
   const handleShare = async () => {
@@ -225,17 +194,6 @@ export function InvoiceActions({ inv, size = "md", showLabels = false }: Props) 
         >
           <Receipt className={iconSize} />
           {showLabels && <span>چاپ حرارتی</span>}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleReceiptPdf}
-          disabled={makingReceiptPdf}
-          className={`${btnBase} ${btnSize} ${size !== "sm" ? "bg-accent text-foreground hover:bg-accent/80" : ""} disabled:opacity-60`}
-          title="فیش PDF برای مینی‌پرینتر بلوتوثی (فوممو و…) — در برنامه پرینتر مثل Print Master باز کنید"
-        >
-          <FileText className={iconSize} />
-          {showLabels && <span>{makingReceiptPdf ? "در حال ساخت…" : "فیش PDF"}</span>}
         </button>
 
         <button

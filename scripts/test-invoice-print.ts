@@ -22,6 +22,8 @@ import {
   DEFAULT_RECEIPT,
   buildReceiptCalibrationHTML,
   normalizeReceiptSettings,
+  receiptDocument,
+  receiptPageWidthMm,
   withReceiptPageHeight,
 } from "../src/lib/receipt.ts";
 import type { Invoice } from "../src/lib/store.ts";
@@ -122,6 +124,29 @@ assert.equal(junk.paperMm, 80);
 assert.equal(junk.printableMm, 80, "printable never wider than paper");
 assert.equal(junk.fontPx, 9);
 assert.equal(junk.show.logo, true, "invalid flag keeps default");
+
+// ── receipt size (scalePct) ──
+assert.equal(d.scalePct, 100, "default size is 100%");
+assert.equal(normalizeReceiptSettings({ scalePct: 1000 }).scalePct, 300);
+assert.equal(normalizeReceiptSettings({ scalePct: 5 }).scalePct, 50);
+assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
+{
+  // settings saved before this option existed → output unchanged
+  const legacy = { ...DEFAULT_RECEIPT } as Partial<typeof DEFAULT_RECEIPT>;
+  delete legacy.scalePct;
+  assert.equal(
+    receiptDocument({ title: "t", body: "b", s: normalizeReceiptSettings(legacy) }),
+    receiptDocument({ title: "t", body: "b", s: { ...DEFAULT_RECEIPT } }),
+  );
+  const big = normalizeReceiptSettings({ scalePct: 200 });
+  const html = receiptDocument({ title: "t", body: "b", s: big });
+  assert.ok(html.includes('data-kamix-receipt="160"'), "page width scales");
+  assert.ok(html.includes("width:144mm"), "printable width scales");
+  assert.ok(html.includes("font-size:26px"), "font scales");
+  assert.equal(receiptPageWidthMm(big), 160);
+  // calibration ruler always prints at real size
+  assert.ok(buildReceiptCalibrationHTML(big).includes('data-kamix-receipt="80"'));
+}
 
 // ── receipt document ──
 const r = buildThermalInvoiceHTML(inv, d);

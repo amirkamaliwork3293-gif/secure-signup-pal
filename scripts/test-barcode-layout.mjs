@@ -15,6 +15,7 @@ import {
   pageSlices,
   parseFaNumber,
   sanitizeLayout,
+  scaleMetrics,
 } from "../src/lib/barcode-layout.ts";
 
 // ─── باگ قدیمی: خالی کردن فیلد به ۱ تبدیل می‌شد ───────────────────────────
@@ -124,5 +125,31 @@ assert.equal(junk.copies, 99);
 assert.equal(junk.labelWidthMm, 15);
 assert.equal(junk.gapMm, 20);
 assert.equal(junk.paper, "A4");
+
+// ─── بزرگ‌نمایی چاپ لیبل‌زن (فقط چاپ، نه PDF) ──────────────────────────────
+{
+  assert.equal(sanitizeLayout({ mode: "label" }).printScalePct, 100, "پیش‌فرض بدون بزرگ‌نمایی");
+  assert.equal(sanitizeLayout({ mode: "label", printScalePct: 123 }).printScalePct, 100, "مقدار نامعتبر");
+  assert.equal(sanitizeLayout({ mode: "label", printScalePct: 400 }).printScalePct, 400);
+  const base = { mode: "label", cols: 1, rows: 1, labelWidthMm: 50, labelHeightMm: 30 };
+  const plain = buildLabelsPrintHTML(["data:image/png;base64,x"], base);
+  assert.equal(
+    plain,
+    buildLabelsPrintHTML(["data:image/png;base64,x"], { ...base, printScalePct: 100 }),
+    "۱۰۰٪ = خروجی قبلی",
+  );
+  assert.ok(plain.includes("@page { size: 50mm 30mm"));
+  const big = buildLabelsPrintHTML(["data:image/png;base64,x"], { ...base, printScalePct: 400 });
+  assert.ok(big.includes("@page { size: 200mm 120mm"), "صفحه ۴ برابر");
+  assert.ok(big.includes("width: 200mm") && big.includes("height: 120mm"), "لیبل ۴ برابر");
+  const m = gridMetrics(base);
+  assert.equal(scaleMetrics(m, 100), m, "۱۰۰٪ همان شیء");
+  // برگهٔ A4 تحت تأثیر نیست
+  const sheet = { mode: "a4", cols: 2, rows: 2, labelWidthMm: 50, labelHeightMm: 30 };
+  assert.equal(
+    buildLabelsPrintHTML(["x"], sheet),
+    buildLabelsPrintHTML(["x"], { ...sheet, printScalePct: 400 }),
+  );
+}
 
 console.log("✓ barcode-layout: همه‌ی بررسی‌ها موفق");

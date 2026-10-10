@@ -8,6 +8,7 @@ import {
   DEFAULT_LABEL_LAYOUT,
   LABEL_PRESETS,
   LAYOUT_LIMITS,
+  PRINT_SCALES,
   SHEET_PAPERS,
   loadPrintLayout,
   savePrintLayout,
@@ -21,7 +22,7 @@ import {
   type SheetPaper,
 } from "@/lib/barcode";
 import { generateUniqueCode } from "@/lib/barcode-code";
-import { savePdf, OLD_APP_MESSAGE } from "@/lib/print";
+import { savePdf, OLD_APP_MESSAGE, isAppShell } from "@/lib/print";
 import { formatNumber, products, type Product } from "@/lib/store";
 import { requireOnlineWrite } from "@/lib/online-status";
 
@@ -148,6 +149,7 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
         showPrice: p.showPrice,
         showCode: p.showCode,
         boldness: p.boldness,
+        printScalePct: p.printScalePct,
         mode,
       }),
     );
@@ -326,6 +328,27 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
             </Field>
           )}
 
+          {isLabel && (
+            <Field label="بزرگ‌نمایی لیبل در «چاپ»">
+              <select
+                value={layout.printScalePct ?? 100}
+                onChange={(e) => patch({ printScalePct: Number(e.target.value) })}
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                {PRINT_SCALES.map((pct) => (
+                  <option key={pct} value={pct}>
+                    {pct === 100 ? "۱۰۰٪ — اندازهٔ واقعی" : `${pct.toLocaleString("fa-IR")}٪`}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] leading-5 text-muted-foreground">
+                پنجرهٔ چاپ گوشی کاغذ A4/Letter می‌گذارد و لیبل وسط برگه ریز می‌ماند. اگر از «چاپ» و
+                «ذخیره به‌صورت PDF» استفاده می‌کنید و بارکد ریز بود، این عدد را بیشتر کنید (مثلاً
+                ۴۰۰٪). روی PDF خود کامیکس اثری ندارد.
+              </p>
+            </Field>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             <Field label={isLabel ? "تعداد ستون در هر ردیف رول" : "تعداد ستون"}>
               <LayoutNumber
@@ -460,6 +483,13 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
               <Printer className="h-4 w-4" /> چاپ
             </button>
           </div>
+          {isLabel && isAppShell() && (
+            <p className="rounded-xl bg-amber-50 p-2 text-[11px] leading-5 text-amber-950">
+              داخل اپلیکیشن از دکمهٔ «چاپ» استفاده کنید و در پنجرهٔ چاپ «ذخیره به‌صورت PDF» را
+              بزنید؛ اندازهٔ بارکد را با «بزرگ‌نمایی لیبل در چاپ» تنظیم کنید. (دکمهٔ PDF در سایت
+              کامیکس با مرورگر، PDF دقیقاً هم‌اندازهٔ برچسب می‌سازد.)
+            </p>
+          )}
           {busy && (
             <p className="text-center text-xs text-muted-foreground">در حال تولید بارکدها...</p>
           )}

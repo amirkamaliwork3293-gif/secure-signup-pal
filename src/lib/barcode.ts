@@ -30,6 +30,7 @@ export {
   DEFAULT_LAYOUT,
   LABEL_PRESETS,
   LAYOUT_LIMITS,
+  PRINT_SCALES,
   loadPrintLayout,
   savePrintLayout,
   SHEET_PAPERS,

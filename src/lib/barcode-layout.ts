@@ -36,7 +36,15 @@ export type PrintLayout = {
   offsetYMm?: number;
   /** پررنگی میله‌ها برای پرینتر حرارتی */
   boldness?: number;
+  /**
+   * بزرگ‌نمایی لیبل‌ها فقط در «چاپ» حالت لیبل‌زن (درصد). پنجرهٔ چاپ گوشی کاغذ استاندارد
+   * (A4/Letter) می‌گذارد و لیبل ۵×۳ وسط برگه ریز می‌ماند؛ با بزرگ‌نمایی برگه پر می‌شود.
+   * PDF خود کامیکس همیشه اندازهٔ دقیق است و به این تنظیم کاری ندارد.
+   */
+  printScalePct?: number;
 };
+
+export const PRINT_SCALES = [100, 150, 200, 300, 400, 500, 600] as const;
 
 export type LabelPreset = {
   id: string;
@@ -104,6 +112,7 @@ export const DEFAULT_LAYOUT: PrintLayout = {
   offsetXMm: 0,
   offsetYMm: 0,
   boldness: 1,
+  printScalePct: 100,
 };
 
 export const DEFAULT_LABEL_LAYOUT: PrintLayout = {
@@ -121,6 +130,7 @@ export const DEFAULT_LABEL_LAYOUT: PrintLayout = {
   offsetXMm: 0,
   offsetYMm: 0,
   boldness: 1,
+  printScalePct: 100,
 };
 
 const LAYOUT_KEY = "kamix_barcode_layout_v1";
@@ -208,6 +218,9 @@ export function sanitizeLayout(raw?: Partial<PrintLayout> | null): PrintLayout {
       LAYOUT_LIMITS.offsetMm.max,
     ),
     boldness,
+    printScalePct: (PRINT_SCALES as readonly number[]).includes(Number(merged.printScalePct))
+      ? Number(merged.printScalePct)
+      : 100,
     showName: merged.showName !== false,
     showPrice: merged.showPrice !== false,
     showCode: merged.showCode !== false,
@@ -389,7 +402,12 @@ export function jsPdfSheetFormat(layout: PrintLayout): "a4" | "a5" | "letter" {
 /** ساخت HTML چاپ — ستون و ردیف با CSS Grid ثابت می‌شوند، نه با flex-wrap. */
 export function buildLabelsPrintHTML(dataUrls: string[], layout: PrintLayout): string {
   const m = gridMetrics(layout);
-  if (m.mode === "label") return buildLabelRollHTML(dataUrls, m);
+  if (m.mode === "label") {
+    return buildLabelRollHTML(
+      dataUrls,
+      scaleMetrics(m, sanitizeLayout(layout).printScalePct ?? 100),
+    );
+  }
   return buildSheetPrintHTML(dataUrls, m);
 }
 
@@ -446,6 +464,28 @@ function buildSheetPrintHTML(dataUrls: string[], m: GridMetrics): string {
 </head>
 <body>${pageHtml}</body>
 </html>`;
+}
+
+/** همهٔ اندازه‌های صفحهٔ لیبل‌زن × ضریب بزرگ‌نمایی (۱۰۰ = بدون تغییر، همان شیء) */
+export function scaleMetrics(m: GridMetrics, pct: number): GridMetrics {
+  if (!Number.isFinite(pct) || pct === 100) return m;
+  const k = pct / 100;
+  const r = (n: number) => Math.round(n * k * 100) / 100;
+  const pageW = r(m.pageW);
+  const pageH = r(m.pageH);
+  return {
+    ...m,
+    gap: r(m.gap),
+    labelW: r(m.labelW),
+    labelH: r(m.labelH),
+    pageW,
+    pageH,
+    pageCss: `${pageW}mm ${pageH}mm`,
+    totalW: r(m.totalW),
+    totalH: r(m.totalH),
+    offsetX: r(m.offsetX),
+    offsetY: r(m.offsetY),
+  };
 }
 
 function buildLabelRollHTML(dataUrls: string[], m: GridMetrics): string {

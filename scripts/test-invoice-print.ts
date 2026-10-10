@@ -174,17 +174,24 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   );
   assert.ok(many.includes('<th class="t">مبلغ</th>'));
   const widths = (h: string) => [...h.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
-  assert.deepEqual(widths(many), [64, 14, 22], "short amounts: name gets most of the row");
+  assert.deepEqual(widths(many), [62, 14, 24], "short amounts: name gets most of the row");
+  assert.ok(!many.includes('em"'), "short amounts keep full size");
   const big = receiptItemsHtml(
     rows(8).map((r) => ({ ...r, total: "۱۲۳٬۴۵۶٬۷۸۹٬۰۰۰" })),
     d,
   );
   const [nameW, , totalW] = widths(big);
   assert.ok(
-    totalW > 22 && totalW <= 48 && nameW + 14 + totalW === 100,
+    totalW > 24 && totalW <= 46 && nameW + 14 + totalW === 100,
     "long amounts widen the column",
   );
-  assert.ok(big.includes("۱۲۳٬<wbr>۴۵۶٬<wbr>"), "breaks only at thousands separators");
+  assert.ok(!big.includes("<wbr>"), "amounts never break");
+  const huge = receiptItemsHtml(
+    rows(8).map((r) => ({ ...r, total: "۹۹۹٬۹۹۹٬۹۹۹٬۹۹۹٬۹۹۹" })),
+    normalizeReceiptSettings({ paperMm: 58 }),
+  );
+  const em = Number(huge.match(/font-size:([\d.]+)em/)?.[1]);
+  assert.ok(em >= 0.6 && em < 1, `only the amount column shrinks for huge amounts (${em})`);
   assert.ok(many.includes("٪۱۰ تخفیف") && many.includes("&lt;b&gt;"), "tags shown, names escaped");
   assert.ok(
     !receiptItemsHtml(rows(20), normalizeReceiptSettings({ itemLayout: "lines" })).includes(

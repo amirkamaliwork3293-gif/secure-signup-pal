@@ -71,3 +71,83 @@ export const createReceiptUploadUrl = createServerFn({ method: "POST" })
     }
     return { path, token: signed.token, signedUrl: signed.signedUrl };
   });
+/**
+ * مسیر جایگزین آپلود رسید از طریق سرور خود سایت.
+ *
+ * آپلود معمولی مستقیم از مرورگر به دامنه‌ی استوریج Supabase انجام می‌شود. روی
+ * بعضی اینترنت‌ها/اپراتورها این دامنه گاهی در دسترس نیست و کاربر پیام «ارتباط با
+ * سرور برقرار نشد» می‌گرفت. اگر آپلود مستقیم شکست بخورد، صفحه فایل را به همین
+ * تابع (روی دامنه‌ی خود سایت) می‌فرستد و سرور آن را در همان باکت خصوصی ذخیره
+ * می‌کند. همان سقف نرخ، همان الگوی مسیر و همان محدودیت «فقط تصویر» اعمال می‌شود؛
+ * به‌علاوه بایت‌های فایل هم بررسی می‌شوند (نه فقط پسوند).
+ */
+const MAX_SERVER_RECEIPT_BYTES = 3 * 1024 * 1024;
+const RECEIPT_EXTS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"] as const;
+const RECEIPT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  gif: "image/gif",
+};
+
+export const uploadReceiptViaServer = createServerFn({ method: "POST" })
+  .inputValidator((d) =>
+    z
+      .object({
+        username: z.string().min(1).max(64),
+        ext: z
+          .string()
+          .min(1)
+          .max(8)
+          .transform((s) => s.toLowerCase())
+          .refine((s) => (RECEIPT_EXTS as readonly string[]).includes(s), "فقط تصویر قابل آپلود است."),
+        kind: z.enum(["signup", "renew"]).default("signup"),
+        // base64 خالص (بدون پیشوند data:) — سقف حجم پیش از decode هم چک می‌شود
+        base64: z
+          .string()
+          .min(16)
+          .max(Math.ceil((MAX_SERVER_RECEIPT_BYTES * 4) / 3) + 8),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { clientIp, enforceRateLimit } = await import("@/lib/rate-limit.server");
+    const { isImageBytes } = await import("@/lib/image-bytes");
+    // همان سهمیه‌های مسیر معمولی — این مسیر راه دور زدن سقف نیست.
+    await enforceRateLimit(supabaseAdmin, "receipt-upload", clientIp(), 20, 3600);
+    await enforceRateLimit(supabaseAdmin, "receipt-upload-global", "all", 80, 3600);
+
+    let bytes: Uint8Array;
+    try {
+      const bin = atob(data.base64);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    } catch {
+      throw new Error("فایل رسید معتبر نیست.");
+    }
+    if (bytes.length === 0 || bytes.length > MAX_SERVER_RECEIPT_BYTES) {
+      throw new Error("حجم عکس رسید بیش از حد مجاز است.");
+    }
+    if (!isImageBytes(bytes.subarray(0, 16))) {
+      throw new Error("فقط عکس رسید (jpg، png، webp یا heic) قابل آپلود است.");
+    }
+
+    const safeUser =
+      (data.username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") || "user").slice(0, 60);
+    const rand = Math.random().toString(36).slice(2, 8);
+    const filename =
+      data.kind === "renew"
+        ? `renew-${Date.now()}-${rand}.${data.ext}`
+        : `${Date.now()}-${rand}.${data.ext}`;
+    const path = `${safeUser}/${filename}`;
+    const { error } = await supabaseAdmin.storage.from("receipts").upload(path, bytes, {
+      contentType: RECEIPT_MIME[data.ext] ?? "image/jpeg",
+      upsert: false,
+    });
+    if (error) throw new Error("امکان ذخیره‌ی عکس رسید فراهم نشد. لطفاً دوباره تلاش کنید.");
+    return { path };
+  });

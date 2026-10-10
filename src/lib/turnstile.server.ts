@@ -35,7 +35,25 @@ export function isTurnstileConfigured(): boolean {
  * این fail-open است؛ فراخوان‌کننده باید وقتی `isTurnstileConfigured()` غلط
  * است سقف نرخ سخت‌تری بگذارد تا سیل ثبت‌نام بدون کپچا برنگردد.
  */
-export async function assertTurnstileToken(token: unknown): Promise<void> {
+/**
+ * کلید idempotency به قالب UUID. با seed، کلید از (توکن + seed) مشتق می‌شود تا
+ * ارسال دوباره‌ی همان فرم (بعد از قطعی شبکه) با همان توکن رد نشود، ولی همان
+ * توکن برای seed دیگری (مثلاً یوزرنیم دیگر) کلید متفاوت و نتیجه‌ی «تکراری» بگیرد.
+ */
+async function idempotencyKey(token: string, seed?: string): Promise<string> {
+  if (!seed) return crypto.randomUUID();
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${seed}\u0000${token}`),
+  );
+  const b = new Uint8Array(digest).slice(0, 16);
+  b[6] = (b[6]! & 0x0f) | 0x40; // version 4
+  b[8] = (b[8]! & 0x3f) | 0x80; // variant
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+export async function assertTurnstileToken(token: unknown, idempotencySeed?: string): Promise<void> {
   const secret = getTurnstileSecretKey();
   if (!secret) return;
 
@@ -53,7 +71,7 @@ export async function assertTurnstileToken(token: unknown): Promise<void> {
   // idempotency_key اجازه می‌دهد همان توکن یک‌بارمصرف دوباره بررسی شود؛ اگر
   // پاسخ کلادفلر در راه گم شود، تلاش دوم به‌جای «توکن تکراری» همان نتیجه‌ی
   // اول را می‌گیرد. قطعی لحظه‌ای شبکه دیگر ثبت‌نام کاربر را خراب نمی‌کند.
-  body.set("idempotency_key", crypto.randomUUID());
+  body.set("idempotency_key", await idempotencyKey(response, idempotencySeed));
 
   let json: { success?: boolean; hostname?: string } | null = null;
   for (let attempt = 0; attempt < 2 && !json; attempt++) {

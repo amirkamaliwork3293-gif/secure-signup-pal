@@ -4,7 +4,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/lib/AuthContext";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitRenewalRequest, getPublicSettings } from "@/lib/auth.functions";
-import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
+import { createReceiptUploadUrl, receiptNote, uploadReceiptViaServer } from "@/lib/receipts.functions";
+import {
+  fileToBase64,
+  friendlySubmitError,
+  uploadReceiptResilient,
+  withNetworkRetry,
+} from "@/lib/resilient-request";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
 import { toJalaliInputDate } from "@/lib/store";
@@ -26,6 +32,8 @@ function RenewPage() {
   const navigate = useNavigate();
   const submit = useServerFn(submitRenewalRequest);
   const signReceiptUpload = useServerFn(createReceiptUploadUrl);
+  const uploadViaServer = useServerFn(uploadReceiptViaServer);
+  const uploadedRef = useRef<{ file: File; path: string } | null>(null);
   const [plan, setPlan] = useState<SubscriptionPlan>("1month");
   const [paid, setPaid] = useState(false);
   const [card, setCard] = useState({ card_number: "", card_holder: "", bank_name: "" });
@@ -131,27 +139,44 @@ function RenewPage() {
         const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
         const rawExt = (receiptFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
         const ext = ALLOWED_EXT.includes(rawExt) ? rawExt : "jpg";
-        const signed = await signReceiptUpload({
-          data: { username: String(username || "user"), ext, kind: "renew" },
-        });
-        const { error: upErr } = await supabase.storage
-          .from("receipts")
-          .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
-            // نوع محتوا همیشه تصویری تثبیت می‌شود تا هیچ فایلی به‌عنوان HTML
-            // از دامنه‌ی استوریج سرو نشود.
-            contentType: receiptFile.type?.startsWith("image/")
-              ? receiptFile.type
-              : "image/jpeg",
-            upsert: false,
+        const file = receiptFile;
+        const owner = String(username || "user");
+        if (uploadedRef.current?.file === file) {
+          path = uploadedRef.current.path;
+        } else {
+          path = await uploadReceiptResilient({
+            direct: async () => {
+              const signed = await withNetworkRetry(() =>
+                signReceiptUpload({ data: { username: owner, ext, kind: "renew" } }),
+              );
+              const { error: upErr } = await supabase.storage
+                .from("receipts")
+                .uploadToSignedUrl(signed.path, signed.token, file, {
+                  // نوع محتوا همیشه تصویری تثبیت می‌شود تا هیچ فایلی به‌عنوان HTML
+                  // از دامنه‌ی استوریج سرو نشود.
+                  contentType: file.type?.startsWith("image/") ? file.type : "image/jpeg",
+                  upsert: false,
+                });
+              if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+              return signed.path;
+            },
+            // مسیر جایگزین: از طریق سرور خود سایت (وقتی دامنه‌ی استوریج در دسترس نیست)
+            viaServer: async () => {
+              const base64 = await fileToBase64(file);
+              const r = await uploadViaServer({ data: { username: owner, ext, kind: "renew", base64 } });
+              return r.path;
+            },
           });
-        if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
-        path = signed.path;
+          uploadedRef.current = { file, path };
+        }
       }
 
-      await submit({ data: { plan, receipt_url: path, receipt_note: note, payment_confirmed: paid } });
+      await withNetworkRetry(() =>
+        submit({ data: { plan, receipt_url: path, receipt_note: note, payment_confirmed: paid } }),
+      );
       setDone(true);
-    } catch (e: any) {
-      setError(e?.message || "خطا در ارسال درخواست تمدید.");
+    } catch (e: unknown) {
+      setError(friendlySubmitError(e, "خطا در ارسال درخواست تمدید."));
     }
     setLoading(false);
   };

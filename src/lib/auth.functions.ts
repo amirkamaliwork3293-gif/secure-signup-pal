@@ -40,6 +40,7 @@ import {
 } from "@/lib/catalog-integrity";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 import { settleQuery } from "@/lib/settle-query";
+import { isImageBytes } from "@/lib/image-bytes";
 import {
   mergeAdminUsers,
   persianSearchVariants,
@@ -381,6 +382,42 @@ function planDurationMs(cfg: PlansConfig, plan: Plan): number {
   return Math.max(1, Math.floor(minutes)) * 60 * 1000;
 }
 
+/**
+ * تشخیص «ارسال دوباره‌ی همان ثبت‌نام». فقط وقتی نتیجه‌ی موفق برمی‌گرداند که:
+ * پروفایل کمتر از ۱۵ دقیقه پیش ساخته شده، درخواست ثبت‌نام (غیر آزمایشی) آن هم
+ * تازه است، و رمز ارسالی با رمز همان حساب می‌خواند (ورود سمت سرور). بنابراین
+ * برای یوزرنیم‌های قدیمی هیچ رفتاری عوض نمی‌شود و اطلاعاتی بیش از صفحه‌ی ورود
+ * لو نمی‌رود. رمز حساب هرگز تغییر نمی‌کند.
+ */
+const SIGNUP_REPLAY_WINDOW_MS = 15 * 60 * 1000;
+async function signupReplayResult(
+  supabaseAdmin: any,
+  profile: { id: string; status?: string | null; created_at?: string | null },
+  username: string,
+  password: string,
+): Promise<{ id: string; approved: boolean } | null> {
+  try {
+    const createdAt = new Date(String(profile.created_at ?? "")).getTime();
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > SIGNUP_REPLAY_WINDOW_MS) return null;
+    if (profile.status !== "pending" && profile.status !== "active") return null;
+    const since = new Date(Date.now() - SIGNUP_REPLAY_WINDOW_MS).toISOString();
+    const { data: req } = await supabaseAdmin
+      .from("signup_requests")
+      .select("id, plan")
+      .eq("username", username)
+      .in("status", ["pending", "approved"])
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!req?.id || req.plan === "trial") return null;
+    await serverSignIn(toEmail(username), password);
+    return { id: req.id, approved: profile.status === "active" };
+  } catch {
+    return null;
+  }
+}
+
 // ─── Public: submit signup request ───────────────────────────────────────────
 // جریان جدید: کاربر همان ابتدا یوزرنیم و رمز عبور انتخاب می‌کند. حساب با وضعیت
 // «در انتظار تایید» ساخته می‌شود و بلافاصله پس از تایید مدیر، ورود ممکن است —
@@ -400,25 +437,28 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
       phone?: string;
       /** فیلد تله — باید خالی بماند. ربات‌ها معمولاً پرش می‌کنند. */
       website?: string | null;
-      /** زمان شروع پر کردن فرم (Date.now سمت کلاینت) */
+      /** زمان شروع پر کردن فرم (Date.now سمت کلاینت) — فقط برای نسخه‌های قدیمی صفحه */
       form_started_at?: number | null;
+      /** مدت پر کردن فرم به میلی‌ثانیه (مستقل از ساعت گوشی کاربر) */
+      form_elapsed_ms?: number | null;
       /** توکن Cloudflare Turnstile — سرور با کلید محرمانه تایید می‌کند */
       turnstile_token?: string | null;
     }) => {
-      // تله را قبل از هر کار سنگین چک می‌کنیم تا ربات سهمیه را نسوزاند.
-      if (String(d.website ?? "").trim()) {
-        throw new Error("امکان ثبت درخواست الان وجود ندارد. کمی بعد دوباره تلاش کنید.");
-      }
-      const startedRaw = d.form_started_at;
-      if (startedRaw != null && startedRaw !== 0) {
-        const started = Number(startedRaw);
-        const now = Date.now();
-        if (!Number.isFinite(started) || started > now + 120_000 || started < now - 6 * 60 * 60 * 1000) {
-          throw new Error("لطفاً صفحه را تازه کنید و فرم را دوباره پر کنید.");
-        }
-        if (now - started < 1500) {
-          throw new Error("لطفاً چند ثانیه صبر کنید و دوباره ارسال کنید.");
-        }
+      // نشانه‌های ربات (فیلد تله و پر شدن فرم در کمتر از ۱٫۵ ثانیه) دیگر ثبت‌نام را
+      // رد نمی‌کنند: autofill مرورگر گاهی فیلد تله را پر می‌کرد و ساعت اشتباه گوشی
+      // کاربر را با پیام «کمی بعد تلاش کنید / صفحه را تازه کنید» برای همیشه گیر
+      // می‌انداخت. حالا فقط «مشکوک» علامت می‌خورند: درخواست ثبت می‌شود ولی حساب
+      // خودکار فعال نمی‌شود و منتظر تایید مدیر می‌ماند. کپچا و سقف نرخ مثل قبل
+      // جلوی ربات را می‌گیرند.
+      let suspicious = Boolean(String(d.website ?? "").trim());
+      const elapsedRaw = d.form_elapsed_ms;
+      if (elapsedRaw != null) {
+        const elapsed = Number(elapsedRaw);
+        if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 1500) suspicious = true;
+      } else if (d.form_started_at != null && d.form_started_at !== 0) {
+        // نسخه‌ی قدیمی صفحه: فقط وقتی ساعت گوشی معقول است بررسی می‌شود
+        const diff = Date.now() - Number(d.form_started_at);
+        if (Number.isFinite(diff) && diff >= 0 && diff < 1500) suspicious = true;
       }
       const first_name = requireName(d.first_name, "نام");
       const last_name = requireName(d.last_name, "نام خانوادگی");
@@ -446,11 +486,15 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
         receipt_note,
         phone: cleanText(d.phone ?? "", MAX_PHONE),
         turnstile_token: d.turnstile_token ?? null,
+        suspicious,
       };
     },
   )
   .handler(async ({ data }) => {
-    await assertTurnstileToken(data.turnstile_token);
+    // کلید idempotency از توکن + یوزرنیم ساخته می‌شود: اگر پاسخ قبلی در شبکه گم
+    // شد و صفحه خودکار دوباره فرستاد، همان توکن دوباره «معتبر» شناخته می‌شود؛
+    // ولی همان توکن برای یوزرنیم دیگری قابل استفاده‌ی دوباره نیست.
+    await assertTurnstileToken(data.turnstile_token, `signup:${data.username}`);
     const supabaseAdmin = await admin();
     const username = data.username;
     const ip = clientIp();
@@ -464,7 +508,11 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const checksP = Promise.all([
       loadPlansConfig(supabaseAdmin),
-      supabaseAdmin.from("profiles").select("id").eq("username", username).maybeSingle(),
+      supabaseAdmin
+        .from("profiles")
+        .select("id, status, created_at")
+        .eq("username", username)
+        .maybeSingle(),
       supabaseAdmin
         .from("signup_requests")
         .select("id, status")
@@ -525,7 +573,14 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
 
     // Check username not already taken (profile or pending request)
     const existingProfile = profileRes.data;
-    if (existingProfile) throw new Error(TAKEN);
+    if (existingProfile) {
+      // تلاش دوباره‌ی همان کاربر (پاسخ قبلی در شبکه گم شده بود): حسابی که همین
+      // چند دقیقه پیش با همین یوزرنیم و **همین رمز** ساخته شده، یعنی درخواست
+      // قبلاً ثبت شده — به‌جای «یوزرنیم تکراری» همان نتیجه‌ی موفق برمی‌گردد.
+      const replay = await signupReplayResult(supabaseAdmin, existingProfile, username, data.password);
+      if (replay) return replay;
+      throw new Error(TAKEN);
+    }
 
     const existingReq = reqRes.data;
     if (existingReq) {
@@ -673,9 +728,12 @@ export const submitSignupRequest = createServerFn({ method: "POST" })
     // خودکار فعال می‌شوند. بقیه مثل قبل ثبت می‌شوند و منتظر تایید مدیر می‌مانند —
     // ساختن انبوه حساب با رسید جعلی دیگر حساب فعال تحویل نمی‌دهد.
     // سقف IP اول چک می‌شود تا یک IP پرکار سهمیه‌ی سراسری را نسوزاند.
+    // درخواست مشکوک (فیلد تله / فرم خیلی سریع) فقط وقتی کپچا واقعاً فعال و تایید
+    // شده باشد خودکار فعال می‌شود؛ وگرنه ثبت می‌شود و منتظر تایید مدیر می‌ماند.
     const canAutoActivate =
       passwordVerified &&
       flagOk &&
+      (!data.suspicious || isTurnstileConfigured()) &&
       (await tryConsumeRateLimit(
         supabaseAdmin,
         "auto-activate-ip",
@@ -1488,21 +1546,6 @@ export const getReceiptSignedUrl = createServerFn({ method: "POST" })
     return { url: signed.signedUrl };
   });
 
-/** تشخیص تصویر از روی بایت‌های ابتدایی — JPEG/PNG/GIF/WEBP/HEIC */
-function isImageBytes(b: Uint8Array): boolean {
-  if (b.length < 12) return false;
-  const jpeg = b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
-  const png = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
-  const gif = b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38;
-  const ascii = (i: number) => String.fromCharCode(b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!);
-  const webp = ascii(0) === "RIFF" && ascii(8) === "WEBP";
-  // ftyp به‌تنهایی MP4/MOV را هم شامل می‌شود؛ فقط برندهای تصویر را بپذیر.
-  const brand = ascii(8).toLowerCase();
-  const heic =
-    ascii(4) === "ftyp" &&
-    ["heic", "heix", "heif", "hevc", "mif1", "msf1", "avif"].includes(brand);
-  return jpeg || png || gif || webp || heic;
-}
 
 // ─── Admin: fetch signup requests enriched with phone from user_metadata ──────
 // Works even before the phone column migration is applied — phone is always
@@ -1979,15 +2022,25 @@ export const submitRenewalRequest = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!profile) throw new Error("پروفایل یافت نشد.");
 
-    // اگر درخواست تمدید فعال (در انتظار) از قبل دارد، اجازه ارسال دوباره نده
+    // اگر درخواست تمدید فعال (در انتظار) از قبل دارد، اجازه ارسال دوباره نده —
+    // مگر اینکه همین چند دقیقه پیش با همین پلن ثبت شده باشد: یعنی صفحه بعد از
+    // قطعی شبکه همان درخواست را دوباره فرستاده و باید همان نتیجه‌ی موفق را بگیرد.
     const { data: existing } = await supabaseAdmin
       .from("signup_requests")
-      .select("id")
+      .select("id, plan, created_at")
       .eq("target_user_id", context.userId)
       .eq("request_type", "renewal")
       .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
-    if (existing) throw new Error("درخواست تمدید قبلی شما هنوز در انتظار بررسی است.");
+    if (existing) {
+      const age = Date.now() - new Date(String((existing as any).created_at ?? "")).getTime();
+      if ((existing as any).plan === data.plan && Number.isFinite(age) && age >= 0 && age < 15 * 60 * 1000) {
+        return { id: existing.id };
+      }
+      throw new Error("درخواست تمدید قبلی شما هنوز در انتظار بررسی است.");
+    }
 
     const renewalBase = {
       first_name: profile.first_name || "",

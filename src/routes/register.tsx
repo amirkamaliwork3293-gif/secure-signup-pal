@@ -3,7 +3,18 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase, PLAN_LABEL, PLAN_DURATION_LABEL, type SubscriptionPlan } from "@/lib/supabase";
 import { submitSignupRequest, getPublicSettings } from "@/lib/auth.functions";
-import { createReceiptUploadUrl, receiptNote } from "@/lib/receipts.functions";
+import {
+  createReceiptUploadUrl,
+  receiptNote,
+  uploadReceiptViaServer,
+} from "@/lib/receipts.functions";
+import {
+  fileToBase64,
+  friendlySubmitError,
+  isTransientNetworkError,
+  uploadReceiptResilient,
+  withNetworkRetry,
+} from "@/lib/resilient-request";
 import { effectivePrice, isDiscountActive, DEFAULT_PLANS, type PlansConfig } from "@/lib/plans";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { JalaliDateSelect, TimeSelect } from "@/components/JalaliPickers";
@@ -140,6 +151,7 @@ function RegisterPage() {
   const [showPass2, setShowPass2] = useState(false);
   const submit = useServerFn(submitSignupRequest);
   const signReceiptUpload = useServerFn(createReceiptUploadUrl);
+  const uploadViaServer = useServerFn(uploadReceiptViaServer);
   const fileRef = useRef<HTMLInputElement>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
@@ -149,7 +161,9 @@ function RegisterPage() {
   const [receiptDate, setReceiptDate] = useState(() => toJalaliInputDate(Date.now()));
   const [receiptTime, setReceiptTime] = useState("");
   const [honeypot, setHoneypot] = useState("");
-  const formStartedAt = useRef(Date.now());
+  // مدت پر کردن فرم با ساعت داخلی مرورگر سنجیده می‌شود (مستقل از ساعت گوشی)
+  const formStartedAt = useRef(typeof performance !== "undefined" ? performance.now() : 0);
+  const uploadedRef = useRef<{ file: File; path: string } | null>(null);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState(() => clientTurnstileSiteKey());
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileReset, setTurnstileReset] = useState(0);
@@ -273,64 +287,86 @@ function RegisterPage() {
     try {
       let path: string | null = null;
       if (receiptFile) {
-        setUploading(true);
-        // پسوند واقعی فایل (هر چیزی، نه فقط چند فرمت خاص) — اگر نامعتبر/خالی بود، jpg پیش‌فرض است
-        // سرور فقط پسوندهای تصویری را می‌پذیرد (جلوگیری از میزبانی HTML روی
-        // دامنه‌ی استوریج). هر پسوند ناشناخته به jpg نگاشت می‌شود تا آپلود
-        // کاربران با فایل‌های غیرمعمول شکست نخورد.
-        const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
-        const rawExt = (receiptFile.name.split(".").pop() || "jpg")
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "");
-        const ext = ALLOWED_EXT.includes(rawExt) ? rawExt : "jpg";
-        try {
-          const signed = await signReceiptUpload({
-            data: { username: usernameField, ext, kind: "signup" },
-          });
-          const { error: upErr } = await supabase.storage
-            .from("receipts")
-            .uploadToSignedUrl(signed.path, signed.token, receiptFile, {
-              // نوع محتوا همیشه تصویری تثبیت می‌شود. اگر مرورگر نوع را خالی یا
-              // غیرتصویری گزارش کند، image/jpeg جایگزین می‌شود تا هیچ فایلی
-              // به‌عنوان HTML از دامنه‌ی استوریج سرو نشود.
-              contentType: receiptFile.type?.startsWith("image/") ? receiptFile.type : "image/jpeg",
-              upsert: false,
+        // اگر همین فایل در تلاش قبلی آپلود شده، دوباره آپلود نمی‌شود
+        if (uploadedRef.current?.file === receiptFile) {
+          path = uploadedRef.current.path;
+        } else {
+          setUploading(true);
+          // سرور فقط پسوندهای تصویری را می‌پذیرد (جلوگیری از میزبانی HTML روی
+          // دامنه‌ی استوریج). هر پسوند ناشناخته به jpg نگاشت می‌شود تا آپلود
+          // کاربران با فایل‌های غیرمعمول شکست نخورد.
+          const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"];
+          const rawExt = (receiptFile.name.split(".").pop() || "jpg")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          const ext = ALLOWED_EXT.includes(rawExt) ? rawExt : "jpg";
+          const file = receiptFile;
+          try {
+            path = await uploadReceiptResilient({
+              direct: async () => {
+                const signed = await withNetworkRetry(() =>
+                  signReceiptUpload({ data: { username: usernameField, ext, kind: "signup" } }),
+                );
+                const { error: upErr } = await supabase.storage
+                  .from("receipts")
+                  .uploadToSignedUrl(signed.path, signed.token, file, {
+                    // نوع محتوا همیشه تصویری تثبیت می‌شود. اگر مرورگر نوع را خالی یا
+                    // غیرتصویری گزارش کند، image/jpeg جایگزین می‌شود تا هیچ فایلی
+                    // به‌عنوان HTML از دامنه‌ی استوریج سرو نشود.
+                    contentType: file.type?.startsWith("image/") ? file.type : "image/jpeg",
+                    upsert: false,
+                  });
+                if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
+                return signed.path;
+              },
+              // مسیر جایگزین: از طریق سرور خود سایت (وقتی دامنه‌ی استوریج در دسترس نیست)
+              viaServer: async () => {
+                const base64 = await fileToBase64(file);
+                const r = await uploadViaServer({
+                  data: { username: usernameField, ext, kind: "signup", base64 },
+                });
+                return r.path;
+              },
             });
-          if (upErr) throw new Error("خطا در آپلود رسید: " + upErr.message);
-          path = signed.path;
-        } finally {
-          setUploading(false);
+            uploadedRef.current = { file, path };
+          } finally {
+            setUploading(false);
+          }
         }
       }
 
-      const res = await submit({
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          username: usernameField,
-          password,
-          plan,
-          payment_confirmed: paid,
-          receipt_url: path,
-          receipt_note: note,
-          phone: phone.trim() || undefined,
-          website: honeypot,
-          form_started_at: formStartedAt.current,
-          turnstile_token: turnstileToken || undefined,
-        },
-      });
+      // ارسال دوباره بعد از قطعی شبکه بی‌خطر است: سرور همان ثبت‌نام را تشخیص
+      // می‌دهد و به‌جای «یوزرنیم تکراری» همان نتیجه‌ی موفق را برمی‌گرداند.
+      const elapsed = Math.max(0, Math.round(performance.now() - formStartedAt.current));
+      const res = await withNetworkRetry(() =>
+        submit({
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            username: usernameField,
+            password,
+            plan,
+            payment_confirmed: paid,
+            receipt_url: path,
+            receipt_note: note,
+            phone: phone.trim() || undefined,
+            website: honeypot,
+            form_elapsed_ms: elapsed,
+            turnstile_token: turnstileToken || undefined,
+          },
+        }),
+      );
       markPendingOnboarding(usernameField);
       setApproved(Boolean((res as { approved?: boolean } | null)?.approved));
       setSuccess(true);
     } catch (e: unknown) {
-      setTurnstileToken("");
-      setTurnstileReset((n) => n + 1);
-      const raw = errorMessage(e);
-      setError(
-        /failed to fetch|network|load failed|timeout/i.test(raw)
-          ? "ارتباط با سرور برقرار نشد. لطفاً اتصال را چک کنید و دوباره تلاش کنید."
-          : raw || "خطا در ارسال درخواست.",
-      );
+      // بعد از قطعی شبکه توکن کپچا نگه داشته می‌شود تا کاربر فقط دوباره دکمه را
+      // بزند (سرور ارسال دوباره‌ی همان فرم را با همان توکن می‌پذیرد).
+      if (!isTransientNetworkError(e)) {
+        setTurnstileToken("");
+        setTurnstileReset((n) => n + 1);
+      }
+      setError(friendlySubmitError(e, "خطا در ارسال درخواست."));
     }
     setLoading(false);
   };
@@ -485,7 +521,7 @@ function RegisterPage() {
                   <input
                     tabIndex={-1}
                     autoComplete="off"
-                    name="company_fax_code"
+                    name="kx_hp_field"
                     value={honeypot}
                     onChange={(e) => setHoneypot(e.target.value)}
                   />

@@ -112,7 +112,7 @@ export function buildPrintSteps(
   bits: Uint8Array,
   widthBytes: number,
   lines: number,
-  opts: PhomemoJobOptions & { feedDots: number },
+  opts: PhomemoJobOptions & { feedDots: number; sendInit?: boolean },
 ): PrintStep[] {
   if (protocol === "m110") {
     return [
@@ -128,8 +128,11 @@ export function buildPrintSteps(
   if (lines < 1 || lines > 0xffff) throw new Error("image too long");
   if (bits.length !== widthBytes * lines) throw new Error("bitmap size mismatch");
   const d8 = clampInt(Math.ceil((clampInt(opts.density, 1, 15) * 8) / 15), 1, 8);
+  const steps: PrintStep[] = [];
+  if (opts.sendInit)
+    steps.push({ bytes: new Uint8Array([0x1b, 0x40]), waitMs: 100, label: "شروع (ESC @)" });
   return [
-    { bytes: new Uint8Array([0x1b, 0x40]), waitMs: 100, label: "شروع (ESC @)" },
+    ...steps,
     {
       bytes: new Uint8Array([0x1b, 0x37, 0x07, heatTime(opts.density), 0x02]),
       waitMs: 30,
@@ -185,7 +188,11 @@ type BtServer = {
   getPrimaryService: (id: number | string) => Promise<BtService>;
   getPrimaryServices: () => Promise<BtService[]>;
 };
-type BtDevice = { name?: string; gatt?: BtServer };
+type BtDevice = {
+  name?: string;
+  gatt?: BtServer;
+  addEventListener?: (type: string, fn: () => void) => void;
+};
 type BtApi = {
   requestDevice: (o: {
     acceptAllDevices?: boolean;
@@ -214,7 +221,10 @@ const KNOWN_SERVICES: (number | string)[] = [0xff00, 0x18f0, 0xae30, 0xfee7, 0xf
  * پنجرهٔ انتخاب دستگاه بلوتوث را باز می‌کند و به پرینتر وصل می‌شود.
  * باید از داخل کلیک کاربر صدا زده شود.
  */
-export async function connectPhomemo(log: (msg: string) => void): Promise<PhomemoConnection> {
+export async function connectPhomemo(
+  log: (msg: string) => void,
+  opts: { notifications?: boolean; onDisconnect?: () => void } = {},
+): Promise<PhomemoConnection> {
   const bt = (navigator as { bluetooth?: BtApi }).bluetooth;
   if (!bt) throw new Error("no-bluetooth");
   const device = await bt.requestDevice({
@@ -224,6 +234,11 @@ export async function connectPhomemo(log: (msg: string) => void): Promise<Phomem
   const name = device.name || "بدون نام";
   log(`دستگاه انتخاب شد: ${name}`);
   if (!device.gatt) throw new Error("no-gatt");
+  // قطع شدن از طرف پرینتر را ثبت کن (کمک به یافتن علت)
+  device.addEventListener?.("gattserverdisconnected", () => {
+    log("⚠ اتصال از طرف پرینتر قطع شد");
+    opts.onDisconnect?.();
+  });
   const server = await device.gatt.connect();
   log("اتصال بلوتوث برقرار شد");
 
@@ -235,22 +250,27 @@ export async function connectPhomemo(log: (msg: string) => void): Promise<Phomem
     const svc = await server.getPrimaryService(0xff00);
     ch = await svc.getCharacteristic(0xff02);
     via = "ff00/ff02";
-    // پاسخ‌های پرینتر (وضعیت/خطا) — بعضی پرینترها تا این روشن نشود داده را نمی‌پذیرند
-    try {
-      const notify = await svc.getCharacteristic(0xff03);
-      notify.addEventListener("characteristicvaluechanged", (e) => {
-        const v = (e.target as { value?: DataView } | undefined)?.value;
-        if (!v) return;
-        const hex = Array.from(new Uint8Array(v.buffer, v.byteOffset, Math.min(v.byteLength, 24)))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join(" ");
-        log(`پاسخ پرینتر: ${hex}`);
-      });
-      await notify.startNotifications();
-      log("دریافت پاسخ پرینتر (ff03) فعال شد");
-    } catch {
-      log("دریافت پاسخ پرینتر در دسترس نیست (ادامه بدون آن)");
-    }
+    // پاسخ‌های پرینتر (وضعیت/خطا) — اختیاری؛ روی بعضی گوشی‌ها/پرینترها اتصال را می‌اندازد
+    if (opts.notifications)
+      try {
+        const notify = await svc.getCharacteristic(0xff03);
+        notify.addEventListener("characteristicvaluechanged", (e) => {
+          const v = (e.target as { value?: DataView } | undefined)?.value;
+          if (!v) return;
+          const hex = Array.from(new Uint8Array(v.buffer, v.byteOffset, Math.min(v.byteLength, 24)))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join(" ");
+          log(`پاسخ پرینتر: ${hex}`);
+        });
+        // سقف زمانی: روی بعضی گوشی‌ها این درخواست هیچ‌وقت جواب نمی‌گیرد
+        await Promise.race([
+          notify.startNotifications(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+        ]);
+        log("دریافت پاسخ پرینتر (ff03) فعال شد");
+      } catch {
+        log("دریافت پاسخ پرینتر در دسترس نیست (ادامه بدون آن)");
+      }
   } catch {
     log("سرویس استاندارد فوممو (ff00) پیدا نشد؛ جست‌وجوی سرویس‌های دیگر…");
     for (const svc of await server.getPrimaryServices()) {

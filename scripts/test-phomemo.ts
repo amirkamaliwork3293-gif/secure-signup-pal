@@ -71,6 +71,7 @@ assert.throws(() =>
     speed: 3,
     media: "continuous",
     feedDots: 32,
+    sendInit: true,
   });
   const hex = steps.map((st) => (st.chunked ? "DATA" : [...st.bytes].join(",")));
   assert.deepEqual(hex, [
@@ -90,8 +91,9 @@ assert.throws(() =>
     media: "gap",
     feedDots: 999,
   });
-  assert.equal(light[1].bytes[3], 40, "lightest heat");
-  assert.equal(light[5].bytes[2], 255, "feed clamped to one byte");
+  assert.equal(light[0].bytes[3], 40, "lightest heat");
+  assert.equal(light[4].bytes[2], 255, "feed clamped to one byte");
+  assert.equal(light.length, 5, "no ESC @ unless asked");
   const m110 = buildPrintSteps("m110", bits, 2, 2, {
     density: 10,
     speed: 3,

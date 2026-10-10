@@ -91,6 +91,8 @@ function PrinterTestPage() {
   const [safeMode, setSafeMode] = useState(false);
   const [protocol, setProtocol] = useState<PhomemoProtocol>("escpos");
   const [feedMm, setFeedMm] = useState(4);
+  const [sendInit, setSendInit] = useState(false);
+  const [notifications, setNotifications] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const supported = typeof window !== "undefined" && bluetoothAvailable();
   const connRef = useRef<PhomemoConnection | null>(null);
@@ -107,7 +109,10 @@ function PrinterTestPage() {
     setBusy(true);
     try {
       conn?.disconnect();
-      const c = await connectPhomemo(addLog);
+      const c = await connectPhomemo(addLog, {
+        notifications,
+        onDisconnect: () => setConn(null),
+      });
       setConn(c);
       addLog(`آماده چاپ — ${c.canWriteWithoutResponse ? "ارسال سریع" : "ارسال با تأیید"}`);
     } catch (e) {
@@ -152,6 +157,7 @@ function PrinterTestPage() {
         speed,
         media,
         feedDots: feedMm * 8,
+        sendInit,
       });
       const bytes = steps.reduce((n, st) => n + st.bytes.length, 0);
       addLog(
@@ -326,6 +332,24 @@ function PrinterTestPage() {
             value={feedMm}
             onChange={(e) => setFeedMm(Number(e.target.value))}
             className="w-full"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-2 text-xs">
+          ارسال دستور شروع ESC @ (فقط روش ۱)
+          <input
+            type="checkbox"
+            checked={sendInit}
+            onChange={(e) => setSendInit(e.target.checked)}
+            className="h-4 w-4"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-2 text-xs">
+          دریافت پاسخ پرینتر (پیش از «اتصال» تنظیم شود)
+          <input
+            type="checkbox"
+            checked={notifications}
+            onChange={(e) => setNotifications(e.target.checked)}
+            className="h-4 w-4"
           />
         </label>
         <label className="flex items-center justify-between gap-2 text-xs">

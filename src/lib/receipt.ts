@@ -54,7 +54,17 @@ export type ReceiptSettings = {
    * می‌کرد. با این گزینه اندازهٔ نوشته‌ها به تعداد کالا بستگی ندارد.
    */
   splitA4: boolean;
+  /**
+   * چیدمان کالاها: «lines» = هر کالا دو خط (نام، سپس تعداد × فی … مبلغ)،
+   * «table» = جدول فشرده یک‌خطی، «auto» = جدول وقتی کالاها زیاد است.
+   */
+  itemLayout: ReceiptItemLayout;
 };
+
+export type ReceiptItemLayout = "auto" | "lines" | "table";
+
+/** در حالت «خودکار»، از این تعداد کالا به بالا فیش جدولی و فشرده می‌شود */
+export const RECEIPT_TABLE_FROM = 6;
 
 export const RECEIPT_PRESETS = [
   { paperMm: 80, printableMm: 72, label: "۸۰ میلی‌متر (رایج)" },
@@ -82,6 +92,7 @@ export const DEFAULT_RECEIPT: ReceiptSettings = {
   footerText: "با تشکر از خرید شما",
   scalePct: 100,
   splitA4: false,
+  itemLayout: "auto",
 };
 
 export const RECEIPT_SCALE_MIN = 50;
@@ -119,6 +130,10 @@ export function normalizeReceiptSettings(raw: unknown): ReceiptSettings {
       clamp(r.scalePct, RECEIPT_SCALE_MIN, RECEIPT_SCALE_MAX, DEFAULT_RECEIPT.scalePct),
     ),
     splitA4: typeof r.splitA4 === "boolean" ? r.splitA4 : DEFAULT_RECEIPT.splitA4,
+    itemLayout:
+      r.itemLayout === "lines" || r.itemLayout === "table" || r.itemLayout === "auto"
+        ? r.itemLayout
+        : DEFAULT_RECEIPT.itemLayout,
   };
 }
 
@@ -212,6 +227,20 @@ export function receiptCss(s: ReceiptSettings): string {
   .foot{margin-top:2.5mm;text-align:center;font-weight:700}
   .cut{margin-top:3mm;text-align:center;font-size:9px;letter-spacing:2px}
   ${s.splitA4 ? ".kv,.tot,.foot,.words{break-inside:avoid;page-break-inside:avoid}" : ""}
+  /* برگه‌های A4 (PDF/برنامهٔ چاپگر): فضا و خط برش لازم نیست و تنها روی یک برگهٔ اضافه می‌افتاد */
+  ${s.splitA4 ? ".r{padding-bottom:2mm}.cut{display:none}" : ""}
+  .tb{width:100%;table-layout:fixed;border-collapse:collapse;font-size:${Math.round(fs * 0.95)}px;line-height:1.35}
+  .tb thead{display:table-header-group}
+  .tb th{font-weight:900;font-size:${Math.max(9, Math.round(fs * 0.8))}px;padding:0.5mm 0.4mm;border-bottom:1.5px solid #000;white-space:nowrap;text-align:center}
+  .tb td{padding:0.7mm 0.6mm;border-bottom:1px dotted #000;vertical-align:top;text-align:center}
+  .tb tr{break-inside:avoid;page-break-inside:avoid}
+  .tb tbody tr:last-child td{border-bottom:0}
+  .tb .n{text-align:right}
+  .tb td.n{font-weight:700;word-break:break-word;overflow-wrap:anywhere}
+  .tb td.p,.tb td.t{white-space:nowrap;text-align:left}
+  .tb th.p,.tb th.t{text-align:left}
+  .tb td.t{font-weight:900}
+  .tb .u{display:block;font-weight:400;font-size:${Math.max(9, Math.round(fs * 0.8))}px}
   `;
 }
 
@@ -246,6 +275,47 @@ export const receiptParts = {
     return `<div class="tot"><span>${esc(label)}</span><span>${esc(value)}</span></div>`;
   },
 };
+
+export type ReceiptItemRow = Parameters<typeof receiptParts.item>[0];
+
+/** آیا این فیش با این تعداد کالا جدولی چاپ می‌شود؟ */
+export function receiptUsesTable(s: ReceiptSettings, count: number): boolean {
+  if (s.itemLayout === "table") return count > 0;
+  if (s.itemLayout === "lines") return false;
+  return count >= RECEIPT_TABLE_FROM;
+}
+
+/**
+ * فهرست کالاهای فیش. کالاهای کم: هر کالا دو خط (مثل قبل). کالاهای زیاد: جدول فشردهٔ
+ * «کالا | تعداد | فی | مبلغ» با یک ردیف برای هر کالا — فیش تقریباً نصف می‌شود و همهٔ
+ * کالاها در فیش/PDF درشت و خوانا می‌مانند. روی کاغذ باریک (۵۸) ستون «فی» زیر نام می‌آید.
+ */
+export function receiptItemsHtml(rows: ReceiptItemRow[], s: ReceiptSettings): string {
+  if (!receiptUsesTable(s, rows.length)) return rows.map((r) => receiptParts.item(r)).join("");
+  const narrow = s.printableMm < 60;
+  // ستون‌ها سهم ثابت دارند تا نام کالا جای کافی داشته باشد و اعداد به هم نچسبند
+  const cols = narrow ? ["52%", "18%", "30%"] : ["44%", "13%", "21%", "22%"];
+  const note = (r: ReceiptItemRow) => {
+    const bits = [
+      r.tag ? esc(r.tag) : "",
+      r.was ? `<s>${esc(r.was)}</s>` : "",
+      narrow ? `فی ${esc(r.unitPrice)}` : "",
+    ].filter(Boolean);
+    // هر تکه در خط خودش تا متن فارسی و عدد در هم نپیچند
+    return bits.map((b) => `<span class="u">${b}</span>`).join("");
+  };
+  const body = rows
+    .map(
+      (r) =>
+        `<tr><td class="n">${esc(r.name)}${note(r)}</td><td class="q">${esc(r.qty)}</td>${
+          narrow ? "" : `<td class="p">${esc(r.unitPrice)}</td>`
+        }<td class="t">${esc(r.total)}</td></tr>`,
+    )
+    .join("");
+  return `<table class="tb"><colgroup>${cols.map((w) => `<col style="width:${w}"/>`).join("")}</colgroup><thead><tr><th class="n">کالا</th><th class="q">تعداد</th>${
+    narrow ? "" : `<th class="p">فی</th>`
+  }<th class="t">مبلغ</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 
 /**
  * چاپ آزمایشی / کالیبره: خط‌کش میلی‌متری سراسری و نشانه‌های لبه. کاربر می‌بیند

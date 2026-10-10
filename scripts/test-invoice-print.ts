@@ -168,8 +168,23 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   const many = receiptItemsHtml(rows(RECEIPT_TABLE_FROM), d);
   assert.ok(many.includes('<table class="tb">'), "many items → table");
   assert.equal((many.match(/<tr>/g) ?? []).length, RECEIPT_TABLE_FROM + 1, "header + one row each");
-  assert.ok(many.includes('<th class="p">فی</th>') && many.includes("<s>۱۲٬۰۰۰</s>"));
-  assert.ok(many.includes('<col style="width:44%"/>'), "name column gets the widest share");
+  assert.ok(
+    !many.includes(">فی<") && !many.includes('class="p"') && !many.includes("<s>"),
+    "no unit-price column",
+  );
+  assert.ok(many.includes('<th class="t">مبلغ</th>'));
+  const widths = (h: string) => [...h.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
+  assert.deepEqual(widths(many), [64, 14, 22], "short amounts: name gets most of the row");
+  const big = receiptItemsHtml(
+    rows(8).map((r) => ({ ...r, total: "۱۲۳٬۴۵۶٬۷۸۹٬۰۰۰" })),
+    d,
+  );
+  const [nameW, , totalW] = widths(big);
+  assert.ok(
+    totalW > 22 && totalW <= 48 && nameW + 14 + totalW === 100,
+    "long amounts widen the column",
+  );
+  assert.ok(big.includes("۱۲۳٬<wbr>۴۵۶٬<wbr>"), "breaks only at thousands separators");
   assert.ok(many.includes("٪۱۰ تخفیف") && many.includes("&lt;b&gt;"), "tags shown, names escaped");
   assert.ok(
     !receiptItemsHtml(rows(20), normalizeReceiptSettings({ itemLayout: "lines" })).includes(
@@ -181,10 +196,8 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   );
   assert.equal(receiptItemsHtml([], d), "", "no items → empty (caller shows placeholder)");
   const narrow = receiptItemsHtml(rows(8), normalizeReceiptSettings({ paperMm: 58 }));
-  assert.ok(
-    !narrow.includes('class="p"') && narrow.includes('class="u"'),
-    "58mm: price under name",
-  );
+  assert.ok(!narrow.includes(">فی<") && !narrow.includes("فی "), "58mm: no unit price either");
+  assert.equal(widths(narrow)[1], 17, "58mm: wider qty share");
   // settings saved before this option → auto
   const legacy = { ...DEFAULT_RECEIPT } as Partial<typeof DEFAULT_RECEIPT>;
   delete legacy.itemLayout;

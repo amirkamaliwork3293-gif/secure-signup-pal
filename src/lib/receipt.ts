@@ -222,6 +222,9 @@ export function receiptCss(s: ReceiptSettings): string {
   .tot{display:flex;justify-content:space-between;gap:1.5mm;align-items:baseline;font-weight:900;
     font-size:${Math.round(fs * (s.printableMm < 60 ? 1.1 : 1.25))}px;border:2px solid #000;padding:1mm 1.5mm;margin:1.2mm 0}
   .tot span{white-space:nowrap}
+  /* مبلغ کل خیلی بلند (کاغذ باریک): به‌جای بیرون‌زدن از کادر، به خط بعدی داخل کادر می‌رود */
+  .tot{flex-wrap:wrap}
+  .tot span:last-child{margin-inline-start:auto}
   .due{font-weight:900}
   .words{font-size:${Math.max(9, Math.round(fs * 0.85))}px;margin-top:1mm}
   .foot{margin-top:2.5mm;text-align:center;font-weight:700}
@@ -237,8 +240,8 @@ export function receiptCss(s: ReceiptSettings): string {
   .tb tbody tr:last-child td{border-bottom:0}
   .tb .n{text-align:right}
   .tb td.n{font-weight:700;word-break:break-word;overflow-wrap:anywhere}
-  .tb td.p,.tb td.t{white-space:nowrap;text-align:left}
-  .tb th.p,.tb th.t{text-align:left}
+  .tb td.t{text-align:left;word-break:keep-all;overflow-wrap:normal;direction:ltr}
+  .tb th.t{text-align:left}
   .tb td.t{font-weight:900}
   .tb .u{display:block;font-weight:400;font-size:${Math.max(9, Math.round(fs * 0.8))}px}
   `;
@@ -287,34 +290,27 @@ export function receiptUsesTable(s: ReceiptSettings, count: number): boolean {
 
 /**
  * فهرست کالاهای فیش. کالاهای کم: هر کالا دو خط (مثل قبل). کالاهای زیاد: جدول فشردهٔ
- * «کالا | تعداد | فی | مبلغ» با یک ردیف برای هر کالا — فیش تقریباً نصف می‌شود و همهٔ
- * کالاها در فیش/PDF درشت و خوانا می‌مانند. روی کاغذ باریک (۵۸) ستون «فی» زیر نام می‌آید.
+ * «کالا | تعداد | مبلغ» با یک ردیف برای هر کالا — فیش کوتاه و همهٔ کالاها در فیش/PDF
+ * درشت و خوانا می‌مانند. عرض ستون مبلغ از روی بلندترین مبلغ همان فیش تعیین می‌شود.
  */
 export function receiptItemsHtml(rows: ReceiptItemRow[], s: ReceiptSettings): string {
   if (!receiptUsesTable(s, rows.length)) return rows.map((r) => receiptParts.item(r)).join("");
-  const narrow = s.printableMm < 60;
-  // ستون‌ها سهم ثابت دارند تا نام کالا جای کافی داشته باشد و اعداد به هم نچسبند
-  const cols = narrow ? ["52%", "18%", "30%"] : ["44%", "13%", "21%", "22%"];
-  const note = (r: ReceiptItemRow) => {
-    const bits = [
-      r.tag ? esc(r.tag) : "",
-      r.was ? `<s>${esc(r.was)}</s>` : "",
-      narrow ? `فی ${esc(r.unitPrice)}` : "",
-    ].filter(Boolean);
-    // هر تکه در خط خودش تا متن فارسی و عدد در هم نپیچند
-    return bits.map((b) => `<span class="u">${b}</span>`).join("");
-  };
+  // عرض ستون «مبلغ» از روی بلندترین مبلغ همین فیش: هر رقم/جداکننده ≈ ۰٫۶۳ قلم (وزیرمتن سیاه)
+  const fontPx = Math.round(s.fontPx * 0.95);
+  const longest = Math.max(...rows.map((r) => r.total.length), 1);
+  const totalMm = (longest * 0.63 * fontPx * 25.4) / 96 + 2;
+  const totalPct = Math.min(48, Math.max(22, Math.ceil((totalMm / s.printableMm) * 100)));
+  const qtyPct = s.printableMm < 60 ? 17 : 14;
+  const cols = [`${100 - qtyPct - totalPct}%`, `${qtyPct}%`, `${totalPct}%`];
+  // مبلغ‌های خیلی بلند فقط سر جداکنندهٔ هزارگان می‌شکنند، نه وسط رقم‌ها
+  const amount = (v: string) => esc(v).replace(/([٬,])/g, "$1<wbr>");
   const body = rows
     .map(
       (r) =>
-        `<tr><td class="n">${esc(r.name)}${note(r)}</td><td class="q">${esc(r.qty)}</td>${
-          narrow ? "" : `<td class="p">${esc(r.unitPrice)}</td>`
-        }<td class="t">${esc(r.total)}</td></tr>`,
+        `<tr><td class="n">${esc(r.name)}${r.tag ? `<span class="u">${esc(r.tag)}</span>` : ""}</td><td class="q">${esc(r.qty)}</td><td class="t">${amount(r.total)}</td></tr>`,
     )
     .join("");
-  return `<table class="tb"><colgroup>${cols.map((w) => `<col style="width:${w}"/>`).join("")}</colgroup><thead><tr><th class="n">کالا</th><th class="q">تعداد</th>${
-    narrow ? "" : `<th class="p">فی</th>`
-  }<th class="t">مبلغ</th></tr></thead><tbody>${body}</tbody></table>`;
+  return `<table class="tb"><colgroup>${cols.map((w) => `<col style="width:${w}"/>`).join("")}</colgroup><thead><tr><th class="n">کالا</th><th class="q">تعداد</th><th class="t">مبلغ</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /**

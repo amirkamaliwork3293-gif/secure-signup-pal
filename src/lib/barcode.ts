@@ -133,9 +133,16 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number):
   return t + "…";
 }
 
+const CODE_FONT = "ui-monospace, 'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace";
+
 /**
  * رندر یک لیبل کامل روی canvas (یا canvas جدید).
- * چیدمان: بارکد بالا (با کد زیر میله‌ها)، نام فارسی وسط، قیمت پایین.
+ * چیدمان: میله‌های بارکد بالا، کد خوانا، نام فارسی، قیمت.
+ *
+ * میله‌ها با «عرض صحیح هر ماژول» (بزرگ‌ترین مضرب صحیحی که جا شود) و بدون نرم‌کردن کشیده
+ * می‌شوند تا لبه‌ها سیاه‌وسفید خالص بمانند — خاکستری لبه‌ها روی چاپگر حرارتی
+ * میله‌ها را پهن/باریک و بارکد را ناخوانا می‌کرد. دو طرف حاشیهٔ سفید (منطقهٔ آرام)
+ * لازم برای اسکنر می‌ماند و کد زیر میله‌ها با قلم درشت‌تر نوشته می‌شود.
  */
 export async function renderLabelToCanvas(
   item: LabelItem,
@@ -161,49 +168,76 @@ export async function renderLabelToCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
-  const pad = Math.round(Math.min(H, W) * 0.05);
+  // منطقهٔ آرام: دست‌کم ۲ میلی‌متر دو طرف، بالا/پایین دست‌کم ۱ میلی‌متر
+  const padX = Math.max(Math.round(2 * PX_PER_MM), Math.round(W * 0.04));
+  const padY = Math.max(Math.round(1 * PX_PER_MM), Math.round(H * 0.04));
   const hasName = showName && !!item.name;
   const hasPrice = showPrice && typeof item.price === "number";
 
-  const nameFontPx = Math.max(16, Math.round(H * 0.115));
-  const priceFontPx = Math.max(18, Math.round(H * 0.125));
-  const lineGap = Math.round(H * 0.025);
+  let codeFontPx = showCode ? Math.max(12, Math.round(H * 0.1)) : 0;
+  let nameFontPx = hasName ? Math.max(12, Math.round(H * 0.115)) : 0;
+  let priceFontPx = hasPrice ? Math.max(13, Math.round(H * 0.13)) : 0;
+  const lineGap = Math.round(H * 0.02);
+  const textH = () =>
+    (showCode ? codeFontPx + lineGap : 0) +
+    (hasName ? nameFontPx + lineGap : 0) +
+    (hasPrice ? priceFontPx + lineGap : 0);
+  // میله‌ها دست‌کم ۴۰٪ ارتفاع لیبل — در لیبل‌های کوتاه نوشته‌ها کمی کوچک می‌شوند
+  const minBarH = Math.round(H * 0.4);
+  if (textH() > 0 && H - padY * 2 - textH() < minBarH) {
+    const k = Math.max(0.5, (H - padY * 2 - minBarH) / textH());
+    codeFontPx = showCode ? Math.max(10, Math.round(codeFontPx * k)) : 0;
+    nameFontPx = hasName ? Math.max(10, Math.round(nameFontPx * k)) : 0;
+    priceFontPx = hasPrice ? Math.max(10, Math.round(priceFontPx * k)) : 0;
+  }
+  const barH = Math.max(1, H - padY * 2 - textH());
+  const maxBarW = W - padX * 2;
 
-  const nameH = hasName ? nameFontPx + lineGap : 0;
-  const priceH = hasPrice ? priceFontPx + lineGap : 0;
-  const barcodeAreaH = H - pad * 2 - nameH - priceH;
-
+  // بارکد با ۱ پیکسل در هر ماژول، بعد بزرگ‌نمایی با ضریب صحیح
   const bc = document.createElement("canvas");
   await drawBarcodeCanvas(bc, item.code, {
-    scale: Math.max(2, Math.round(4 * boldness)),
-    height: 11,
-    includetext: showCode,
-    textsize: 9,
-    paddingwidth: 2,
+    scale: 1,
+    height: 2,
+    includetext: false,
+    paddingwidth: 0,
   });
-  const maxBcW = W - pad * 2;
-  const ratio = Math.min(maxBcW / bc.width, barcodeAreaH / Math.max(1, bc.height));
-  const bw = Math.max(1, Math.floor(bc.width * ratio));
-  const bh = Math.max(1, Math.floor(bc.height * ratio));
-  ctx.imageSmoothingEnabled = bw < bc.width;
-  ctx.drawImage(bc, Math.round((W - bw) / 2), pad + Math.round((barcodeAreaH - bh) / 2), bw, bh);
+  const fit = maxBarW / Math.max(1, bc.width);
+  // پررنگی کمتر از ۱ = بارکد کمی باریک‌تر (برای چاپگرهای پرحرارت)
+  const moduleK = Math.floor(fit * Math.min(1, boldness));
+  const barY = padY;
+  if (moduleK >= 1) {
+    const bw = bc.width * moduleK;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bc, 0, 0, bc.width, 1, Math.round((W - bw) / 2), barY, bw, barH);
+  } else {
+    // کد خیلی بلند برای این عرض: کوچک‌نمایی (مثل قبل)
+    const bw = Math.max(1, Math.floor(bc.width * fit));
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(bc, 0, 0, bc.width, 1, Math.round((W - bw) / 2), barY, bw, barH);
+  }
+  ctx.imageSmoothingEnabled = true;
 
-  ctx.fillStyle = "#111111";
+  ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.direction = "rtl";
 
-  let y = pad + barcodeAreaH;
+  let y = barY + barH;
+  if (showCode) {
+    y += lineGap + codeFontPx;
+    ctx.direction = "ltr";
+    ctx.font = `600 ${codeFontPx}px ${CODE_FONT}`;
+    ctx.fillText(fitText(ctx, item.code, W - padX), W / 2, y - Math.round(codeFontPx * 0.12));
+  }
+  ctx.direction = "rtl";
   if (hasName) {
-    y += nameFontPx;
+    y += lineGap + nameFontPx;
     ctx.font = `600 ${nameFontPx}px ${LABEL_FONT}`;
-    ctx.fillText(fitText(ctx, item.name!, W - pad * 2), W / 2, y);
-    y += lineGap;
+    ctx.fillText(fitText(ctx, item.name!, W - padX), W / 2, y - Math.round(nameFontPx * 0.12));
   }
   if (hasPrice) {
-    y += priceFontPx;
+    y += lineGap + priceFontPx;
     ctx.font = `700 ${priceFontPx}px ${LABEL_FONT}`;
-    ctx.fillText(formatToman(item.price!), W / 2, y);
+    ctx.fillText(formatToman(item.price!), W / 2, y - Math.round(priceFontPx * 0.12));
   }
 
   return canvas;

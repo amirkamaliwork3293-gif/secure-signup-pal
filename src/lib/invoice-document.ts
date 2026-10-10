@@ -33,6 +33,7 @@ import {
   normalizeReceiptSettings,
   printFontFaceCss,
   receiptDocument,
+  receiptItemsHtml,
   receiptParts,
   type ReceiptSettings,
 } from "@/lib/receipt";
@@ -729,21 +730,20 @@ export function buildThermalInvoiceHTML(
       : []),
     inv.paymentMethod ? receiptParts.kv("پرداخت", PAYMENT_LABEL[inv.paymentMethod]) : "",
   ].join("");
-  const items = inv.items
-    .map((it) =>
-      receiptParts.item({
-        name: it.name,
-        tag:
-          sh.itemDiscount && it.discountPercent
-            ? `٪${formatNumber(it.discountPercent)} تخفیف`
-            : undefined,
-        qty: qtyWithUnit(it),
-        was: sh.itemDiscount && it.originalPrice ? fmt(it.originalPrice) : undefined,
-        unitPrice: fmt(it.price),
-        total: fmt(lineTotal(it)),
-      }),
-    )
-    .join("");
+  const items = receiptItemsHtml(
+    inv.items.map((it) => ({
+      name: it.name,
+      tag:
+        sh.itemDiscount && it.discountPercent
+          ? `٪${formatNumber(it.discountPercent)} تخفیف`
+          : undefined,
+      qty: qtyWithUnit(it),
+      was: sh.itemDiscount && it.originalPrice ? fmt(it.originalPrice) : undefined,
+      unitPrice: fmt(it.price),
+      total: fmt(lineTotal(it)),
+    })),
+    s,
+  );
   const lines = amountLines
     .map((l) =>
       l.kind === "grand"

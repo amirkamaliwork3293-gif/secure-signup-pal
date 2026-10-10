@@ -22,7 +22,9 @@ import {
   DEFAULT_RECEIPT,
   buildReceiptCalibrationHTML,
   normalizeReceiptSettings,
+  RECEIPT_TABLE_FROM,
   receiptDocument,
+  receiptItemsHtml,
   receiptPageWidthMm,
   withReceiptPageHeight,
 } from "../src/lib/receipt.ts";
@@ -146,6 +148,47 @@ assert.equal(normalizeReceiptSettings({ scalePct: "x" }).scalePct, 100);
   assert.equal(receiptPageWidthMm(big), 160);
   // calibration ruler always prints at real size
   assert.ok(buildReceiptCalibrationHTML(big).includes('data-kamix-receipt="80"'));
+}
+
+// ── item layout: two lines vs compact table ──
+{
+  assert.equal(d.itemLayout, "auto", "auto by default");
+  assert.equal(normalizeReceiptSettings({ itemLayout: "weird" }).itemLayout, "auto");
+  const row = (i: number) => ({
+    name: `کالا ${i} <b>`,
+    qty: "۲",
+    unitPrice: "۱۰٬۰۰۰",
+    total: "۲۰٬۰۰۰",
+    was: i === 0 ? "۱۲٬۰۰۰" : undefined,
+    tag: i === 0 ? "٪۱۰ تخفیف" : undefined,
+  });
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => row(i));
+  const few = receiptItemsHtml(rows(RECEIPT_TABLE_FROM - 1), d);
+  assert.ok(!few.includes("<table") && few.includes('class="it"'), "few items → two lines");
+  const many = receiptItemsHtml(rows(RECEIPT_TABLE_FROM), d);
+  assert.ok(many.includes('<table class="tb">'), "many items → table");
+  assert.equal((many.match(/<tr>/g) ?? []).length, RECEIPT_TABLE_FROM + 1, "header + one row each");
+  assert.ok(many.includes('<th class="p">فی</th>') && many.includes("<s>۱۲٬۰۰۰</s>"));
+  assert.ok(many.includes('<col style="width:44%"/>'), "name column gets the widest share");
+  assert.ok(many.includes("٪۱۰ تخفیف") && many.includes("&lt;b&gt;"), "tags shown, names escaped");
+  assert.ok(
+    !receiptItemsHtml(rows(20), normalizeReceiptSettings({ itemLayout: "lines" })).includes(
+      "<table",
+    ),
+  );
+  assert.ok(
+    receiptItemsHtml(rows(1), normalizeReceiptSettings({ itemLayout: "table" })).includes("<table"),
+  );
+  assert.equal(receiptItemsHtml([], d), "", "no items → empty (caller shows placeholder)");
+  const narrow = receiptItemsHtml(rows(8), normalizeReceiptSettings({ paperMm: 58 }));
+  assert.ok(
+    !narrow.includes('class="p"') && narrow.includes('class="u"'),
+    "58mm: price under name",
+  );
+  // settings saved before this option → auto
+  const legacy = { ...DEFAULT_RECEIPT } as Partial<typeof DEFAULT_RECEIPT>;
+  delete legacy.itemLayout;
+  assert.equal(normalizeReceiptSettings(legacy).itemLayout, "auto");
 }
 
 // ── split into A4-shaped pages (splitA4) ──

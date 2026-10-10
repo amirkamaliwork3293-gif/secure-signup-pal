@@ -11,6 +11,8 @@ import {
   receiptPageWidthMm,
   type ReceiptSettings,
   type ReceiptShow,
+  type ReceiptItemLayout,
+  RECEIPT_TABLE_FROM,
 } from "@/lib/receipt";
 import { buildThermalInvoiceHTML } from "@/lib/invoice-document";
 import { printHtml, isAppShell, OLD_APP_MESSAGE } from "@/lib/print";
@@ -227,6 +229,25 @@ export function ReceiptSettingsCard() {
             onChange={(e) => save({ boldText: e.target.checked })}
             className="h-4 w-4"
           />
+        </label>
+        <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs sm:col-span-2">
+          <span>
+            چیدمان کالاها
+            <span className="block text-[10px] text-muted-foreground">
+              جدولی = هر کالا یک ردیف؛ فیش پرکالا کوتاه‌تر و درشت‌تر چاپ می‌شود
+            </span>
+          </span>
+          <select
+            value={s.itemLayout}
+            onChange={(e) => save({ itemLayout: e.target.value as ReceiptItemLayout })}
+            className="rounded-lg border border-input bg-card px-2 py-1 text-xs"
+          >
+            <option value="auto">
+              خودکار (جدولی از {RECEIPT_TABLE_FROM.toLocaleString("fa-IR")} کالا)
+            </option>
+            <option value="lines">همیشه دوخطی</option>
+            <option value="table">همیشه جدولی</option>
+          </select>
         </label>
         <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2 text-xs sm:col-span-2">
           <span>

@@ -34,6 +34,7 @@ import { formatQtyWithUnit } from "@/lib/qty-format";
 import {
   normalizeReceiptSettings,
   receiptDocument,
+  receiptItemsHtml,
   receiptParts,
   type ReceiptSettings,
 } from "@/lib/receipt";
@@ -179,16 +180,15 @@ export function buildThermalPurchaseHTML(
       : []),
     p.paymentMethod ? receiptParts.kv("پرداخت", PAYMENT_LABEL[p.paymentMethod]) : "",
   ].join("");
-  const items = p.items
-    .map((it) =>
-      receiptParts.item({
-        name: it.name,
-        qty: formatQtyWithUnit(it.quantity, it.unit),
-        unitPrice: fmt(it.buyPrice),
-        total: fmt(purchaseLineTotal(it)),
-      }),
-    )
-    .join("");
+  const items = receiptItemsHtml(
+    p.items.map((it) => ({
+      name: it.name,
+      qty: formatQtyWithUnit(it.quantity, it.unit),
+      unitPrice: fmt(it.buyPrice),
+      total: fmt(purchaseLineTotal(it)),
+    })),
+    receipt,
+  );
   const remaining = purchaseCreditRemaining(p);
   const body = `
   ${sh.logo && p.shopLogoUrl ? `<img class="logo" src="${esc(p.shopLogoUrl)}" alt=""/>` : ""}

@@ -16,12 +16,13 @@ import { normalizeReceiptSettings, receiptDocument, receiptParts } from "@/lib/r
 import { renderReceiptCanvas } from "@/lib/receipt-raster";
 import {
   bluetoothAvailable,
-  buildPhomemoJob,
+  buildPrintSteps,
   connectPhomemo,
   packBitmap,
-  sendToPrinter,
+  sendSteps,
   type PhomemoConnection,
   type PhomemoMedia,
+  type PhomemoProtocol,
 } from "@/lib/phomemo";
 
 export const Route = createFileRoute("/printer-test")({
@@ -88,6 +89,8 @@ function PrinterTestPage() {
   const [speed, setSpeed] = useState(3);
   const [media, setMedia] = useState<PhomemoMedia>("continuous");
   const [safeMode, setSafeMode] = useState(false);
+  const [protocol, setProtocol] = useState<PhomemoProtocol>("escpos");
+  const [feedMm, setFeedMm] = useState(4);
   const [previewUrl, setPreviewUrl] = useState("");
   const supported = typeof window !== "undefined" && bluetoothAvailable();
   const connRef = useRef<PhomemoConnection | null>(null);
@@ -144,18 +147,25 @@ function PrinterTestPage() {
       const ctx = canvas.getContext("2d")!;
       const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const { bits, widthBytes } = packBitmap(data, canvas.width, canvas.height);
-      const job = buildPhomemoJob(bits, widthBytes, canvas.height, { density, speed, media });
+      const steps = buildPrintSteps(protocol, bits, widthBytes, canvas.height, {
+        density,
+        speed,
+        media,
+        feedDots: feedMm * 8,
+      });
+      const bytes = steps.reduce((n, st) => n + st.bytes.length, 0);
       addLog(
-        `تصویر ${canvas.width}×${canvas.height} نقطه (${Math.round(canvas.height / 8)} میلی‌متر) — ارسال ${job.length.toLocaleString("fa-IR")} بایت…`,
+        `روش ${protocol === "escpos" ? "ESC/POS" : "M110"} — تصویر ${canvas.width}×${canvas.height} نقطه (${Math.round(canvas.height / 8)} میلی‌متر) — ارسال ${bytes.toLocaleString("fa-IR")} بایت…`,
       );
       const t0 = Date.now();
-      await sendToPrinter(
+      await sendSteps(
         conn,
-        job,
+        steps,
         safeMode
           ? { chunk: 100, delayMs: 30, withResponse: true }
-          : { chunk: 128, delayMs: 12, withResponse: false },
+          : { chunk: 128, delayMs: 20, withResponse: false },
         (sent, total) => setProgress(Math.round((sent / total) * 100)),
+        addLog,
       );
       addLog(`ارسال کامل شد (${((Date.now() - t0) / 1000).toFixed(1)} ثانیه)`);
     } catch (e) {
@@ -250,6 +260,17 @@ function PrinterTestPage() {
       <div className="space-y-3 rounded-xl border border-border bg-background p-3">
         <div className="text-sm font-semibold">۲. تنظیمات</div>
         <label className="block space-y-1 text-xs">
+          <span>روش ارسال (اگر یکی چاپ نکرد، دیگری را امتحان کنید)</span>
+          <select
+            value={protocol}
+            onChange={(e) => setProtocol(e.target.value as PhomemoProtocol)}
+            className={field}
+          >
+            <option value="escpos">روش ۱ — ESC/POS (پیشنهادی برای M220)</option>
+            <option value="m110">روش ۲ — دستورهای M110</option>
+          </select>
+        </label>
+        <label className="block space-y-1 text-xs">
           <span>عرض چاپ</span>
           <select
             value={widthDots}
@@ -264,7 +285,7 @@ function PrinterTestPage() {
           </select>
         </label>
         <label className="block space-y-1 text-xs">
-          <span>نوع کاغذ</span>
+          <span>نوع کاغذ (فقط روش ۲)</span>
           <select
             value={media}
             onChange={(e) => setMedia(e.target.value as PhomemoMedia)}
@@ -293,6 +314,17 @@ function PrinterTestPage() {
             max={5}
             value={speed}
             onChange={(e) => setSpeed(Number(e.target.value))}
+            className="w-full"
+          />
+        </label>
+        <label className="block space-y-1 text-xs">
+          <span>فاصلهٔ خالی بعد از چاپ: {feedMm.toLocaleString("fa-IR")} میلی‌متر (فقط روش ۱)</span>
+          <input
+            type="range"
+            min={0}
+            max={30}
+            value={feedMm}
+            onChange={(e) => setFeedMm(Number(e.target.value))}
             className="w-full"
           />
         </label>

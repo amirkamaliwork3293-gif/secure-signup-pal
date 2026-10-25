@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { resolveSupabaseUrl } from "./integrations/supabase/public-config";
+import { isSupabaseProxyPath, proxySupabaseRequest } from "./integrations/supabase/proxy.server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -110,6 +111,9 @@ function withSecurityHeaders(response: Response): Response {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      if (isSupabaseProxyPath(new URL(request.url).pathname)) {
+        return withSecurityHeaders(await proxySupabaseRequest(request, SUPABASE_ORIGIN));
+      }
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));

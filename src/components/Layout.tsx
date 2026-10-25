@@ -3,7 +3,12 @@ import { useAuth } from "@/lib/AuthContext";
 import { ScanLine, Package, Receipt, History, Settings, LogOut, BarChart3, Users, WifiOff, CloudOff, UtensilsCrossed, GraduationCap, ListChecks, Wallet, Coins, Bell, LayoutGrid, LayoutTemplate, Boxes, X, DatabaseBackup, HelpCircle, Factory, CalendarX, Stethoscope } from "lucide-react";
 import type { ReactNode } from "react";
 import { settings, students as studentsStore, studentStatus, reminders as remindersStore, dueReminderCount, useSyncState, formatJalaliDateTime } from "@/lib/store";
-import { useOnlineStatus } from "@/lib/online-status";
+import { checkConnectionNow, useOnlineStatus } from "@/lib/online-status";
+import {
+  getOfflineReadiness,
+  OFFLINE_PROGRESS_EVENT,
+  type OfflineReadiness,
+} from "@/registerSW";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { UserMenu } from "@/components/UserMenu";
 import { DueAlertsDialog } from "@/components/DueAlertsDialog";
@@ -85,6 +90,41 @@ export function Layout({ children }: { children: ReactNode }) {
     const t = window.setTimeout(() => setNeedsOnlineLogin(true), 8000);
     return () => window.clearTimeout(t);
   }, [offlineSession, isOnline]);
+  // آماده‌سازی فایل‌های برنامه روی گوشی برای کار بدون اینترنت (فقط اپ اندروید)
+  const [offlineReady, setOfflineReady] = useState<OfflineReadiness | null>(null);
+  const [readyToast, setReadyToast] = useState(false);
+  useEffect(() => {
+    if (!isCapacitorApp) return;
+    let prev = getOfflineReadiness();
+    setOfflineReady(prev);
+    let hideTimer: number | undefined;
+    const onProgress = (e: Event) => {
+      const next = (e as CustomEvent<OfflineReadiness>).detail;
+      // پیام «آماده است» فقط بار اولی که این گوشی کامل آماده می‌شود
+      if (next.complete && prev.known && !prev.complete && !prev.everReady) {
+        setReadyToast(true);
+        hideTimer = window.setTimeout(() => setReadyToast(false), 6000);
+      }
+      prev = next;
+      setOfflineReady(next);
+    };
+    window.addEventListener(OFFLINE_PROGRESS_EVENT, onProgress);
+    return () => {
+      window.removeEventListener(OFFLINE_PROGRESS_EVENT, onProgress);
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, [isCapacitorApp]);
+  const preparingOffline =
+    isCapacitorApp && isOnline && !!offlineReady?.known && !offlineReady.complete && offlineReady.total > 0;
+  const [checkingNet, setCheckingNet] = useState(false);
+  const retryConnection = async () => {
+    setCheckingNet(true);
+    try {
+      await checkConnectionNow();
+    } finally {
+      setCheckingNet(false);
+    }
+  };
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
@@ -198,10 +238,40 @@ export function Layout({ children }: { children: ReactNode }) {
               {lastSyncedAt
                 ? ` — آخرین همگام‌سازی: ${formatJalaliDateTime(lastSyncedAt)}`
                 : ""}
+              <button
+                type="button"
+                onClick={retryConnection}
+                disabled={checkingNet}
+                className="mr-2 rounded-lg bg-white/20 px-2 py-0.5 disabled:opacity-60"
+              >
+                {checkingNet ? "در حال بررسی…" : "بررسی اتصال"}
+              </button>
             </span>
           ) : (
             <span>آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد</span>
           )}
+        </div>
+      )}
+
+      {/* دانلود فایل‌های برنامه برای کار بدون اینترنت */}
+      {preparingOffline && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-sky-600 px-4 py-1.5 text-[11px] font-semibold text-white"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <span>
+            آماده‌سازی برای کار بدون اینترنت…{" "}
+            {Math.min(99, Math.round((offlineReady!.done / offlineReady!.total) * 100)).toLocaleString("fa-IR")}٪
+            — تا پایان، برنامه را باز و اینترنت را وصل نگه دارید
+          </span>
+        </div>
+      )}
+      {readyToast && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-emerald-600 px-4 py-1.5 text-[11px] font-semibold text-white"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          ✓ برنامه آمادهٔ کار بدون اینترنت است
         </div>
       )}
 
@@ -228,6 +298,14 @@ export function Layout({ children }: { children: ReactNode }) {
           <CloudOff className="h-3.5 w-3.5 shrink-0" />
           ذخیره‌ی آخرین تغییرات روی سرور ناموفق بود — روی این دستگاه محفوظ است و تلاش
           مجدد ادامه دارد. تا رفع مشکل، از این دستگاه خارج نشوید.
+          <button
+            type="button"
+            onClick={retryConnection}
+            disabled={checkingNet}
+            className="rounded-lg bg-white/20 px-2 py-0.5 disabled:opacity-60"
+          >
+            {checkingNet ? "در حال ارسال…" : "ارسال دوباره"}
+          </button>
         </div>
       )}
 

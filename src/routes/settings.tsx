@@ -16,7 +16,7 @@ import {
 } from "@/lib/storeProfile";
 import { openExternal } from "@/lib/openExternal";
 import { OfflineWriteError, requireOnlineWrite } from "@/lib/online-status";
-import { isCapacitor } from "@/lib/isWebView";
+import { isNativeApp } from "@/lib/isWebView";
 import { rememberOfflineLogin } from "@/lib/offline-login";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { ReceiptSettingsCard } from "@/components/ReceiptSettingsCard";
@@ -487,7 +487,7 @@ function ChangePasswordSection() {
       const { error } = await supabase.auth.updateUser({ password: newPass });
       if (error) throw error;
       // ورود بدون اینترنت روی همین گوشی از این به بعد با رمز جدید است.
-      if (isCapacitor() && reauthData.user?.id) {
+      if (isNativeApp() && reauthData.user?.id) {
         void rememberOfflineLogin(username, newPass, reauthData.user.id);
       }
       setMsg({ type: "ok", text: "رمز عبور با موفقیت تغییر کرد." });

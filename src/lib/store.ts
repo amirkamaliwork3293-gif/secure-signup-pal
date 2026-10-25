@@ -47,7 +47,7 @@ import type { CustomerField, InvoicePartyField } from "@/lib/customer-fields";
 import type { ReceiptSettings } from "@/lib/receipt";
 import { buildCustomerIndex, matchCustomer } from "@/lib/customer-link";
 import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
-import { isCapacitor } from "@/lib/isWebView";
+import { isNativeApp } from "@/lib/isWebView";
 import {
   isCapacitorOfflineReadOnly,
   ONLINE_CONFIRMED_EVENT,
@@ -1650,7 +1650,7 @@ async function mergeLatestServerRow(userId: string): Promise<void> {
   }
   applyCloudRow(data as Record<string, unknown>);
   lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : null;
-  if (isCapacitor()) rememberCloudRead(userId);
+  if (isNativeApp()) rememberCloudRead(userId);
 }
 
 let lastCloudUpdatedAt: string | null = null;
@@ -1792,7 +1792,7 @@ async function pullUserData(
       }
       lastCloudUpdatedAt = null;
       markCloudHydrated();
-      if (isCapacitor()) rememberCloudRead(userId);
+      if (isNativeApp()) rememberCloudRead(userId);
       return; // بلوک finally صف را flush می‌کند
     }
     // بازنویسی کش محلی از ابر. فیلدهای dirty (ویرایش آفلاین، از جمله حذف فاکتور)
@@ -1818,7 +1818,7 @@ async function pullUserData(
     applyCloudRow(data as Record<string, unknown>);
     lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
     markCloudHydrated();
-    if (isCapacitor()) rememberCloudRead(userId);
+    if (isNativeApp()) rememberCloudRead(userId);
   } catch (e) {
     console.error("[store] hydrate failed", e);
     publishSyncState({

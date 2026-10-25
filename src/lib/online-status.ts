@@ -3,8 +3,9 @@
  * در مرورگر وب هیچ پروب شبکه‌ای اضافه نمی‌شود تا رفتار/حجم سایت عوض نشود.
  */
 import { useEffect, useState } from "react";
-import { isCapacitor } from "@/lib/isWebView";
+import { isNativeApp } from "@/lib/isWebView";
 import { readCloudReadAt } from "@/lib/offline-cache";
+import { resolveSupabaseUrl } from "@/integrations/supabase/public-config";
 import {
   decideOnlineKind,
   shouldBlockCapacitorWrites,
@@ -69,7 +70,7 @@ export function getOnlineKind(): OnlineKind {
 }
 
 export function isCapacitorOfflineReadOnly(): boolean {
-  return shouldBlockCapacitorWrites({ isCapacitor: isCapacitor(), kind: getOnlineKind() });
+  return shouldBlockCapacitorWrites({ isCapacitor: isNativeApp(), kind: getOnlineKind() });
 }
 
 /**
@@ -108,25 +109,73 @@ function snapshot(): OnlineSnapshot {
     isOnline: k !== "offline",
     kind: k,
     lastSyncedAt: uid ? readCloudReadAt(uid) : null,
-    isCapacitorApp: isCapacitor(),
+    isCapacitorApp: isNativeApp(),
   };
 }
 
-async function runProbe(): Promise<void> {
-  if (!isCapacitor()) return;
+/** هر کدام از سایت یا سرور داده جواب بدهد یعنی اینترنت هست. */
+async function probeAny(): Promise<boolean> {
+  const targets = [probeReachability()];
+  const supabaseUrl = resolveSupabaseUrl();
+  if (supabaseUrl) targets.push(probeReachability({ href: `${supabaseUrl}/auth/v1/health`, mode: "no-cors" }));
+  return new Promise<boolean>((resolve) => {
+    let pending = targets.length;
+    for (const t of targets) {
+      void t.then((ok) => {
+        if (ok) resolve(true);
+        else if (--pending === 0) resolve(false);
+      });
+    }
+  });
+}
+
+let probing: Promise<boolean> | null = null;
+
+async function runProbe(force = false): Promise<boolean> {
+  if (!isNativeApp()) return true;
   if (currentNavigatorOnLine() === false) {
     probeOk = false;
     publish();
-    return;
+    return false;
   }
-  const wasOffline = getOnlineKind() === "offline";
-  const ok = await probeReachability();
-  probeOk = ok;
-  publish();
-  if (ok && wasOffline && typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
+  if (probing) return probing;
+  probing = (async () => {
+    const wasOffline = getOnlineKind() !== "online";
+    const ok = await probeAny();
+    probeOk = ok;
+    publish();
+    if (ok && (wasOffline || force) && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
+    }
+    return ok;
+  })();
+  try {
+    return await probing;
+  } finally {
+    probing = null;
   }
 }
+
+/**
+ * «همین الان بررسی و ارسال کن»: اگر اینترنت باشد رویداد اتصال فرستاده می‌شود تا
+ * ورود و همگام‌سازی فوراً انجام شود (حتی اگر برنامه خودش را آنلاین می‌دانست).
+ */
+export async function checkConnectionNow(): Promise<boolean> {
+  if (!isNativeApp()) {
+    const ok = currentNavigatorOnLine() !== false;
+    if (ok && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
+      window.dispatchEvent(new Event("online"));
+    }
+    return ok;
+  }
+  return runProbe(true);
+}
+
+/** وقتی برنامه خودش را آفلاین می‌داند، هر چند ثانیه دوباره بررسی کن (شبکهٔ کند/تازه وصل‌شده). */
+const REPROBE_OFFLINE_MS = 15_000;
+/** در حالت آنلاین هم گاهی بررسی شود تا قطع بی‌صدا (Wi-Fi بدون اینترنت) دیده شود. */
+const REPROBE_ONLINE_MS = 120_000;
 
 function bindWriteAlert(): void {
   if (typeof window === "undefined" || listenersBound) return;
@@ -145,7 +194,7 @@ export function initOnlineMonitoring(): void {
   if (typeof window === "undefined" || started) return;
   started = true;
   bindWriteAlert();
-  if (!isCapacitor()) {
+  if (!isNativeApp()) {
     probeOk = currentNavigatorOnLine() === false ? false : true;
     kind = currentKind();
     return;
@@ -157,6 +206,22 @@ export function initOnlineMonitoring(): void {
   window.addEventListener("online", () => {
     void runProbe();
   });
+  let lastProbeAt = Date.now();
+  window.setInterval(() => {
+    const k = getOnlineKind();
+    const every = k === "online" ? REPROBE_ONLINE_MS : REPROBE_OFFLINE_MS;
+    if (Date.now() - lastProbeAt < every) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    lastProbeAt = Date.now();
+    void runProbe();
+  }, 5_000);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      lastProbeAt = Date.now();
+      void runProbe();
+    });
+  }
   window.addEventListener("offline", () => {
     probeOk = false;
     publish();
@@ -166,7 +231,7 @@ export function initOnlineMonitoring(): void {
 export function useOnlineStatus(): OnlineSnapshot {
   const [state, setState] = useState<OnlineSnapshot>(() => {
     const navOnline = typeof navigator === "undefined" ? true : navigator.onLine;
-    const native = typeof window !== "undefined" && isCapacitor();
+    const native = typeof window !== "undefined" && isNativeApp();
     const k = decideOnlineKind({
       navigatorOnLine: navOnline,
       probeOk: native ? (navOnline ? null : false) : navOnline ? true : false,
@@ -187,7 +252,7 @@ export function useOnlineStatus(): OnlineSnapshot {
       else setState(snapshot());
     };
     window.addEventListener("kamix-online-status", onStatus);
-    if (!isCapacitor()) {
+    if (!isNativeApp()) {
       const on = () => setState((s) => ({ ...s, isOnline: true, kind: "online" }));
       const off = () => setState((s) => ({ ...s, isOnline: false, kind: "offline" }));
       window.addEventListener("online", on);

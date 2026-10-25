@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
 import { useAuth } from "@/lib/AuthContext";
-import { isCapacitor } from "@/lib/isWebView";
+import { isNativeApp } from "@/lib/isWebView";
 import {
   forgetOfflineLogin,
   hasOfflineLoginForUsername,
@@ -88,7 +88,7 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
     }
 
     // Regular user login
-    if (isCapacitor()) {
+    if (isNativeApp()) {
       await nativeLogin(u);
       setLoading(false);
       return;

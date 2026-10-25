@@ -51,8 +51,8 @@ function shouldRegisterCapacitorShellWorker(native) {
 {
   const url = healthCheckUrl("https://kamixapp.ir");
   assert.match(url, new RegExp(`${HEALTH_CHECK_PARAM}=1`));
-  assert.ok(HEALTH_TIMEOUT_MS <= 3000);
-  assert.ok(HEALTH_TIMEOUT_MS >= 2000);
+  assert.ok(HEALTH_TIMEOUT_MS <= 8000);
+  assert.ok(HEALTH_TIMEOUT_MS >= 4000);
 }
 
 {
@@ -189,7 +189,7 @@ function shouldRegisterCapacitorShellWorker(native) {
   assert.match(oldSw, /Self-destructing/);
 
   const register = readFileSync(join(root, "../src/registerSW.ts"), "utf8");
-  assert.match(register, /isCapacitor/);
+  assert.match(register, /isNativeApp/);
   assert.match(register, /updateViaCache/);
   assert.match(register, /capacitor-sw\.js/);
 

@@ -11,7 +11,7 @@ import {
   beginUserScope,
   flushPendingCloudWrites,
 } from "@/lib/store";
-import { isCapacitor } from "@/lib/isWebView";
+import { isNativeApp } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
 import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
@@ -211,7 +211,7 @@ let offlineReauth: { userId: string; username: string; password: string } | null
 let reauthInFlight = false;
 
 function capacitorNetworkDown(): boolean {
-  if (!isCapacitor()) return false;
+  if (!isNativeApp()) return false;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
   return isCapacitorOfflineReadOnly();
 }
@@ -404,9 +404,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     // ورود آفلاین: تا وقتی ورود واقعی انجام نشده، هر دقیقه بی‌صدا امتحان کن
     // (برای وقتی که سایت باز می‌شود ولی سرور داده هنوز در دسترس نیست).
+    // نشست زنده نیست (offline-cached): هر ۳۰ ثانیه اگر نشست ذخیره‌شده دوباره معتبر شد
+    // (سرور برگشت) وارد شو تا تغییرات آفلاین ارسال شوند؛ وگرنه ورود بی‌صدا با رمز همین اجرا.
     const reauthTimer = setInterval(() => {
-      if (offlineReauth && stateRef.current.status === "offline-cached") void trySilentReauth();
-    }, 60_000);
+      if (stateRef.current.status !== "offline-cached") return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      void supabase.auth
+        .getSession()
+        .then(({ data: { session } }) => {
+          if (session) void refreshProfile();
+          else void trySilentReauth();
+        })
+        .catch(() => {});
+    }, 30_000);
     const onOffline = () => {
       try {
         void supabase.auth.stopAutoRefresh();
@@ -414,7 +424,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         /* noop */
       }
     };
-    if (isCapacitor()) {
+    if (isNativeApp()) {
       window.addEventListener("online", onOnline);
       window.addEventListener("offline", onOffline);
       window.addEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
@@ -426,7 +436,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearInterval(reauthTimer);
       if (signedOutTimer) clearTimeout(signedOutTimer);
       subscription.unsubscribe();
-      if (isCapacitor()) {
+      if (isNativeApp()) {
         window.removeEventListener("online", onOnline);
         window.removeEventListener("offline", onOffline);
         window.removeEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
@@ -456,7 +466,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // تغییرات ذخیره‌نشده روی همین دستگاه می‌مانند تا ورود بعدی همین حساب آن‌ها را بفرستد.
     // اگر ورود آفلاین برای این حساب روی این گوشی فعال است، داده‌ها (مثل سایت) روی
     // گوشی می‌مانند تا بعد از خروج هم بدون اینترنت بتوان دوباره وارد شد و کار کرد.
-    if (isCapacitor() && prevId && synced && !hasOfflineLoginFor(prevId)) {
+    if (isNativeApp() && prevId && synced && !hasOfflineLoginFor(prevId)) {
       clearUserOfflineCache(prevId);
     }
     setStorageScope(null);

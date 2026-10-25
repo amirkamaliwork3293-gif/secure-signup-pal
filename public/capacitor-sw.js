@@ -152,6 +152,23 @@ self.addEventListener("message", (event) => {
   );
 });
 
+/** اول صفحه‌ها و کد اصلی، بعد کتابخانه‌های سنگین (اکسل/PDF/اسکنر) و فونت‌ها */
+const HEAVY_ASSET_RE = /(?:xlsx|jspdf|html2canvas|zxing|purify|\.wasm$|\.woff2?$)/i;
+function warmPriority(path) {
+  if (/\.css$/.test(path)) return 0;
+  if (/\.js$/.test(path) && !HEAVY_ASSET_RE.test(path)) return 1;
+  return 2;
+}
+
+async function postToClients(message) {
+  try {
+    const list = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
+    for (const c of list) c.postMessage(message);
+  } catch {
+    /* noop */
+  }
+}
+
 async function warmOfflineAssets() {
   let manifest;
   try {
@@ -165,25 +182,47 @@ async function warmOfflineAssets() {
     ? manifest.files.filter((f) => typeof f === "string" && f.startsWith("/"))
     : [];
   if (files.length === 0) return;
+  const version = typeof manifest.version === "string" ? manifest.version : "";
   const cache = await caches.open(CACHE_NAME);
-  const queue = files.slice();
+  const queue = files.slice().sort((a, b) => warmPriority(a) - warmPriority(b));
+  const total = files.length;
+  let done = 0;
   let failed = 0;
+  let lastReport = 0;
+  const report = (final) =>
+    postToClients({
+      type: "KAMIX_OFFLINE_PROGRESS",
+      version,
+      done,
+      total,
+      failed,
+      complete: final && failed === 0 && done === total,
+      finished: final,
+    });
+  await report(false);
   async function worker() {
     while (queue.length > 0) {
       const path = queue.shift();
       const href = self.location.origin + path;
       try {
-        if (await cache.match(href, { ignoreSearch: true })) continue;
-        const res = await fetch(href, { credentials: "same-origin" });
-        if (res && res.ok) await cache.put(href, res);
-        else failed += 1;
+        if (!(await cache.match(href, { ignoreSearch: true }))) {
+          const res = await fetch(href, { credentials: "same-origin" });
+          if (res && res.ok) await cache.put(href, res);
+          else failed += 1;
+        }
       } catch {
         failed += 1;
+      }
+      done += 1;
+      if (done - lastReport >= 5) {
+        lastReport = done;
+        void report(false);
       }
     }
   }
   await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
   if (failed === 0) await pruneStaleAssets(cache, new Set(files)).catch(() => {});
+  await report(true);
 }
 
 function assetRefs(html) {

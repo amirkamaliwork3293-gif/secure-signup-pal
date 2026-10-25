@@ -15,7 +15,8 @@ export const ONLINE_CONFIRMED_EVENT = "kamix-online";
 
 export const HEALTH_CHECK_PATH = "/favicon.ico";
 export const HEALTH_CHECK_PARAM = "kamix-health";
-export const HEALTH_TIMEOUT_MS = 2500;
+/** اینترنت بین‌الملل ایران گاهی کند است؛ مهلت کوتاه اتصال سالم را «آفلاین» می‌دید. */
+export const HEALTH_TIMEOUT_MS = 6000;
 
 export type OnlineKind = "online" | "offline" | "checking";
 
@@ -45,6 +46,8 @@ export async function probeReachability(opts?: {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   href?: string;
+  /** برای دامنهٔ دیگر: no-cors یعنی فقط «رسیدن پاسخ» مهم است، نه خواندن آن */
+  mode?: RequestMode;
 }): Promise<boolean> {
   const timeoutMs = opts?.timeoutMs ?? HEALTH_TIMEOUT_MS;
   const fetchImpl =
@@ -60,7 +63,12 @@ export async function probeReachability(opts?: {
     }
   }, timeoutMs);
   try {
-    await fetchImpl(url, { method: "GET", cache: "no-store", signal: ctrl?.signal });
+    await fetchImpl(url, {
+      method: "GET",
+      cache: "no-store",
+      signal: ctrl?.signal,
+      ...(opts?.mode ? { mode: opts.mode } : {}),
+    });
     return true;
   } catch {
     return false;

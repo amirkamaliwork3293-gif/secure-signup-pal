@@ -43,6 +43,9 @@ function makeCache() {
     async keys() {
       return [...entries.keys()].map((k) => new Request(k));
     },
+    async delete(req) {
+      return entries.delete(keyOf(req, false));
+    },
   };
 }
 
@@ -87,7 +90,12 @@ function loadWorker({ fetchImpl }) {
     const response = await responded;
     return { handled: true, response, waited };
   }
-  return { dispatch, cache, fetchCalls };
+  async function message(data) {
+    const waited = [];
+    listeners.message({ data, waitUntil: (p) => waited.push(p) });
+    await Promise.all(waited);
+  }
+  return { dispatch, message, cache, fetchCalls };
 }
 
 const html = (body, status = 200) =>
@@ -266,6 +274,105 @@ for (const status of [503, 402, 500, 429]) {
   assert.equal((await w.dispatch("/api/x")).handled, false);
   assert.equal((await w.dispatch("/_serverFn/abc", { method: "POST" })).handled, false);
   assert.equal((await w.dispatch("https://abc.supabase.co/rest/v1/x")).handled, false);
+}
+
+// ۱۵) KAMIX_WARM_ASSETS: همهٔ فایل‌های فهرست کش می‌شوند؛ فایل موجود دوباره دانلود نمی‌شود
+{
+  const files = ["/assets/index-A1.js", "/assets/invoices-B2.js", "/assets/zxing_reader-C3.wasm"];
+  const w = loadWorker({
+    fetchImpl: async (req) => {
+      const u = new URL(typeof req === "string" ? req : req.url, ORIGIN);
+      if (u.pathname === "/kamix-offline-assets.json") {
+        return new Response(JSON.stringify({ version: "v", files }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return js("// " + u.pathname);
+    },
+  });
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  for (const f of files) assert.ok(w.cache.entries.has(ORIGIN + f), f);
+  assert.ok(!w.cache.entries.has(ORIGIN + "/kamix-offline-assets.json"), "فهرست کش نمی‌شود");
+  const before = w.fetchCalls.length;
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.equal(w.fetchCalls.length - before, 1, "دفعهٔ دوم فقط خود فهرست خوانده می‌شود");
+  // فایلی که آفلاین قبلاً باز نشده بود، حالا از کش
+  const offline = loadWorker({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
+  for (const [k, v] of w.cache.entries) offline.cache.entries.set(k, v);
+  const r = await offline.dispatch("/assets/invoices-B2.js");
+  assert.equal(await r.response.text(), "// /assets/invoices-B2.js");
+  // خود فهرست هیچ‌وقت از کش جواب داده نمی‌شود
+  assert.equal((await w.dispatch("/kamix-offline-assets.json")).handled, false);
+}
+
+// ۱۶) پاک‌سازی: فقط فایل قدیمیِ بی‌ارجاع حذف می‌شود؛ پوسته و فایل‌های فعلی می‌مانند
+{
+  let files = ["/assets/index-OLD.js", "/assets/page-OLD.js"];
+  let shellHtml = '<script type="module" src="/assets/index-OLD.js"></script>';
+  const w = loadWorker({
+    fetchImpl: async (req) => {
+      const u = new URL(typeof req === "string" ? req : req.url, ORIGIN);
+      if (u.pathname === "/kamix-offline-assets.json") {
+        return new Response(JSON.stringify({ files }), { headers: { "content-type": "application/json" } });
+      }
+      if (u.pathname.startsWith("/assets/")) return js("// " + u.pathname);
+      return html(shellHtml);
+    },
+  });
+  await w.dispatch("/", { navigate: true });
+  await tick();
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/page-OLD.js"));
+
+  // نسخهٔ جدید منتشر شد ولی پوستهٔ کش‌شده هنوز قدیمی است → چیزی پاک نمی‌شود
+  files = ["/assets/index-NEW.js", "/assets/page-NEW.js"];
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/page-OLD.js"), "پوستهٔ قدیمی فایل‌هایش را لازم دارد");
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/page-NEW.js"));
+
+  // پوسته به نسخهٔ جدید رسید → فایل‌های قدیمیِ بی‌ارجاع پاک می‌شوند
+  shellHtml = '<link rel="modulepreload" href="/assets/index-NEW.js">';
+  await w.dispatch("/", { navigate: true });
+  await tick();
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.ok(!w.cache.entries.has(ORIGIN + "/assets/page-OLD.js"));
+  assert.ok(!w.cache.entries.has(ORIGIN + "/assets/index-OLD.js"));
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/index-NEW.js"));
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/page-NEW.js"));
+  assert.ok(w.cache.entries.has(ORIGIN + "/__kamix_app_shell__"));
+}
+
+// ۱۷) دانلود ناقص (قطع وسط کار) → هیچ چیز پاک نمی‌شود
+{
+  let files = ["/assets/index-OLD.js"];
+  let fail = false;
+  const w = loadWorker({
+    fetchImpl: async (req) => {
+      const u = new URL(typeof req === "string" ? req : req.url, ORIGIN);
+      if (u.pathname === "/kamix-offline-assets.json") {
+        return new Response(JSON.stringify({ files }), { headers: { "content-type": "application/json" } });
+      }
+      if (u.pathname.startsWith("/assets/")) {
+        if (fail && u.pathname.includes("NEW-2")) throw new TypeError("Failed to fetch");
+        return js("// " + u.pathname);
+      }
+      return html('<script src="/assets/index-NEW-1.js"></script>');
+    },
+  });
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  await w.dispatch("/", { navigate: true });
+  await tick();
+  files = ["/assets/index-NEW-1.js", "/assets/page-NEW-2.js"];
+  fail = true;
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.ok(w.cache.entries.has(ORIGIN + "/assets/index-OLD.js"), "با دانلود ناقص پاک‌سازی انجام نمی‌شود");
+}
+
+// ۱۸) فهرست در دسترس نیست (آفلاین/۴۰۴) → بی‌خطر، بدون تغییر
+{
+  const w = loadWorker({ fetchImpl: async () => new Response("nf", { status: 404 }) });
+  await w.message({ type: "KAMIX_WARM_ASSETS" });
+  assert.equal(w.cache.entries.size, 0);
 }
 
 console.log("capacitor-sw: all checks passed");

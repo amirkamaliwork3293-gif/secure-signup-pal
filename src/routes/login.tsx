@@ -4,6 +4,17 @@ import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/lib/supabase";
 import { verifyAdminLogin } from "@/lib/auth.functions";
 import { LoginHelpDialog } from "@/components/LoginHelpDialog";
+import { useAuth } from "@/lib/AuthContext";
+import { isCapacitor } from "@/lib/isWebView";
+import {
+  forgetOfflineLogin,
+  hasOfflineLoginForUsername,
+  isInvalidCredentialsError,
+  isUnreachableAuthError,
+  rememberOfflineLogin,
+  usernameToAuthEmail,
+  verifyOfflineLogin,
+} from "@/lib/offline-login";
 import { Receipt, Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 
 const LOGIN_URL = "https://kamixapp.ir/login";
@@ -28,8 +39,16 @@ export const Route = createFileRoute("/login")({
 });
 
 function toEmail(username: string) {
-  return `${username.trim().toLowerCase()}@kamali.local`;
+  return usernameToAuthEmail(username);
 }
+
+/** اپ اندروید: اگر سرور تا این مدت جواب ندهد، ورود آفلاین امتحان می‌شود. */
+const NATIVE_LOGIN_TIMEOUT_MS = 15_000;
+const LOGIN_TIMED_OUT = Symbol("login-timeout");
+
+const OFFLINE_LOGIN_UNAVAILABLE =
+  "اتصال به سرور برقرار نشد. ورود بدون اینترنت فقط روی گوشی‌ای ممکن است که قبلاً " +
+  "یک‌بار با اینترنت و با همین یوزرنیم و رمز وارد آن شده باشید. اینترنت را بررسی کنید و دوباره تلاش کنید.";
 
 export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
   const [username, setUsername] = useState("");
@@ -39,6 +58,7 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const adminLogin = useServerFn(verifyAdminLogin);
+  const { enterOfflineSession } = useAuth();
 
   const handleSubmit = async () => {
     setError("");
@@ -68,6 +88,11 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
     }
 
     // Regular user login
+    if (isCapacitor()) {
+      await nativeLogin(u);
+      setLoading(false);
+      return;
+    }
     const { error: err } = await supabase.auth.signInWithPassword({
       email: toEmail(u),
       password,
@@ -82,6 +107,67 @@ export function LoginPage({ adminMode = false }: { adminMode?: boolean } = {}) {
       navigate({ to: "/" });
     }
     setLoading(false);
+  };
+
+  /**
+   * اپ اندروید: ورود آنلاین مثل همیشه؛ اگر سرور در دسترس نبود (قطعی اینترنت
+   * بین‌الملل)، یوزرنیم/رمز با اثر ذخیره‌شده روی همین گوشی مقایسه می‌شود و کاربر
+   * با داده‌های گوشی وارد می‌شود. رمز اشتباه هیچ‌وقت به ورود آفلاین نمی‌رسد.
+   */
+  const nativeLogin = async (u: string) => {
+    const pass = password;
+    const online = supabase.auth.signInWithPassword({ email: toEmail(u), password: pass });
+    // نتیجهٔ دیررس (بعد از ورود آفلاین) هم ثبت شود: اثر رمز تازه یا حذف شود.
+    void online
+      .then(({ data, error: lateErr }) => {
+        if (!lateErr && data.user?.id) void rememberOfflineLogin(u, pass, data.user.id);
+        else if (lateErr && isInvalidCredentialsError(lateErr)) forgetOfflineLogin(u);
+      })
+      .catch(() => {});
+
+    let outcome: Awaited<typeof online> | typeof LOGIN_TIMED_OUT | { thrown: unknown };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      outcome = await Promise.race([
+        online,
+        new Promise<typeof LOGIN_TIMED_OUT>((resolve) => {
+          timer = setTimeout(() => resolve(LOGIN_TIMED_OUT), NATIVE_LOGIN_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (e) {
+      outcome = { thrown: e };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    if (outcome !== LOGIN_TIMED_OUT && "data" in outcome && !outcome.error) {
+      navigate({ to: "/" });
+      return;
+    }
+
+    const err =
+      outcome === LOGIN_TIMED_OUT ? null : "thrown" in outcome ? outcome.thrown : outcome.error;
+    const unreachable = outcome === LOGIN_TIMED_OUT || isUnreachableAuthError(err);
+    if (!unreachable) {
+      const message = (err as { message?: string } | null)?.message || "";
+      setError(
+        message.includes("Invalid login")
+          ? "یوزرنیم یا رمز عبور اشتباه است."
+          : message || "ورود ناموفق بود. دوباره تلاش کنید.",
+      );
+      return;
+    }
+
+    const userId = await verifyOfflineLogin(u, pass);
+    if (userId && enterOfflineSession(userId, u, pass)) {
+      navigate({ to: "/" });
+      return;
+    }
+    setError(
+      !userId && hasOfflineLoginForUsername(u)
+        ? "اینترنت در دسترس نیست و یوزرنیم یا رمز عبور با ورود قبلی همین گوشی نمی‌خواند."
+        : OFFLINE_LOGIN_UNAVAILABLE,
+    );
   };
 
   return (

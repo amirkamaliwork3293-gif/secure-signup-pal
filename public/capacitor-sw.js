@@ -23,12 +23,23 @@
  *   - روی سایت/مرورگر ثبت نمی‌شود (register فقط با isCapacitor)
  *   - کش نسخه‌دار است و با آپدیت SW کش قدیمی پاک می‌شود
  *   - خودِ اسکریپت SW با updateViaCache:'none' همیشه از شبکه چک می‌شود
+ *
+ * کار کامل بدون اینترنت (KAMIX_WARM_ASSETS):
+ *   بعد از باز شدن با اینترنت، فهرست /kamix-offline-assets.json (همهٔ
+ *   فایل‌های هش‌دار برنامه: صفحه‌ها، اسکنر، PDF، فونت) خوانده و هر فایلی که
+ *   هنوز در کش نیست دانلود می‌شود، تا صفحه‌ای که قبلاً باز نشده هم آفلاین باز
+ *   شود. فقط وقتی همهٔ فایل‌های نسخهٔ فعلی در کش نشستند، فایل‌های قدیمیِ
+ *   بی‌استفاده پاک می‌شوند (فایلی که پوستهٔ کش‌شده به آن نیاز دارد هرگز پاک نمی‌شود).
  * ============================================================ */
 const SHELL_CACHE_VERSION = "v1";
 const CACHE_NAME = "kamix-capacitor-shell-" + SHELL_CACHE_VERSION;
 const HEALTH_PARAM = "kamix-health";
 const SHELL_PATH = "/__kamix_app_shell__";
 const NAV_TIMEOUT_MS = 8000;
+const OFFLINE_MANIFEST_PATH = "/kamix-offline-assets.json";
+const WARM_CONCURRENCY = 3;
+let warmInFlight = null;
+const ASSET_REF_RE = /\/assets\/[A-Za-z0-9._-]+\.(?:js|css|wasm|woff2?|svg)/g;
 
 const NAV_FALLBACK_HTML = `<!doctype html>
 <html lang="fa" dir="rtl">
@@ -103,6 +114,15 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   const data = event.data;
+  if (data && data.type === "KAMIX_WARM_ASSETS") {
+    if (!warmInFlight) {
+      warmInFlight = warmOfflineAssets().finally(() => {
+        warmInFlight = null;
+      });
+    }
+    event.waitUntil(warmInFlight.catch(() => {}));
+    return;
+  }
   if (!data || data.type !== "KAMIX_WARM_SHELL") return;
   const urls = Array.isArray(data.urls) ? data.urls : [];
   event.waitUntil(
@@ -132,10 +152,100 @@ self.addEventListener("message", (event) => {
   );
 });
 
+async function warmOfflineAssets() {
+  let manifest;
+  try {
+    const res = await fetch(OFFLINE_MANIFEST_PATH, { cache: "no-store" });
+    if (!res || !res.ok) return;
+    manifest = await res.json();
+  } catch {
+    return; // آفلاین یا فهرست موجود نیست — دفعهٔ بعد
+  }
+  const files = Array.isArray(manifest && manifest.files)
+    ? manifest.files.filter((f) => typeof f === "string" && f.startsWith("/"))
+    : [];
+  if (files.length === 0) return;
+  const cache = await caches.open(CACHE_NAME);
+  const queue = files.slice();
+  let failed = 0;
+  async function worker() {
+    while (queue.length > 0) {
+      const path = queue.shift();
+      const href = self.location.origin + path;
+      try {
+        if (await cache.match(href, { ignoreSearch: true })) continue;
+        const res = await fetch(href, { credentials: "same-origin" });
+        if (res && res.ok) await cache.put(href, res);
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
+  if (failed === 0) await pruneStaleAssets(cache, new Set(files)).catch(() => {});
+}
+
+function assetRefs(html) {
+  const out = new Set();
+  const found = html.match(ASSET_REF_RE);
+  if (found) for (const ref of found) out.add(ref);
+  return out;
+}
+
+/**
+ * پاک‌سازی محتاطانه: فایل /assets/ فقط وقتی پاک می‌شود که نه در فهرست نسخهٔ
+ * فعلی باشد و نه هیچ HTML کش‌شده‌ای به آن ارجاع دهد. صفحهٔ HTML قدیمی (غیر از
+ * پوسته) که به فایل‌های نسخهٔ فعلی ارجاع نمی‌دهد حذف می‌شود؛ به‌جایش پوسته
+ * نشان داده می‌شود.
+ */
+async function pruneStaleAssets(cache, current) {
+  // پوسته باید از همین نسخه باشد؛ وگرنه (دیپلوی وسط کار) فعلاً چیزی پاک نکن تا
+  // فایل‌های تنبل پوستهٔ قدیمی برای باز شدن آفلاین بمانند.
+  const shell = await cache.match(SHELL_PATH);
+  if (!shell) return;
+  const shellRefs = assetRefs(await shell.clone().text());
+  if (shellRefs.size === 0 || [...shellRefs].some((r) => !current.has(r))) return;
+  const requests = await cache.keys();
+  const keep = new Set(current);
+  const shellKeys = new Set([SHELL_PATH, "/"]);
+  for (const req of requests) {
+    let url;
+    try {
+      url = new URL(req.url);
+    } catch {
+      continue;
+    }
+    if (url.pathname.startsWith("/assets/")) continue;
+    const res = await cache.match(req);
+    if (!res) continue;
+    const type = (res.headers.get("content-type") || "").toLowerCase();
+    if (!type.includes("text/html")) continue;
+    const refs = assetRefs(await res.clone().text());
+    const stale = refs.size > 0 && [...refs].some((r) => !current.has(r));
+    if (stale && !shellKeys.has(url.pathname)) {
+      await cache.delete(req);
+      continue;
+    }
+    for (const r of refs) keep.add(r);
+  }
+  for (const req of requests) {
+    let url;
+    try {
+      url = new URL(req.url);
+    } catch {
+      continue;
+    }
+    if (!url.pathname.startsWith("/assets/")) continue;
+    if (!keep.has(url.pathname)) await cache.delete(req);
+  }
+}
+
 function shouldHandle(request, url) {
   if (request.method !== "GET") return false;
   if (url.origin !== self.location.origin) return false;
   if (url.searchParams.has(HEALTH_PARAM)) return false;
+  if (url.pathname === OFFLINE_MANIFEST_PATH) return false;
   if (url.pathname.endsWith(".apk")) return false;
   if (url.pathname.startsWith("/api/")) return false;
   if (url.pathname === SHELL_PATH) return false;

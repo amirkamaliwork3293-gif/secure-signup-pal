@@ -50,7 +50,6 @@ import { WRITE_BLOCKED_EVENT } from "@/lib/subscription-access";
 import { isCapacitor } from "@/lib/isWebView";
 import {
   isCapacitorOfflineReadOnly,
-  notifyOfflineWriteBlocked,
   ONLINE_CONFIRMED_EVENT,
 } from "@/lib/online-status";
 import { rememberCloudRead } from "@/lib/offline-cache";
@@ -817,10 +816,7 @@ export function areBusinessWritesBlocked(): boolean {
 
 /** اگر نوشتن مجاز نباشد رویداد UI را می‌فرستد و false برمی‌گرداند. */
 export function assertBusinessWriteAllowed(): boolean {
-  if (isCapacitorOfflineReadOnly()) {
-    notifyOfflineWriteBlocked();
-    return false;
-  }
+  // آفلاین بودن دیگر مانع ثبت نیست؛ تغییر روی دستگاه می‌ماند و بعداً همگام می‌شود.
   if (!businessWritesBlocked) return true;
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(WRITE_BLOCKED_EVENT));

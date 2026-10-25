@@ -5,6 +5,7 @@
 // ============================================================
 
 import { isCapacitor } from "@/lib/isWebView";
+import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
 
 export const CAPACITOR_SW_URL = "/capacitor-sw.js";
 export const CAPACITOR_SW_CACHE_PREFIX = "kamix-capacitor-shell-";
@@ -52,6 +53,23 @@ function warmControlledClient(): void {
   });
 }
 
+/**
+ * همهٔ فایل‌های برنامه (صفحه‌هایی که هنوز باز نشده‌اند، اسکنر، PDF، فونت) را
+ * برای کار بدون اینترنت در کش SW می‌گذارد. فایل‌های موجود دوباره دانلود
+ * نمی‌شوند؛ پس بعد از اولین بار فقط فایل‌های عوض‌شدهٔ هر نسخه دانلود می‌شوند.
+ */
+const WARM_ASSETS_DELAY_MS = 12_000;
+let warmTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleWarmOfflineAssets(delay = WARM_ASSETS_DELAY_MS): void {
+  if (warmTimer) return;
+  warmTimer = setTimeout(() => {
+    warmTimer = null;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    navigator.serviceWorker.controller?.postMessage({ type: "KAMIX_WARM_ASSETS" });
+  }, delay);
+}
+
 async function registerCapacitorShellWorker(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
   try {
@@ -83,6 +101,7 @@ async function registerCapacitorShellWorker(): Promise<void> {
     void registration.update();
     if (navigator.serviceWorker.controller) {
       warmControlledClient();
+      scheduleWarmOfflineAssets();
     } else {
       navigator.serviceWorker.addEventListener(
         "controllerchange",
@@ -92,6 +111,9 @@ async function registerCapacitorShellWorker(): Promise<void> {
         { once: true },
       );
     }
+    // SW تازه (اولین نصب یا آپدیت) کنترل را گرفت → فهرست کامل را از همان بخواه
+    navigator.serviceWorker.addEventListener("controllerchange", () => scheduleWarmOfflineAssets());
+    window.addEventListener(ONLINE_CONFIRMED_EVENT, () => scheduleWarmOfflineAssets(3000));
     setInterval(
       () => {
         void registration.update();

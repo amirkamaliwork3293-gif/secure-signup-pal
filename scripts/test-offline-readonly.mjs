@@ -206,7 +206,21 @@ function shouldRegisterCapacitorShellWorker(native) {
   const storeSrc = readFileSync(join(here, "../src/lib/store.ts"), "utf8");
   assert.match(storeSrc, /isCapacitorOfflineReadOnly/);
   assert.match(storeSrc, /rememberCloudRead/);
-  assert.match(storeSrc, /notifyOfflineWriteBlocked/);
+  // ثبت محلی در آفلاین آزاد است (صف همگام‌سازی)؛ فقط نوشتن مستقیم سرور قفل می‌ماند.
+  const gate = storeSrc.slice(
+    storeSrc.indexOf("export function assertBusinessWriteAllowed"),
+    storeSrc.indexOf("function publishSyncState"),
+  );
+  assert.ok(gate.length > 0);
+  assert.doesNotMatch(gate, /isCapacitorOfflineReadOnly|notifyOfflineWriteBlocked/);
+  for (const f of [
+    "../src/components/InvoiceWorkspace.tsx",
+    "../src/routes/customers.tsx",
+    "../src/routes/products.tsx",
+    "../src/routes/scan.tsx",
+  ]) {
+    assert.doesNotMatch(readFileSync(join(here, f), "utf8"), /requireOnlineWrite\(\)/, f);
+  }
 
   const menuSrc = readFileSync(join(here, "../src/lib/menu.ts"), "utf8");
   assert.match(menuSrc, /assertOnlineServerWrite/);

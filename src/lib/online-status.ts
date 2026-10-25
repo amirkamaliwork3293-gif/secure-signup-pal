@@ -72,6 +72,11 @@ export function isCapacitorOfflineReadOnly(): boolean {
   return shouldBlockCapacitorWrites({ isCapacitor: isCapacitor(), kind: getOnlineKind() });
 }
 
+/**
+ * فقط برای کارهایی که مستقیم به سرور می‌نویسند (منو، پروفایل فروشگاه، آپلود).
+ * ثبت‌های محلی (فاکتور، مشتری، کالا، …) این را صدا نمی‌زنند: در آفلاین روی
+ * گوشی ذخیره و بعد از وصل شدن همگام می‌شوند.
+ */
 export function requireOnlineWrite(): boolean {
   if (!isCapacitorOfflineReadOnly()) return true;
   notifyOfflineWriteBlocked();

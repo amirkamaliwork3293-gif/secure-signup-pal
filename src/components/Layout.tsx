@@ -73,6 +73,18 @@ export function Layout({ children }: { children: ReactNode }) {
   const loggedIn = isAppSession(state);
   const readOnly = isSubscriptionReadOnly(state);
   const syncFailed = sync.failed && sync.pending > 0 && loggedIn;
+  // وضعیت offline-cached یعنی نشست زنده‌ای نیست؛ اگر چند ثانیه آنلاین بماند و
+  // ورود بی‌صدا هم انجام نشود، از کاربر می‌خواهیم یک‌بار وارد شود.
+  const offlineSession = state.status === "offline-cached";
+  const [needsOnlineLogin, setNeedsOnlineLogin] = useState(false);
+  useEffect(() => {
+    if (!offlineSession || !isOnline) {
+      setNeedsOnlineLogin(false);
+      return;
+    }
+    const t = window.setTimeout(() => setNeedsOnlineLogin(true), 8000);
+    return () => window.clearTimeout(t);
+  }, [offlineSession, isOnline]);
   const [moreOpen, setMoreOpen] = useState(false);
   const [tourReplay, setTourReplay] = useState(0);
   useEffect(() => { setMoreOpen(false); }, [pathname]);
@@ -181,14 +193,29 @@ export function Layout({ children }: { children: ReactNode }) {
           <WifiOff className="h-3.5 w-3.5 shrink-0" />
           {isCapacitorApp ? (
             <span>
-              آفلاین هستید — اطلاعات ممکن است قدیمی باشند
+              آفلاین هستید — ثبت‌ها روی همین گوشی ذخیره می‌شوند و بعد از وصل شدن به سرور می‌روند
+              {sync.pending > 0 ? ` (${sync.pending.toLocaleString("fa-IR")} بخش منتظر ارسال)` : ""}
               {lastSyncedAt
-                ? ` (آخرین به‌روزرسانی: ${formatJalaliDateTime(lastSyncedAt)})`
+                ? ` — آخرین همگام‌سازی: ${formatJalaliDateTime(lastSyncedAt)}`
                 : ""}
             </span>
           ) : (
             <span>آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد</span>
           )}
+        </div>
+      )}
+
+      {/* ورود آفلاین/نشست منقضی: اینترنت وصل است ولی برای ارسال داده باید یک‌بار وارد شد */}
+      {needsOnlineLogin && (
+        <div
+          className="sticky z-20 flex flex-wrap items-center justify-center gap-2 bg-amber-600 px-4 py-2 text-xs font-semibold text-white"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <CloudOff className="h-3.5 w-3.5 shrink-0" />
+          <span>اطلاعات این گوشی محفوظ است؛ برای ارسال آن به سرور یک‌بار دوباره وارد شوید.</span>
+          <Link to="/login" className="rounded-lg bg-white/20 px-2 py-0.5 underline-offset-2 hover:underline">
+            ورود
+          </Link>
         </div>
       )}
 

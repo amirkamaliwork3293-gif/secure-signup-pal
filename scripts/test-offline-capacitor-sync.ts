@@ -199,4 +199,35 @@ async function reconnect(d: Device) {
   cap.Capacitor = saved;
 }
 
+// ۵) اگر ذخیرهٔ فاکتور در فهرست رد شود، فاکتور باز بسته نمی‌شود (هیچ‌چیز گم نمی‌شود)
+{
+  freshWorld();
+  const A = await newDevice("A");
+  await signIn(A);
+  const g = globalThis as unknown as { window: Record<string, unknown> };
+  const prevAlert = g.window.alert;
+  let alerted = "";
+  g.window.alert = (m: string) => (alerted = m);
+  await on(A, (s) => {
+    const inv = s.addCustomInvoiceLine(s.emptyInvoice(), { name: "نان", price: 1000, quantity: 1 });
+    s.invoice.save(inv);
+    const before = s.invoice.getCurrent();
+    // شبیه رد شدن نوشتن (اسکوپ حافظه با حساب ابری نمی‌خواند)
+    const current = s.invoice.getCurrent();
+    const histBefore = s.invoice.getHistory().length;
+    localStorage.setItem("kamali.auth.scope.v1", "someone-else");
+    const out = s.invoice.archive(current);
+    localStorage.setItem("kamali.auth.scope.v1", U);
+    assert.equal(out.id, before.id);
+    assert.equal(s.invoice.getHistory().length, histBefore, "ذخیره نشد");
+    assert.equal(s.invoice.getCurrent().id, before.id, "فاکتور باز سر جایش ماند");
+    assert.equal(s.invoice.getCurrent().items.length, 1, "اقلام فاکتور باز گم نشد");
+    // دوباره امتحان: این بار ذخیره می‌شود
+    s.invoice.archive(s.invoice.getCurrent());
+    assert.equal(s.invoice.getHistory().length, histBefore + 1);
+  });
+  assert.match(alerted, /فاکتور باز مانده/);
+  g.window.alert = prevAlert;
+}
+
 console.log("offline-capacitor-sync: all checks passed");

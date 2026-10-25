@@ -10,7 +10,9 @@ import {
   stopCloudSync,
   beginUserScope,
   flushPendingCloudWrites,
+  checkInvoiceJournalSoon,
 } from "@/lib/store";
+import { syncLog } from "@/lib/sync-log";
 import { isNativeApp } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
@@ -241,6 +243,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "unauthenticated" });
   const stateRef = useRef(state);
   stateRef.current = state;
+  const loggedScope = scopedUserId(state);
+  useEffect(() => {
+    syncLog("auth", { status: state.status, user: loggedScope ? loggedScope.slice(0, 8) : null });
+    // تور ایمنی: فاکتورهای ثبت‌شدهٔ این گوشی که هنوز به سرور نرسیده‌اند گم نشوند
+    if (loggedScope) checkInvoiceJournalSoon(loggedScope);
+  }, [state.status, loggedScope]);
   const explicitSignOutRef = useRef(false);
 
   const adoptNoSession = () => {
@@ -378,6 +386,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       const cur = stateRef.current;
       const curId = scopedUserId(cur);
+      if (event !== "TOKEN_REFRESHED") syncLog("auth-event", event);
       if (event === "SIGNED_OUT") {
         if (signedOutTimer) clearTimeout(signedOutTimer);
         signedOutTimer = setTimeout(() => {

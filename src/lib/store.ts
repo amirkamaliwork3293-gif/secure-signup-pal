@@ -57,6 +57,14 @@ import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
 import { findProductByCode } from "@/lib/barcode-match";
 import { ensureRealtimeSync, startRealtimeSync, stopRealtimeSync } from "@/lib/realtime-sync";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
+import { syncLog } from "@/lib/sync-log";
+import {
+  confirmJournal,
+  forgetJournalInvoice,
+  journalInvoice,
+  missingFromHistory,
+  readJournal,
+} from "@/lib/invoice-journal";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -731,6 +739,9 @@ export function setStorageScope(scope: string | null) {
       if (last) nextScope = last;
     } catch {}
   }
+  if (localStorage.getItem(STORAGE_SCOPE_KEY) !== nextScope) {
+    syncLog("scope", { to: nextScope.slice(0, 8), asked: scope ? scope.slice(0, 8) : null });
+  }
   localStorage.setItem(STORAGE_SCOPE_KEY, nextScope);
   window.dispatchEvent(
     new CustomEvent("store-change", { detail: { scopeChanged: true, scope: nextScope } }),
@@ -939,11 +950,15 @@ function stampOpenInvoices(value: unknown): unknown {
 }
 
 function write<T>(key: string, value: T): boolean {
-  if (!assertBusinessWriteAllowed()) return false;
+  if (!assertBusinessWriteAllowed()) {
+    syncLog("write-blocked", { key });
+    return false;
+  }
   // تب دیگری روی همین مرورگر با اکانت دیگری وارد شده و اسکوپ مشترک localStorage
   // عوض شده، ولی این تب هنوز اکانت قبلی است: نوشتن دادهٔ این تب در حافظهٔ اکانت دیگر ممنوع.
   if (cloudUserId && getStorageScope() !== cloudUserId) {
     console.warn("[store] write refused: storage scope belongs to another account");
+    syncLog("write-refused-scope", { key, scope: getStorageScope().slice(0, 8), cloud: cloudUserId.slice(0, 8) });
     return false;
   }
   const field = CLOUD_FIELDS[key];
@@ -1212,6 +1227,7 @@ function rememberRemovedIds(field: string, prev: unknown, next: unknown) {
     if (id && !nextSet.has(id)) removed.push(id);
   }
   if (removed.length === 0 && nextIds.length === 0) return;
+  if (removed.length) syncLog("removed", { field, ids: removed.slice(0, 5), count: removed.length });
   const map = readTombstones();
   const cur = new Set(map[field] || []);
   for (const id of removed) cur.add(id);
@@ -1485,8 +1501,15 @@ async function runFlushCloudPush() {
   pushTimer = null;
   let guard = 0;
   while (guard++ < 8) {
-    if (!cloudUserId) return;
-    if (isCapacitorOfflineReadOnly()) return;
+    const waiting = Object.keys(pendingPush);
+    if (!cloudUserId) {
+      if (waiting.length) syncLog("push-wait", "no-session");
+      return;
+    }
+    if (isCapacitorOfflineReadOnly()) {
+      if (waiting.length) syncLog("push-wait", "offline");
+      return;
+    }
     if (
       !canFlushCloudPush({
         cloudUserId,
@@ -1494,6 +1517,9 @@ async function runFlushCloudPush() {
         storageScope: getStorageScope(),
       })
     ) {
+      if (waiting.length) {
+        syncLog("push-wait", cloudHydrated ? "scope-mismatch" : "not-read-yet");
+      }
       return;
     }
     const fieldsToPush = { ...pendingPush };
@@ -1513,6 +1539,7 @@ async function runFlushCloudPush() {
       const result = await compareAndSwapUserData(userId, fieldsToPush);
       if (cloudUserId !== userId || getStorageScope() !== userId) return;
       if (result.kind === "conflict") {
+        syncLog("push-conflict", fieldNames);
         // دستگاه دیگری از آخرین خواندن ما چیزی ذخیره کرده. هرگز روی آن نمی‌نویسیم:
         // نسخهٔ تازهٔ سرور را می‌خوانیم، با حافظهٔ محلی ادغام می‌کنیم و دوباره می‌فرستیم.
         await mergeLatestServerRow(userId);
@@ -1536,6 +1563,11 @@ async function runFlushCloudPush() {
         }
       }
       clearDirty(confirmed);
+      syncLog("push-ok", {
+        fields: confirmed,
+        invoices: Array.isArray(fieldsToPush.invoices) ? fieldsToPush.invoices.length : undefined,
+        skipped: result.skipped.length ? result.skipped : undefined,
+      });
       // همان نسخه‌ای که کلیدهای تغییرکرده را داشت روی سرور نشست
       if (confirmed.includes("settings")) clearSettingsDirtyKeys();
       retryDelay = 5000;
@@ -1553,6 +1585,7 @@ async function runFlushCloudPush() {
       if (Object.keys(pendingPush).length === 0) return;
     } catch (e) {
       console.error("[store] cloud push failed", { fields: fieldNames, error: e });
+      syncLog("push-fail", (e as { message?: string })?.message || String(e));
       // کاربر در حین آپلود عوض شده (خروج یا ورود مستقیم با اکانت دیگر): دادهٔ کاربر
       // قبلی هرگز به صف کاربر فعلی برنمی‌گردد. نشانهٔ dirty در حافظهٔ خودش باقی است.
       if (cloudUserId !== userId || getStorageScope() !== userId) return;
@@ -1739,6 +1772,50 @@ function applyCloudRow(data: Record<string, unknown>) {
   applyMerged("manual_ledger", MANUAL_LEDGER_KEY, data.manual_ledger);
 }
 
+let journalBusy = false;
+
+/**
+ * تور ایمنی: فاکتوری که روی این گوشی ثبت شده، هنوز به سرور نرسیده و از فهرست
+ * غیب شده است برمی‌گردد (و دوباره ارسال می‌شود). serverInvoices اگر داده شود،
+ * فاکتورهای دیده‌شده روی سرور «تأییدشده» علامت می‌خورند.
+ */
+async function reconcileInvoiceJournal(userId: string, serverInvoices?: unknown): Promise<void> {
+  if (!userId || userId === "anon" || journalBusy) return;
+  journalBusy = true;
+  try {
+    if (Array.isArray(serverInvoices)) {
+      await confirmJournal(userId, historyIds(serverInvoices));
+    }
+    const journal = await readJournal(userId);
+    if (journal.length === 0 || getStorageScope() !== userId) return;
+    const hist = read<Invoice[]>(HISTORY_KEY, []);
+    const lost = missingFromHistory(journal, historyIds(hist));
+    if (lost.length === 0) return;
+    const restored = lost.map((e) => e.row as Invoice);
+    const ok = write(HISTORY_KEY, [...restored, ...hist]);
+    syncLog(ok ? "journal-restored" : "journal-restore-failed", {
+      ids: lost.map((e) => e.id).slice(0, 5),
+      count: lost.length,
+    });
+    if (ok && cloudUserId === userId && cloudHydrated) {
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(flushCloudPush, 600);
+    }
+  } catch (e) {
+    syncLog("journal-error", (e as { message?: string })?.message || String(e));
+  } finally {
+    journalBusy = false;
+  }
+}
+
+/** بعد از باز شدن برنامه (حتی آفلاین): فاکتورهای گم‌شدهٔ این گوشی را برگردان. */
+export function checkInvoiceJournalSoon(userId: string): void {
+  if (typeof window === "undefined" || !userId || userId === "anon") return;
+  setTimeout(() => {
+    if (getStorageScope() === userId) void reconcileInvoiceJournal(userId);
+  }, 1500);
+}
+
 async function pullUserData(
   userId: string,
   opts?: { refresh?: boolean; epoch?: number },
@@ -1776,6 +1853,7 @@ async function pullUserData(
       return;
     }
     if (!data) {
+      syncLog("pull-no-row");
       // اولین دستگاه این کاربر: هر چیزی که به‌صورت محلی وجود دارد باید بالا برود.
       // به‌جای insert دستی (که قبلاً فقط ۵ فیلد را می‌فرستاد و مشتریان/هزینه‌ها/
       // خریدها/... را جا می‌انداخت) همه‌ی فیلدها را در صف push می‌گذاریم تا از
@@ -1815,12 +1893,23 @@ async function pullUserData(
     ) {
       return;
     }
+    const invBefore = read<unknown[]>(HISTORY_KEY, []).length;
     applyCloudRow(data as Record<string, unknown>);
+    syncLog(opts?.refresh ? "refresh-ok" : "pull-ok", {
+      invoices: {
+        local: invBefore,
+        cloud: Array.isArray(data.invoices) ? data.invoices.length : null,
+        after: read<unknown[]>(HISTORY_KEY, []).length,
+      },
+      dirty: [...readDirtySet()],
+    });
     lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
     markCloudHydrated();
+    void reconcileInvoiceJournal(userId, data.invoices);
     if (isNativeApp()) rememberCloudRead(userId);
   } catch (e) {
     console.error("[store] hydrate failed", e);
+    syncLog("pull-fail", (e as { message?: string })?.message || String(e));
     publishSyncState({
       pending: readDirtySet().size,
       failed: true,
@@ -2333,7 +2422,26 @@ export const invoice = {
     if (inventoryTrackingEnabled()) {
       reconcileStockForInvoiceEdit([], stamped.items);
     }
-    write(HISTORY_KEY, [stamped, ...hist]);
+    void journalInvoice(getStorageScope(), stamped);
+    const saved = write(HISTORY_KEY, [stamped, ...hist]);
+    syncLog(saved ? "invoice-saved" : "invoice-NOT-saved", {
+      id: stamped.id,
+      total: hist.length + (saved ? 1 : 0),
+    });
+    if (!saved) {
+      // فاکتور در فهرست ننشست: فاکتور باز را نبند تا هیچ‌چیز گم نشود.
+      if (!businessWritesBlocked && typeof window !== "undefined") {
+        try {
+          window.alert(
+            "ثبت این فاکتور روی گوشی انجام نشد و فاکتور باز مانده است (چیزی پاک نشد).\n" +
+              "برنامه را کامل ببندید، دوباره باز کنید و «ثبت فاکتور» را دوباره بزنید.",
+          );
+        } catch {
+          /* noop */
+        }
+      }
+      return inv;
+    }
     addIdToSet(CLOSED_OPEN_IDS_KEY, stamped.id);
     if (stamped.accountId) syncInvoiceAccountTx(stamped);
     // Remove archived invoice from the open board (and ensure at least one tab remains)
@@ -2362,6 +2470,7 @@ export const invoice = {
       HISTORY_KEY,
       hist.map((inv) => (inv.id === updated.id ? fixed : inv)),
     );
+    if (ok) void journalInvoice(getStorageScope(), fixed);
     // واریز به حساب/کارت همین فاکتور با مبلغ و تاریخ جدید هماهنگ می‌شود
     if (ok && prev && (prev.accountId || fixed.accountId)) syncInvoiceAccountTx(fixed);
   },
@@ -2381,7 +2490,10 @@ export const invoice = {
       HISTORY_KEY,
       hist.filter((inv) => inv.id !== id),
     );
-    if (ok) removeInvoiceAccountTx(id);
+    if (ok) {
+      removeInvoiceAccountTx(id);
+      void forgetJournalInvoice(getStorageScope(), id);
+    }
   },
 };
 

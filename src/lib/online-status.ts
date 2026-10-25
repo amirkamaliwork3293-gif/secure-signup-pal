@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { isNativeApp } from "@/lib/isWebView";
 import { readCloudReadAt } from "@/lib/offline-cache";
 import { resolveSupabaseUrl } from "@/integrations/supabase/public-config";
+import { syncLog } from "@/lib/sync-log";
 import {
   decideOnlineKind,
   shouldBlockCapacitorWrites,
@@ -96,8 +97,14 @@ export function assertOnlineServerWrite(): void {
   throw new OfflineWriteError();
 }
 
+let loggedKind: OnlineKind | null = null;
+
 function publish(): void {
   kind = currentKind();
+  if (kind !== loggedKind && kind !== "checking") {
+    loggedKind = kind;
+    syncLog("net", kind);
+  }
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent("kamix-online-status", { detail: snapshot() }));
 }

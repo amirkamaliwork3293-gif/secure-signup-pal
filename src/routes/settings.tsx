@@ -20,6 +20,7 @@ import { isNativeApp } from "@/lib/isWebView";
 import { rememberOfflineLogin } from "@/lib/offline-login";
 import { ApkDownloadButton } from "@/components/ApkDownloadButton";
 import { ReceiptSettingsCard } from "@/components/ReceiptSettingsCard";
+import { SyncStatusCard } from "@/components/SyncStatusCard";
 import {
   Settings,
   Save,
@@ -388,6 +389,9 @@ function SettingsPageInner() {
 
       {/* پروفایل عمومی فروشگاه */}
       <StoreProfileSection shopName={shopName} />
+
+      {/* وضعیت همگام‌سازی و آفلاین — برای پیگیری مشکل ارسال اطلاعات */}
+      <SyncStatusCard />
 
       {/* دانلود نسخه اندروید — همیشه در دسترس */}
       <div className="mt-4 text-center">

@@ -138,6 +138,8 @@ function shouldHandle(request, url) {
   if (url.searchParams.has(HEALTH_PARAM)) return false;
   if (url.pathname.endsWith(".apk")) return false;
   if (url.pathname.startsWith("/api/")) return false;
+  // مسیر جایگزین سوپابیس: دادهٔ کاربر است، هرگز کش نشود
+  if (url.pathname.startsWith("/sb/")) return false;
   if (url.pathname === SHELL_PATH) return false;
   return true;
 }

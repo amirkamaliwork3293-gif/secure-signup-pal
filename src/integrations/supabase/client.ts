@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { resolveSupabasePublishableKey, resolveSupabaseUrl } from './public-config';
+import { browserProxyBase, browserStorage, createFallbackFetch } from './fallback-fetch';
 
 function createSupabaseClient() {
   const SUPABASE_URL = resolveSupabaseUrl();
@@ -15,6 +16,14 @@ function createSupabaseClient() {
   }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    // اگر دستگاه به supabase.co نرسد، همان درخواست از kamixapp.ir/sb می‌رود.
+    global: {
+      fetch: createFallbackFetch({
+        supabaseUrl: SUPABASE_URL,
+        proxyBase: browserProxyBase,
+        storage: browserStorage(),
+      }),
+    },
     auth: {
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: true,

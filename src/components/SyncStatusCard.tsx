@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { invoice, formatJalaliDateTime, useSyncState } from "@/lib/store";
 import { checkConnectionNow, useOnlineStatus } from "@/lib/online-status";
 import { isCapacitor, isNativeApp } from "@/lib/isWebView";
-import { formatSyncLog, readSyncLog } from "@/lib/sync-log";
+import { AUTH_FA, formatSyncLog, readSyncLog, syncErrorFa } from "@/lib/sync-log";
 import { readJournal } from "@/lib/invoice-journal";
 import { authUserId } from "@/lib/subscription-access";
 import { getOfflineReadiness, OFFLINE_READY_KEY } from "@/registerSW";
@@ -49,24 +49,27 @@ export function SyncStatusCard() {
   const rows: [string, string][] = [
     ["داخل اپ اندروید", isNativeApp() ? (isCapacitor() ? "بله" : "بله (بدون پل)") : "خیر (مرورگر)"],
     ["اتصال", kind === "online" ? "آنلاین" : kind === "offline" ? "آفلاین" : "در حال بررسی"],
-    ["وضعیت ورود", state.status],
+    ["وضعیت ورود", AUTH_FA[state.status] || state.status],
     [
       "آمادهٔ کار آفلاین",
       readiness.known
         ? readiness.complete
           ? "کامل ✓"
-          : `${readiness.done}/${readiness.total}`
+          : `${readiness.done.toLocaleString("fa-IR")} از ${readiness.total.toLocaleString("fa-IR")}`
         : readyVersion
           ? `کامل (نسخهٔ ${readyVersion.slice(0, 6)})`
           : "نامشخص",
     ],
-    ["بخش‌های منتظر ارسال", String(sync.pending)],
+    ["بخش‌های منتظر ارسال", sync.pending.toLocaleString("fa-IR")],
     ["آخرین ارسال موفق", sync.lastOkAt ? formatJalaliDateTime(sync.lastOkAt) : "—"],
     ["آخرین همگام‌سازی", lastSyncedAt ? formatJalaliDateTime(lastSyncedAt) : "—"],
-    ["آخرین خطا", sync.failed ? sync.lastError || "خطا" : "—"],
+    ["آخرین خطا", sync.failed ? syncErrorFa(sync.lastError || "") : "—"],
     ["حافظهٔ گوشی", sync.localStorageFull ? "پر است ⚠️" : "عادی"],
-    ["فاکتورهای روی گوشی", String(history.length)],
-    ["فاکتورهای هنوز تأییدنشده روی سرور", journalPending === null ? "…" : String(journalPending)],
+    ["فاکتورهای روی گوشی", history.length.toLocaleString("fa-IR")],
+    [
+      "فاکتورهای هنوز تأییدنشده روی سرور",
+      journalPending === null ? "…" : journalPending.toLocaleString("fa-IR"),
+    ],
   ];
 
   const sendNow = async () => {
@@ -83,8 +86,9 @@ export function SyncStatusCard() {
   const copy = async () => {
     const text = [
       ...rows.map(([k, v]) => `${k}: ${v}`),
-      `کاربر: ${userId ? userId.slice(0, 8) : "-"}`,
+      `کد حساب: ${userId ? userId.slice(0, 8) : "-"}`,
       "",
+      "رویدادهای اخیر:",
       formatSyncLog(readSyncLog()),
     ].join("\n");
     try {
@@ -150,7 +154,7 @@ export function SyncStatusCard() {
             </button>
           </div>
           <pre
-            dir="ltr"
+            dir="rtl"
             className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-muted p-2 text-[10px] leading-4"
           >
             {logText || "—"}

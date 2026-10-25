@@ -16,33 +16,6 @@ export function isCapacitor(): boolean {
   return !!cap && (typeof cap.isNativePlatform === "function" ? cap.isNativePlatform() : true);
 }
 
-const NATIVE_APP_FLAG_KEY = "kamix.native.app.v1";
-
-/**
- * داخل اپ اندروید کامیکس هستیم — حتی وقتی صفحه بدون اینترنت از حافظهٔ اپ
- * (سرویس‌ورکر) باز شده و پل Capacitor روی WebViewهای قدیمی تزریق نشده است.
- * هر بار که پل دیده شود، علامتی در حافظهٔ همین WebView گذاشته می‌شود. حافظهٔ
- * WebView مخصوص همین اپ است؛ مرورگر گوشی (کروم و …) هرگز این علامت را ندارد.
- * برای تصمیم‌های آفلاین/همگام‌سازی از این استفاده کنید؛ برای صدا زدن پلاگین‌های
- * نیتیو همچنان isCapacitor.
- */
-export function isNativeApp(): boolean {
-  if (typeof window === "undefined") return false;
-  if (isCapacitor()) {
-    try {
-      if (localStorage.getItem(NATIVE_APP_FLAG_KEY) !== "1") localStorage.setItem(NATIVE_APP_FLAG_KEY, "1");
-    } catch {
-      /* noop */
-    }
-    return true;
-  }
-  try {
-    return localStorage.getItem(NATIVE_APP_FLAG_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 function uaLooksLikeWebView(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";

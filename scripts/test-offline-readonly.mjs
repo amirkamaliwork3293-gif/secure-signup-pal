@@ -51,8 +51,8 @@ function shouldRegisterCapacitorShellWorker(native) {
 {
   const url = healthCheckUrl("https://kamixapp.ir");
   assert.match(url, new RegExp(`${HEALTH_CHECK_PARAM}=1`));
-  assert.ok(HEALTH_TIMEOUT_MS <= 8000);
-  assert.ok(HEALTH_TIMEOUT_MS >= 4000);
+  assert.ok(HEALTH_TIMEOUT_MS <= 3000);
+  assert.ok(HEALTH_TIMEOUT_MS >= 2000);
 }
 
 {
@@ -189,7 +189,7 @@ function shouldRegisterCapacitorShellWorker(native) {
   assert.match(oldSw, /Self-destructing/);
 
   const register = readFileSync(join(root, "../src/registerSW.ts"), "utf8");
-  assert.match(register, /isNativeApp/);
+  assert.match(register, /isCapacitor/);
   assert.match(register, /updateViaCache/);
   assert.match(register, /capacitor-sw\.js/);
 
@@ -206,21 +206,7 @@ function shouldRegisterCapacitorShellWorker(native) {
   const storeSrc = readFileSync(join(here, "../src/lib/store.ts"), "utf8");
   assert.match(storeSrc, /isCapacitorOfflineReadOnly/);
   assert.match(storeSrc, /rememberCloudRead/);
-  // ثبت محلی در آفلاین آزاد است (صف همگام‌سازی)؛ فقط نوشتن مستقیم سرور قفل می‌ماند.
-  const gate = storeSrc.slice(
-    storeSrc.indexOf("export function assertBusinessWriteAllowed"),
-    storeSrc.indexOf("function publishSyncState"),
-  );
-  assert.ok(gate.length > 0);
-  assert.doesNotMatch(gate, /isCapacitorOfflineReadOnly|notifyOfflineWriteBlocked/);
-  for (const f of [
-    "../src/components/InvoiceWorkspace.tsx",
-    "../src/routes/customers.tsx",
-    "../src/routes/products.tsx",
-    "../src/routes/scan.tsx",
-  ]) {
-    assert.doesNotMatch(readFileSync(join(here, f), "utf8"), /requireOnlineWrite\(\)/, f);
-  }
+  assert.match(storeSrc, /notifyOfflineWriteBlocked/);
 
   const menuSrc = readFileSync(join(here, "../src/lib/menu.ts"), "utf8");
   assert.match(menuSrc, /assertOnlineServerWrite/);

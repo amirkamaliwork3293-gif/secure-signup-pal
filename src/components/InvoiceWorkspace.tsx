@@ -71,6 +71,7 @@ import { InvoiceSavedDialog } from "@/components/InvoiceSavedDialog";
 import { GettingStartedChecklist } from "@/components/GettingStartedChecklist";
 import { ChequeEditor, emptyCheque } from "@/components/ChequeEditor";
 import { useSubscriptionAccess } from "@/components/SubscriptionAccess";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { StockNoticeBanner } from "@/components/StockGuardUi";
 import { InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
 import { CustomerChoiceDialog } from "@/components/CustomerChoiceDialog";
@@ -339,6 +340,7 @@ export function InvoiceWorkspace() {
    */
   const checkout = (picked?: Customer | "new") => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     if (inv.items.length === 0) return;
     let customer: CustomerInfo = customerState;
     const hasCustomer = !!(
@@ -482,6 +484,7 @@ export function InvoiceWorkspace() {
    */
   const saveCustomer = (picked?: Customer | "new") => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     let next: CustomerInfo = customer;
     try {
       const hasInfo = !!(next.firstName?.trim() || next.lastName?.trim() || next.phone?.trim());
@@ -530,6 +533,7 @@ export function InvoiceWorkspace() {
 
   const addFromSearch = (productId: string) => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     const { invoice: next, result } = tryAddProductToInvoice(inv, p);
@@ -569,6 +573,7 @@ export function InvoiceWorkspace() {
   // افزودن کالای دستی به فاکتور — کالایی که در انبار/دسته‌بندی محصولات نیست
   const addManualItem = () => {
     if (!requireActive()) return;
+    if (!requireOnlineWrite()) return;
     const price = parseNumberInput(manualPrice);
     const qty = parseNumberInput(manualQty) || 1;
     if (!manualName.trim() || price <= 0 || qty <= 0) {

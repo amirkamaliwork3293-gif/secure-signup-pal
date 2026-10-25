@@ -10,10 +10,8 @@ import {
   stopCloudSync,
   beginUserScope,
   flushPendingCloudWrites,
-  checkInvoiceJournalSoon,
 } from "@/lib/store";
-import { syncLog } from "@/lib/sync-log";
-import { isNativeApp } from "@/lib/isWebView";
+import { isCapacitor } from "@/lib/isWebView";
 import { isCapacitorOfflineReadOnly } from "@/lib/online-status";
 import { clearUserOfflineCache } from "@/lib/offline-cache";
 import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
@@ -28,13 +26,6 @@ import {
   writeStaySignedIn,
 } from "@/lib/auth-session";
 import { keepLiveAdminRole } from "@/lib/account-isolation";
-import {
-  forgetOfflineLogin,
-  hasOfflineLoginFor,
-  isInvalidCredentialsError,
-  rememberOfflineLogin,
-  usernameToAuthEmail,
-} from "@/lib/offline-login";
 
 type AuthState =
   | { status: "loading" }
@@ -49,11 +40,6 @@ type AuthContextValue = {
   state: AuthState;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  /**
-   * ورود بدون اینترنت (اپ اندروید): بعد از تطبیق رمز با اثر ذخیره‌شده روی گوشی،
-   * کاربر با داده‌های همین گوشی وارد می‌شود. false یعنی دادهٔ این حساب روی گوشی نیست.
-   */
-  enterOfflineSession: (userId: string, username: string, password: string) => boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -182,10 +168,12 @@ async function loadState(
   return toAuthState(session, picked.profile, isAdmin);
 }
 
-function deviceAuthFor(userId: string): AuthState | null {
-  const cached = readProfileCache(userId);
-  if (!cached || cached.profile.id !== userId) return null;
-  setStorageScope(userId);
+function restoreDeviceAuth(): AuthState | null {
+  const stayId = readStaySignedIn();
+  if (!stayId) return null;
+  const cached = readProfileCache(stayId);
+  if (!cached || cached.profile.id !== stayId) return null;
+  setStorageScope(stayId);
   const kind = classifyUserAccess(cached.profile, false);
   if (kind === "pending") return { status: "pending", username: cached.profile.username };
   if (kind === "rejected") return { status: "rejected", username: cached.profile.username };
@@ -193,27 +181,12 @@ function deviceAuthFor(userId: string): AuthState | null {
     status: "offline-cached",
     username: cached.profile.username,
     profile: cached.profile,
-    userId,
+    userId: stayId,
   };
 }
 
-function restoreDeviceAuth(): AuthState | null {
-  const stayId = readStaySignedIn();
-  if (!stayId) return null;
-  return deviceAuthFor(stayId);
-}
-
-/**
- * یوزرنیم/رمزی که با آن ورود آفلاین انجام شده — فقط در حافظهٔ همین اجرا (نه
- * روی دیسک) تا وقتی سرور دوباره در دسترس شد، بی‌صدا ورود واقعی انجام شود و
- * تغییرات آفلاین به سرور بروند. با بسته شدن برنامه از بین می‌رود؛ آن‌وقت نوار
- * «یک‌بار دوباره وارد شوید» نشان داده می‌شود و داده‌ها روی گوشی منتظر می‌مانند.
- */
-let offlineReauth: { userId: string; username: string; password: string } | null = null;
-let reauthInFlight = false;
-
 function capacitorNetworkDown(): boolean {
-  if (!isNativeApp()) return false;
+  if (!isCapacitor()) return false;
   if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
   return isCapacitorOfflineReadOnly();
 }
@@ -243,12 +216,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "unauthenticated" });
   const stateRef = useRef(state);
   stateRef.current = state;
-  const loggedScope = scopedUserId(state);
-  useEffect(() => {
-    syncLog("auth", { status: state.status, user: loggedScope ? loggedScope.slice(0, 8) : null });
-    // تور ایمنی: فاکتورهای ثبت‌شدهٔ این گوشی که هنوز به سرور نرسیده‌اند گم نشوند
-    if (loggedScope) checkInvoiceJournalSoon(loggedScope);
-  }, [state.status, loggedScope]);
   const explicitSignOutRef = useRef(false);
 
   const adoptNoSession = () => {
@@ -280,43 +247,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "unauthenticated" });
   };
 
-  const trySilentReauth = async () => {
-    const creds = offlineReauth;
-    const cur = stateRef.current;
-    if (!creds || reauthInFlight) return;
-    if (cur.status !== "offline-cached" || cur.userId !== creds.userId) return;
-    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-    reauthInFlight = true;
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: usernameToAuthEmail(creds.username),
-        password: creds.password,
-      });
-      if (error) {
-        if (isInvalidCredentialsError(error)) {
-          // رمز روی سرور عوض شده — رمز قدیمی دیگر نه آفلاین و نه بی‌صدا استفاده نمی‌شود.
-          offlineReauth = null;
-          forgetOfflineLogin(creds.username);
-        }
-        return;
-      }
-      offlineReauth = null;
-      if (data.user?.id) void rememberOfflineLogin(creds.username, creds.password, data.user.id);
-      // رویداد SIGNED_IN خودش syncSession را اجرا می‌کند (وضعیت offline-cached است).
-    } catch {
-      /* هنوز در دسترس نیست — دفعهٔ بعد */
-    } finally {
-      reauthInFlight = false;
-    }
-  };
-
   const refreshProfile = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session) {
       adoptNoSession();
-      void trySilentReauth();
       return;
     }
     const cur = stateRef.current;
@@ -386,7 +322,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       const cur = stateRef.current;
       const curId = scopedUserId(cur);
-      if (event !== "TOKEN_REFRESHED") syncLog("auth-event", event);
       if (event === "SIGNED_OUT") {
         if (signedOutTimer) clearTimeout(signedOutTimer);
         signedOutTimer = setTimeout(() => {
@@ -411,21 +346,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       void refreshProfile();
     };
-    // ورود آفلاین: تا وقتی ورود واقعی انجام نشده، هر دقیقه بی‌صدا امتحان کن
-    // (برای وقتی که سایت باز می‌شود ولی سرور داده هنوز در دسترس نیست).
-    // نشست زنده نیست (offline-cached): هر ۳۰ ثانیه اگر نشست ذخیره‌شده دوباره معتبر شد
-    // (سرور برگشت) وارد شو تا تغییرات آفلاین ارسال شوند؛ وگرنه ورود بی‌صدا با رمز همین اجرا.
-    const reauthTimer = setInterval(() => {
-      if (stateRef.current.status !== "offline-cached") return;
-      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-      void supabase.auth
-        .getSession()
-        .then(({ data: { session } }) => {
-          if (session) void refreshProfile();
-          else void trySilentReauth();
-        })
-        .catch(() => {});
-    }, 30_000);
     const onOffline = () => {
       try {
         void supabase.auth.stopAutoRefresh();
@@ -433,7 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         /* noop */
       }
     };
-    if (isNativeApp()) {
+    if (isCapacitor()) {
       window.addEventListener("online", onOnline);
       window.addEventListener("offline", onOffline);
       window.addEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
@@ -442,10 +362,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       disposed = true;
-      clearInterval(reauthTimer);
       if (signedOutTimer) clearTimeout(signedOutTimer);
       subscription.unsubscribe();
-      if (isNativeApp()) {
+      if (isCapacitor()) {
         window.removeEventListener("online", onOnline);
         window.removeEventListener("offline", onOffline);
         window.removeEventListener(ONLINE_CONFIRMED_EVENT, onOnline);
@@ -462,41 +381,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     explicitSignOutRef.current = true;
-    offlineReauth = null;
     clearStaySignedIn();
     const prev = stateRef.current;
     const prevId = scopedUserId(prev);
     stopCloudSync();
     await supabase.auth.signOut();
-    if (prev.status === "offline-cached") {
-      // بدون نشست زنده، signOut رویداد SIGNED_OUT نمی‌دهد؛ پرچم را همین‌جا برگردان.
-      explicitSignOutRef.current = false;
-    }
     // تغییرات ذخیره‌نشده روی همین دستگاه می‌مانند تا ورود بعدی همین حساب آن‌ها را بفرستد.
-    // اگر ورود آفلاین برای این حساب روی این گوشی فعال است، داده‌ها (مثل سایت) روی
-    // گوشی می‌مانند تا بعد از خروج هم بدون اینترنت بتوان دوباره وارد شد و کار کرد.
-    if (isNativeApp() && prevId && synced && !hasOfflineLoginFor(prevId)) {
-      clearUserOfflineCache(prevId);
-    }
+    if (isCapacitor() && prevId && synced) clearUserOfflineCache(prevId);
     setStorageScope(null);
     setState({ status: "unauthenticated" });
   };
 
-  const enterOfflineSession = (userId: string, username: string, password: string): boolean => {
-    if (!userId) return false;
-    const cur = stateRef.current;
-    if (scopedUserId(cur) && scopedUserId(cur) !== userId) stopCloudSync();
-    const next = deviceAuthFor(userId);
-    if (!next) return false;
-    explicitSignOutRef.current = false;
-    writeStaySignedIn(userId);
-    offlineReauth = next.status === "offline-cached" ? { userId, username, password } : null;
-    setState(next);
-    return true;
-  };
-
   return (
-    <AuthContext.Provider value={{ state, signOut, refreshProfile, enterOfflineSession }}>
+    <AuthContext.Provider value={{ state, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

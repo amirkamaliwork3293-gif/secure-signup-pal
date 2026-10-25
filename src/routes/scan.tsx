@@ -12,6 +12,7 @@ import {
   evaluateInvoiceStockAdd,
   productStockHint,
 } from "@/lib/store";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { CheckCircle2, AlertCircle, Plus, Search, X, Package, Mic } from "lucide-react";
 
 export const Route = createFileRoute("/scan")({
@@ -59,6 +60,7 @@ function ScanPageInner() {
         setPaused(true);
         return;
       }
+      if (!requireOnlineWrite()) return;
       lastAddRef.current = { id: product.id, at: now };
       invoice.save(next);
       setLast({
@@ -79,6 +81,7 @@ function ScanPageInner() {
   }, []);
 
   const addFromSearch = (productId: string) => {
+    if (!requireOnlineWrite()) return;
     const p = allProducts.find((x) => x.id === productId);
     if (!p) return;
     const current = invoice.getCurrent();

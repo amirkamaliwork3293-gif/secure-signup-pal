@@ -24,6 +24,7 @@ import {
 import { generateUniqueCode } from "@/lib/barcode-code";
 import { savePdf, OLD_APP_MESSAGE, isAppShell } from "@/lib/print";
 import { formatNumber, products, type Product } from "@/lib/store";
+import { requireOnlineWrite } from "@/lib/online-status";
 
 export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClose: () => void }) {
   const [layout, setLayout] = useState<PrintLayout>(() => sanitizeLayout(loadPrintLayout()));
@@ -78,6 +79,7 @@ export function BarcodePrintModal({ items, onClose }: { items: Product[]; onClos
 
   const generateMissing = () => {
     if (missing.length === 0) return;
+    if (!requireOnlineWrite()) return;
     const taken = new Set(
       products
         .getAll()

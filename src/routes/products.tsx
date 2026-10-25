@@ -1,4 +1,5 @@
 import { AuthGuard } from "@/components/AuthGuard";
+import { requireOnlineWrite } from "@/lib/online-status";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { Layout } from "@/components/Layout";
@@ -123,6 +124,7 @@ function ProductsPageInner() {
 
   const remove = (id: string) => {
     if (!confirm("حذف این محصول؟")) return;
+    if (!requireOnlineWrite()) return;
     products.remove([id]);
   };
 
@@ -134,12 +136,14 @@ function ProductsPageInner() {
       )
     )
       return;
+    if (!requireOnlineWrite()) return;
     // فقط همان محصولاتی که کاربر دید و تأیید کرد؛ کالایی که همین حالا از دستگاه دیگر رسیده حذف نمی‌شود.
     products.remove(list.map((p) => p.id));
     setSelected(new Set());
   };
 
   const onCreate = (p: Omit<Product, "id">) => {
+    if (!requireOnlineWrite()) return;
     if (p.code && products.getAll().some((x) => x.code === p.code)) {
       alert("محصولی با همین کد قبلاً ثبت شده است.");
       return;
@@ -150,6 +154,7 @@ function ProductsPageInner() {
   };
 
   const onEdit = (p: Product) => {
+    if (!requireOnlineWrite()) return;
     const original = editTarget && editTarget.id === p.id ? editTarget : p;
     let edited = p;
     // تغییر واحد بین کیلوگرم/گرم (یا لیتر/میلی‌لیتر): موجودی و قیمت‌ها فقط با تأیید کاربر

@@ -636,6 +636,40 @@ export function unionMergeById(
   return [...map.values(), ...noId];
 }
 
+/**
+ * نسخهٔ ابر همان‌طور که کاربر می‌بیند: ردیف‌های حذف‌شده (tombstone) و اقلام حذف‌شدهٔ
+ * دفتر داخلی کنار گذاشته می‌شوند. سرور این ردیف‌ها را عمداً نگه می‌دارد (حذف نرم،
+ * مهاجرت 20261002120000)، پس آپلود دوباره فقط برای «پاک کردن» آن‌ها روی سرور هیچ
+ * اثری ندارد جز عوض شدن updated_at — که دستگاه دیگر را به دریافت و آپلود دوباره
+ * وامی‌داشت (حلقهٔ بی‌پایان بین دو دستگاه باز). برای مقایسه به‌کار می‌رود، نه ذخیره.
+ */
+export function withoutTombstonedRows(
+  rows: unknown,
+  tombstoned: ReadonlySet<string> = new Set(),
+  nested?: NestedLedgerOptions,
+): unknown[] {
+  const arr = Array.isArray(rows) ? rows : [];
+  const nestedGone = nested?.tombstoned;
+  if (tombstoned.size === 0 && (!nested || !nestedGone || nestedGone.size === 0)) return arr;
+  const out: unknown[] = [];
+  for (const row of arr) {
+    const id = catalogRowId(row);
+    if (id && tombstoned.has(id)) continue;
+    const rec = nested && nestedGone && nestedGone.size > 0 ? asRecord(row) : null;
+    const inner = rec ? rec[nested!.key] : undefined;
+    if (rec && Array.isArray(inner)) {
+      const kept = inner.filter((e) => {
+        const eid = catalogRowId(e);
+        return !eid || !nestedGone!.has(eid);
+      });
+      out.push(kept.length === inner.length ? row : { ...rec, [nested!.key]: kept });
+      continue;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 /** شناسه‌های حذف‌شده به‌تفکیک ستون ابری — باید بین دستگاه‌ها یکی شود. */
 export type TombstoneMap = Record<string, string[]>;
 

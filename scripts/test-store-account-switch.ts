@@ -86,7 +86,7 @@ await signIn(A);
 assert.deepEqual(localIds(A), ["a1"]);
 products.save([...products.getAll(), product("a2")]);
 let release = fake.hold();
-await advance(600); // آپلود A شروع شد و روی شبکه معطل است
+await advance(2000); // آپلود A شروع شد (بعد از تایمر تجمیع ذخیره) و روی شبکه معطل است
 signOut();
 release(); // آپلود A حالا بدون نشست اجرا و با RLS رد می‌شود
 await advance(1000);
@@ -101,7 +101,7 @@ reset();
 await signIn(A);
 products.save([...products.getAll(), product("a2")]);
 release = fake.hold();
-await advance(600);
+await advance(2000);
 const bLogin = signIn(B); // نشست B جایگزین می‌شود؛ hydrate B هم پشت همان شبکه معطل است
 await flush();
 release();

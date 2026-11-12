@@ -461,6 +461,51 @@ async function run(serverMode: "blind" | "trigger") {
     assert.deepEqual(ids, ["x"], `${tag} 14: deleted draft item came back after conflict: ${ids}`);
   });
 
+  // ۱۵) بعد از حذف کالا/تراکنش، دو دستگاه باز نباید با هر دریافت دوباره کل ستون را
+  //     بفرستند. سرور ردیف حذف‌شده را نگه می‌دارد (حذف نرم، تریگر 20261002120000) و
+  //     هر آپلود updated_at را عوض می‌کند، پس دستگاه دیگر دوباره دریافت و آپلود می‌کرد:
+  //     حلقهٔ بی‌پایان رفت‌وبرگشت که سهمیهٔ Disk IO سوپابیس را تمام می‌کرد.
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => s.products.remove(["p1"]));
+    await on(A, (s) => s.customers.removeTx("c1", "t0"));
+    await settle();
+    await refresh(B);
+    await refresh(A);
+    const before = fake.upserts.length;
+    for (let i = 0; i < 4; i++) {
+      // هر دو دستگاه به نوبت (مثل سیگنال لحظه‌ای / دریافت دوره‌ای) سرور را می‌خوانند
+      fake.rows.get(U)!.updated_at = new Date(Date.now() + i).toISOString();
+      await refresh(B);
+      await refresh(A);
+    }
+    const extra = fake.upserts.slice(before);
+    assert.equal(
+      extra.length,
+      0,
+      `${tag} 15: devices kept uploading after a delete (${extra.length}): ${extra
+        .slice(0, 4)
+        .map((u) => Object.keys(u.payload).join("+"))
+        .join(" | ")}`,
+    );
+    // حذف همچنان روی همهٔ دستگاه‌ها (و دستگاه تازه) برقرار است
+    const C = await newDevice("C");
+    await signIn(C);
+    for (const d of [A, B, C]) {
+      assert.deepEqual(
+        ids(await on(d, (s) => s.products.getAll())),
+        ["p2"],
+        `${tag} 15: ${d.name} deleted product came back`,
+      );
+      const c = await on(d, (s) => s.customers.getAll().find((x) => x.id === "c1")!);
+      assert.equal(c.txs.length, 0, `${tag} 15: ${d.name} deleted tx came back`);
+    }
+    // دادهٔ حذف‌شده روی سرور قابل بازیابی می‌ماند (حذف نرم)
+    if (serverMode === "trigger") {
+      assert.ok(ids(server().products).includes("p1"), `${tag} 15: server must keep p1 (soft delete)`);
+    }
+  });
+
   if (!failures.length) console.log(`✓ ${tag} two-device sync scenarios passed`);
 }
 

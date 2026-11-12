@@ -16,6 +16,13 @@ let onChange: ((updatedAt: string | null) => void) | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
 const MAX_FAILURES = 6;
+/** کانال همین حالا وصل است و سیگنال‌ها می‌رسند */
+let connected = false;
+
+/** آیا سیگنال لحظه‌ای وصل است؟ (دریافت دوره‌ای در این حالت کمتر لازم است) */
+export function isRealtimeSyncConnected(): boolean {
+  return connected && channel !== null && activeUser !== null;
+}
 
 function clearRetry() {
   if (retryTimer) {
@@ -27,6 +34,7 @@ function clearRetry() {
 function removeChannel() {
   const ch = channel;
   channel = null;
+  connected = false;
   if (!ch) return;
   try {
     void supabase.removeChannel(ch);
@@ -62,11 +70,13 @@ function subscribe(userId: string) {
     if (channel !== ch || activeUser !== userId) return;
     if (status === "SUBSCRIBED") {
       failures = 0;
+      connected = true;
       // ممکن است در مدت قطعی سیگنالی را از دست داده باشیم
       onChange?.(null);
       return;
     }
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+      connected = false;
       failures += 1;
       if (failures > MAX_FAILURES) return; // دریافت دوره‌ای کافی است؛ با بازگشت به برنامه دوباره
       clearRetry();

@@ -23,6 +23,7 @@ import {
   mergeNestedLedger,
   preferCloudValue,
   unionMergeById,
+  withoutTombstonedRows,
   type NestedLedgerOptions,
   type TombstoneMap,
 } from "@/lib/catalog-integrity";
@@ -56,7 +57,12 @@ import {
 import { rememberCloudRead } from "@/lib/offline-cache";
 import { canFlushCloudPush, shouldAbortHydrate } from "@/lib/account-isolation";
 import { findProductByCode } from "@/lib/barcode-match";
-import { ensureRealtimeSync, startRealtimeSync, stopRealtimeSync } from "@/lib/realtime-sync";
+import {
+  ensureRealtimeSync,
+  isRealtimeSyncConnected,
+  startRealtimeSync,
+  stopRealtimeSync,
+} from "@/lib/realtime-sync";
 import { missingUserDataColumnFromError, stripMissingUserDataColumn } from "@/lib/user-data-schema";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1033,6 +1039,7 @@ function clearInMemoryPush() {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
+  pushQueuedSince = 0;
   if (retryTimer) {
     clearTimeout(retryTimer);
     retryTimer = null;
@@ -1095,6 +1102,24 @@ export function isCloudHydrated() {
 const pendingPush: Record<string, unknown> = {};
 let flushChain: Promise<void> = Promise.resolve();
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * چند تغییر پشت سر هم (تایپ در فاکتور، اسکن چند بارکد) با یک بار نوشتن ذخیره شوند.
+ * هر نوشتن روی user_data ستون‌های JSON بزرگ را کامل بازنویسی می‌کند و سهمیهٔ Disk IO
+ * سوپابیس را مصرف می‌کند. داده همان لحظه در حافظهٔ دستگاه با نشانهٔ dirty ذخیره است و
+ * با پنهان شدن/بستن برنامه فوراً فرستاده می‌شود، پس این تأخیر هیچ داده‌ای را به خطر
+ * نمی‌اندازد. سقف انتظار: حتی با تایپ بی‌وقفه، حداکثر هر CLOUD_PUSH_MAX_WAIT_MS یک بار.
+ */
+export const CLOUD_PUSH_DEBOUNCE_MS = 1500;
+export const CLOUD_PUSH_MAX_WAIT_MS = 8000;
+let pushQueuedSince = 0;
+
+function scheduleDebouncedPush() {
+  const now = Date.now();
+  if (!pushQueuedSince || now < pushQueuedSince) pushQueuedSince = now;
+  const remaining = pushQueuedSince + CLOUD_PUSH_MAX_WAIT_MS - now;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(flushCloudPush, Math.max(0, Math.min(CLOUD_PUSH_DEBOUNCE_MS, remaining)));
+}
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryDelay = 5000;
 
@@ -1330,8 +1355,7 @@ function scheduleCloudPush(key: string, value: unknown) {
   // flush still knows this field has unsynced local changes.
   markDirty([field]);
   publishSyncState({ pending: readDirtySet().size });
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(flushCloudPush, 600);
+  scheduleDebouncedPush();
 }
 
 function localValueForCloudField(field: string): unknown {
@@ -1352,7 +1376,7 @@ export function hasUnsyncedChanges(): boolean {
 
 /**
  * پیش از خروج از حساب: صف ذخیره همین حالا فرستاده می‌شود (بدون منتظر ماندن برای
- * تایمر ۶۰۰ میلی‌ثانیه‌ای) و تا timeoutMs صبر می‌کنیم. true یعنی همه چیز روی سرور است.
+ * تایمر تجمیع ذخیره) و تا timeoutMs صبر می‌کنیم. true یعنی همه چیز روی سرور است.
  */
 export async function flushPendingCloudWrites(timeoutMs = 8000): Promise<boolean> {
   if (cloudUserId && cloudHydrated && Object.keys(pendingPush).length > 0) {
@@ -1487,6 +1511,7 @@ async function flushCloudPush() {
 
 async function runFlushCloudPush() {
   pushTimer = null;
+  pushQueuedSince = 0;
   let guard = 0;
   while (guard++ < 8) {
     if (!cloudUserId) return;
@@ -1713,14 +1738,14 @@ function applyCloudRow(data: Record<string, unknown>) {
     }
     const localVal = localValueForCloudField(field);
     const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
-    const merged = unionMergeById(
-      localVal,
-      cloudArr,
-      tombstoneSet(field),
-      nestedLedgerOptions(field),
-    );
+    const tombstoned = tombstoneSet(field);
+    const nested = nestedLedgerOptions(field);
+    const merged = unionMergeById(localVal, cloudArr, tombstoned, nested);
     writeLocalOnly(key, merged);
-    if (catalogArraysDiffer(merged, cloudArr)) {
+    // سرور ردیف‌های حذف‌شده را نگه می‌دارد (حذف نرم). فقط وقتی آپلود لازم است که
+    // این دستگاه چیزی دارد که سرور ندارد؛ نه برای «پاک کردن» ردیف حذف‌شده — آن آپلود
+    // روی سرور بی‌اثر است و فقط دستگاه‌های دیگر را به رفت‌وبرگشت بی‌پایان می‌انداخت.
+    if (catalogArraysDiffer(merged, withoutTombstonedRows(cloudArr, tombstoned, nested))) {
       pendingPush[field] = merged;
       markDirty([field]);
     } else {
@@ -1933,7 +1958,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", onReconnect);
   window.addEventListener(ONLINE_CONFIRMED_EVENT, onReconnect);
 
-  // بستن تب / رفتن اپ به پس‌زمینه: منتظر تایمر ۶۰۰ میلی‌ثانیه‌ای نمی‌مانیم و
+  // بستن تب / رفتن اپ به پس‌زمینه: منتظر تایمر تجمیع ذخیره نمی‌مانیم و
   // همان لحظه تلاش می‌کنیم ذخیره کنیم. (اگر نرسد، نشانه‌ی dirty باقی می‌ماند و
   // اجرای بعدی برنامه دوباره می‌فرستد — پس در بدترین حالت هم چیزی گم نمی‌شود.)
   const flushNow = () => {
@@ -1959,10 +1984,16 @@ if (typeof window !== "undefined") {
   window.addEventListener("focus", () => void refreshFromCloud());
   // وقتی برنامه باز است، هر ۴۰ ثانیه اگر ابر عوض شده باشد داده را می‌آوریم
   // تا همان اکانت روی گوشی/مرورگر دیگر آخرین تغییرات را ببیند.
+  // اگر سیگنال لحظه‌ای وصل باشد، تغییر دستگاه دیگر همان لحظه می‌رسد و این بررسی فقط
+  // پشتیبان است: هر ۳ دقیقه یک بار کافی است (درخواست کمتر به سرور).
+  let lastPeriodicRefreshAt = 0;
   window.setInterval(() => {
     if (!cloudUserId || !cloudHydrated) return;
     if (isCapacitorOfflineReadOnly()) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const now = Date.now();
+    if (isRealtimeSyncConnected() && now - lastPeriodicRefreshAt < 175_000) return;
+    lastPeriodicRefreshAt = now;
     void refreshFromCloud();
   }, 40_000);
 }

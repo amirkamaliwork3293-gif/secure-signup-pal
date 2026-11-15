@@ -2191,7 +2191,10 @@ function applyCloudBoard(cloudValue: unknown, cloudInvoices?: unknown) {
         })()
       : merged;
   writeLocalOnly(INVOICE_KEY, toWrite);
-  if (catalogArraysDiffer(toWrite, cloudValue)) {
+  // «کدام تب فعال است» مال همین دستگاه است؛ هر دستگاه تب خودش را باز دارد. قبلاً همین
+  // تفاوت «تغییر» حساب می‌شد: دو دستگاه با دو تب فعال متفاوت، بعد از هر دریافت دوباره
+  // کل تب‌ها را آپلود می‌کردند و هیچ‌وقت آرام نمی‌گرفتند. فقط تفاوت خود فاکتورهای باز مهم است.
+  if (catalogArraysDiffer(toWrite.open, extractOpenInvoices(cloudValue))) {
     pendingPush.current_invoice = toWrite;
     markDirty(["current_invoice"]);
   }

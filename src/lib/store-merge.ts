@@ -52,8 +52,30 @@ export function pickNewerOpenInvoice(local: unknown, cloud: unknown): unknown {
   if (cloud == null) return local;
   const lu = rowUpdatedAt(local);
   const cu = rowUpdatedAt(cloud);
-  if (lu || cu) return cu > lu ? cloud : local;
+  if (lu !== cu) return cu > lu ? cloud : local;
+  if (lu || cu) {
+    // زمان ویرایش یکسان ولی محتوای متفاوت: هر دو دستگاه باید یک نسخه را انتخاب کنند
+    // (قبلاً هر کدام نسخهٔ خودش را نگه می‌داشت و بی‌پایان روی سرور بازنویسی می‌کرد).
+    const lj = orderedJson(local);
+    const cj = orderedJson(cloud);
+    return lj >= cj ? local : cloud;
+  }
   return pickRicherRow(local, cloud);
+}
+
+/** JSON با کلیدهای مرتب — برای مقایسهٔ مستقل از ترتیب کلیدها (jsonb ترتیب را عوض می‌کند) */
+function orderedJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? null, (_k, v: unknown) => {
+      if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+      const rec = v as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(rec).sort()) out[k] = rec[k];
+      return out;
+    });
+  } catch {
+    return "";
+  }
 }
 
 export function historyIds(history: unknown): Set<string> {

@@ -552,7 +552,16 @@ export function pickRicherCatalogRow(local: unknown, cloud: unknown): unknown {
   const ct = catalogRowTimestamp(cloud);
   if (ct > lt + 1000) return cloud;
   if (lt > ct + 1000) return local;
-  return catalogRowSize(local) >= catalogRowSize(cloud) ? local : cloud;
+  // دو ویرایش تقریباً هم‌زمان (کمتر از یک ثانیه فاصله): انتخاب باید روی «همهٔ» دستگاه‌ها
+  // یکی باشد. قبلاً در حالت مساوی هر دستگاه نسخهٔ خودش را نگه می‌داشت؛ نتیجه: دو دستگاه
+  // برای همیشه دو مقدار متفاوت نشان می‌دادند و بی‌وقفه نسخهٔ خودشان را روی سرور
+  // بازنویسی می‌کردند (رفت‌وبرگشت بی‌پایان). حالا ترتیب فقط به خود دو نسخه بستگی دارد،
+  // نه به این‌که کدام محلی است: اول حجم، بعد زمان، بعد مقایسهٔ متنی.
+  const ls = catalogRowSize(local);
+  const cs = catalogRowSize(cloud);
+  if (ls !== cs) return ls > cs ? local : cloud;
+  if (lt !== ct) return lt > ct ? local : cloud;
+  return stableStringify(local) >= stableStringify(cloud) ? local : cloud;
 }
 
 /**

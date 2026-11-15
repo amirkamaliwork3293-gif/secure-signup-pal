@@ -23,12 +23,17 @@ const channels = new Set<FakeChannel>();
 
 let clock = Date.UTC(2026, 0, 1);
 function serverNow(): string {
-  clock += 1;
+  // با fake.realClock ساعت سرور همان ساعت تست است (همیشه رو به جلو)، مثل سرور واقعی
+  clock = fake.realClock ? Math.max(clock + 1, Date.now()) : clock + 1;
   return new Date(clock).toISOString().replace("Z", "+00:00");
 }
 
 export const fake = {
   rows: new Map<string, Row>(),
+  /** بعد از هر نوشتن روی سرور صدا زده می‌شود (شبیه‌سازی سیگنال لحظه‌ای در سطح تست) */
+  afterWrite: null as null | ((row: Row) => void),
+  /** ساعت سرور = ساعت تست (پیش‌فرض: ساعت ثابتِ جدا، یک میلی‌ثانیه با هر نوشتن) */
+  realClock: false,
   sessionUser: null as string | null,
   upserts: [] as { asUser: string | null; payload: Row; ok: boolean }[],
   gate: null as Promise<void> | null,
@@ -368,6 +373,7 @@ function applyWrite(id: string, payload: Row): Row {
     noteChanges(id, fake.rows.has(id) ? old : undefined, next, seqCounter);
   }
   fake.rows.set(id, next);
+  fake.afterWrite?.(next);
   if (fake.realtime) {
     for (const ch of channels) {
       if (ch.removed || !ch.cb || (ch.userFilter && ch.userFilter !== id)) continue;

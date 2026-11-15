@@ -12,10 +12,13 @@ type Channel = ReturnType<typeof supabase.channel>;
 
 let channel: Channel | null = null;
 let activeUser: string | null = null;
-let onChange: ((updatedAt: string | null) => void) | null = null;
+type ChangeHandler = (updatedAt: string | null, seq: number | null) => void;
+let onChange: ChangeHandler | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
-const MAX_FAILURES = 6;
+/** بعد از این تعداد شکست، فاصلهٔ تلاش‌ها روی سقف می‌ماند (ولی تلاش قطع نمی‌شود) */
+const MAX_BACKOFF_STEPS = 6;
+const MAX_RETRY_DELAY_MS = 120_000;
 /** کانال همین حالا وصل است و سیگنال‌ها می‌رسند */
 let connected = false;
 
@@ -56,9 +59,11 @@ function subscribe(userId: string) {
         table: "user_data_sync_signal",
         filter: `user_id=eq.${userId}`,
       },
-      (payload: { new?: { updated_at?: string } }) => {
+      (payload: { new?: { updated_at?: string; seq?: unknown } }) => {
         if (activeUser !== userId) return;
-        onChange?.(payload?.new?.updated_at ?? null);
+        // seq فقط بعد از مهاجرت 20261115120000 در سیگنال هست
+        const seq = Number(payload?.new?.seq);
+        onChange?.(payload?.new?.updated_at ?? null, Number.isSafeInteger(seq) && seq > 0 ? seq : null);
       },
     );
   } catch (e) {
@@ -72,15 +77,20 @@ function subscribe(userId: string) {
       failures = 0;
       connected = true;
       // ممکن است در مدت قطعی سیگنالی را از دست داده باشیم
-      onChange?.(null);
+      onChange?.(null, null);
       return;
     }
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
       connected = false;
       failures += 1;
-      if (failures > MAX_FAILURES) return; // دریافت دوره‌ای کافی است؛ با بازگشت به برنامه دوباره
+      // قبلاً بعد از ۶ شکست تا برگشتن کاربر به برنامه دیگر تلاشی نمی‌شد؛ برنامه‌ای که
+      // تمام روز باز است (صندوق فروشگاه) برای همیشه بدون سیگنال می‌ماند. حالا با
+      // فاصلهٔ زیاد ادامه می‌دهیم؛ در این مدت بررسی دوره‌ای کار را انجام می‌دهد.
       clearRetry();
-      const delay = Math.min(60_000, 2_000 * 2 ** (failures - 1));
+      const delay = Math.min(
+        MAX_RETRY_DELAY_MS,
+        2_000 * 2 ** (Math.min(failures, MAX_BACKOFF_STEPS) - 1),
+      );
       retryTimer = setTimeout(() => {
         retryTimer = null;
         if (activeUser === userId) subscribe(userId);
@@ -89,7 +99,7 @@ function subscribe(userId: string) {
   });
 }
 
-export function startRealtimeSync(userId: string, handler: (updatedAt: string | null) => void) {
+export function startRealtimeSync(userId: string, handler: ChangeHandler) {
   onChange = handler;
   if (activeUser === userId && channel) return;
   stopRealtimeSync();

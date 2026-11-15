@@ -21,7 +21,9 @@ import {
   changedSettingKeys,
   mergeTombstoneMaps,
   mergeNestedLedger,
+  mergeRowsDelta,
   preferCloudValue,
+  rowIdsMissingOrDifferent,
   unionMergeById,
   withoutTombstonedRows,
   type NestedLedgerOptions,
@@ -562,6 +564,16 @@ const CLOSED_OPEN_IDS_KEY = "acc.closedOpenInvoiceIds.v1";
  * سرور تأیید نشده. فقط همین کلیدها هنگام ادغام بر ابر برنده‌اند؛ بقیه از ابر می‌آیند.
  */
 const SETTINGS_DIRTY_KEYS_KEY = "acc.settingsDirtyKeys.v1";
+/**
+ * همگام‌سازی «فقط تغییرات» (مهاجرت 20261115120000):
+ * - DIRTY_ROWS: برای هر ستونِ همگام‌نشده، شناسهٔ ردیف‌هایی که باید فرستاده شوند
+ *   («*» یعنی کل ستون). ستونی که dirty است ولی اینجا نیامده هم «کل ستون» حساب می‌شود.
+ * - TOMB_DIRTY: حذف‌هایی که هنوز رسیدنشان به سرور تأیید نشده.
+ * - SYNC_CURSOR: آخرین نسخهٔ سرور که دادهٔ محلیِ همین دستگاه آن را کامل دارد.
+ */
+const DIRTY_ROWS_KEY = "acc.dirtyRows.v1";
+const TOMB_DIRTY_KEY = "acc.tombDirty.v1";
+const SYNC_CURSOR_KEY = "acc.syncCursor.v1";
 
 // Mapping of localStorage key -> cloud column name in user_data
 const CLOUD_FIELDS: Record<
@@ -792,6 +804,8 @@ function writeLocalOnly<T>(key: string, value: T) {
     memoryOverlay.delete(keyWithScope);
   } catch (e) {
     memoryOverlay.set(keyWithScope, value);
+    // دادهٔ روی دیسک دیگر با نسخهٔ سرور هم‌قدم نیست: اجرای بعدی باید همه چیز را کامل بخواند
+    forgetPersistedSyncCursor();
     console.error("[store] device storage refused the write; kept in memory and sent to cloud", {
       key,
       error: e,
@@ -887,7 +901,7 @@ function noteServerClock(serverAt: string, sentStamp: string, sentAt: number, re
  * اگر روی همه‌ی ردیف‌ها مهر بزنیم، نسخهٔ کهنهٔ همین دستگاه هنگام ادغام
  * بر نسخهٔ تازه‌ی دستگاه دیگر برنده می‌شود.
  */
-function stampChangedRows(key: string, value: unknown): unknown {
+function stampChangedRows(key: string, value: unknown, changedIds?: string[]): unknown {
   if (!Array.isArray(value) || !CLOUD_FIELDS[key] || key === INVOICE_KEY) return value;
   const prev = read<unknown[]>(key, []);
   const prevById = new Map<string, unknown>();
@@ -901,7 +915,9 @@ function stampChangedRows(key: string, value: unknown): unknown {
     const rec = row as Record<string, unknown>;
     const id = catalogRowId(rec);
     const old = id ? prevById.get(id) : undefined;
+    if (old === rec) return rec; // همان ردیفِ حافظه — دست‌نخورده
     if (!old || typeof old !== "object") {
+      changedIds?.push(id || "");
       return rec.updatedAt ? rec : { ...rec, updatedAt: now };
     }
     const a = { ...rec };
@@ -910,6 +926,7 @@ function stampChangedRows(key: string, value: unknown): unknown {
     delete b.updatedAt;
     // مقایسه بدون حساسیت به ترتیب کلیدها (ردیفی که از ابر آمده ترتیب jsonb دارد)
     if (!catalogArraysDiffer(a, b)) return old;
+    changedIds?.push(id || "");
     return { ...rec, updatedAt: editStamp(now, old) };
   });
 }
@@ -957,12 +974,17 @@ function write<T>(key: string, value: T): boolean {
     return false;
   }
   const field = CLOUD_FIELDS[key];
+  const changedIds: string[] = [];
   const stamped = (
-    key === INVOICE_KEY ? stampOpenInvoices(value) : stampChangedRows(key, value)
+    key === INVOICE_KEY ? stampOpenInvoices(value) : stampChangedRows(key, value, changedIds)
   ) as T;
   if (field) {
     const prev = read<unknown>(key, Array.isArray(value) ? [] : null);
     rememberRemovedIds(field, prev, stamped);
+    // فقط همین ردیف‌ها به سرور فرستاده می‌شوند (ردیف بدون شناسه ⇒ کل ستون)
+    if (Array.isArray(stamped) && key !== INVOICE_KEY && changedIds.length) {
+      addDirtyRows(field, changedIds.includes("") ? "*" : changedIds);
+    }
   }
   if (key === SETTINGS_KEY) {
     for (const k of changedSettingKeys(read(SETTINGS_KEY, DEFAULT_SETTINGS), stamped)) {
@@ -1060,6 +1082,8 @@ export function beginUserScope(userId: string) {
     stopRealtimeSync();
     cloudHydrated = false;
     lastCloudUpdatedAt = null;
+    syncCursor = null; // فقط حافظه؛ نسخهٔ ذخیره‌شدهٔ هر حساب در کلید اسکوپ‌شدهٔ خودش می‌ماند
+    deltaDisabled = false;
     hydrateEpoch += 1;
   }
   cloudUserId = userId;
@@ -1080,6 +1104,7 @@ function requestPersistentStorage() {
 
 function markCloudHydrated() {
   cloudHydrated = true;
+  hydrateRetryDelay = 2000;
   requestPersistentStorage();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("store-hydrated"));
@@ -1088,11 +1113,16 @@ function markCloudHydrated() {
 }
 
 /** دستگاه دیگری با همین حساب چیزی ذخیره کرد (یا کانال لحظه‌ای تازه وصل شد) */
-function onRemoteChangeSignal(updatedAt: string | null) {
-  if (updatedAt && updatedAt === lastCloudUpdatedAt) return; // پژواک ذخیرهٔ خودمان
-  void refreshFromCloud();
-  // اگر همین الان دریافت/ذخیرهٔ دیگری در جریان بود، refreshFromCloud رد می‌شود
-  setTimeout(() => void refreshFromCloud(), 3000);
+function onRemoteChangeSignal(updatedAt: string | null, seq?: number | null) {
+  if (updatedAt || seq != null) lastRealtimeSignalAt = Date.now();
+  if (isOwnEcho({ updatedAt, seq: seq ?? null })) return; // پژواک ذخیرهٔ خودمان
+  void refreshFromCloud({ updatedAt, seq: seq ?? null });
+}
+
+/** آیا این سیگنال همان نسخه‌ای است که این دستگاه خودش دارد؟ */
+function isOwnEcho(signal: { updatedAt: string | null; seq: number | null }): boolean {
+  if (signal.seq != null && syncCursor !== null && signal.seq <= syncCursor) return true;
+  return !!signal.updatedAt && signal.updatedAt === lastCloudUpdatedAt;
 }
 
 /** آیا داده‌ی ابری این نشست خوانده شده (یا تلاش اول تمام شده) — برای تور شروع کار */
@@ -1110,6 +1140,12 @@ let pushTimer: ReturnType<typeof setTimeout> | null = null;
  * نمی‌اندازد. سقف انتظار: حتی با تایپ بی‌وقفه، حداکثر هر CLOUD_PUSH_MAX_WAIT_MS یک بار.
  */
 export const CLOUD_PUSH_DEBOUNCE_MS = 1500;
+/** فاصلهٔ بررسی تغییرات دستگاه‌های دیگر (میلی‌ثانیه) */
+const POLL_TICK_MS = 4000;
+const POLL_ACTIVE_MS = 8000; // کاربر مشغول کار است و سیگنال لحظه‌ای نداریم
+const POLL_IDLE_MS = 40_000; // برنامه باز است ولی کسی با آن کار نمی‌کند
+const POLL_REALTIME_OK_MS = 120_000; // سیگنال لحظه‌ای سالم است؛ فقط پشتیبان
+const POLL_ACTIVE_WINDOW_MS = 3 * 60_000;
 export const CLOUD_PUSH_MAX_WAIT_MS = 8000;
 let pushQueuedSince = 0;
 
@@ -1140,6 +1176,139 @@ function writeDirtySet(set: Set<string>) {
     if (set.size === 0) localStorage.removeItem(scopedKey(CLOUD_DIRTY_KEY));
     else localStorage.setItem(scopedKey(CLOUD_DIRTY_KEY), JSON.stringify([...set]));
   } catch {}
+}
+
+// ─── ردیف‌های همگام‌نشده (برای ارسال «فقط تغییرات») ────────────────────────
+type DirtyRows = Record<string, string[] | "*">;
+
+function readDirtyRows(): DirtyRows {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(scopedKey(DIRTY_ROWS_KEY));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: DirtyRows = {};
+    for (const [field, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v === "*") out[field] = "*";
+      else if (Array.isArray(v)) out[field] = v.filter((x): x is string => typeof x === "string");
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeDirtyRows(map: DirtyRows) {
+  if (typeof window === "undefined") return;
+  const key = scopedKey(DIRTY_ROWS_KEY);
+  try {
+    if (Object.keys(map).length === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(map));
+  } catch {
+    // نتوانستیم فهرست ردیف‌ها را نگه داریم: نبودنش یعنی «کل ستون» — امن ولی سنگین‌تر
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+function addDirtyRows(field: string, ids: readonly string[] | "*") {
+  const map = readDirtyRows();
+  const cur = map[field];
+  if (cur === "*") return;
+  if (ids === "*") map[field] = "*";
+  else {
+    // ستونی که از قبل dirty بوده ولی فهرست ردیف ندارد «کل ستون» است؛ باریکش نکن
+    if (cur === undefined && readDirtySet().has(field)) return;
+    if (ids.length === 0) return;
+    map[field] = [...new Set([...(cur ?? []), ...ids])];
+  }
+  writeDirtyRows(map);
+}
+
+function clearDirtyRows(fields: readonly string[]) {
+  const map = readDirtyRows();
+  let changed = false;
+  for (const f of fields) {
+    if (f in map) {
+      delete map[f];
+      changed = true;
+    }
+  }
+  if (changed) writeDirtyRows(map);
+}
+
+function readTombDirty(): TombstoneMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(scopedKey(TOMB_DIRTY_KEY));
+    return mergeTombstoneMaps(raw ? JSON.parse(raw) : null);
+  } catch {
+    return {};
+  }
+}
+
+function writeTombDirty(map: TombstoneMap) {
+  if (typeof window === "undefined") return;
+  try {
+    const compact = compactTombstones(map);
+    if (!compact) localStorage.removeItem(scopedKey(TOMB_DIRTY_KEY));
+    else localStorage.setItem(scopedKey(TOMB_DIRTY_KEY), JSON.stringify(compact));
+  } catch {
+    /* در بدترین حالت کل فهرست حذف‌ها دوباره فرستاده می‌شود */
+  }
+}
+
+// ─── نسخهٔ سرور (cursor) ────────────────────────────────────────────────────
+/**
+ * null یعنی همگام‌سازی «فقط تغییرات» فعال نیست (مهاجرت اجرا نشده، یا این نشست به
+ * روش قبلی برگشته) و همان روش کل‌ردیف استفاده می‌شود.
+ */
+let syncCursor: number | null = null;
+/** در این نشست RPCها خطا داده‌اند؛ تا ورود بعدی فقط روش قبلی */
+let deltaDisabled = false;
+/** هر چند وقت یک بار با شروع برنامه کل داده دوباره خوانده و تطبیق داده می‌شود */
+const FULL_RESYNC_MS = 12 * 3600_000;
+
+function readPersistedSyncCursor(): { seq: number; fullAt: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(scopedKey(SYNC_CURSOR_KEY));
+    const parsed = raw ? (JSON.parse(raw) as { seq?: unknown; fullAt?: unknown }) : null;
+    const seq = Number(parsed?.seq);
+    const fullAt = Number(parsed?.fullAt);
+    if (!Number.isSafeInteger(seq) || seq < 0 || !Number.isFinite(fullAt)) return null;
+    return { seq, fullAt };
+  } catch {
+    return null;
+  }
+}
+
+function forgetPersistedSyncCursor() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(scopedKey(SYNC_CURSOR_KEY));
+  } catch {
+    /* noop */
+  }
+}
+
+function setSyncCursor(seq: number | null, opts?: { fullReadNow?: boolean }) {
+  syncCursor = seq;
+  if (typeof window === "undefined") return;
+  // اگر بخشی از داده فقط در حافظهٔ برنامه است (دیسک پر)، نسخه را روی دیسک نگه نمی‌داریم
+  if (seq === null || memoryOverlay.size > 0) {
+    forgetPersistedSyncCursor();
+    return;
+  }
+  try {
+    const fullAt = opts?.fullReadNow ? Date.now() : (readPersistedSyncCursor()?.fullAt ?? 0);
+    localStorage.setItem(scopedKey(SYNC_CURSOR_KEY), JSON.stringify({ seq, fullAt }));
+  } catch {
+    forgetPersistedSyncCursor();
+  }
 }
 
 function readTombstones(): TombstoneMap {
@@ -1173,6 +1342,15 @@ function tombstoneMapsEqual(a: TombstoneMap, b: TombstoneMap): boolean {
 /** حذف یک دستگاه را در تنظیمات ابری هم می‌نویسد تا گوشی/مرورگر دیگر همان حذف را ببیند. */
 function persistTombstones(map: TombstoneMap) {
   const compact = compactTombstones(map) ?? {};
+  // حذف‌های تازه جدا نگه داشته می‌شوند تا فقط همان‌ها به سرور بروند، نه کل فهرست
+  const before = readTombstones();
+  const added: TombstoneMap = {};
+  for (const [field, ids] of Object.entries(compact)) {
+    const had = new Set(before[field] || []);
+    const fresh = ids.filter((id) => !had.has(id));
+    if (fresh.length) added[field] = fresh;
+  }
+  if (Object.keys(added).length) writeTombDirty(mergeTombstoneMaps(readTombDirty(), added));
   writeTombstones(compact);
   if (typeof window === "undefined") return;
   const s = read<AppSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
@@ -1284,6 +1462,8 @@ function clearDirty(fields: string[]) {
   const set = readDirtySet();
   for (const f of fields) set.delete(f);
   writeDirtySet(set);
+  clearDirtyRows(fields);
+  if (fields.includes("settings")) writeTombDirty({});
 }
 
 // ─── وضعیت همگام‌سازی (برای نمایش به کاربر — خطای ذخیره هرگز بی‌صدا نماند) ──
@@ -1417,6 +1597,17 @@ async function dropVandalizedCatalogPushes(
 ): Promise<void> {
   const protectedInPush = Object.keys(fieldsToPush).filter(isProtectedCatalogField);
   if (protectedInPush.length === 0) return;
+  // نسخهٔ ابر فقط وقتی لازم است که خودِ دادهٔ محلی مشکوک باشد (تمام شاخه‌های پایین با
+  // دادهٔ محلیِ سالم هیچ کاری نمی‌کنند). قبلاً قبل از «هر» ذخیره کل کالاها و فاکتورها
+  // دانلود می‌شد: دو برابر ترافیک و یک نقطهٔ شکست اضافه روی اینترنت کند.
+  const suspicious = protectedInPush.some((field) => {
+    const localVal = fieldsToPush[field];
+    return (
+      catalogLooksVandalized(localVal, field) ||
+      ((field === "products" || field === "invoices") && catalogHasVandalPrice(localVal, field))
+    );
+  });
+  if (!suspicious) return;
 
   const selectFields = new Set(protectedInPush);
   if (selectFields.has("invoices") || selectFields.has("products")) {
@@ -1452,6 +1643,7 @@ async function dropVandalizedCatalogPushes(
         fieldsToPush[field] = merged;
         writeLocalOnly(PRODUCTS_KEY, merged);
         pendingPush.products = merged;
+        addDirtyRows("products", "*");
         continue;
       }
       if (field === "invoices") {
@@ -1464,6 +1656,7 @@ async function dropVandalizedCatalogPushes(
         fieldsToPush[field] = merged;
         writeLocalOnly(HISTORY_KEY, merged);
         pendingPush.invoices = merged;
+        addDirtyRows("invoices", "*");
         continue;
       }
       if (preferCloudValue(localVal, cloudVal, field)) {
@@ -1539,6 +1732,16 @@ async function runFlushCloudPush() {
       return;
     }
     try {
+      if (syncCursor !== null && !deltaDisabled) {
+        // فقط ردیف‌های تغییرکرده فرستاده می‌شوند؛ سرور آن‌ها را ردیف‌به‌ردیف ادغام می‌کند
+        const outcome = await pushDelta(userId, fieldsToPush);
+        if (cloudUserId !== userId || getStorageScope() !== userId) return;
+        if (outcome === "done") {
+          if (Object.keys(pendingPush).length === 0) return;
+          continue;
+        }
+        // "legacy": توابع سرور در دسترس نیستند — همین تغییرات با روش قبلی ذخیره می‌شوند
+      }
       const result = await compareAndSwapUserData(userId, fieldsToPush);
       if (cloudUserId !== userId || getStorageScope() !== userId) return;
       if (result.kind === "conflict") {
@@ -1599,6 +1802,233 @@ async function runFlushCloudPush() {
   }
   // چند بار پشت سر هم دستگاه دیگری زودتر ذخیره کرد؛ کمی بعد دوباره.
   if (Object.keys(pendingPush).length > 0) scheduleRetry();
+}
+
+// ─── همگام‌سازی «فقط تغییرات» ────────────────────────────────────────────────
+// به‌جای فرستادن کل آرایهٔ کالاها/فاکتورها با هر تغییر (چند مگابایت برای فروشگاه
+// پرکار؛ روی اینترنت کند به مقصد نمی‌رسید)، فقط ردیف‌های عوض‌شده با تابع سرور
+// kamix_sync_push فرستاده و با kamix_sync_pull فقط ردیف‌های عوض‌شدهٔ دستگاه‌های دیگر
+// گرفته می‌شود. اگر این توابع روی سرور نباشند یا خطا بدهند، همان روش قبلی
+// (compare-and-swap روی کل ستون) بدون هیچ تفاوتی برای کاربر ادامه پیدا می‌کند.
+
+type SyncRpcError = { code?: string; message?: string; status?: number };
+
+/** خطاهای SQL گذرا پشت سر هم — بعد از چند بار، روش قبلی امتحان می‌شود */
+let deltaTransientSqlFailures = 0;
+
+function disableDeltaSync(reason: string, error?: unknown) {
+  if (!deltaDisabled) console.warn(`[store] delta sync off for this session: ${reason}`, error ?? "");
+  deltaDisabled = true;
+  setSyncCursor(null);
+}
+
+/** آیا این خطا یعنی «توابع سرور قابل استفاده نیستند» (نه قطعی شبکه)؟ */
+function isSyncRpcUnavailable(error: SyncRpcError): boolean {
+  const code = String(error.code || "");
+  const msg = String(error.message || "").toLowerCase();
+  if (code === "PGRST202" || code === "42883" || msg.includes("could not find the function")) {
+    return true;
+  }
+  if (msg.includes("permission denied for")) return true;
+  if (code === "42501") return false; // نشست/دسترسی — گذرا
+  if (/^PGRST[12]/.test(code)) return true;
+  if (/^[0-9A-Z]{5}$/.test(code)) {
+    // اتصال (08)، کمبود منابع (53)، لغو/مهلت (57) و بن‌بست (40) گذرا هستند
+    if (/^(08|53|57|40)/.test(code)) {
+      deltaTransientSqlFailures += 1;
+      return deltaTransientSqlFailures >= 3;
+    }
+    return true; // هر خطای دیگر SQL: ناسازگاری توابع سرور
+  }
+  return false;
+}
+
+/**
+ * نتیجه: شیء پاسخ، یا null یعنی «با روش قبلی ادامه بده».
+ * خطای شبکه/نشست پرتاب می‌شود تا مثل قبل بعداً دوباره تلاش شود.
+ */
+async function callSyncRpc(
+  name: "kamix_sync_push" | "kamix_sync_pull",
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const client = supabase as unknown as {
+    rpc?: (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => PromiseLike<{ data: unknown; error: SyncRpcError | null }>;
+  };
+  if (typeof client.rpc !== "function") {
+    disableDeltaSync("client has no rpc");
+    return null;
+  }
+  let refreshed = false;
+  for (;;) {
+    const { data, error } = await client.rpc(name, args);
+    if (!error) {
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        deltaTransientSqlFailures = 0;
+        return data as Record<string, unknown>;
+      }
+      disableDeltaSync(`${name} returned an unexpected value`);
+      return null;
+    }
+    const unavailable = isSyncRpcUnavailable(error);
+    if (isCloudPermissionError(error) && !refreshed && !unavailable) {
+      refreshed = true;
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (!refreshError) continue;
+    }
+    if (unavailable) {
+      disableDeltaSync(`${name} failed`, error);
+      return null;
+    }
+    throw error;
+  }
+}
+
+type DeltaPushPlan = {
+  payload: Record<string, unknown>;
+  /** برای هر ستون آرایه‌ای: ردیف‌هایی که فرستاده شد (شناسه → همان نسخه) یا «*» */
+  sentRows: Record<string, Map<string, unknown> | "*">;
+  empty: boolean;
+};
+
+function planDeltaPush(fieldsToPush: Record<string, unknown>): DeltaPushPlan {
+  const dirtyRows = readDirtyRows();
+  const rowsOut: Record<string, unknown[]> = {};
+  const sentRows: DeltaPushPlan["sentRows"] = {};
+  const payload: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(fieldsToPush)) {
+    if (field === "settings" || field === "current_invoice") continue;
+    const arr = Array.isArray(value) ? value : [];
+    const want = dirtyRows[field] ?? "*";
+    if (want === "*") {
+      sentRows[field] = "*";
+      if (arr.length) rowsOut[field] = arr;
+      continue;
+    }
+    const ids = new Set(want);
+    const sent = new Map<string, unknown>();
+    for (const row of arr) {
+      const id = catalogRowId(row);
+      if (id && ids.has(id) && !sent.has(id)) sent.set(id, row);
+    }
+    sentRows[field] = sent;
+    if (sent.size) rowsOut[field] = [...sent.values()];
+  }
+  if (Object.keys(rowsOut).length) payload.rows = rowsOut;
+
+  const board = fieldsToPush.current_invoice;
+  if (board && typeof board === "object" && !Array.isArray(board)) payload.current_invoice = board;
+
+  if ("settings" in fieldsToPush) {
+    const raw = fieldsToPush.settings;
+    const local = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<
+      string,
+      unknown
+    >;
+    const keys = readIdSet(SETTINGS_DIRTY_KEYS_KEY);
+    keys.delete("catalogTombstones");
+    const tombDirty = readTombDirty();
+    // دلیل dirty بودن معلوم نیست (مثلاً نشانهٔ جامانده از نسخهٔ قبلی برنامه): همه چیز
+    const everything =
+      dirtyRows.settings === "*" || (keys.size === 0 && Object.keys(tombDirty).length === 0);
+    const set: Record<string, unknown> = {};
+    const unset: string[] = [];
+    if (everything) {
+      for (const [k, v] of Object.entries(local)) {
+        if (k !== "catalogTombstones" && v !== undefined) set[k] = v;
+      }
+    } else {
+      for (const k of keys) {
+        if (k in local && local[k] !== undefined) set[k] = local[k];
+        else unset.push(k);
+      }
+    }
+    const tombstones = everything ? mergeTombstoneMaps(local.catalogTombstones) : tombDirty;
+    if (Object.keys(set).length || unset.length || Object.keys(tombstones).length) {
+      payload.settings = { set, unset, tombstones };
+    }
+  }
+  return { payload, sentRows, empty: Object.keys(payload).length === 0 };
+}
+
+/**
+ * ارسال ردیف‌های تغییرکرده. "done": همه چیز روی سرور نشست (یا چیزی برای فرستادن
+ * نبود). "legacy": توابع سرور در دسترس نیستند؛ فراخواننده با روش قبلی ذخیره می‌کند.
+ * خطای شبکه پرتاب می‌شود (تلاش مجدد با همان منطق قبلی).
+ */
+async function pushDelta(
+  userId: string,
+  fieldsToPush: Record<string, unknown>,
+): Promise<"done" | "legacy"> {
+  const plan = planDeltaPush(fieldsToPush);
+  const cursorAtSend = syncCursor;
+  let result: Record<string, unknown> | null = null;
+  const sentAt = Date.now();
+  if (!plan.empty) {
+    result = await callSyncRpc("kamix_sync_push", { p: plan.payload });
+    if (!result) return "legacy";
+    if (cloudUserId !== userId || getStorageScope() !== userId) return "done";
+    const seq = Number(result.seq);
+    if (!Number.isSafeInteger(seq) || typeof result.updated_at !== "string") {
+      disableDeltaSync("kamix_sync_push returned an unexpected value");
+      return "legacy";
+    }
+    lastLocalPushAt = Date.now();
+    lastCloudUpdatedAt = result.updated_at;
+    if (result.noop !== true) noteServerClock(result.updated_at, "", sentAt, Date.now());
+    const prevSeq = result.prev_seq == null ? null : Number(result.prev_seq);
+    if (syncCursor !== null && syncCursor === cursorAtSend && prevSeq === cursorAtSend) {
+      // سرور درست روی همان نسخه‌ای بود که این دستگاه داشت: حالا نسخهٔ جدید را هم کامل دارد
+      setSyncCursor(seq);
+    } else if (syncCursor !== null && seq > syncCursor) {
+      // دستگاه دیگری در این فاصله ذخیره کرده: تغییراتش را بگیر (نسخه جلو نمی‌رود)
+      void refreshFromCloud();
+    }
+  }
+
+  const confirmed: string[] = [];
+  for (const field of Object.keys(fieldsToPush)) {
+    if (pendingPush[field] === fieldsToPush[field]) {
+      delete pendingPush[field];
+      confirmed.push(field);
+      continue;
+    }
+    // در مدت ارسال دوباره عوض شده: dirty می‌ماند؛ فقط ردیف‌هایی که همان نسخه‌شان روی
+    // سرور نشست از فهرست ارسال برداشته می‌شوند.
+    markDirty([field]);
+    const sent = plan.sentRows[field];
+    if (sent && sent !== "*") forgetSentDirtyRows(field, sent);
+  }
+  clearDirty(confirmed);
+  if (confirmed.includes("settings")) clearSettingsDirtyKeys();
+  retryDelay = 5000;
+  publishSyncState({
+    pending: readDirtySet().size,
+    failed: false,
+    lastError: undefined,
+    lastOkAt: Date.now(),
+  });
+  return "done";
+}
+
+function forgetSentDirtyRows(field: string, sent: ReadonlyMap<string, unknown>) {
+  const map = readDirtyRows();
+  const cur = map[field];
+  if (!Array.isArray(cur)) return;
+  const now = localValueForCloudField(field);
+  const nowById = new Map<string, unknown>();
+  for (const row of Array.isArray(now) ? now : []) {
+    const id = catalogRowId(row);
+    if (id && !nowById.has(id)) nowById.set(id, row);
+  }
+  map[field] = cur.filter((id) => {
+    if (!sent.has(id)) return true; // بعد از ارسال اضافه شده
+    if (!nowById.has(id)) return false; // دیگر روی این دستگاه نیست (حذف با tombstone می‌رود)
+    return catalogArraysDiffer(nowById.get(id), sent.get(id)); // دوباره ویرایش شده؟
+  });
+  writeDirtyRows(map);
 }
 
 type CasResult = { kind: "ok"; updatedAt: string; skipped: string[] } | { kind: "conflict" };
@@ -1682,14 +2112,35 @@ async function mergeLatestServerRow(userId: string): Promise<void> {
   if (isCapacitor()) rememberCloudRead(userId);
 }
 
+let lastRealtimeSignalAt = 0;
+
 let lastCloudUpdatedAt: string | null = null;
 let lastLocalPushAt = 0;
+let hydrateRetryDelay = 2000;
 let hydrateInFlight: Promise<void> | null = null;
 
-function applyCloudRow(data: Record<string, unknown>) {
+function setDirtyRows(field: string, ids: readonly string[] | "*") {
+  const map = readDirtyRows();
+  map[field] = ids === "*" ? "*" : [...new Set(ids)];
+  writeDirtyRows(map);
+}
+
+/** شناسه‌های حذف‌شده‌ای که این دستگاه دارد و نسخهٔ ابر ندارد */
+function tombstonesMissingFromCloud(local: TombstoneMap, cloud: unknown): TombstoneMap {
+  const onCloud = mergeTombstoneMaps(cloud);
+  const out: TombstoneMap = {};
+  for (const [field, ids] of Object.entries(local)) {
+    const have = new Set(onCloud[field] || []);
+    const missing = ids.filter((id) => !have.has(id));
+    if (missing.length) out[field] = missing;
+  }
+  return out;
+}
+
+/** تنظیمات کامل ابر (همراه فهرست حذف‌ها) — دریافت کامل ردیف */
+function applyCloudSettingsWhole(cloudSettings: unknown) {
   // اول حذف‌های همه‌ی دستگاه‌ها را یکی می‌کنیم، بعد آرایه‌ها را ادغام می‌کنیم
   // تا کالای حذف‌شده روی گوشی دیگر دوباره ظاهر نشود.
-  const cloudSettings = data.settings;
   // ابر مرجع است؛ فقط کلیدهایی که همین دستگاه عوض کرده و هنوز تأیید نشده‌اند محلی می‌مانند.
   const mergedSettings = mergeSettingsFromCloud(
     localValueForCloudField("settings"),
@@ -1703,6 +2154,16 @@ function applyCloudRow(data: Record<string, unknown>) {
   else delete mergedSettings.catalogTombstones;
   writeLocalOnly(SETTINGS_KEY, mergedSettings);
   if (catalogArraysDiffer(mergedSettings, cloudSettings)) {
+    // دقیقاً همان چیزهایی که ابر ندارد برای ارسال «فقط تغییرات» ثبت می‌شود
+    for (const k of changedSettingKeys(cloudSettings, mergedSettings)) {
+      addIdToSet(SETTINGS_DIRTY_KEYS_KEY, k);
+    }
+    writeTombDirty(
+      tombstonesMissingFromCloud(
+        compact ?? {},
+        (cloudSettings as { catalogTombstones?: unknown } | null)?.catalogTombstones,
+      ),
+    );
     pendingPush.settings = mergedSettings;
     markDirty(["settings"]);
   } else {
@@ -1710,62 +2171,205 @@ function applyCloudRow(data: Record<string, unknown>) {
     clearDirty(["settings"]);
     clearSettingsDirtyKeys(); // ابر همین مقدارها را دارد؛ چیزی ذخیره‌نشده نمانده
   }
+}
 
-  const applyMerged = (field: string, key: string, cloudValue: unknown) => {
-    if (field === "settings") return;
-    if (field === "current_invoice") {
-      const localBoard = localValueForCloudField("current_invoice");
-      const registered = new Set<string>([
-        ...historyIds(localValueForCloudField("invoices")),
-        ...historyIds(data.invoices),
-        ...tombstoneSet("current_invoice"),
-        ...readIdSet(CLOSED_OPEN_IDS_KEY),
-      ]);
-      const merged = mergeOpenInvoiceBoard(localBoard, cloudValue, registered);
-      const toWrite =
-        merged.open.length === 0
-          ? (() => {
-              const fresh = emptyInvoice();
-              return { open: [fresh], activeId: fresh.id };
-            })()
-          : merged;
-      writeLocalOnly(key, toWrite);
-      if (catalogArraysDiffer(toWrite, cloudValue)) {
-        pendingPush.current_invoice = toWrite;
-        markDirty(["current_invoice"]);
-      }
+/** فاکتورهای باز (پیش‌نویس) — همیشه کامل می‌آید */
+function applyCloudBoard(cloudValue: unknown, cloudInvoices?: unknown) {
+  const localBoard = localValueForCloudField("current_invoice");
+  const registered = new Set<string>([
+    ...historyIds(localValueForCloudField("invoices")),
+    ...historyIds(cloudInvoices),
+    ...tombstoneSet("current_invoice"),
+    ...readIdSet(CLOSED_OPEN_IDS_KEY),
+  ]);
+  const merged = mergeOpenInvoiceBoard(localBoard, cloudValue, registered);
+  const toWrite =
+    merged.open.length === 0
+      ? (() => {
+          const fresh = emptyInvoice();
+          return { open: [fresh], activeId: fresh.id };
+        })()
+      : merged;
+  writeLocalOnly(INVOICE_KEY, toWrite);
+  if (catalogArraysDiffer(toWrite, cloudValue)) {
+    pendingPush.current_invoice = toWrite;
+    markDirty(["current_invoice"]);
+  }
+}
+
+/** یک ستون آرایه‌ای کامل از ابر — ادغام شناسه‌به‌شناسه، بدون حذف هیچ ردیف */
+function applyCloudArrayWhole(field: string, key: string, cloudValue: unknown) {
+  const localVal = localValueForCloudField(field);
+  const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
+  const tombstoned = tombstoneSet(field);
+  const nested = nestedLedgerOptions(field);
+  const merged = unionMergeById(localVal, cloudArr, tombstoned, nested);
+  writeLocalOnly(key, merged);
+  // سرور ردیف‌های حذف‌شده را نگه می‌دارد (حذف نرم). فقط وقتی آپلود لازم است که
+  // این دستگاه چیزی دارد که سرور ندارد؛ نه برای «پاک کردن» ردیف حذف‌شده — آن آپلود
+  // روی سرور بی‌اثر است و فقط دستگاه‌های دیگر را به رفت‌وبرگشت بی‌پایان می‌انداخت.
+  const cloudVisible = withoutTombstonedRows(cloudArr, tombstoned, nested);
+  if (catalogArraysDiffer(merged, cloudVisible)) {
+    pendingPush[field] = merged;
+    setDirtyRows(field, rowIdsMissingOrDifferent(merged, cloudVisible) ?? "*");
+    markDirty([field]);
+  } else {
+    delete pendingPush[field];
+    clearDirty([field]);
+  }
+}
+
+const ARRAY_FIELD_ORDER_BEFORE_BOARD = ["products", "categories", "invoices"] as const;
+const ARRAY_FIELD_ORDER_AFTER_BOARD = [
+  "customers",
+  "students",
+  "purchases",
+  "expenses",
+  "reminders",
+  "accounts",
+  "account_txs",
+  "production",
+  "manual_ledger",
+] as const;
+
+function applyCloudRow(data: Record<string, unknown>) {
+  applyCloudSettingsWhole(data.settings);
+  for (const field of ARRAY_FIELD_ORDER_BEFORE_BOARD) {
+    applyCloudArrayWhole(field, FIELD_TO_LOCAL_KEY[field], data[field]);
+  }
+  applyCloudBoard(data.current_invoice, data.invoices);
+  for (const field of ARRAY_FIELD_ORDER_AFTER_BOARD) {
+    applyCloudArrayWhole(field, FIELD_TO_LOCAL_KEY[field], data[field]);
+  }
+}
+
+type DeltaEntry = { whole?: unknown; rows?: unknown };
+
+function deltaEntry(value: unknown): DeltaEntry | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as DeltaEntry) : null;
+}
+
+/**
+ * اعمال پاسخ kamix_sync_pull: فقط ردیف‌هایی که روی دستگاه‌های دیگر عوض شده‌اند.
+ * همان قواعد ادغام دریافت کامل (applyCloudRow) استفاده می‌شود، فقط روی ردیف‌های رسیده.
+ */
+function applyCloudDelta(fields: Record<string, unknown>, tombDelta: unknown) {
+  // ۱) حذف‌های دستگاه‌های دیگر
+  const before = readTombstones();
+  const after = compactTombstones(mergeTombstoneMaps(before, tombDelta)) ?? {};
+  const tombChanged = !tombstoneMapsEqual(before, after);
+  if (tombChanged) writeTombstones(after);
+
+  // ۲) تنظیمات (بدون فهرست حذف‌ها؛ آن‌ها جدا در tombDelta می‌آیند)
+  const settingsEntry = deltaEntry(fields.settings);
+  if (settingsEntry && "whole" in settingsEntry) {
+    const cloud = (deltaEntry(settingsEntry.whole) ?? {}) as Record<string, unknown>;
+    const merged = mergeSettingsFromCloud(
+      localValueForCloudField("settings"),
+      { ...cloud, catalogTombstones: after },
+      readIdSet(SETTINGS_DIRTY_KEYS_KEY),
+    );
+    if (Object.keys(after).length) merged.catalogTombstones = after;
+    else delete merged.catalogTombstones;
+    writeLocalOnly(SETTINGS_KEY, merged);
+    const localWins = changedSettingKeys(cloud, merged);
+    if (localWins.length || Object.keys(readTombDirty()).length) {
+      for (const k of localWins) addIdToSet(SETTINGS_DIRTY_KEYS_KEY, k);
+      pendingPush.settings = merged;
+      markDirty(["settings"]);
+    } else {
+      delete pendingPush.settings;
+      clearDirty(["settings"]);
+      clearSettingsDirtyKeys();
+    }
+  } else if (tombChanged) {
+    const cur = localValueForCloudField("settings");
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) {
+      const next = { ...(cur as Record<string, unknown>), catalogTombstones: after };
+      writeLocalOnly(SETTINGS_KEY, next);
+      if ("settings" in pendingPush) pendingPush.settings = next;
+    }
+  }
+
+  // ۳) آرایه‌ها
+  const tombFields = new Set(
+    Object.keys(mergeTombstoneMaps(tombDelta)).map((k) => k.split(".")[0]),
+  );
+  const applyField = (field: string) => {
+    const key = FIELD_TO_LOCAL_KEY[field];
+    const entry = deltaEntry(fields[field]);
+    if (entry && "whole" in entry) {
+      applyCloudArrayWhole(field, key, entry.whole);
       return;
     }
-    const localVal = localValueForCloudField(field);
-    const cloudArr = Array.isArray(cloudValue) ? cloudValue : [];
-    const tombstoned = tombstoneSet(field);
-    const nested = nestedLedgerOptions(field);
-    const merged = unionMergeById(localVal, cloudArr, tombstoned, nested);
-    writeLocalOnly(key, merged);
-    // سرور ردیف‌های حذف‌شده را نگه می‌دارد (حذف نرم). فقط وقتی آپلود لازم است که
-    // این دستگاه چیزی دارد که سرور ندارد؛ نه برای «پاک کردن» ردیف حذف‌شده — آن آپلود
-    // روی سرور بی‌اثر است و فقط دستگاه‌های دیگر را به رفت‌وبرگشت بی‌پایان می‌انداخت.
-    if (catalogArraysDiffer(merged, withoutTombstonedRows(cloudArr, tombstoned, nested))) {
-      pendingPush[field] = merged;
+    const rows = entry && Array.isArray(entry.rows) ? entry.rows : null;
+    // بدون ردیف تازه هم اگر حذفی برای این ستون رسیده، ردیف حذف‌شده از حافظه برداشته می‌شود
+    if (!rows && !(tombChanged && tombFields.has(field))) return;
+    const res = mergeRowsDelta(
+      localValueForCloudField(field),
+      rows ?? [],
+      tombstoneSet(field),
+      nestedLedgerOptions(field),
+    );
+    if (res.changed) writeLocalOnly(key, res.merged);
+    if (res.upload.length) {
+      // نسخهٔ این دستگاه جلوتر است (یا تراکنشی دارد که سرور ندارد): همان ردیف‌ها بالا می‌روند
+      addDirtyRows(field, res.upload);
+      pendingPush[field] = res.merged;
       markDirty([field]);
-    } else {
-      delete pendingPush[field];
-      clearDirty([field]);
+    } else if (res.changed && field in pendingPush) {
+      pendingPush[field] = res.merged;
     }
   };
-  applyMerged("products", PRODUCTS_KEY, data.products);
-  applyMerged("categories", CATEGORIES_KEY, data.categories);
-  applyMerged("invoices", HISTORY_KEY, data.invoices);
-  applyMerged("current_invoice", INVOICE_KEY, data.current_invoice);
-  applyMerged("customers", CUSTOMERS_KEY, data.customers);
-  applyMerged("students", STUDENTS_KEY, data.students);
-  applyMerged("purchases", PURCHASES_KEY, data.purchases);
-  applyMerged("expenses", EXPENSES_KEY, data.expenses);
-  applyMerged("reminders", REMINDERS_KEY, data.reminders);
-  applyMerged("accounts", ACCOUNTS_KEY, data.accounts);
-  applyMerged("account_txs", ACCOUNT_TXS_KEY, data.account_txs);
-  applyMerged("production", PRODUCTION_KEY, data.production);
-  applyMerged("manual_ledger", MANUAL_LEDGER_KEY, data.manual_ledger);
+  for (const field of ARRAY_FIELD_ORDER_BEFORE_BOARD) applyField(field);
+  const boardEntry = deltaEntry(fields.current_invoice);
+  if (boardEntry && "whole" in boardEntry) applyCloudBoard(boardEntry.whole);
+  for (const field of ARRAY_FIELD_ORDER_AFTER_BOARD) applyField(field);
+}
+
+/** شمارندهٔ «تغییر دستگاه دیگری اعمال شد» — برای سنجش سلامت سیگنال لحظه‌ای */
+let remoteChangesApplied = 0;
+
+function scheduleFlushAfterPull() {
+  if (Object.keys(pendingPush).length === 0) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(flushCloudPush, 600);
+}
+
+/**
+ * دریافت «فقط تغییرات» از نسخهٔ syncCursor به بعد.
+ * "ok": اعمال شد (یا چیزی عوض نشده بود). "full": سرور می‌گوید کل ردیف را بخوان.
+ * "legacy": توابع سرور در دسترس نیستند.
+ */
+async function pullDelta(userId: string): Promise<"ok" | "full" | "legacy"> {
+  const since = syncCursor;
+  if (since === null || deltaDisabled) return "legacy";
+  const data = await callSyncRpc("kamix_sync_pull", { p_since: since });
+  if (cloudUserId !== userId || getStorageScope() !== userId) return "ok";
+  if (!data) return "legacy";
+  const seq = Number(data.seq);
+  if (
+    data.exists === false ||
+    data.full === true ||
+    !Number.isSafeInteger(seq) ||
+    typeof data.updated_at !== "string"
+  ) {
+    return "full";
+  }
+  const fields = (deltaEntry(data.fields) ?? {}) as Record<string, unknown>;
+  const touched =
+    Object.keys(fields).length > 0 || Object.keys(mergeTombstoneMaps(data.tombstones)).length > 0;
+  if (touched) {
+    applyCloudDelta(fields, data.tombstones);
+    remoteChangesApplied += 1;
+  }
+  // نسخه بعد از نوشتن داده جلو می‌رود: اگر برنامه همین وسط بسته شود، دفعهٔ بعد همین
+  // تغییرات دوباره می‌آید (اعمال دوباره بی‌اثر است) و چیزی جا نمی‌ماند.
+  if (syncCursor !== null) setSyncCursor(Math.max(syncCursor, seq));
+  lastCloudUpdatedAt = data.updated_at;
+  if (isCapacitor()) rememberCloudRead(userId);
+  scheduleFlushAfterPull();
+  return "ok";
 }
 
 async function pullUserData(
@@ -1787,6 +2391,39 @@ async function pullUserData(
     } catch {}
   }
   try {
+    // شروع برنامه: اگر این دستگاه نسخهٔ قبلی داده را کامل دارد، فقط تغییرات بعد از آن
+    // گرفته می‌شود (چند صد بایت به‌جای کل ردیف). هر FULL_RESYNC_MS یک بار، یا اگر
+    // سرور بگوید، کل ردیف دوباره خوانده و تطبیق داده می‌شود.
+    if (!opts?.refresh && !deltaDisabled && syncCursor === null) {
+      const saved = readPersistedSyncCursor();
+      const age = saved ? Date.now() - saved.fullAt : Infinity;
+      if (saved && age >= 0 && age < FULL_RESYNC_MS && memoryOverlay.size === 0) {
+        syncCursor = saved.seq;
+        let outcome: "ok" | "full" | "legacy" = "full";
+        try {
+          outcome = await pullDelta(userId);
+        } catch (e) {
+          console.warn("[store] delta hydrate failed; reading the whole row", e);
+        }
+        if (
+          shouldAbortHydrate({
+            requestedUserId: userId,
+            cloudUserId,
+            storageScope: getStorageScope(),
+            epoch,
+            currentEpoch: hydrateEpoch,
+          })
+        ) {
+          return;
+        }
+        if (outcome === "ok") {
+          markCloudHydrated();
+          publishSyncState({ pending: readDirtySet().size, failed: false, lastError: undefined });
+          return; // بلوک finally صف را flush می‌کند
+        }
+        syncCursor = null;
+      }
+    }
     const { data, error } = await supabase
       .from("user_data")
       .select("*")
@@ -1814,12 +2451,14 @@ async function pullUserData(
           const local = readLocalJson(localKey);
           if (!local.found) continue;
           pendingPush[field] = local.value;
+          setDirtyRows(field, "*");
           markDirty([field]);
         } catch {
           /* مقدار خراب — نادیده */
         }
       }
       lastCloudUpdatedAt = null;
+      setSyncCursor(null);
       markCloudHydrated();
       if (isCapacitor()) rememberCloudRead(userId);
       return; // بلوک finally صف را flush می‌کند
@@ -1846,7 +2485,20 @@ async function pullUserData(
     }
     applyCloudRow(data as Record<string, unknown>);
     lastCloudUpdatedAt = typeof data.updated_at === "string" ? data.updated_at : lastCloudUpdatedAt;
+    // ستون sync_seq فقط بعد از مهاجرت 20261115120000 وجود دارد؛ با آن، از این به بعد
+    // فقط تغییرات رد و بدل می‌شود. بدون آن همان روش کل‌ردیف ادامه دارد.
+    const serverSeq = (data as { sync_seq?: unknown }).sync_seq;
+    setSyncCursor(
+      !deltaDisabled && typeof serverSeq === "number" && Number.isSafeInteger(serverSeq)
+        ? serverSeq
+        : null,
+      { fullReadNow: true },
+    );
+    if (opts?.refresh) remoteChangesApplied += 1;
     markCloudHydrated();
+    if (!(Object.keys(pendingPush).length > 0)) {
+      publishSyncState({ pending: readDirtySet().size, failed: false, lastError: undefined });
+    }
     if (isCapacitor()) rememberCloudRead(userId);
   } catch (e) {
     console.error("[store] hydrate failed", e);
@@ -1858,10 +2510,12 @@ async function pullUserData(
     // Read failed: stay locked so local state can never overwrite cloud data.
     // Pending edits keep their dirty markers and retry after a successful read.
     if (!opts?.refresh) {
+      // اولین خواندن ناموفق: زود دوباره (۴، ۸، ۱۶، حداکثر ۳۰ ثانیه) تا دستگاه معطل نماند.
+      hydrateRetryDelay = Math.min(30_000, hydrateRetryDelay * 2);
       setTimeout(() => {
         if (isCapacitorOfflineReadOnly()) return;
         if (cloudUserId === userId && !cloudHydrated) void hydrateFromCloud(userId);
-      }, 15000);
+      }, hydrateRetryDelay);
     }
   } finally {
     // Flush any restored offline edits back to the cloud.
@@ -1897,33 +2551,91 @@ export async function hydrateFromCloud(userId: string) {
 }
 
 /**
- * خواندن مجدد ابر وقتی برنامه باز است (تب دیگر / گوشی دیگر).
- * اگر updated_at عوض نشده باشد فقط یک ستون کوچک خوانده می‌شود.
+ * خواندن تغییرات دستگاه‌های دیگر وقتی برنامه باز است (تب دیگر / گوشی دیگر).
+ * - با همگام‌سازی «فقط تغییرات»: یک درخواست کوچک که یا «چیزی عوض نشده» برمی‌گرداند
+ *   یا همان ردیف‌های عوض‌شده را.
+ * - روش قبلی: اگر updated_at عوض نشده باشد فقط یک ستون کوچک خوانده می‌شود.
+ * درخواست‌های هم‌زمان یکی می‌شوند؛ اگر وسط کار درخواست تازه‌ای برسد، بلافاصله بعد از
+ * تمام شدن یک دور دیگر اجرا می‌شود (قبلاً دور ریخته می‌شد).
  */
-export async function refreshFromCloud() {
+type RefreshSignal = { updatedAt: string | null; seq: number | null };
+let refreshRunning: Promise<void> | null = null;
+let refreshWanted = false;
+let refreshForced = false;
+let refreshSignal: RefreshSignal | null = null;
+let lastPullAt = 0;
+
+export async function refreshFromCloud(signal?: RefreshSignal): Promise<void> {
   if (!cloudUserId || !cloudHydrated) return;
-  if (hydrateInFlight) return hydrateInFlight;
-  if (Date.now() - lastLocalPushAt < 2000) return;
-  const userId = cloudUserId;
-  hydrateInFlight = (async () => {
-    try {
-      const { data, error } = await supabase
-        .from("user_data")
-        .select("updated_at")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (error || !data) return;
-      if (lastCloudUpdatedAt && data.updated_at === lastCloudUpdatedAt) return;
-      if (cloudUserId !== userId) return;
-      await pullUserData(userId, { refresh: true });
-    } catch (e) {
-      console.warn("[store] refresh failed", e);
+  refreshWanted = true;
+  if (signal) refreshSignal = signal;
+  else refreshForced = true;
+  return startRefreshLoop();
+}
+
+function startRefreshLoop(): Promise<void> {
+  if (refreshRunning) return refreshRunning;
+  const run: Promise<void> = (async () => {
+    let rounds = 0;
+    while (refreshWanted && rounds++ < 6) {
+      refreshWanted = false;
+      const userId: string | null = cloudUserId;
+      if (!userId || !cloudHydrated) return;
+      // ذخیرهٔ در جریانِ همین دستگاه اول تمام شود: پاسخش نسخهٔ سرور را جلو می‌برد و
+      // سیگنالِ همان ذخیره (پژواک) دیگر دریافت بی‌دلیل راه نمی‌اندازد.
+      if (hydrateInFlight) await hydrateInFlight.catch(() => {});
+      await flushChain.catch(() => {});
+      if (cloudUserId !== userId || !cloudHydrated) return;
+      const forced = refreshForced;
+      const sig = refreshSignal;
+      refreshForced = false;
+      refreshSignal = null;
+      if (!forced && sig && isOwnEcho(sig)) continue;
+      await refreshOnce(userId);
     }
-  })();
+  })().catch((e) => {
+    console.warn("[store] refresh loop failed", e);
+  });
+  refreshRunning = run;
+  // همیشه بعد از انتساب بالا اجرا می‌شود (حتی اگر حلقه بدون await تمام شده باشد)
+  void run.finally(() => {
+    if (refreshRunning === run) refreshRunning = null;
+    // درخواستی که درست در لحظهٔ تمام شدن حلقه رسیده جا نماند
+    if (refreshWanted && cloudUserId && cloudHydrated) setTimeout(() => void startRefreshLoop(), 250);
+  });
+  return run;
+}
+
+async function refreshOnce(userId: string): Promise<void> {
+  lastPullAt = Date.now();
   try {
-    await hydrateInFlight;
-  } finally {
-    hydrateInFlight = null;
+    let mustReadWholeRow = false;
+    if (syncCursor !== null && !deltaDisabled) {
+      const outcome = await pullDelta(userId);
+      if (outcome === "ok" || cloudUserId !== userId) return;
+      mustReadWholeRow = outcome === "full";
+    }
+    const legacy = (async () => {
+      if (!mustReadWholeRow) {
+        const { data, error } = await supabase
+          .from("user_data")
+          .select("updated_at")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (error || !data) return;
+        if (lastCloudUpdatedAt && data.updated_at === lastCloudUpdatedAt) return;
+        if (cloudUserId !== userId) return;
+      }
+      await pullUserData(userId, { refresh: true });
+    })();
+    hydrateInFlight = legacy;
+    try {
+      await legacy;
+    } finally {
+      if (hydrateInFlight === legacy) hydrateInFlight = null;
+    }
+  } catch (e) {
+    console.warn("[store] refresh failed", e);
   }
 }
 
@@ -1933,6 +2645,8 @@ export function stopCloudSync() {
   cloudUserId = null;
   cloudHydrated = false;
   lastCloudUpdatedAt = null;
+  syncCursor = null;
+  deltaDisabled = false;
   clearInMemoryPush();
   // Do NOT clear the persisted dirty set here — it must survive sign-out /
   // reload so a subsequent sign-in can still resync offline edits.
@@ -1950,7 +2664,9 @@ function onReconnect() {
     flushCloudPush();
   }
   ensureRealtimeSync();
-  void refreshFromCloud();
+  // اولین خواندن این نشست هنوز انجام نشده (اینترنت قطع بود): همین حالا، نه با تایمر
+  if (!cloudHydrated) void hydrateFromCloud(cloudUserId);
+  else void refreshFromCloud();
 }
 
 // Re-flush pending changes when the browser regains connectivity
@@ -1982,20 +2698,44 @@ if (typeof window !== "undefined") {
     if ((e as PageTransitionEvent).persisted) void refreshFromCloud();
   });
   window.addEventListener("focus", () => void refreshFromCloud());
-  // وقتی برنامه باز است، هر ۴۰ ثانیه اگر ابر عوض شده باشد داده را می‌آوریم
-  // تا همان اکانت روی گوشی/مرورگر دیگر آخرین تغییرات را ببیند.
-  // اگر سیگنال لحظه‌ای وصل باشد، تغییر دستگاه دیگر همان لحظه می‌رسد و این بررسی فقط
-  // پشتیبان است: هر ۳ دقیقه یک بار کافی است (درخواست کمتر به سرور).
-  let lastPeriodicRefreshAt = 0;
+  // ── بررسی دوره‌ای تغییرات دستگاه‌های دیگر ──
+  // سیگنال لحظه‌ای (WebSocket مستقیم به supabase.co) روی خیلی از شبکه‌ها وصل نمی‌شود،
+  // پس نباید به آن تکیه کرد: وقتی وصل و سالم نیست، تا کاربر با برنامه کار می‌کند هر
+  // چند ثانیه یک درخواست خیلی کوچک («بعد از نسخهٔ n چه عوض شده؟») فرستاده می‌شود.
+  // وقتی سیگنال سالم است این بررسی فقط پشتیبان است.
+  let lastActivityAt = Date.now();
+  let realtimeSuspectUntil = 0;
+  const noteActivity = () => {
+    lastActivityAt = Date.now();
+  };
+  window.addEventListener("pointerdown", noteActivity, { passive: true });
+  window.addEventListener("keydown", noteActivity, { passive: true });
+  window.addEventListener("store-change", noteActivity);
+  const pollEveryMs = (now: number): number => {
+    if (isRealtimeSyncConnected() && now >= realtimeSuspectUntil) return POLL_REALTIME_OK_MS;
+    return now - lastActivityAt < POLL_ACTIVE_WINDOW_MS ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+  };
   window.setInterval(() => {
-    if (!cloudUserId || !cloudHydrated) return;
+    if (!cloudUserId) return;
     if (isCapacitorOfflineReadOnly()) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (!cloudHydrated) return; // تلاش مجدد خواندن اول، تایمر خودش را دارد
     const now = Date.now();
-    if (isRealtimeSyncConnected() && now - lastPeriodicRefreshAt < 175_000) return;
-    lastPeriodicRefreshAt = now;
-    void refreshFromCloud();
-  }, 40_000);
+    if (now - lastPullAt < pollEveryMs(now)) return;
+    const seenBefore = remoteChangesApplied;
+    const realtimeWasUp = isRealtimeSyncConnected();
+    void refreshFromCloud().then(() => {
+      // کانال «وصل» است ولی تغییر دستگاه دیگر را این بررسی پیدا کرد نه سیگنال:
+      // سیگنال‌ها نمی‌رسند (مثلاً جدول سیگنال منتشر نشده). مدتی به آن اعتماد نکن.
+      if (
+        realtimeWasUp &&
+        remoteChangesApplied !== seenBefore &&
+        Date.now() - lastRealtimeSignalAt > 20_000
+      ) {
+        realtimeSuspectUntil = Date.now() + 10 * 60_000;
+      }
+    });
+  }, POLL_TICK_MS);
 }
 
 // ─── React hook ──────────────────────────────────────────────────────────────

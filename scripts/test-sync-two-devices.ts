@@ -131,14 +131,27 @@ function triggerLikeMerge(old: Row, incoming: Row): Row {
 }
 
 // ─── سناریوها ────────────────────────────────────────────────────────────────
-async function freshWorld(serverMode: "blind" | "trigger") {
+/**
+ * blind / trigger: سرور قبل از مهاجرت 20261115120000 (روش کل‌ستون).
+ * delta / delta-trigger: همان مهاجرت نصب است (ارسال و دریافت «فقط تغییرات»)،
+ * بدون / با تریگر محافظ 20261002120000.
+ */
+type ServerMode = "blind" | "trigger" | "delta" | "delta-trigger";
+const isDelta = (m: ServerMode) => m.startsWith("delta");
+
+async function freshWorld(serverMode: ServerMode) {
   for (const d of ["A", "B", "C"]) deviceStorage(d).clear();
   timers.clear();
   fake.rows.clear();
   fake.upserts.length = 0;
   fake.gate = null;
   fake.beforeWrite = null;
-  fake.serverMerge = serverMode === "trigger" ? triggerLikeMerge : null;
+  fake.serverMerge = serverMode.endsWith("trigger") ? triggerLikeMerge : null;
+  fake.delta = isDelta(serverMode);
+  fake.rowSeq.clear();
+  fake.rpcCalls.length = 0;
+  fake.selects.length = 0;
+  fake.rpcError = null;
   fake.rows.set(U, {
     user_id: U,
     products: [product("p1"), product("p2")],
@@ -170,7 +183,7 @@ async function scenario(fn: () => Promise<void>) {
   }
 }
 
-async function run(serverMode: "blind" | "trigger") {
+async function run(serverMode: ServerMode) {
   const tag = `[${serverMode}]`;
 
   // ۱) کالای تازهٔ دستگاه A با ذخیرهٔ دستگاهِ کهنهٔ B از سرور پاک نمی‌شود
@@ -501,16 +514,256 @@ async function run(serverMode: "blind" | "trigger") {
       assert.equal(c.txs.length, 0, `${tag} 15: ${d.name} deleted tx came back`);
     }
     // دادهٔ حذف‌شده روی سرور قابل بازیابی می‌ماند (حذف نرم)
-    if (serverMode === "trigger") {
+    if (serverMode !== "blind") {
       assert.ok(ids(server().products).includes("p1"), `${tag} 15: server must keep p1 (soft delete)`);
     }
   });
 
+  if (isDelta(serverMode)) await runDeltaOnly(serverMode, tag);
+
   if (!failures.length) console.log(`✓ ${tag} two-device sync scenarios passed`);
 }
 
-await run("blind");
-await run("trigger");
+/** سناریوهای مخصوص همگام‌سازی «فقط تغییرات» */
+async function runDeltaOnly(serverMode: ServerMode, tag: string) {
+  const pushes = () => fake.rpcCalls.filter((c) => c.name === "kamix_sync_push");
+  const pulls = () => fake.rpcCalls.filter((c) => c.name === "kamix_sync_pull");
+  const bytes = (v: unknown) => JSON.stringify(v ?? null).length;
+  const bigCatalog = () =>
+    Array.from({ length: 400 }, (_, i) => product(`big-${i}`, { name: `کالای حجیم شمارهٔ ${i}` }));
+
+  // D1) با ۴۰۰ کالا روی سرور، افزودن یک کالا فقط همان یک ردیف را می‌فرستد و دستگاه
+  //     دیگر فقط همان یک ردیف را می‌گیرد (نه کل ستون و نه کل ردیف)
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => s.products.save([...s.products.getAll(), ...bigCatalog()]));
+    await settle();
+    await refresh(B);
+    assert.equal((await on(B, (s) => s.products.getAll())).length, 402, `${tag} D1: B catalog`);
+    fake.rpcCalls.length = 0;
+    fake.selects.length = 0;
+    const writesBefore = fake.upserts.length;
+    await on(A, (s) => s.products.save([product("p-new"), ...s.products.getAll()]));
+    await settle();
+    await refresh(B);
+    const sent = pushes();
+    assert.equal(sent.length, 1, `${tag} D1: expected one push, got ${sent.length}`);
+    const sentRows = ((sent[0].args.p as Row).rows as Row).products as Row[];
+    assert.deepEqual(ids(sentRows), ["p-new"], `${tag} D1: pushed rows ${ids(sentRows)}`);
+    assert.ok(bytes(sent[0].args) < 400, `${tag} D1: push is ${bytes(sent[0].args)} bytes`);
+    const got = pulls().filter((c) => (c.result as Row)?.fields && bytes((c.result as Row).fields) > 2);
+    assert.equal(got.length, 1, `${tag} D1: expected one non-empty pull, got ${got.length}`);
+    assert.ok(bytes(got[0].result) < 600, `${tag} D1: pull is ${bytes(got[0].result)} bytes`);
+    assert.deepEqual(fake.selects, [], `${tag} D1: whole-row reads happened: ${fake.selects}`);
+    assert.equal(fake.upserts.length - writesBefore, 1, `${tag} D1: extra uploads`);
+    const listB = await on(B, (s) => s.products.getAll());
+    assert.equal(listB.length, 403, `${tag} D1: B has ${listB.length} products`);
+    assert.equal(listB[0].id, "p-new", `${tag} D1: a new row must come first on B`);
+    assert.equal((server().products as Row[]).length, 403, `${tag} D1: server count`);
+    assert.equal((server().products as Row[])[0].id, "p-new", `${tag} D1: server order`);
+  });
+
+  // D2) بستن و باز کردن برنامه: به‌جای خواندن کل ردیف فقط «بعد از نسخهٔ n چه عوض شده؟»
+  //     و تغییری که در این فاصله روی دستگاه دیگر ثبت شده می‌رسد
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(B, (s) => s.stopCloudSync());
+    await on(A, (s) => s.customers.addTx("c1", { type: "payment", amount: 250 }));
+    await on(A, (s) => s.products.remove(["p2"]));
+    await settle();
+    fake.selects.length = 0;
+    fake.rpcCalls.length = 0;
+    const B2 = await newDevice("B"); // همان حافظهٔ دستگاه B
+    await signIn(B2);
+    assert.deepEqual(fake.selects, [], `${tag} D2: restart read the whole row: ${fake.selects}`);
+    assert.ok(pulls().length >= 1, `${tag} D2: no delta pull on restart`);
+    const c = await on(B2, (s) => s.customers.getAll().find((x) => x.id === "c1")!);
+    assert.equal(c.txs.length, 2, `${tag} D2: B missed the payment made while it was closed`);
+    assert.deepEqual(
+      ids(await on(B2, (s) => s.products.getAll())),
+      ["p1"],
+      `${tag} D2: B missed the delete made while it was closed`,
+    );
+    assert.equal(fake.upserts.filter((u) => u.asUser && u.ok).length, 2, `${tag} D2: B re-uploaded`);
+  });
+
+  // D3) توابع سرور خطا می‌دهند (باگ/حذف تابع): همان تغییر با روش قبلی ذخیره می‌شود و
+  //     دستگاه دیگر هم آن را می‌گیرد — هیچ چیز گیر نمی‌کند
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    fake.rpcError = { code: "XX000", message: "internal error in kamix_sync_push" };
+    await on(A, (s) => s.products.save([...s.products.getAll(), product("p-fallback")]));
+    await settle();
+    assert.ok(ids(server().products).includes("p-fallback"), `${tag} D3: change was not saved`);
+    assert.deepEqual(ids(server().products), ["p-fallback", "p1", "p2"].sort(), `${tag} D3: server`);
+    await refresh(B);
+    assert.ok(
+      ids(await on(B, (s) => s.products.getAll())).includes("p-fallback"),
+      `${tag} D3: B did not receive it`,
+    );
+    assert.equal((await on(A, (s) => s.getSyncState())).failed, false, `${tag} D3: A shows an error`);
+    // تابع وجود ندارد (مهاجرت برگردانده شده)
+    fake.rpcError = { code: "PGRST202", message: "Could not find the function" };
+    await on(B, (s) => s.products.save([...s.products.getAll(), product("p-fallback-2")]));
+    await settle();
+    assert.ok(ids(server().products).includes("p-fallback-2"), `${tag} D3: B change not saved`);
+    fake.rpcError = null;
+    await refresh(A);
+    assert.ok(
+      ids(await on(A, (s) => s.products.getAll())).includes("p-fallback-2"),
+      `${tag} D3: A did not receive B's change`,
+    );
+  });
+
+  // D4) اپ قدیمی (نسخهٔ کش‌شده روی یک گوشی) کل ستون را مستقیم می‌نویسد: دستگاه جدید
+  //     همان را به‌صورت «فقط تغییرات» می‌گیرد
+  await scenario(async () => {
+    const { A } = await freshWorld(serverMode);
+    fake.selects.length = 0;
+    fake.externalWrite(U, {
+      products: [...(server().products as Row[]), product("p-old-app")],
+      expenses: [{ id: "e-old", title: "اپ قدیمی", amount: 3, createdAt: 5 }],
+    });
+    await refresh(A);
+    assert.ok(
+      ids(await on(A, (s) => s.products.getAll())).includes("p-old-app"),
+      `${tag} D4: product from the old app missing`,
+    );
+    assert.deepEqual(ids(await on(A, (s) => s.expenses.getAll())), ["e-old"], `${tag} D4: expense`);
+    assert.deepEqual(fake.selects, [], `${tag} D4: whole-row read: ${fake.selects}`);
+  });
+
+  // D5) اپ قدیمی روی سرورِ بدون تریگر محافظ ردیف‌ها را از ستون حذف می‌کند: دستگاه جدید
+  //     کل همان ستون را می‌گیرد و ردیف‌های گم‌شده را دوباره به سرور برمی‌گرداند
+  if (serverMode === "delta") {
+    await scenario(async () => {
+      const { A } = await freshWorld(serverMode);
+      fake.externalWrite(U, { products: [product("p-only")] });
+      await refresh(A);
+      await settle();
+      assert.deepEqual(
+        ids(await on(A, (s) => s.products.getAll())),
+        ["p-only", "p1", "p2"],
+        `${tag} D5: A lost rows`,
+      );
+      assert.deepEqual(ids(server().products), ["p-only", "p1", "p2"], `${tag} D5: server not healed`);
+    });
+  }
+
+  // D6) ویرایش هم‌زمان یک کالا روی دو دستگاه: آخرین ویرایش روی هر دو و روی سرور می‌ماند
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => s.products.update({ ...s.products.findById("p1")!, price: 1111 }));
+    await advance(5000);
+    await on(B, (s) => s.products.update({ ...s.products.findById("p1")!, price: 2222 }));
+    await settle();
+    await refresh(A);
+    await refresh(B);
+    for (const d of [A, B]) {
+      assert.equal(
+        (await on(d, (s) => s.products.findById("p1")))!.price,
+        2222,
+        `${tag} D6: ${d.name} price`,
+      );
+    }
+    assert.equal(
+      (server().products as Row[]).find((p) => p.id === "p1")!.price,
+      2222,
+      `${tag} D6: server price`,
+    );
+  });
+
+  // D7) تغییر تنظیمات روی A و کلید دیگری روی B: هر دو می‌مانند (فقط همان کلید می‌رود)
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => s.settings.save({ ...s.settings.get(), shopName: "نام تازه" }));
+    await on(B, (s) => s.settings.save({ ...s.settings.get(), invoiceFontSize: 17 }));
+    await settle();
+    await refresh(A);
+    await refresh(B);
+    for (const d of [A, B]) {
+      const st = await on(d, (s) => s.settings.get());
+      assert.equal(st.shopName, "نام تازه", `${tag} D7: ${d.name} shopName`);
+      assert.equal(st.invoiceFontSize, 17, `${tag} D7: ${d.name} font size`);
+    }
+    const sent = pushes()
+      .filter((c) => (c.args.p as Row).settings)
+      .map((c) => Object.keys(((c.args.p as Row).settings as Row).set as Row));
+    assert.deepEqual(sent.map((k) => k.join()).sort(), ["invoiceFontSize", "shopName"], `${tag} D7: ${JSON.stringify(sent)}`);
+  });
+
+  // D8) ثبت آفلاین + بستن برنامه: بعد از باز شدن فقط همان ردیف‌ها فرستاده می‌شوند
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => s.products.save([...s.products.getAll(), ...bigCatalog()]));
+    await settle();
+    await refresh(B);
+    const release = fake.hold();
+    await on(B, (s) =>
+      s.expenses.add({ ...s.emptyExpense(), id: "e-off", title: "آفلاین", amount: 5 }),
+    );
+    await on(B, (s) => s.products.update({ ...s.products.findById("big-7")!, price: 7777 }));
+    await settle(4000);
+    await on(B, (s) => s.stopCloudSync());
+    release();
+    await settle();
+    fake.rpcCalls.length = 0;
+    const B2 = await newDevice("B");
+    await signIn(B2);
+    await settle(3000);
+    assert.deepEqual(ids(server().expenses), ["e-off"], `${tag} D8: offline expense not sent`);
+    assert.equal(
+      (server().products as Row[]).find((p) => p.id === "big-7")!.price,
+      7777,
+      `${tag} D8: offline edit not sent`,
+    );
+    const total = pushes().reduce((n, c) => n + bytes(c.args), 0);
+    assert.ok(total < 1500, `${tag} D8: restart re-sent ${total} bytes (whole columns?)`);
+    await refresh(A);
+    assert.equal((await on(A, (s) => s.products.findById("big-7")))!.price, 7777, `${tag} D8: A`);
+  });
+
+  // D9) فاکتور ثبت‌شده روی A: فاکتور، کم شدن موجودی و بسته شدن تبِ باز به B می‌رسد
+  await scenario(async () => {
+    const { A, B } = await freshWorld(serverMode);
+    await on(A, (s) => {
+      const p = s.products.findById("p1")!;
+      s.invoice.save({
+        ...s.invoice.getCurrent(),
+        items: [{ productId: p.id, name: p.name, price: p.price, quantity: 2 }],
+      });
+    });
+    await settle();
+    await refresh(B);
+    assert.equal((await on(B, (s) => s.invoice.getCurrent())).items.length, 1, `${tag} D9: draft on B`);
+    await on(A, (s) => s.invoice.archive(s.invoice.getCurrent()));
+    await settle();
+    await refresh(B);
+    await refresh(A);
+    for (const d of [A, B]) {
+      const hist = await on(d, (s) => s.invoice.getHistory());
+      assert.equal(hist.length, 1, `${tag} D9: ${d.name} has ${hist.length} invoices`);
+      assert.equal(
+        (await on(d, (s) => s.products.findById("p1")))!.stock,
+        3,
+        `${tag} D9: ${d.name} stock`,
+      );
+      assert.equal(
+        (await on(d, (s) => s.invoice.getCurrent())).items.length,
+        0,
+        `${tag} D9: ${d.name} still shows the registered invoice as an open draft`,
+      );
+    }
+    assert.equal((server().invoices as Row[]).length, 1, `${tag} D9: server invoices`);
+  });
+
+  if (!failures.length) console.log(`✓ ${tag} delta-only scenarios passed`);
+}
+
+const only = process.env.MODE as ServerMode | undefined;
+for (const mode of ["blind", "trigger", "delta", "delta-trigger"] as ServerMode[]) {
+  if (!only || only === mode) await run(mode);
+}
 if (failures.length) {
   console.log(failures.map((f) => `✗ ${f}`).join("\n"));
   process.exit(1);

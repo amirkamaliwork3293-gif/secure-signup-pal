@@ -786,3 +786,103 @@ export function catalogArraysDiffer(a: unknown, b: unknown): boolean {
     return true;
   }
 }
+
+/** مقایسهٔ دو ردیف بدون حساسیت به ترتیب کلیدها */
+function rowsDiffer(a: unknown, b: unknown): boolean {
+  return a !== b && catalogArraysDiffer(a, b);
+}
+
+/**
+ * شناسهٔ ردیف‌هایی از mine که theirs ندارد یا نسخهٔ دیگری از آن دارد — همان ردیف‌هایی
+ * که باید به سرور فرستاده شوند. null یعنی با شناسه قابل بیان نیست (ردیف بدون شناسه)
+ * و کل آرایه باید فرستاده شود.
+ */
+export function rowIdsMissingOrDifferent(mine: unknown, theirs: unknown): string[] | null {
+  const mineArr = Array.isArray(mine) ? mine : [];
+  const theirsById = new Map<string, unknown>();
+  for (const row of Array.isArray(theirs) ? theirs : []) {
+    const id = catalogRowId(row);
+    if (id && !theirsById.has(id)) theirsById.set(id, row);
+  }
+  const out: string[] = [];
+  for (const row of mineArr) {
+    const id = catalogRowId(row);
+    if (!id) return null;
+    if (!theirsById.has(id) || rowsDiffer(row, theirsById.get(id))) out.push(id);
+  }
+  return out;
+}
+
+export type RowsDeltaResult = {
+  /** آرایهٔ محلی پس از اعمال ردیف‌های رسیده */
+  merged: unknown[];
+  /** آیا چیزی در آرایهٔ محلی عوض شد؟ */
+  changed: boolean;
+  /** ردیف‌هایی که نسخهٔ این دستگاه از نسخهٔ سرور جلوتر است و باید فرستاده شوند */
+  upload: string[];
+};
+
+/**
+ * اعمال «فقط ردیف‌های تغییرکرده» که از سرور رسیده روی آرایهٔ محلی.
+ * - ردیف موجود سر جای خودش می‌ماند و با نسخهٔ جدیدتر جایگزین می‌شود (همان قاعدهٔ
+ *   pickRicherCatalogRow و ادغام دفتر داخلی که در دریافت کامل استفاده می‌شود)
+ * - ردیف تازه ابتدای آرایه می‌آید (برنامه ردیف‌های جدید را اول نگه می‌دارد)
+ * - ردیف‌های محلی که در این دسته نیستند دست‌نخورده می‌مانند؛ هیچ ردیفی حذف نمی‌شود
+ *   مگر شناسه‌اش tombstone باشد (حذف صریح کاربر روی یکی از دستگاه‌ها).
+ */
+export function mergeRowsDelta(
+  local: unknown,
+  cloudRows: unknown,
+  tombstoned: ReadonlySet<string> = new Set(),
+  nested?: NestedLedgerOptions,
+): RowsDeltaResult {
+  const localArr = Array.isArray(local) ? local : [];
+  const cloudById = new Map<string, unknown>();
+  for (const row of Array.isArray(cloudRows) ? cloudRows : []) {
+    const id = catalogRowId(row);
+    if (!id || tombstoned.has(id)) continue;
+    const prev = cloudById.get(id);
+    cloudById.set(id, prev === undefined ? row : pickRicherCatalogRow(prev, row));
+  }
+  const upload: string[] = [];
+  const seen = new Set<string>();
+  let changed = false;
+  const body: unknown[] = [];
+  for (const row of localArr) {
+    const id = catalogRowId(row);
+    if (!id) {
+      body.push(row);
+      continue;
+    }
+    if (tombstoned.has(id) || seen.has(id)) {
+      changed = true;
+      continue;
+    }
+    seen.add(id);
+    if (!cloudById.has(id)) {
+      const cleaned = nested ? mergeNestedLedger(row, null, nested) : row;
+      if (cleaned !== row) changed = true;
+      body.push(cleaned);
+      continue;
+    }
+    const cloud = cloudById.get(id);
+    const picked = pickRicherCatalogRow(row, cloud);
+    const result = nested ? mergeNestedLedger(picked, picked === row ? cloud : row, nested) : picked;
+    // سرور اقلام حذف‌شدهٔ دفتر داخلی را نگه می‌دارد؛ فرستادن دوباره فقط برای پاک کردنشان لازم نیست
+    const cloudVisible = nested ? mergeNestedLedger(cloud, null, nested) : cloud;
+    if (rowsDiffer(result, cloudVisible)) upload.push(id);
+    if (result !== row && rowsDiffer(result, row)) {
+      changed = true;
+      body.push(result);
+    } else {
+      body.push(row);
+    }
+  }
+  const fresh: unknown[] = [];
+  for (const [id, row] of cloudById) {
+    if (seen.has(id)) continue;
+    fresh.push(nested ? mergeNestedLedger(row, null, nested) : row);
+  }
+  if (fresh.length) changed = true;
+  return { merged: changed ? [...fresh, ...body] : localArr, changed, upload };
+}

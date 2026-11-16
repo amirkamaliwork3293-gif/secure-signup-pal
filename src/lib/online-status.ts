@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { isCapacitor } from "@/lib/isWebView";
 import { readCloudReadAt } from "@/lib/offline-cache";
+import { resolveSupabaseUrl } from "@/integrations/supabase/public-config";
 import {
   decideOnlineKind,
   shouldBlockCapacitorWrites,
@@ -12,6 +13,8 @@ import {
   OFFLINE_WRITE_BLOCKED_EVENT,
   OFFLINE_WRITE_MESSAGE,
   ONLINE_CONFIRMED_EVENT,
+  NETWORK_OK_EVENT,
+  healthCheckUrl,
   OfflineWriteError,
   type OnlineKind,
 } from "@/lib/online-status-core";
@@ -158,7 +161,7 @@ async function probeOnce(): Promise<void> {
     return;
   }
   const wasOffline = getOnlineKind() === "offline";
-  const ok = await probeReachability();
+  const ok = await probeReachability({ hrefs: probeTargets() });
   if (ok) {
     probeFailures = 0;
     probeOk = true;
@@ -173,6 +176,42 @@ async function probeOnce(): Promise<void> {
   }
   publish();
   if (ok && wasOffline && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
+  }
+}
+
+/**
+ * مقصدهای تست اتصال: خود سایت برنامه و سرور داده (Supabase).
+ * قبلاً فقط سایت (kamixapp.ir روی Vercel) امتحان می‌شد؛ وقتی همان یک مقصد از ایران کند
+ * یا مسدود بود، همهٔ کاربران «آفلاین هستید» می‌دیدند و نوشتن بسته می‌شد، در حالی که
+ * اینترنت و حتی سرور داده در دسترس بود.
+ */
+function probeTargets(): string[] {
+  const targets = [healthCheckUrl()];
+  try {
+    const sb = resolveSupabaseUrl();
+    if (/^https:\/\//.test(sb)) targets.push(`${sb}/auth/v1/health`);
+  } catch {
+    /* نشانی سرور داده در دسترس نیست — فقط سایت */
+  }
+  return targets;
+}
+
+/**
+ * هر درخواستی که واقعاً به سرور داده رسید (کلاینت سوپابیس این رویداد را می‌فرستد)
+ * بهترین مدرک آنلاین بودن است: دیگر به تست جداگانه تکیه نمی‌کنیم.
+ */
+function noteRealNetworkSuccess(): void {
+  if (probeOk === true) return;
+  const wasOffline = getOnlineKind() === "offline";
+  probeOk = true;
+  probeFailures = 0;
+  if (reprobeTimer) {
+    clearTimeout(reprobeTimer);
+    reprobeTimer = null;
+  }
+  publish();
+  if (wasOffline && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
   }
 }
@@ -202,6 +241,7 @@ export function initOnlineMonitoring(): void {
   probeOk = currentNavigatorOnLine() === false ? false : null;
   kind = currentKind();
   publish();
+  window.addEventListener(NETWORK_OK_EVENT, noteRealNetworkSuccess);
   void runProbe();
   window.addEventListener("online", () => {
     void runProbe();

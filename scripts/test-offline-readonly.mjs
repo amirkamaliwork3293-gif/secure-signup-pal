@@ -51,8 +51,47 @@ function shouldRegisterCapacitorShellWorker(native) {
 {
   const url = healthCheckUrl("https://kamixapp.ir");
   assert.match(url, new RegExp(`${HEALTH_CHECK_PARAM}=1`));
-  assert.ok(HEALTH_TIMEOUT_MS <= 3000);
-  assert.ok(HEALTH_TIMEOUT_MS >= 2000);
+  // اینترنت ایران به سرور خارجی کند است؛ مهلت کوتاه همه را «آفلاین» نشان می‌داد
+  assert.ok(HEALTH_TIMEOUT_MS >= 5000);
+  assert.ok(HEALTH_TIMEOUT_MS <= 10000);
+}
+
+// چند مقصد: اگر سایت نرسد ولی سرور داده برسد، آنلاین است
+{
+  const ok = await probeReachability({
+    hrefs: ["/favicon.ico?kamix-health=1", "https://x.supabase.co/auth/v1/health"],
+    fetchImpl: async (url, init) => {
+      if (String(url).startsWith("/")) throw new TypeError("Failed to fetch");
+      assert.equal(init?.mode, "no-cors", "cross-origin probe must not need CORS headers");
+      return new Response(null, { status: 200 });
+    },
+  });
+  assert.equal(ok, true, "one reachable target is enough");
+}
+{
+  const ok = await probeReachability({
+    hrefs: ["/a", "https://b.test/x"],
+    fetchImpl: async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  });
+  assert.equal(ok, false, "offline only when every target fails");
+}
+{
+  // یک مقصد معلق، دیگری سریع: منتظر معلق نمی‌ماند
+  const started = Date.now();
+  const ok = await probeReachability({
+    timeoutMs: 5000,
+    hrefs: ["/slow", "https://fast.test/"],
+    fetchImpl: (url, init) =>
+      String(url).startsWith("/")
+        ? new Promise((_, reject) =>
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+          )
+        : Promise.resolve(new Response("ok")),
+  });
+  assert.equal(ok, true);
+  assert.ok(Date.now() - started < 1000, "a hanging target must not delay the answer");
 }
 
 {

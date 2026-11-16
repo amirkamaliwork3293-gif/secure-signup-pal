@@ -12,10 +12,16 @@ export class OfflineWriteError extends Error {
 }
 export const OFFLINE_WRITE_BLOCKED_EVENT = "kamix-offline-write-blocked";
 export const ONLINE_CONFIRMED_EVENT = "kamix-online";
+/** یک درخواست واقعی به سرور داده جواب گرفت (از کلاینت سوپابیس) */
+export const NETWORK_OK_EVENT = "kamix-network-ok";
 
 export const HEALTH_CHECK_PATH = "/favicon.ico";
 export const HEALTH_CHECK_PARAM = "kamix-health";
-export const HEALTH_TIMEOUT_MS = 2500;
+/**
+ * مهلت هر تست اتصال. قبلاً ۲٫۵ ثانیه بود؛ روی اینترنت ایران رسیدن به سرور خارجی
+ * گاهی بیشتر طول می‌کشد و همین برای «آفلاین» نشان دادن کل برنامه کافی بود.
+ */
+export const HEALTH_TIMEOUT_MS = 6000;
 
 export type OnlineKind = "online" | "offline" | "checking";
 
@@ -41,16 +47,24 @@ export function healthCheckUrl(origin = ""): string {
   return origin ? `${origin}${path}` : path;
 }
 
+/**
+ * آیا دست‌کم یکی از مقصدها جواب می‌دهد؟ هر پاسخ HTTP (حتی 403/404) یعنی شبکه هست؛
+ * فقط خطای شبکه یا تمام شدن مهلت «نرسیدن» حساب می‌شود.
+ * چند مقصد هم‌زمان امتحان می‌شوند (سایت برنامه و سرور داده): اگر یکی از ایران در
+ * دسترس نباشد ولی دیگری باشد، دستگاه آفلاین نیست.
+ */
 export async function probeReachability(opts?: {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   href?: string;
+  /** چند مقصد؛ اگر داده شود به‌جای href استفاده می‌شود */
+  hrefs?: string[];
 }): Promise<boolean> {
   const timeoutMs = opts?.timeoutMs ?? HEALTH_TIMEOUT_MS;
   const fetchImpl =
     opts?.fetchImpl ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
   if (!fetchImpl) return false;
-  const url = opts?.href ?? healthCheckUrl();
+  const urls = opts?.hrefs?.length ? opts.hrefs : [opts?.href ?? healthCheckUrl()];
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = setTimeout(() => {
     try {
@@ -60,11 +74,35 @@ export async function probeReachability(opts?: {
     }
   }, timeoutMs);
   try {
-    await fetchImpl(url, { method: "GET", cache: "no-store", signal: ctrl?.signal });
-    return true;
-  } catch {
-    return false;
+    return await new Promise<boolean>((resolve) => {
+      let pending = urls.length;
+      for (const url of urls) {
+        const sameOrigin = url.startsWith("/");
+        Promise.resolve()
+          .then(() =>
+            fetchImpl(url, {
+              method: "GET",
+              cache: "no-store",
+              signal: ctrl?.signal,
+              // مقصد دیگر (سرور داده) هدر CORS نمی‌دهد؛ پاسخ opaque هم یعنی شبکه هست
+              ...(sameOrigin ? {} : { mode: "no-cors" as RequestMode, credentials: "omit" as const }),
+            }),
+          )
+          .then(
+            () => resolve(true),
+            () => {
+              pending -= 1;
+              if (pending === 0) resolve(false);
+            },
+          );
+      }
+    });
   } finally {
     clearTimeout(timer);
+    try {
+      ctrl?.abort(); // بقیهٔ درخواست‌ها لازم نیستند
+    } catch {
+      /* noop */
+    }
   }
 }

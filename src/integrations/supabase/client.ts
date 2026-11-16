@@ -18,11 +18,13 @@ function createSupabaseClient() {
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     // اگر دستگاه به supabase.co نرسد، همان درخواست از kamixapp.ir/sb می‌رود.
     global: {
-      fetch: createFallbackFetch({
-        supabaseUrl: SUPABASE_URL,
-        proxyBase: browserProxyBase,
-        storage: browserStorage(),
-      }),
+      fetch: reportNetworkOk(
+        createFallbackFetch({
+          supabaseUrl: SUPABASE_URL,
+          proxyBase: browserProxyBase,
+          storage: browserStorage(),
+        }),
+      ),
     },
     auth: {
       storage: typeof window !== 'undefined' ? localStorage : undefined,
@@ -30,6 +32,27 @@ function createSupabaseClient() {
       autoRefreshToken: true,
     }
   });
+}
+
+/**
+ * هر پاسخی از سرور داده یعنی دستگاه آنلاین است؛ به اپ اندروید خبر می‌دهیم تا اگر
+ * تست اتصال اشتباهی «آفلاین» گفته بود، فوراً اصلاح شود. (حداکثر هر ۵ ثانیه یک بار)
+ */
+function reportNetworkOk(inner: typeof fetch): typeof fetch {
+  let lastAt = 0;
+  return async (input, init) => {
+    const res = await inner(input, init);
+    const now = Date.now();
+    if (typeof window !== 'undefined' && now - lastAt > 5000) {
+      lastAt = now;
+      try {
+        window.dispatchEvent(new CustomEvent('kamix-network-ok'));
+      } catch {
+        /* noop */
+      }
+    }
+    return res;
+  };
 }
 
 let _supabase: ReturnType<typeof createSupabaseClient> | undefined;

@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/integrations/supabase/client": ["./real-supabase-client.ts"],
+      "@/*": ["../../src/*"]
+    }
+  }
+}

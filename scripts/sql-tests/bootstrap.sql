@@ -11,7 +11,11 @@ CREATE SCHEMA auth;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 CREATE TABLE auth.users (id uuid PRIMARY KEY);
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
-  SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+  -- same lookup as Supabase: legacy per-claim setting, then the claims JSON
+  SELECT COALESCE(
+    NULLIF(current_setting('request.jwt.claim.sub', true), ''),
+    NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'
+  )::uuid;
 $$;
 
 CREATE TYPE public.app_role AS ENUM ('admin', 'user');

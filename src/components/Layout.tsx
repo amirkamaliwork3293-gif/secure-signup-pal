@@ -58,7 +58,7 @@ export function Layout({ children }: { children: ReactNode }) {
     }
     return !!appSettings[item.settingKey];
   });
-  const { state, signOut } = useAuth();
+  const { state, signOut, needsSignIn, signInAgain } = useAuth();
   const { requireActive } = useSubscriptionAccess();
   const [studentsList] = studentsStore.useAll();
   const [remindersList] = remindersStore.useAll();
@@ -189,6 +189,37 @@ export function Layout({ children }: { children: ReactNode }) {
           ) : (
             <span>آفلاین — داده‌ها روی دستگاه ذخیره می‌شوند و پس از اتصال همگام‌سازی خواهند شد</span>
           )}
+        </div>
+      )}
+
+      {/* نشست سرور این دستگاه برقرار نیست: همگام‌سازی خاموش است و نباید بی‌صدا بماند */}
+      {isOnline && state.status === "offline-cached" && needsSignIn && (
+        <div
+          className="sticky z-20 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-destructive px-4 py-2 text-xs font-semibold text-destructive-foreground"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <span className="flex items-center gap-2">
+            <CloudOff className="h-3.5 w-3.5 shrink-0" />
+            ارتباط این دستگاه با حساب قطع شده است؛ تغییرات روی سرور ذخیره نمی‌شود و اطلاعات
+            دستگاه‌های دیگر به این دستگاه نمی‌رسد. اطلاعات همین دستگاه محفوظ می‌ماند.
+          </span>
+          <button
+            type="button"
+            onClick={signInAgain}
+            className="rounded-md bg-background px-3 py-1 text-xs font-bold text-foreground"
+          >
+            ورود دوباره
+          </button>
+        </div>
+      )}
+      {isOnline && state.status === "offline-cached" && !needsSignIn && (
+        <div
+          className="sticky z-20 flex items-center justify-center gap-2 bg-amber-500 px-4 py-2 text-xs font-semibold text-white"
+          style={{ top: "calc(57px + var(--safe-top))" }}
+        >
+          <CloudOff className="h-3.5 w-3.5 shrink-0" />
+          در حال اتصال دوباره به حساب… تغییرات فعلاً روی همین دستگاه ذخیره می‌شوند و پس از
+          اتصال، خودکار همگام می‌شوند.
         </div>
       )}
 

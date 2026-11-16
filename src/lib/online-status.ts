@@ -42,6 +42,14 @@ let started = false;
 let kind: OnlineKind = "checking";
 let probeOk: boolean | null = null;
 let listenersBound = false;
+/** تست‌های اتصالِ ناموفقِ پشت سر هم */
+let probeFailures = 0;
+let probing: Promise<void> | null = null;
+let reprobeTimer: ReturnType<typeof setTimeout> | null = null;
+/** با یک بار جواب ندادن (اینترنت کند) دستگاه «آفلاین» حساب نمی‌شود */
+const FAILURES_BEFORE_OFFLINE = 2;
+const REPROBE_MIN_MS = 2000;
+const REPROBE_MAX_MS = 15000;
 
 function currentNavigatorOnLine(): boolean | undefined {
   if (typeof navigator === "undefined") return undefined;
@@ -81,6 +89,8 @@ export function requireOnlineWrite(): boolean {
 export function notifyOfflineWriteBlocked(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_BLOCKED_EVENT));
+  // شاید اینترنت برگشته و هنوز خبر نداریم: همین حالا دوباره بررسی کن
+  void runProbe();
 }
 
 /** قبل از هر نوشتن مستقیم به سرور (منو، پروفایل فروشگاه، آپلود). */
@@ -107,16 +117,60 @@ function snapshot(): OnlineSnapshot {
   };
 }
 
-async function runProbe(): Promise<void> {
-  if (!isCapacitor()) return;
+/**
+ * قبلاً اتصال فقط یک بار هنگام باز شدن برنامه (با مهلت ۲٫۵ ثانیه) و بعد فقط با رویداد
+ * online مرورگر بررسی می‌شد. روی اینترنت کند همان یک بررسی ناموفق می‌شد و برنامه تا
+ * بسته شدن «آفلاین» می‌ماند: نه داده‌ای از سرور می‌گرفت، نه چیزی می‌فرستاد، در حالی که
+ * اینترنت وصل بود — «اطلاعاتی که با سیستم ثبت کردم روی گوشی نیامد».
+ * حالا: یک بار جواب ندادن کافی نیست، و تا وقتی وضعیت «آنلاین» تأیید نشده بررسی با
+ * فاصلهٔ کوتاه تکرار می‌شود (و با برگشتن به برنامه هم دوباره انجام می‌شود).
+ */
+function scheduleReprobe(): void {
+  if (reprobeTimer || typeof window === "undefined") return;
+  const delay = Math.min(REPROBE_MAX_MS, REPROBE_MIN_MS * 2 ** Math.max(0, probeFailures - 1));
+  reprobeTimer = setTimeout(() => {
+    reprobeTimer = null;
+    // برنامه در پس‌زمینه است: با برگشتن کاربر (visibilitychange) بررسی می‌شود
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    void runProbe();
+  }, delay);
+}
+
+function runProbe(): Promise<void> {
+  if (!isCapacitor()) return Promise.resolve();
+  if (probing) return probing;
+  const run = probeOnce()
+    .catch(() => {})
+    .finally(() => {
+      if (probing === run) probing = null;
+    });
+  probing = run;
+  return run;
+}
+
+async function probeOnce(): Promise<void> {
   if (currentNavigatorOnLine() === false) {
     probeOk = false;
+    probeFailures = Math.max(probeFailures, FAILURES_BEFORE_OFFLINE);
     publish();
+    // بعضی WebViewها رویداد online را دیر یا اصلاً نمی‌فرستند
+    scheduleReprobe();
     return;
   }
   const wasOffline = getOnlineKind() === "offline";
   const ok = await probeReachability();
-  probeOk = ok;
+  if (ok) {
+    probeFailures = 0;
+    probeOk = true;
+    if (reprobeTimer) {
+      clearTimeout(reprobeTimer);
+      reprobeTimer = null;
+    }
+  } else {
+    probeFailures += 1;
+    if (probeFailures >= FAILURES_BEFORE_OFFLINE) probeOk = false;
+    scheduleReprobe();
+  }
   publish();
   if (ok && wasOffline && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(ONLINE_CONFIRMED_EVENT));
@@ -154,8 +208,19 @@ export function initOnlineMonitoring(): void {
   });
   window.addEventListener("offline", () => {
     probeOk = false;
+    probeFailures = FAILURES_BEFORE_OFFLINE;
     publish();
+    scheduleReprobe();
   });
+  // برگشتن به برنامه: اگر هنوز «آنلاین» تأیید نشده، همین حالا دوباره بررسی کن
+  const recheck = () => {
+    if (probeOk !== true) void runProbe();
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") recheck();
+  });
+  window.addEventListener("focus", recheck);
+  window.addEventListener("pageshow", recheck);
 }
 
 export function useOnlineStatus(): OnlineSnapshot {

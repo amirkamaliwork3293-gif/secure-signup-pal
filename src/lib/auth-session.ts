@@ -94,6 +94,12 @@ export function shouldSyncOnAuthEvent(
   nextUserId?: string | null,
 ): boolean {
   if (event === "SIGNED_OUT") return true;
+  // برنامه با دادهٔ روی دستگاه باز شده چون هنگام شروع، تازه‌سازی نشست جواب نداد
+  // (اینترنت کند). وقتی بعداً همان نشست تازه می‌شود باید همگام‌سازی دوباره راه بیفتد؛
+  // قبلاً این رویداد نادیده گرفته می‌شد و دستگاه تا بارگذاری مجدد بدون همگام‌سازی می‌ماند.
+  if (event === "TOKEN_REFRESHED") {
+    return Boolean(nextUserId) && currentStatus === "offline-cached";
+  }
   if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
     if (nextUserId && currentUserId && nextUserId !== currentUserId) return true;
     return (
@@ -165,4 +171,21 @@ export function shouldRestoreDeviceSession(opts: {
   if (opts.explicitSignOut) return false;
   if (opts.hasLiveSession) return false;
   return Boolean(opts.stayUserId);
+}
+
+/** آیا نشست سوپابیس هنوز روی این دستگاه ذخیره است (حتی اگر توکنش منقضی شده باشد)؟ */
+export function hasStoredAuthSession(
+  storage?: { length: number; key(i: number): string | null; getItem(k: string): string | null } | null,
+): boolean {
+  const s = storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+  if (!s) return false;
+  try {
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k && /^sb-.+-auth-token$/.test(k) && s.getItem(k)) return true;
+    }
+  } catch {
+    /* حافظه در دسترس نیست */
+  }
+  return false;
 }

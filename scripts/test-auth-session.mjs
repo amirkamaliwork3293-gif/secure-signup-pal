@@ -86,6 +86,11 @@ assert.equal(shouldSyncOnAuthEvent("INITIAL_SESSION", "unauthenticated"), true);
 assert.equal(shouldSyncOnAuthEvent("INITIAL_SESSION", "authenticated"), false);
 assert.equal(shouldSyncOnAuthEvent("USER_UPDATED", "authenticated"), false);
 assert.equal(shouldSyncOnAuthEvent("TOKEN_REFRESHED", "authenticated"), false);
+// برنامه با دادهٔ روی دستگاه باز است (تازه‌سازی نشست هنگام شروع جواب نداد): وقتی نشست
+// بعداً تازه شد باید همگام‌سازی دوباره راه بیفتد.
+assert.equal(shouldSyncOnAuthEvent("TOKEN_REFRESHED", "offline-cached", "a", "a"), true);
+assert.equal(shouldSyncOnAuthEvent("TOKEN_REFRESHED", "offline-cached", "a", null), false);
+assert.equal(shouldSyncOnAuthEvent("TOKEN_REFRESHED", "unauthenticated", null, "a"), false);
 
 assert.equal(shouldKeepExistingSession("unauthenticated", "authenticated", true), true);
 assert.equal(shouldKeepExistingSession("unauthenticated", "loading", true), false);

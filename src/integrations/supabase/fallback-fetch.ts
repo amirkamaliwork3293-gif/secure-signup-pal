@@ -19,6 +19,18 @@
 export const SUPABASE_PROXY_PATH = "/sb";
 export const PROXY_STICKY_MS = 30 * 60_000;
 export const DIRECT_TIMEOUT_MS = 15_000;
+/**
+ * مهلت کوتاه‌تر برای تازه‌سازی توکن. توکن تازه‌سازی یک‌بارمصرف است و سوپابیس فقط تا
+ * ۱۰ ثانیه استفادهٔ دوباره از همان توکن را می‌پذیرد. اگر درخواست مستقیم به سرور رسیده
+ * ولی جوابش دیر بیاید و بعد از ۱۵ ثانیه همان را از مسیر جایگزین دوباره بفرستیم، سرور
+ * آن را «استفادهٔ تکراری» می‌بیند و کل نشست را باطل می‌کند: دستگاه بی‌صدا از حساب
+ * بیرون می‌افتد و دیگر همگام نمی‌شود. با ۶ ثانیه، ارسال دوباره داخل همان پنجره است.
+ */
+export const REFRESH_DIRECT_TIMEOUT_MS = 6_000;
+
+function isRefreshTokenRequest(url: string): boolean {
+  return url.includes("/auth/v1/token") && url.includes("grant_type=refresh_token");
+}
 export const PROXY_UNTIL_KEY = "kamix.sbProxyUntil.v1";
 
 type FetchFn = typeof fetch;
@@ -37,6 +49,8 @@ export type FallbackFetchOptions = {
   storage?: KeyValueStore | null;
   now?: () => number;
   directTimeoutMs?: number;
+  /** مهلت مسیر مستقیم برای تازه‌سازی توکن (پیش‌فرض REFRESH_DIRECT_TIMEOUT_MS) */
+  refreshDirectTimeoutMs?: number;
 };
 
 function isReplayableBody(body: BodyInit | null | undefined): boolean {
@@ -55,6 +69,10 @@ export function createFallbackFetch(opts: FallbackFetchOptions): FetchFn {
   const baseFetch: FetchFn = opts.baseFetch ?? ((...args) => fetch(...args));
   const now = opts.now ?? (() => Date.now());
   const directTimeoutMs = opts.directTimeoutMs ?? DIRECT_TIMEOUT_MS;
+  const refreshDirectTimeoutMs = Math.min(
+    directTimeoutMs,
+    opts.refreshDirectTimeoutMs ?? REFRESH_DIRECT_TIMEOUT_MS,
+  );
   let memoryUntil = 0;
 
   function proxyUntil(): number {
@@ -96,7 +114,7 @@ export function createFallbackFetch(opts: FallbackFetchOptions): FetchFn {
     // مهلت فقط تا رسیدن سرآیند پاسخ؛ خواندن بدنه را قطع نمی‌کند.
     const timer = setTimeout(
       () => ctrl.abort(new Error("supabase-direct-timeout")),
-      directTimeoutMs,
+      isRefreshTokenRequest(url) ? refreshDirectTimeoutMs : directTimeoutMs,
     );
     try {
       return await baseFetch(url, { ...init, signal: ctrl.signal });

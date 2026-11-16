@@ -18,6 +18,7 @@ import { ONLINE_CONFIRMED_EVENT } from "@/lib/online-status-core";
 import {
   classifyUserAccess,
   clearStaySignedIn,
+  hasStoredAuthSession,
   pickProfileForSession,
   readStaySignedIn,
   shouldKeepExistingSession,
@@ -40,6 +41,13 @@ type AuthContextValue = {
   state: AuthState;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /**
+   * نشست سرور این دستگاه باطل شده و فقط با ورود دوباره برمی‌گردد. تا آن موقع برنامه با
+   * دادهٔ روی دستگاه کار می‌کند ولی هیچ چیز همگام نمی‌شود.
+   */
+  needsSignIn: boolean;
+  /** رفتن به صفحهٔ ورود بدون پاک شدن دادهٔ (حتی ذخیره‌نشدهٔ) روی این دستگاه */
+  signInAgain: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -217,6 +225,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const explicitSignOutRef = useRef(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const syncSessionRef = useRef<((session: Session | null) => Promise<void>) | null>(null);
 
   const adoptNoSession = () => {
     if (explicitSignOutRef.current) {
@@ -312,6 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    syncSessionRef.current = syncSession;
     supabase.auth.getSession().then(({ data: { session } }) => {
       void syncSession(session);
     });
@@ -362,6 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       disposed = true;
+      syncSessionRef.current = null;
       if (signedOutTimer) clearTimeout(signedOutTimer);
       subscription.unsubscribe();
       if (isCapacitor()) {
@@ -371,6 +383,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
   }, []);
+
+  // ── برگشتن خودکار از حالت «فقط دادهٔ روی دستگاه» ──
+  // وضعیت offline-cached یعنی برنامه باز است ولی نشست سرور نداریم؛ در این حالت
+  // همگام‌سازی خاموش است. قبلاً (به‌جز هنگام وصل شدن اینترنت در اپ اندروید) هیچ چیز
+  // دوباره نشست را امتحان نمی‌کرد: اگر هنگام باز شدن برنامه تازه‌سازی توکن یک بار جواب
+  // نمی‌داد، آن دستگاه تا بارگذاری مجدد نه چیزی می‌فرستاد و نه چیزی می‌گرفت، بدون هیچ
+  // پیامی. حالا تا برگشتن نشست، هر چند ثانیه و با هر برگشتن به برنامه دوباره تلاش می‌شود.
+  const offlineCached = state.status === "offline-cached";
+  useEffect(() => {
+    if (!offlineCached) {
+      setNeedsSignIn(false);
+      return;
+    }
+    let cancelled = false;
+    let busy = false;
+    const attempt = async () => {
+      if (cancelled || busy) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      if (capacitorNetworkDown()) return;
+      busy = true;
+      try {
+        // اگر توکن منقضی شده باشد همین فراخوانی تازه‌سازی را هم امتحان می‌کند
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (session) {
+          setNeedsSignIn(false);
+          await syncSessionRef.current?.(session);
+          return;
+        }
+        // نشستی روی دستگاه نمانده (سرور آن را باطل کرده): فقط ورود دوباره کمک می‌کند
+        setNeedsSignIn(!hasStoredAuthSession());
+      } catch {
+        /* شبکه — دفعهٔ بعد */
+      } finally {
+        busy = false;
+      }
+    };
+    const run = () => void attempt();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    const first = window.setTimeout(run, 1500);
+    const timer = window.setInterval(run, 20_000);
+    window.addEventListener("online", run);
+    window.addEventListener("focus", run);
+    window.addEventListener(ONLINE_CONFIRMED_EVENT, run);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      window.removeEventListener("online", run);
+      window.removeEventListener("focus", run);
+      window.removeEventListener(ONLINE_CONFIRMED_EVENT, run);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [offlineCached]);
+
+  const signInAgain = () => {
+    // دادهٔ این حساب (همراه تغییرات ذخیره‌نشده و نشانه‌هایشان) در حافظهٔ اسکوپ‌شدهٔ خودش
+    // می‌ماند؛ ورود بعدی همین حساب آن‌ها را به سرور می‌فرستد.
+    explicitSignOutRef.current = false;
+    clearStaySignedIn();
+    stopCloudSync();
+    setStorageScope(null);
+    setNeedsSignIn(false);
+    setState({ status: "unauthenticated" });
+  };
 
   const signOut = async () => {
     // قبلاً صف ذخیره بدون ارسال دور ریخته می‌شد و در اپ اندروید حافظهٔ محلی کاربر
@@ -393,7 +475,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ state, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ state, signOut, refreshProfile, needsSignIn, signInAgain }}>
       {children}
     </AuthContext.Provider>
   );

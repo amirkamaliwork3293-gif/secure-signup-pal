@@ -7,6 +7,7 @@ import {
   createFallbackFetch,
   PROXY_STICKY_MS,
   PROXY_UNTIL_KEY,
+  REFRESH_DIRECT_TIMEOUT_MS,
 } from "../src/integrations/supabase/fallback-fetch.ts";
 import {
   isSupabaseProxyPath,
@@ -117,6 +118,35 @@ const failDirect = (url: string) =>
   const res = await f(`${SB}/rest/v1/x`);
   assert.equal(await res.text(), "via-proxy");
   assert.equal(calls.length, 2);
+}
+
+// ۳ب) تازه‌سازی توکن: ارسال دوباره از مسیر جایگزین باید داخل پنجرهٔ ۱۰ ثانیه‌ای سوپابیس
+//      برای «استفادهٔ دوباره از همان توکن» باشد، وگرنه نشست باطل می‌شود
+{
+  assert.ok(REFRESH_DIRECT_TIMEOUT_MS < 10_000, "refresh replay must stay inside the reuse window");
+  const { fn, calls } = fakeFetch((url, init) =>
+    url.startsWith(SB)
+      ? new Promise((_, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+        )
+      : Promise.resolve(new Response("via-proxy")),
+  );
+  const f = createFallbackFetch({
+    supabaseUrl: SB,
+    proxyBase: () => PROXY,
+    baseFetch: fn,
+    storage: memoryStorage(),
+    directTimeoutMs: 60_000,
+    refreshDirectTimeoutMs: 30,
+  });
+  const started = Date.now();
+  const res = await f(`${SB}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: "r1" }),
+  });
+  assert.equal(await res.text(), "via-proxy");
+  assert.equal(calls.length, 2);
+  assert.ok(Date.now() - started < 2000, "refresh request waited for the long timeout");
 }
 
 // ۴) هر دو مسیر قطع (واقعاً آفلاین) → همان خطای اصلی، حالت پروکسی ذخیره نمی‌شود

@@ -43,6 +43,7 @@ import { formatQtyWithUnit } from "@/lib/qty-format";
 import { MoneyInput } from "@/components/MoneyInput";
 import { InvoicePartyFieldsEditor } from "@/components/PartyFieldsEditor";
 import { CustomerChoiceDialog } from "@/components/CustomerChoiceDialog";
+import { InvoiceScanDialog, type InvoiceScanConfirm } from "@/components/InvoiceScanDialog";
 import {
   cleanInvoiceFields,
   pinnedInvoiceFields,
@@ -71,6 +72,7 @@ import {
   Calendar,
   PlusCircle,
   Users,
+  ScanText,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -199,6 +201,17 @@ function PurchaseLineEditor({
             ariaLabel="قیمت خرید"
           />
         </MiniField>
+        {!compact && item.productId && item.updateSellPrice && (
+          <MiniField label="قیمت فروش جدید">
+            <MoneyInput
+              value={item.sellPrice || 0}
+              onChange={(sellPrice) =>
+                onChange({ ...item, sellPrice, updateSellPrice: sellPrice > 0 })
+              }
+              ariaLabel="قیمت فروش جدید"
+            />
+          </MiniField>
+        )}
         {!item.productId && (
           <>
             <MiniField label="قیمت فروش پیشنهادی">
@@ -755,6 +768,7 @@ export function PurchasesPageInner() {
   const [dateStr, setDateStr] = useState<string>(toJalaliInputDate(Date.now()));
   const [timeStr, setTimeStr] = useState<string>(toJalaliInputTime(Date.now()));
   const [dateErr, setDateErr] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const [query, setQuery] = useState("");
   const [showHistory, setShowHistory] = useState(true);
@@ -844,6 +858,18 @@ export function PurchasesPageInner() {
 
   const removeItem = (idx: number) => {
     setDraft((prev) => recalcPurchase({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+  };
+
+  /** اقلام تاییدشده از «اسکن فاکتور» به پیش‌نویس همین فاکتور خرید اضافه می‌شوند */
+  const applyScan = (r: InvoiceScanConfirm) => {
+    setDraft((prev) => recalcPurchase({ ...prev, items: [...prev.items, ...r.items] }));
+    if (r.supplierName?.trim()) {
+      setSupplierName(r.supplierName.trim());
+      setSupplierPhone(r.supplierPhone?.trim() || "");
+      setSupplierCustomerId(undefined);
+    }
+    if (r.note) setNote((n) => (n.trim() ? `${n.trim()} · ${r.note}` : r.note!));
+    setScanOpen(false);
   };
 
   const canSubmit =
@@ -953,6 +979,30 @@ export function PurchasesPageInner() {
         خودکار به‌روزرسانی می‌شود، و کالای جدید هم مستقیماً به انبار اضافه می‌شود تا سود هر فروش
         بعدی درست محاسبه شود.
       </p>
+
+      <button
+        type="button"
+        onClick={() => setScanOpen(true)}
+        className="mb-3 flex w-full items-center gap-3 rounded-2xl border border-primary/40 bg-primary/5 p-3 text-right hover:bg-primary/10"
+      >
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <ScanText className="h-5 w-5" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-bold">اسکن فاکتور با دوربین</span>
+          <span className="block text-[11px] leading-5 text-muted-foreground">
+            از فاکتور عکس بگیرید؛ کالاها، تعداد و قیمت خرید خودکار وارد می‌شوند.
+          </span>
+        </span>
+      </button>
+      <InvoiceScanDialog
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onConfirm={applyScan}
+        allProducts={allProducts}
+        defaultCategory={catList[0]?.name || ""}
+        hasSupplier={!!(supplierName.trim() || supplierPhone.trim())}
+      />
 
       <div className="mb-3 rounded-2xl border border-border bg-card p-3">
         <label className="mb-1.5 block text-xs font-medium text-muted-foreground">

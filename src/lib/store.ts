@@ -318,6 +318,16 @@ export type PurchaseItem = {
   /** واحد خود کالا در لحظهٔ ثبت این ردیف (برای ردیف‌های قدیمی خالی است) */
   productUnit?: string;
   category?: string;
+  /**
+   * کد/بارکد کالا از روی فاکتور (اختیاری — مثلاً از اسکن فاکتور). برای کالای جدید
+   * روی کالا ثبت می‌شود، و برای کالای موجودِ بدون کد هم فقط اگر تکراری نباشد.
+   */
+  code?: string;
+  /**
+   * فقط وقتی true باشد sellPrice روی «قیمت فروش» کالای موجود اعمال می‌شود
+   * (کاربر در بازبینی اسکن فاکتور قیمت فروش را عمداً عوض کرده). پیش‌فرض: دست نمی‌خورد.
+   */
+  updateSellPrice?: boolean;
 };
 
 export type Purchase = {
@@ -3185,6 +3195,9 @@ export const purchases = {
     const cats = read<Category[]>(CATEGORIES_KEY, DEFAULT_CATEGORIES);
     const nextProducts = [...list];
     const resolvedItems: PurchaseItem[] = [];
+    // کد فقط وقتی روی کالا نوشته می‌شود که هیچ کالای دیگری آن را نداشته باشد
+    const codeTaken = (code: string, exceptId?: string) =>
+      nextProducts.some((pr) => pr.id !== exceptId && (pr.code || "").trim() === code);
 
     for (const item of stamped.items) {
       const idx = item.productId ? nextProducts.findIndex((pr) => pr.id === item.productId) : -1;
@@ -3193,11 +3206,22 @@ export const purchases = {
         // مقدار و قیمت به واحد خود کالا (مثلاً خرید ۵۰۰ گرم ← ۰٫۵ کیلوگرم موجودی)
         const qty = purchaseQtyInProductUnit(item, prev);
         const unitCost = purchaseUnitCostInProductUnit(item, prev);
-        nextProducts[idx] = {
+        const next: Product = {
           ...prev,
           stock: productTracksStock(prev) ? applyStockDelta(prev.stock, qty) : prev.stock || 0,
           buyPrice: unitCost,
         };
+        // قیمت فروش جدیدی که کاربر صراحتاً در بازبینی اسکن وارد کرده (به واحد کالا)
+        if (item.updateSellPrice && Number(item.sellPrice) > 0) {
+          next.price = Math.round(
+            purchaseUnitCostInProductUnit({ buyPrice: Number(item.sellPrice), unit: item.unit }, prev),
+          );
+        }
+        const itemCode = (item.code || "").trim();
+        if (itemCode && !(prev.code || "").trim() && !codeTaken(itemCode, prev.id)) {
+          next.code = itemCode;
+        }
+        nextProducts[idx] = next;
         resolvedItems.push({ ...item, productId: prev.id, name: prev.name });
       } else {
         // کالای جدید — در انبار ساخته می‌شود تا از این پس در فروش هم قابل انتخاب باشد
@@ -3208,7 +3232,7 @@ export const purchases = {
           price:
             item.sellPrice && item.sellPrice > 0 ? item.sellPrice : Math.round(item.buyPrice * 1.3),
           category,
-          code: "",
+          code: item.code?.trim() && !codeTaken(item.code.trim()) ? item.code.trim() : "",
           stock: roundQty(Math.max(0, item.quantity)),
           buyPrice: item.buyPrice,
           unit: item.unit || COUNT_UNIT,

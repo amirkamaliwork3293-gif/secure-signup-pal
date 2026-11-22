@@ -430,13 +430,18 @@ export function InvoiceWorkspace() {
       accountId: depositAccountId || undefined,
       ...chequePayload,
     };
+    // همین فاکتور قبلاً ثبت شده (دو بار زدن «ثبت» یا ثبت روی دستگاه دیگر):
+    // بدهی و یادآوری چک دوباره ساخته نمی‌شود.
+    const wasRegistered = invoice.getHistory().some((h) => h.id === finalInv.id);
     const saved = invoice.archive(finalInv);
     if (!invoice.getHistory().some((h) => h.id === saved.id)) return;
     // ثبت بدهی: نسیه = باقیمانده پس از پرداخت نقدی؛ چک = مبلغ چک + هر مانده‌ی
     // نسیه‌ای که نه نقد داده شده نه چک (قبلاً این مانده در حساب مشتری ثبت نمی‌شد)
     const debt = invoiceCustomerDebt(saved);
     let linked = null as ReturnType<typeof customers.findOrCreate>;
-    if (paymentMethod === "credit") {
+    if (wasRegistered) {
+      // ثبت تکراری — بدهی، مشتری و یادآوری چک همان ثبت اول است
+    } else if (paymentMethod === "credit") {
       if (debt > 0)
         linked = customers.recordInvoiceDebt(customer, saved, {
           amount: debt,

@@ -275,7 +275,11 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
                 <>
                   <button
                     type="button"
-                    onClick={() => remindersStore.markDone(current.reminder.id)}
+                    onClick={() => {
+                      // اگر ذخیره ممکن نبود (مثلاً حساب فقط‌خواندنی)، دست‌کم تا پایان امروز
+                      // دوباره مزاحم کاربر نشود.
+                      if (!remindersStore.markDone(current.reminder.id)) dismissCurrent();
+                    }}
                     className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-semibold text-white"
                   >
                     <Check className="h-3.5 w-3.5" />
@@ -283,12 +287,12 @@ export function DueAlertsDialog({ includeReminders = true }: { includeReminders?
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      remindersStore.update({
-                        ...current.reminder,
-                        dueAt: Date.now() + SNOOZE_MINUTES * 60_000,
-                      })
-                    }
+                    onClick={() => {
+                      // از نسخهٔ فعلی حافظه؛ یادآوری‌ای که در این فاصله انجام شده دوباره باز نمی‌شود
+                      if (!remindersStore.snooze(current.reminder.id, SNOOZE_MINUTES)) {
+                        dismissCurrent();
+                      }
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2.5 text-xs"
                   >
                     <Clock className="h-3.5 w-3.5" />۱ ساعت بعد

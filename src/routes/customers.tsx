@@ -2280,6 +2280,11 @@ function CustomerInvoiceModal({ customer, onClose }: { customer: Customer; onClo
       paymentMethod,
       paidAmount: paymentMethod === "credit" ? paid : undefined,
     });
+    // همین فاکتور قبلاً ثبت شده (دو بار زدن «ثبت»): بدهی تکراری ساخته نمی‌شود
+    if (invoice.getHistory().some((h) => h.id === finalInv.id)) {
+      onClose();
+      return;
+    }
     invoice.archive(finalInv);
     if (!invoice.getHistory().some((h) => h.id === finalInv.id)) return;
     let linked = null as ReturnType<typeof customers.findOrCreate>;

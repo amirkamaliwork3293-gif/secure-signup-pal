@@ -1010,7 +1010,9 @@ function keepUndeletedRows<T>(key: string, value: T): T {
   // تراکنش داخل ردیف (مثلاً پرداخت مشتری) هم با لیست کهنه حذف نمی‌شود؛
   // حذف تراکنش فقط از customers.removeTx و توابع صریح.
   const nestedKey = NESTED_LEDGERS[CLOUD_FIELDS[key]];
-  const out = nestedKey ? keepNestedItems(current, value, nestedKey) : [...value];
+  const out = nestedKey
+    ? keepNestedItems(current, value, nestedKey, CLOUD_FIELDS[key])
+    : [...value];
   const kept: string[] = [];
   current.forEach((row, index) => {
     const id = catalogRowId(row);
@@ -1029,7 +1031,14 @@ function keepUndeletedRows<T>(key: string, value: T): T {
   return out as T;
 }
 
-function keepNestedItems(current: unknown[], next: unknown[], nestedKey: string): unknown[] {
+function keepNestedItems(
+  current: unknown[],
+  next: unknown[],
+  nestedKey: string,
+  field: string,
+): unknown[] {
+  // اقلام حذف‌شدهٔ دفتر داخلی (tombstone) از لیست کهنه دوباره زنده نمی‌شوند
+  const opts = { key: nestedKey, tombstoned: tombstoneSet(`${field}.${nestedKey}`) };
   const byId = new Map<string, unknown>();
   for (const row of current) {
     const id = catalogRowId(row);
@@ -1037,7 +1046,7 @@ function keepNestedItems(current: unknown[], next: unknown[], nestedKey: string)
   }
   return next.map((row) => {
     const stored = byId.get(catalogRowId(row));
-    return stored && stored !== row ? mergeNestedLedger(row, stored, { key: nestedKey }) : row;
+    return stored && stored !== row ? mergeNestedLedger(row, stored, opts) : row;
   });
 }
 
@@ -3092,6 +3101,23 @@ export const invoice = {
   archive: (inv: Invoice): Invoice => {
     if (!assertBusinessWriteAllowed()) return inv;
     const hist = read<Invoice[]>(HISTORY_KEY, []);
+    // همین فاکتور قبلاً ثبت شده (دو بار زدن «ثبت»، یا تب باز همگام‌شده روی دستگاه دیگر):
+    // دوباره ثبت نمی‌شود تا موجودی دو بار کم نشود و بدهی/یادآوری تکراری ساخته نشود.
+    const already = inv.id ? hist.find((h) => h.id === inv.id) : undefined;
+    if (already) {
+      addIdToSet(CLOSED_OPEN_IDS_KEY, already.id);
+      const board = readBoard();
+      if (board.open.some((i) => i.id === already.id)) {
+        const rest = board.open.filter((i) => i.id !== already.id);
+        if (rest.length === 0) {
+          const fresh = emptyInvoice();
+          writeBoard({ open: [fresh], activeId: fresh.id });
+        } else {
+          writeBoard({ open: rest, activeId: rest[0].id });
+        }
+      }
+      return already;
+    }
     // تاریخ/ساعت فاکتور را در لحظه‌ی ثبت نهایی می‌زنیم، نه در لحظه‌ی باز شدن تب
     // هم روی آبجکت اصلی می‌نویسیم تا فراخوان‌های بعدی (مثل ثبت بدهی مشتری) هم
     // همین تاریخ را ببینند و بین «تاریخچه» و «دفتر بدهی مشتری» اختلاف نیفتد.
@@ -3641,6 +3667,21 @@ export function dueReminderCount(list: Reminder[]): number {
   ).length;
 }
 
+/**
+ * شناسهٔ ثابت نوبت بعدیِ یک یادآوری تکرارشونده (FNV-1a روی شناسهٔ نوبت فعلی).
+ * دو دستگاهی که همان نوبت را «انجام شد» بزنند، همان یک نوبت بعدی را می‌سازند.
+ */
+function recurringSuccessorId(id: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < id.length; i++) {
+    const c = id.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
+  }
+  return `rr-${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}`;
+}
+
 export const reminders = {
   useAll: () => useStore<Reminder[]>(REMINDERS_KEY, []),
   getAll: () => read<Reminder[]>(REMINDERS_KEY, []),
@@ -3658,16 +3699,33 @@ export const reminders = {
     return created;
   },
 
+  /**
+   * ویرایش مشخصات یادآوری (عنوان، زمان، یادداشت، …). نسخهٔ ورودی ممکن است کهنه باشد
+   * (فرم ویرایش یا پنجرهٔ هشدار از قبل باز بوده و در همین فاصله یادآوری از نوتیف گوشی،
+   * دستگاه دیگر یا همین صفحه «انجام شد» خورده). وضعیت انجام‌شدن فقط با markDone/markUndone
+   * عوض می‌شود؛ قبلاً همین ویرایش کهنه یادآوری انجام‌شده را دوباره باز می‌کرد.
+   */
   update: (updated: Reminder) => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
     const prev = list.find((r) => r.id === updated.id);
-    const dueAt =
-      !prev || prev.dueAt !== updated.dueAt ? dueAtReadyToNotify(updated.dueAt) : updated.dueAt;
-    const next = { ...updated, dueAt };
+    if (!prev) return;
+    const dueAt = prev.dueAt !== updated.dueAt ? dueAtReadyToNotify(updated.dueAt) : updated.dueAt;
+    const next: Reminder = { ...updated, dueAt, done: prev.done, doneAt: prev.doneAt };
     write(
       REMINDERS_KEY,
       list.map((r) => (r.id === updated.id ? next : r)),
     );
+  },
+
+  /**
+   * «بعداً یادآوری کن»: از نسخهٔ فعلی حافظه (نه نسخهٔ لحظهٔ باز شدن پنجره).
+   * یادآوری انجام‌شده یا حذف‌شده دوباره باز نمی‌شود.
+   */
+  snooze: (id: string, minutes: number): boolean => {
+    const current = read<Reminder[]>(REMINDERS_KEY, []).find((r) => r.id === id);
+    if (!current || current.done) return false;
+    reminders.update({ ...current, dueAt: Date.now() + Math.max(1, minutes) * 60_000 });
+    return true;
   },
 
   remove: (id: string) => {
@@ -3678,27 +3736,45 @@ export const reminders = {
     );
   },
 
-  /** انجام‌شده علامت بزن؛ اگر تکرارشونده باشد، یادآوری بعدی خودکار ساخته می‌شود */
-  markDone: (id: string) => {
+  /**
+   * انجام‌شده علامت بزن؛ اگر تکرارشونده باشد، یادآوری بعدی خودکار ساخته می‌شود.
+   * تکرار امن است: یادآوری‌ای که از قبل انجام شده دست نمی‌خورد (قبلاً هر تیک دوباره —
+   * از نوتیف گوشی، دستگاه دیگر یا «برگرداندن و دوباره انجام» — یک یادآوری تکراریِ تازه
+   * می‌ساخت که بعد از انجام دادن اصلی، باز هم نمایش داده می‌شد).
+   * خروجی true یعنی یادآوری الان در حالت «انجام‌شده» است.
+   */
+  markDone: (id: string): boolean => {
     const list = read<Reminder[]>(REMINDERS_KEY, []);
     const target = list.find((r) => r.id === id);
-    if (!target) return;
-    const next = list.map((r) => (r.id === id ? { ...r, done: true, doneAt: Date.now() } : r));
+    if (!target) return false;
+    if (target.done) return true;
+    const now = Date.now();
+    const next = list.map((r) => (r.id === id ? { ...r, done: true, doneAt: now } : r));
     if (target.recurringDays && target.recurringDays > 0) {
-      const period = target.recurringDays * 86_400_000;
-      let nextDue = target.dueAt + period;
-      const now = Date.now();
-      while (nextDue < now) nextDue += period;
-      next.unshift({
-        ...target,
-        id: cryptoId(),
-        dueAt: nextDue,
-        done: false,
-        doneAt: undefined,
-        createdAt: Date.now(),
-      });
+      // شناسهٔ نوبت بعدی از شناسهٔ همین یادآوری ساخته می‌شود تا روی همهٔ دستگاه‌ها یکی
+      // باشد و هرگز دو بار ساخته نشود؛ اگر کاربر آن را حذف کرده باشد دوباره ساخته نمی‌شود.
+      const successorId = recurringSuccessorId(target.id);
+      const exists =
+        list.some((r) => r.id === successorId) ||
+        tombstoneSet(CLOUD_FIELDS[REMINDERS_KEY]).has(successorId);
+      if (!exists) {
+        const period = target.recurringDays * 86_400_000;
+        let nextDue = target.dueAt + period;
+        while (nextDue < now) nextDue += period;
+        const successor: Reminder & { updatedAt?: unknown } = {
+          ...target,
+          id: successorId,
+          dueAt: nextDue,
+          done: false,
+          doneAt: undefined,
+          createdAt: now,
+        };
+        // مهر ویرایش یادآوری قبلی به نوبت بعدی منتقل نشود؛ write مهر تازه می‌زند
+        delete successor.updatedAt;
+        next.unshift(successor);
+      }
     }
-    write(REMINDERS_KEY, next);
+    return write(REMINDERS_KEY, next);
   },
 
   /** برگرداندن یک یادآوری انجام‌شده به حالت فعال */
@@ -3919,7 +3995,13 @@ export const customers = {
     write(
       CUSTOMERS_KEY,
       list.map((c) =>
-        c.id === updated.id ? (mergeNestedLedger(updated, c, { key: "txs" }) as Customer) : c,
+        c.id === updated.id
+          ? (mergeNestedLedger(updated, c, {
+              key: "txs",
+              // تراکنشی که کاربر حذف کرده (یا با ویرایش فاکتور جایگزین شده) از فرم کهنه برنمی‌گردد
+              tombstoned: tombstoneSet("customers.txs"),
+            }) as Customer)
+          : c,
       ),
     );
   },
@@ -4045,11 +4127,20 @@ export const customers = {
   ): Customer | null => {
     const debtAmount = Math.max(0, Math.round(opts?.amount ?? inv.total));
     if (debtAmount <= 0) return customers.findOrCreate(info);
+    // هر فاکتور حداکثر یک بدهی در دفتر مشتری دارد. اگر همین فاکتور دوباره ثبت شود
+    // (دو بار زدن دکمه، یا ثبت همان تب باز روی دستگاه دیگر) بدهی دوم ساخته نمی‌شود؛
+    // قبلاً بدهی تکراری باعث می‌شد مشتریِ تسویه‌شده دوباره بدهکار نمایش داده شود.
+    const existing = inv.id ? customers.invoiceDebtOf(inv.id) : null;
+    if (existing) return existing.customer;
     const target = customers.findOrCreate(info);
     if (!target) return null;
     const list = read<Customer[]>(CUSTOMERS_KEY, []);
+    // شناسهٔ ثابت از روی فاکتور: اگر دو دستگاه هم‌زمان همان فاکتور را ثبت کنند،
+    // در ادغام یکی می‌شوند نه دو بدهی. اگر این شناسه قبلاً حذف شده، شناسهٔ تازه.
+    const stableId = inv.id ? `invdebt-${inv.id}` : "";
+    const txId = stableId && !tombstoneSet("customers.txs").has(stableId) ? stableId : cryptoId();
     const tx: CustomerTx = {
-      id: cryptoId(),
+      id: txId,
       type: "debt",
       amount: debtAmount,
       note: opts?.note ?? "فاکتور نسیه",

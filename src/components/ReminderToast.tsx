@@ -94,16 +94,20 @@ export function ReminderToast() {
 
             <div className="mt-3 flex items-center gap-1.5">
               <button
-                onClick={() => remindersStore.markDone(current.id)}
+                onClick={() => {
+                  if (!remindersStore.markDone(current.id)) setDismissed((d) => [...d, current.id]);
+                }}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-semibold text-primary-foreground"
               >
                 <Check className="h-3.5 w-3.5" />
                 انجام شد
               </button>
               <button
-                onClick={() =>
-                  remindersStore.update({ ...current, dueAt: Date.now() + SNOOZE_MINUTES * 60_000 })
-                }
+                onClick={() => {
+                  if (!remindersStore.snooze(current.id, SNOOZE_MINUTES)) {
+                    setDismissed((d) => [...d, current.id]);
+                  }
+                }}
                 className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs"
               >
                 <Clock className="h-3.5 w-3.5" />

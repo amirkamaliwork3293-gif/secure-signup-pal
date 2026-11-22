@@ -20,6 +20,35 @@ import {
 } from "@/lib/reminder-notifications";
 import { useState, useEffect } from "react";
 
+// «انجام شد» روی نوتیف گوشی که هنوز اعمال نشده — شناسه → زمان دریافت
+const PENDING_REMINDER_DONE_KEY = "acc.pendingReminderDone.v1";
+const PENDING_REMINDER_DONE_TTL_MS = 7 * 86_400_000;
+
+function readPendingReminderDone(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(PENDING_REMINDER_DONE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    const out: Record<string, number> = {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [id, at] of Object.entries(parsed as Record<string, unknown>)) {
+        if (id && typeof at === "number" && Number.isFinite(at)) out[id] = at;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writePendingReminderDone(map: Record<string, number>) {
+  try {
+    if (Object.keys(map).length === 0) localStorage.removeItem(PENDING_REMINDER_DONE_KEY);
+    else localStorage.setItem(PENDING_REMINDER_DONE_KEY, JSON.stringify(map));
+  } catch {
+    /* noop */
+  }
+}
+
 const nav = [
   { to: "/",          label: "فاکتور",   icon: Receipt,  settingKey: null },
   { to: "/invoices",  label: "فاکتورها", icon: ListChecks, settingKey: null },
@@ -90,13 +119,31 @@ export function Layout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!loggedIn) return;
     const apply = () => {
+      // شناسه‌ای که از پل گوشی برداشته شده ولی هنوز اعمال نشده (یادآوری هنوز از ابر
+      // نرسیده یا ذخیره ممکن نبوده) گم نمی‌شود و در نوبت‌های بعد دوباره امتحان می‌شود.
+      // قبلاً همین شناسه دور ریخته می‌شد و یادآوریِ «انجام شد» خورده دوباره نمایش داده می‌شد.
+      const pending = readPendingReminderDone();
+      const now = Date.now();
+      let changed = false;
       for (const id of takeCompletedReminderIds()) {
-        try {
-          remindersStore.markDone(id);
-        } catch {
-          /* نادیده */
+        if (!(id in pending)) {
+          pending[id] = now;
+          changed = true;
         }
       }
+      for (const [id, since] of Object.entries(pending)) {
+        let ok = false;
+        try {
+          ok = remindersStore.markDone(id);
+        } catch {
+          ok = false;
+        }
+        if (ok || now - since > PENDING_REMINDER_DONE_TTL_MS) {
+          delete pending[id];
+          changed = true;
+        }
+      }
+      if (changed) writePendingReminderDone(pending);
       // ویجت صفحهٔ اصلی (فقط APK جدید): ضربه روی ویجت → صفحهٔ یادآوری‌ها
       const route = takeWidgetOpenRoute();
       if (route) {
